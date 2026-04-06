@@ -40,6 +40,21 @@ const AGENT_ICONS = {
   stack: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/></svg>',
   shield: '<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><rect x="9" y="9" width="6" height="8" rx="1"/><circle cx="12" cy="7" r="1.5"/></svg>',
   ops: '<svg viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>',
+  // research-lab-7
+  atlas: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36z"/><circle cx="12" cy="12" r="2"/></svg>',
+  cipher: '<svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><circle cx="14" cy="10" r="3"/><line x1="17" y1="13" x2="19" y2="15"/></svg>',
+  prism: '<svg viewBox="0 0 24 24"><polygon points="12 2 22 20 2 20"/><line x1="18" y1="14" x2="22" y2="8"/><line x1="18" y1="14" x2="22" y2="14"/><line x1="18" y1="14" x2="22" y2="20"/></svg>',
+  proto: '<svg viewBox="0 0 24 24"><path d="M9 3h6v4a3 3 0 0 1-3 3 3 3 0 0 1-3-3V3z"/><path d="M6 10a6 6 0 0 0 12 0"/><path d="M6 10v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8"/><circle cx="12" cy="15" r="2"/></svg>',
+  slide: '<svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><rect x="6" y="7" width="4" height="6"/><rect x="12" y="9" width="4" height="4"/></svg>',
+  muse: '<svg viewBox="0 0 24 24"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.8 5.8 21 7 14 2 9.3 9 8.5"/><circle cx="12" cy="12" r="3"/></svg>',
+  quill: '<svg viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="M15 5l4 4"/><line x1="2" y1="22" x2="10" y2="22"/></svg>',
+  // innovation-sprint-6
+  spark: '<svg viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="10" y1="11" x2="14" y2="11"/></svg>',
+  scout: '<svg viewBox="0 0 24 24"><circle cx="8" cy="10" r="5"/><circle cx="16" cy="10" r="5"/><line x1="3" y1="10" x2="3" y2="10"/><line x1="21" y1="10" x2="21" y2="10"/><path d="M11 10h2"/></svg>',
+  flux: '<svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/><path d="M13 4l-2 16"/><line x1="12" y1="8" x2="12" y2="16"/></svg>',
+  pitch: '<svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><polygon points="10 7 10 13 15 10"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+  brief: '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>',
+  verify: '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><circle cx="12" cy="14" r="3"/><line x1="15" y1="17" x2="17" y2="19"/></svg>',
   // Role-based fallbacks
   _role_leader: '<svg viewBox="0 0 24 24"><path d="M2 20h20l-2-8-4 4-4-8-4 8-4-4z"/><path d="M5 20v2h14v-2"/></svg>',
   _role_qa: '<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>',
@@ -48,6 +63,11 @@ const AGENT_ICONS = {
   _role_design: '<svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="2.5"/><path d="M3 20c0 0 5-2 5-10"/><path d="M9.5 14.6L16 20"/><path d="M5.5 12.8L2 22l5-3.4"/></svg>',
   _role_devops: '<svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
   _role_data: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+  _role_research: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
+  _role_presenter: '<svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><polygon points="10 7 10 13 15 10"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+  _role_writer: '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/></svg>',
+  _role_brand: '<svg viewBox="0 0 24 24"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.8 5.8 21 7 14 2 9.3 9 8.5"/></svg>',
+  _role_validation: '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>',
 };
 
 class OfficeApp {
@@ -111,6 +131,11 @@ class OfficeApp {
     if (role.includes('design') || role.includes('ux')) return AGENT_ICONS._role_design;
     if (role.includes('devops') || role.includes('ops') || role.includes('infra')) return AGENT_ICONS._role_devops;
     if (role.includes('data') || role.includes('ml') || role.includes('ai')) return AGENT_ICONS._role_data;
+    if (role.includes('research') || role.includes('analyst')) return AGENT_ICONS._role_research;
+    if (role.includes('present') || role.includes('storytell') || role.includes('pitch')) return AGENT_ICONS._role_presenter;
+    if (role.includes('writer') || role.includes('document')) return AGENT_ICONS._role_writer;
+    if (role.includes('brand') || role.includes('strateg')) return AGENT_ICONS._role_brand;
+    if (role.includes('valid') || role.includes('verif')) return AGENT_ICONS._role_validation;
     return null;
   }
 
@@ -1978,6 +2003,7 @@ class OfficeApp {
       fullstack: '\u{1F3D7}\u{FE0F}',
       frontend: '\u{1F3A8}',
       backend: '\u{2699}\u{FE0F}',
+      research: '\u{1F52C}',
       custom: '\u{1F527}',
     };
 
