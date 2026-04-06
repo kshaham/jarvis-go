@@ -2,10 +2,16 @@ VERSION ?= 0.2.0-go
 LDFLAGS := -s -w -X main.version=$(VERSION)
 BINARY := jarvis
 
-.PHONY: build build-all test test-race bench clean
+.PHONY: build build-cm build-mcp build-all test test-race bench clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/jarvis/
+
+build-cm:
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o cm ./cmd/cm/
+
+build-mcp:
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o jarvis-mcp ./cmd/jarvis-mcp/
 
 build-all:
 	@mkdir -p dist
@@ -27,4 +33,4 @@ bench:
 	go test ./... -bench=. -benchmem -count=1
 
 clean:
-	rm -rf $(BINARY) dist/
+	rm -rf $(BINARY) cm jarvis-mcp dist/
