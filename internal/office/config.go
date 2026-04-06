@@ -56,7 +56,7 @@ func DefaultConfig() *Config {
 		AuditRotateSize:        5 * 1024 * 1024,
 		AutoStandupInterval:      4 * time.Hour,
 		IdleCheckInterval:        60 * time.Second,
-		IdleThreshold:            300 * time.Second,
+		IdleThreshold:            120 * time.Second,
 		MeetingInactivityTimeout:  300 * time.Second,
 		WaterCoolerCooldown:      5 * time.Minute,
 		BlockedTriageMaxAttempts: 3,

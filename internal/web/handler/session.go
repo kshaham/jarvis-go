@@ -333,11 +333,12 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 			if rc != nil {
 				rc.OnIdlePrompt()
 			}
-			// Notify office if this is a team agent
+			// Notify office if this is a team agent (full payload)
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				broker.Broadcast("office:memberUpdated", map[string]interface{}{
-					"sessionId": sessionID, "status": "idle",
-				})
+				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+					payload["status"] = "idle"
+					broker.Broadcast("office:memberUpdated", payload)
+				}
 			}
 		case pty.EventWorking:
 			broker.Broadcast("session:working", map[string]interface{}{"id": sessionID})
@@ -347,18 +348,18 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 			if rs := getRunSummary(); rs != nil {
 				rs.RecordWorking()
 			}
-			// Signal respawn controller that agent is working (resets idle signals)
 			ctx.RespawnMu.RLock()
 			rc := ctx.RespawnControllers[sessionID]
 			ctx.RespawnMu.RUnlock()
 			if rc != nil {
 				rc.OnWorkingDetected("terminal working indicator")
 			}
-			// Notify office if this is a team agent
+			// Notify office if this is a team agent (full payload)
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				broker.Broadcast("office:memberUpdated", map[string]interface{}{
-					"sessionId": sessionID, "status": "working",
-				})
+				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+					payload["status"] = "working"
+					broker.Broadcast("office:memberUpdated", payload)
+				}
 			}
 		case pty.EventExit:
 			broker.Broadcast("session:stopped", map[string]interface{}{

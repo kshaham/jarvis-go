@@ -1367,11 +1367,9 @@ func (ctx *Context) OfficeAgentTaskStart(w http.ResponseWriter, r *http.Request)
 		ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 		})
-		// Update member status to working when a task starts
-		ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
-			"sessionId": req.SessionID,
-			"status":    "working",
-		})
+		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+		}
 	}
 	ok(w, nil)
 }
@@ -1395,18 +1393,9 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			"sessionId": req.SessionID,
 		})
 
-		// Update member status based on remaining active tasks
-		activeTask := agent.ActiveTask()
-		if activeTask != nil {
-			ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
-				"sessionId": req.SessionID,
-				"status":    "working",
-			})
-		} else {
-			ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
-				"sessionId": req.SessionID,
-				"status":    "idle",
-			})
+		// Broadcast full member payload with updated status
+		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
 		}
 
 		// Check if agent's queue is now empty after a grace period,
@@ -1434,6 +1423,9 @@ func (ctx *Context) OfficeAgentTaskAck(w http.ResponseWriter, r *http.Request) {
 			"taskId":    req.TaskID,
 			"status":    string(office.TaskAcknowledged),
 		})
+		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+		}
 	}
 	ok(w, nil)
 }
@@ -1452,6 +1444,9 @@ func (ctx *Context) OfficeAgentTaskProgress(w http.ResponseWriter, r *http.Reque
 			"taskId":    req.TaskID,
 			"progress":  req.Progress,
 		})
+		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+		}
 	}
 	ok(w, nil)
 }

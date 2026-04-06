@@ -753,8 +753,64 @@ func (m *Manager) GetWrapUpStatus() WrapUpStatus {
 }
 
 // ---------------------------------------------------------------------------
-// GetOfficeState - matches Node.js getOfficeState()
+// BuildMemberPayload + GetOfficeState
 // ---------------------------------------------------------------------------
+
+// BuildMemberPayload returns a complete member map for SSE broadcasts and API responses.
+// Always returns all fields the frontend needs -- never partial.
+func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
+	if a == nil || a.Config == nil {
+		return nil
+	}
+
+	status := "idle"
+	activeTask := a.ActiveTask()
+	if activeTask != nil {
+		status = "working"
+	} else {
+		for _, t := range a.GetTasks() {
+			if t.Status == TaskInProgress {
+				status = "working"
+				break
+			}
+		}
+	}
+
+	emoji := ""
+	avatarInitial := ""
+	if len(a.Config.Name) > 0 {
+		avatarInitial = string([]rune(a.Config.Name)[0:1])
+		emoji = avatarInitial
+	}
+
+	learningData := LoadLearningData(a.ConfigID)
+	learningCount := len(learningData.Learnings) + len(learningData.DistilledInsights)
+	skillCount := len(learningData.Skills)
+	score := CalculateAgentScore(a)
+
+	return map[string]interface{}{
+		"sessionId":      a.SessionID,
+		"configId":       a.ConfigID,
+		"name":           a.Config.Name,
+		"role":           a.Config.Role,
+		"tier":           a.Config.Tier,
+		"color":          a.Config.Color,
+		"emoji":          emoji,
+		"status":         status,
+		"atMeetingTable": false,
+		"activeTask":     activeTask,
+		"learningCount":  learningCount,
+		"skillCount":     skillCount,
+		"score":          score,
+		"avatarColor":    a.Config.Color,
+		"avatarInitial":  avatarInitial,
+		"avatarEmoji":    emoji,
+		"totalCost":      0,
+		"lastActivityAt": time.Now().Format(time.RFC3339),
+		"workingDir":     "",
+		"activeTool":     nil,
+	}
+}
 
 // GetOfficeState returns the full office state matching the Node.js response shape.
 func (m *Manager) GetOfficeState() map[string]interface{} {
@@ -771,66 +827,10 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	roster := m.GetRoster()
 	members := make([]map[string]interface{}, 0, len(roster))
 	for _, a := range roster {
-		if a.Config == nil {
-			continue
+		payload := m.BuildMemberPayload(a)
+		if payload != nil {
+			members = append(members, payload)
 		}
-		// Determine agent status: working if there's an active task OR
-		// any in-progress task in the queue
-		status := "idle"
-		activeTask := a.ActiveTask()
-		if activeTask != nil {
-			status = "working"
-		} else {
-			// Check for any in-progress tasks even if ActiveTask is nil
-			for _, t := range a.GetTasks() {
-				if t.Status == TaskInProgress {
-					status = "working"
-					break
-				}
-			}
-		}
-
-		// Get emoji from config or generate default
-		emoji := ""
-		if len(a.Config.Name) > 0 {
-			emoji = string([]rune(a.Config.Name)[0:1])
-		}
-
-		// Load learning count for this agent (non-blocking, best-effort).
-		learningData := LoadLearningData(a.ConfigID)
-		learningCount := len(learningData.Learnings) + len(learningData.DistilledInsights)
-		skillCount := len(learningData.Skills)
-
-		score := CalculateAgentScore(a)
-
-		// Avatar fields for frontend rendering
-		avatarInitial := ""
-		if len(a.Config.Name) > 0 {
-			avatarInitial = string([]rune(a.Config.Name)[0:1])
-		}
-
-		members = append(members, map[string]interface{}{
-			"sessionId":      a.SessionID,
-			"configId":       a.ConfigID,
-			"name":           a.Config.Name,
-			"role":           a.Config.Role,
-			"tier":           a.Config.Tier,
-			"color":          a.Config.Color,
-			"emoji":          emoji,
-			"status":         status,
-			"atMeetingTable": false,
-			"activeTask":     activeTask,
-			"learningCount":  learningCount,
-			"skillCount":     skillCount,
-			"score":          score,
-			"avatarColor":    a.Config.Color,
-			"avatarInitial":  avatarInitial,
-			"avatarEmoji":    emoji,
-			"totalCost":      0,
-			"lastActivityAt": time.Now().Format(time.RFC3339),
-			"workingDir":     "",
-			"activeTool":     nil,
-		})
 	}
 
 	messages := m.GetMessages()

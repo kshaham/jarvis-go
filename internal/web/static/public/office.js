@@ -179,6 +179,13 @@ class OfficeApp {
     // Refresh CSRF token periodically
     this.csrfInterval = setInterval(() => this.fetchCsrfToken(), 45 * 60 * 1000);
 
+    // Periodic state sync -- safety net to self-correct any missed SSE updates
+    this._stateRefreshInterval = setInterval(() => {
+      if (this.state.teamSpawned && this.state.members && this.state.members.length > 0) {
+        this.fetchInitialState().then(() => this.renderAgentCards());
+      }
+    }, 30000);
+
     // Clean up all resources on page unload
     window.addEventListener('beforeunload', () => {
       if (this.eventSource) this.eventSource.close();
@@ -186,6 +193,7 @@ class OfficeApp {
       if (this.uptimeInterval) clearInterval(this.uptimeInterval);
       if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
       if (this.csrfInterval) clearInterval(this.csrfInterval);
+      if (this._stateRefreshInterval) clearInterval(this._stateRefreshInterval);
     });
 
     // Handle Enter key in message input
@@ -905,6 +913,12 @@ class OfficeApp {
   }
 
   fillAgentCard(card, member) {
+    // Defensive defaults -- prevent "undefined" rendering
+    if (!member.name) member.name = member.configId || 'Agent';
+    if (!member.role) member.role = '';
+    if (!member.status) member.status = 'idle';
+    if (!member.avatarColor) member.avatarColor = member.color || 'blue';
+
     const queue = (this.taskQueues || []).find(q => q.sessionId === member.sessionId);
     const tasks = queue ? queue.tasks || [] : [];
     const total = tasks.length;
