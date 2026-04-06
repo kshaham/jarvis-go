@@ -221,7 +221,9 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 		transcript = append(transcript, closingMsg)
 
 		m.mu.Lock()
+		var standupStartedAt time.Time
 		if m.standup != nil {
+			standupStartedAt = m.standup.StartedAt
 			m.standup.Active = false
 		}
 		m.mu.Unlock()
@@ -233,7 +235,7 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 		m.emitEvent(StandupEndedEvent{Summary: closingMsg.Content})
 
 		// Persist to disk.
-		m.persistStandup(standupID, participants, transcript)
+		m.persistStandup(standupID, participants, transcript, standupStartedAt)
 
 		// Trigger leader task assignment by notifying strategic-tier agents.
 		m.triggerLeaderTaskAssignment(standupID, participants, transcript)
@@ -353,7 +355,7 @@ func (m *Manager) CompleteStandup() {
 }
 
 // persistStandup writes the completed standup to disk as JSON.
-func (m *Manager) persistStandup(standupID string, participants []string, transcript []StandupMessage) {
+func (m *Manager) persistStandup(standupID string, participants []string, transcript []StandupMessage, startedAt time.Time) {
 	dir := standupDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		slog.Error("Failed to create standup dir", "err", err)
@@ -379,7 +381,7 @@ func (m *Manager) persistStandup(standupID string, participants []string, transc
 		ID:               standupID,
 		Participants:     participants,
 		Transcript:       transcript,
-		StartedAt:        time.Now().Add(-5 * time.Minute).UnixMilli(), // approximate
+		StartedAt:        startedAt.UnixMilli(),
 		CompletedAt:      time.Now().UnixMilli(),
 		RespondedCount:   responded,
 		TimedOutCount:    timedOut,

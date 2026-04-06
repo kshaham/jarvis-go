@@ -419,13 +419,11 @@ func (s *Session) GetActiveTools() []string {
 func (s *Session) readLoop(ctx context.Context) {
 	defer s.wg.Done()
 
-	buf := make([]byte, readBufSize)
-
 	// PTY file descriptors don't support SetReadDeadline (they're not net.Conn).
 	// Use a goroutine to do blocking reads, and select on ctx.Done() for cancellation.
 	type readResult struct {
-		n   int
-		err error
+		data []byte
+		err  error
 	}
 	readCh := make(chan readResult, 1)
 
@@ -438,11 +436,16 @@ func (s *Session) readLoop(ctx context.Context) {
 			return
 		}
 
-		// Start blocking read in a goroutine
-		go func() {
-			n, err := ptyFile.Read(buf)
-			readCh <- readResult{n, err}
-		}()
+		// Start blocking read in a goroutine with its own buffer to avoid data races.
+		go func(f *os.File) {
+			buf := make([]byte, readBufSize)
+			n, err := f.Read(buf)
+			if err != nil {
+				readCh <- readResult{nil, err}
+			} else {
+				readCh <- readResult{buf[:n], nil}
+			}
+		}(ptyFile)
 
 		// Wait for either read completion or context cancellation
 		select {
@@ -456,8 +459,7 @@ func (s *Session) readLoop(ctx context.Context) {
 				s.handleExit()
 				return
 			}
-			data := string(buf[:result.n])
-			s.processOutput(data)
+			s.processOutput(string(result.data))
 		}
 	}
 }

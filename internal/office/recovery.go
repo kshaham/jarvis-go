@@ -506,11 +506,6 @@ func (m *Manager) checkForStuckAgents() {
 			continue
 		}
 
-		// Only check agents that received a prompt in the last 10 minutes.
-		if now.Sub(lastPromptAt) > 10*time.Minute {
-			continue
-		}
-
 		// Check inactivity duration against threshold.
 		inactiveDuration := now.Sub(lastPromptAt)
 		if inactiveDuration < cfg.StuckThreshold {

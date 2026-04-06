@@ -222,10 +222,10 @@ func (s *AppState) flushLocked() {
 		return
 	}
 	dir := filepath.Dir(s.filePath)
-	os.MkdirAll(dir, 0755)
-	// Atomic write via temp file
+	os.MkdirAll(dir, 0700)
+	// Atomic write via temp file (0600: contains API keys)
 	tmp := s.filePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		slog.Error("Failed to write state", "error", err)
 		return
 	}

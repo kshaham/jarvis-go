@@ -194,6 +194,10 @@ func maskToken(token string) string {
 // GetTelegramStatus returns Telegram integration status.
 // GET /api/settings/telegram
 func (ctx *Context) GetTelegramStatus(w http.ResponseWriter, r *http.Request) {
+	if ctx.TelegramBot == nil {
+		ok(w, map[string]interface{}{"connected": false, "telegram": map[string]interface{}{"connected": false}})
+		return
+	}
 	connected := ctx.TelegramBot.IsConnected()
 	token, chatID := ctx.TelegramBot.GetConfig()
 	maskedToken := ""
@@ -214,6 +218,10 @@ func (ctx *Context) GetTelegramStatus(w http.ResponseWriter, r *http.Request) {
 // UpdateTelegramConfig updates Telegram configuration.
 // POST /api/settings/telegram
 func (ctx *Context) UpdateTelegramConfig(w http.ResponseWriter, r *http.Request) {
+	if ctx.TelegramBot == nil {
+		request.WriteError(w, http.StatusServiceUnavailable, "telegram not available")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var body struct {
 		Token  string `json:"token"`
@@ -239,7 +247,7 @@ func (ctx *Context) UpdateTelegramConfig(w http.ResponseWriter, r *http.Request)
 // SendTelegramTest sends a test message via Telegram.
 // POST /api/telegram/test
 func (ctx *Context) SendTelegramTest(w http.ResponseWriter, r *http.Request) {
-	if !ctx.TelegramBot.IsConnected() {
+	if ctx.TelegramBot == nil || !ctx.TelegramBot.IsConnected() {
 		request.WriteError(w, http.StatusBadRequest, "telegram not configured")
 		return
 	}
@@ -256,6 +264,10 @@ func (ctx *Context) SendTelegramTest(w http.ResponseWriter, r *http.Request) {
 // ConnectTelegram connects the Telegram integration.
 // POST /api/telegram/send-test
 func (ctx *Context) ConnectTelegram(w http.ResponseWriter, r *http.Request) {
+	if ctx.TelegramBot == nil {
+		request.WriteError(w, http.StatusServiceUnavailable, "telegram not available")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var body struct {
 		Token  string `json:"token"`
@@ -282,6 +294,10 @@ func (ctx *Context) ConnectTelegram(w http.ResponseWriter, r *http.Request) {
 // DisconnectTelegram disconnects the Telegram integration.
 // POST /api/telegram/disconnect
 func (ctx *Context) DisconnectTelegram(w http.ResponseWriter, r *http.Request) {
+	if ctx.TelegramBot == nil {
+		request.WriteError(w, http.StatusServiceUnavailable, "telegram not available")
+		return
+	}
 	ctx.TelegramBot.Disconnect()
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"telegram": map[string]interface{}{
@@ -697,7 +713,13 @@ func (ctx *Context) Run(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	cmd := exec.Command("sh", "-c", body.Command)
+	// Split command into args to avoid shell injection (no sh -c).
+	parts := strings.Fields(body.Command)
+	if len(parts) == 0 {
+		request.WriteError(w, http.StatusBadRequest, "empty command")
+		return
+	}
+	cmd := exec.Command(parts[0], parts[1:]...)
 	if body.WorkingDir != "" {
 		cmd.Dir = body.WorkingDir
 	}

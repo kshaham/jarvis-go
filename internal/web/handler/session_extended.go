@@ -480,7 +480,7 @@ func (ctx *Context) GetSessionRespawnConfig(w http.ResponseWriter, r *http.Reque
 func (ctx *Context) StartSessionRespawn(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	rc := ctx.GetOrCreateRespawnController(id)
-	if err := rc.Start(r.Context()); err != nil {
+	if err := rc.Start(context.Background()); err != nil {
 		request.WriteError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -524,7 +524,7 @@ func (ctx *Context) UpdateSessionRespawnConfig(w http.ResponseWriter, r *http.Re
 func (ctx *Context) EnableSessionRespawn(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	rc := ctx.GetOrCreateRespawnController(id)
-	if err := rc.Start(r.Context()); err != nil {
+	if err := rc.Start(context.Background()); err != nil {
 		request.WriteError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -935,7 +935,7 @@ func (ctx *Context) SessionInteractiveRespawn(w http.ResponseWriter, r *http.Req
 
 	rc := ctx.GetOrCreateRespawnController(id)
 	rc.Stop()
-	if err := rc.Start(r.Context()); err != nil {
+	if err := rc.Start(context.Background()); err != nil {
 		request.WriteError(w, http.StatusConflict, "failed to restart respawn: "+err.Error())
 		return
 	}
@@ -1048,10 +1048,12 @@ func (ctx *Context) GetSessionFileContent(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Resolve relative paths against the session's working directory.
-	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(session.WorkingDir, filePath)
+	// Reject absolute paths -- always resolve relative to session working directory.
+	if filepath.IsAbs(filePath) {
+		request.WriteError(w, http.StatusBadRequest, "absolute paths not allowed")
+		return
 	}
+	filePath = filepath.Join(session.WorkingDir, filePath)
 
 	// Resolve to absolute and validate no path traversal outside WorkingDir.
 	absPath, err := filepath.Abs(filePath)
@@ -1433,10 +1435,12 @@ func (ctx *Context) GetSessionFileRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve relative paths against the session's working directory.
-	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(session.WorkingDir, filePath)
+	// Reject absolute paths -- always resolve relative to session working directory.
+	if filepath.IsAbs(filePath) {
+		request.WriteError(w, http.StatusBadRequest, "absolute paths not allowed")
+		return
 	}
+	filePath = filepath.Join(session.WorkingDir, filePath)
 
 	// Resolve to absolute and validate no path traversal outside WorkingDir.
 	absPath, err := filepath.Abs(filePath)

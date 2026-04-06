@@ -200,7 +200,11 @@ func (m *Manager) UnregisterAgent(sessionID string) {
 	m.mu.Unlock()
 
 	if ok {
-		m.auditLog("office:memberLeft", sessionID, agent.Config.Name, nil)
+		name := sessionID
+		if agent.Config != nil {
+			name = agent.Config.Name
+		}
+		m.auditLog("office:memberLeft", sessionID, name, nil)
 		m.emitEvent(MemberLeftEvent{ConfigID: agent.ConfigID, SessionID: sessionID})
 	}
 }
@@ -541,8 +545,9 @@ func (m *Manager) GetTeamMission() string {
 
 // SetTeamMission sets the team mission, persists it to disk, and broadcasts.
 func (m *Manager) SetTeamMission(s string) {
+	trimmed := strings.TrimSpace(s)
 	m.mu.Lock()
-	m.teamMission = strings.TrimSpace(s)
+	m.teamMission = trimmed
 	m.mu.Unlock()
 
 	// Persist to disk atomically
@@ -551,12 +556,12 @@ func (m *Manager) SetTeamMission(s string) {
 	os.MkdirAll(dir, 0o755)
 	tmpFile := filepath.Join(dir, "team-mission.txt.tmp")
 	targetFile := filepath.Join(dir, "team-mission.txt")
-	if err := os.WriteFile(tmpFile, []byte(m.teamMission), 0o644); err == nil {
+	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o644); err == nil {
 		os.Rename(tmpFile, targetFile)
 	}
 
 	// Broadcast to frontend
-	m.broadcast("office:missionUpdated", map[string]interface{}{"mission": m.teamMission})
+	m.broadcast("office:missionUpdated", map[string]interface{}{"mission": trimmed})
 }
 
 // loadPersistedMission reads the team mission from disk if available.
@@ -1060,10 +1065,11 @@ func (m *Manager) AppendMissionInsight(insight string) {
 	if m.teamMission != "" && insight != "" {
 		m.teamMission += "\n\n[Learned] " + insight
 	}
+	updated := m.teamMission
 	m.mu.Unlock()
 
 	// Persist via SetTeamMission which handles disk write and broadcast.
-	m.SetTeamMission(m.teamMission)
+	m.SetTeamMission(updated)
 }
 
 // GetTeamSpawnedAt returns the time the team was spawned, or a zero time if not spawned.

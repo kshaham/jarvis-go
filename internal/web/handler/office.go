@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,14 @@ import (
 	"github.com/claudeman/jarvis-go/internal/pty"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
+
+// safeName validates that a name contains only safe characters for use in file paths.
+// Rejects path traversal attempts (../, /, \) and non-alphanumeric chars except - and _.
+var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+func safeName(name string) bool {
+	return len(name) > 0 && len(name) <= 128 && safeNameRe.MatchString(name)
+}
 
 // ---------------------------------------------------------------------------
 // Request types
@@ -685,7 +694,6 @@ func (ctx *Context) OfficePostWhiteboard(w http.ResponseWriter, r *http.Request)
 	}
 	ctx.OfficeManager.SetWhiteboardNote(req.SessionID, req.Text)
 	ctx.SSEBroker.Broadcast("office:whiteboardUpdated", map[string]interface{}{"sessionId": req.SessionID})
-	ctx.SSEBroker.Broadcast("office:whiteboardUpdate", map[string]interface{}{"sessionId": req.SessionID})
 	ok(w, nil)
 }
 
@@ -869,6 +877,10 @@ func (ctx *Context) OfficeGetLearnings(w http.ResponseWriter, r *http.Request) {
 // OfficeGetLearningsByConfig returns learnings for a specific config ID.
 func (ctx *Context) OfficeGetLearningsByConfig(w http.ResponseWriter, r *http.Request) {
 	configID := chi.URLParam(r, "configId")
+	if !safeName(configID) {
+		request.WriteError(w, http.StatusBadRequest, "invalid config ID")
+		return
+	}
 	homeDir, _ := os.UserHomeDir()
 	learningPath := filepath.Join(homeDir, ".jarvis", "learnings", configID+".json")
 	data, err := os.ReadFile(learningPath)
@@ -1203,6 +1215,10 @@ func (ctx *Context) OfficeGetStandupHistory(w http.ResponseWriter, r *http.Reque
 // OfficeGetStandupByID returns a specific historical standup.
 func (ctx *Context) OfficeGetStandupByID(w http.ResponseWriter, r *http.Request) {
 	standupID := chi.URLParam(r, "standupId")
+	if !safeName(standupID) {
+		request.WriteError(w, http.StatusBadRequest, "invalid standup ID")
+		return
+	}
 	homeDir, _ := os.UserHomeDir()
 	standupPath := filepath.Join(homeDir, ".jarvis", "office-memory", "standups", standupID+".json")
 	data, err := os.ReadFile(standupPath)
@@ -1596,6 +1612,10 @@ func (ctx *Context) OfficeAgentSearchSkills(w http.ResponseWriter, r *http.Reque
 // OfficeAgentGetSkillByName returns a specific skill.
 func (ctx *Context) OfficeAgentGetSkillByName(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	if !safeName(name) {
+		request.WriteError(w, http.StatusBadRequest, "invalid skill name")
+		return
+	}
 	homeDir, _ := os.UserHomeDir()
 	skillPath := filepath.Join(homeDir, ".claude", "skills", name, "SKILL.md")
 	data, err := os.ReadFile(skillPath)
@@ -1618,6 +1638,10 @@ func (ctx *Context) OfficeAgentSkillCreate(w http.ResponseWriter, r *http.Reques
 	}
 	if req.SkillName == "" || req.Content == "" {
 		request.WriteError(w, http.StatusBadRequest, "skillName and content are required")
+		return
+	}
+	if !safeName(req.SkillName) {
+		request.WriteError(w, http.StatusBadRequest, "invalid skill name")
 		return
 	}
 	homeDir, _ := os.UserHomeDir()
