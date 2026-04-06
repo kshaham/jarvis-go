@@ -774,11 +774,20 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		if a.Config == nil {
 			continue
 		}
-		// Determine agent status
+		// Determine agent status: working if there's an active task OR
+		// any in-progress task in the queue
 		status := "idle"
 		activeTask := a.ActiveTask()
 		if activeTask != nil {
 			status = "working"
+		} else {
+			// Check for any in-progress tasks even if ActiveTask is nil
+			for _, t := range a.GetTasks() {
+				if t.Status == TaskInProgress {
+					status = "working"
+					break
+				}
+			}
 		}
 
 		// Get emoji from config or generate default

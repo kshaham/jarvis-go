@@ -1367,6 +1367,11 @@ func (ctx *Context) OfficeAgentTaskStart(w http.ResponseWriter, r *http.Request)
 		ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 		})
+		// Update member status to working when a task starts
+		ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
+			"sessionId": req.SessionID,
+			"status":    "working",
+		})
 	}
 	ok(w, nil)
 }
@@ -1389,6 +1394,20 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 		ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 		})
+
+		// Update member status based on remaining active tasks
+		activeTask := agent.ActiveTask()
+		if activeTask != nil {
+			ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
+				"sessionId": req.SessionID,
+				"status":    "working",
+			})
+		} else {
+			ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
+				"sessionId": req.SessionID,
+				"status":    "idle",
+			})
+		}
 
 		// Check if agent's queue is now empty after a grace period,
 		// then trigger work-finding so the agent does not sit idle.
