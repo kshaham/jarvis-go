@@ -620,10 +620,12 @@ class OfficeApp {
     if (idx >= 0) {
       this.state.members[idx] = { ...this.state.members[idx], ...member };
     }
+    // Use the MERGED member (with all fields) for rendering, not the partial SSE payload
+    const fullMember = idx >= 0 ? this.state.members[idx] : member;
     // Targeted card update -- only patch the one card that changed
     const card = document.querySelector(`.agent-card[data-session-id="${member.sessionId}"]`);
     if (card) {
-      this.updateAgentCard(card, member);
+      this.updateAgentCard(card, fullMember);
     } else {
       // New member or card missing -- schedule a debounced full render
       this._scheduleRender(() => this.renderAgentCards(), 'agents', 80);
