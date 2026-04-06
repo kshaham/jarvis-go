@@ -47,6 +47,11 @@ func standupDir() string {
 // is already active, returns the current state unchanged.
 func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 	m.mu.Lock()
+	if m.wrappingUp {
+		m.mu.Unlock()
+		slog.Info("Standup blocked: team is wrapping up")
+		return nil
+	}
 	if m.standup != nil && m.standup.Active {
 		st := m.standup
 		m.mu.Unlock()

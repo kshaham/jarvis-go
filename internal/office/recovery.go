@@ -654,6 +654,9 @@ func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDurat
 // CheckForIdleAgents looks for agents with empty task queues and no active work,
 // then attempts to find them new work via brainstorm or self-replenishment.
 func (m *Manager) CheckForIdleAgents() {
+	if m.IsWrappingUp() {
+		return // Don't assign new work during wrap-up
+	}
 	roster := m.GetRoster()
 	for _, agent := range roster {
 		if agent.Config == nil {
@@ -936,6 +939,9 @@ func (CuriosityEvent) officeEventType() string { return "curiosityTriggered" }
 
 // checkForCuriousAgents sends curiosity prompts to idle agents with no tasks.
 func (m *Manager) checkForCuriousAgents() {
+	if m.IsWrappingUp() {
+		return
+	}
 	m.mu.RLock()
 	enabled := m.curiosityEnabled
 	cooldown := m.config.CuriosityCooldown
@@ -1021,6 +1027,9 @@ func (WaterCoolerEvent) officeEventType() string { return "waterCoolerChat" }
 // maybeTriggerWaterCoolerChat has a 30% chance of pairing two idle agents
 // for an informal chat about the codebase. Respects a cooldown period.
 func (m *Manager) maybeTriggerWaterCoolerChat() {
+	if m.IsWrappingUp() {
+		return
+	}
 	// 30% probability.
 	if rand.Float64() > 0.3 {
 		return
@@ -1113,6 +1122,9 @@ func (ReflectionEvent) officeEventType() string { return "reflectionTriggered" }
 // checkForReflectionOpportunity sends a reflection prompt to agents that
 // just completed all their tasks and haven't reflected recently.
 func (m *Manager) checkForReflectionOpportunity() {
+	if m.IsWrappingUp() {
+		return
+	}
 	now := time.Now()
 
 	m.mu.RLock()
