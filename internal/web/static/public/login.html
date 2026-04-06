@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Jarvis - Login</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%2360a5fa'/%3E%3Cstop offset='100%25' stop-color='%233b82f6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='%230a0a0a'/%3E%3Cpath d='M20 6h-7v2h5v12a4 4 0 01-4 4H12' stroke='url(%23g)' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='24' r='2' fill='url(%23g)'/%3E%3Ccircle cx='22' cy='6' r='1.5' fill='%2360a5fa' opacity='.6'/%3E%3C/svg%3E">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-container {
+      width: 100%;
+      max-width: 380px;
+      padding: 2rem;
+    }
+    .login-brand {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    .login-brand h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #60a5fa;
+      letter-spacing: -0.02em;
+    }
+    .login-brand p {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 0.5rem;
+    }
+    .login-card {
+      background: #141414;
+      border: 1px solid #262626;
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: #999;
+      margin-bottom: 0.4rem;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #e5e5e5;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-group input:focus {
+      border-color: #3b82f6;
+    }
+    .btn-login {
+      width: 100%;
+      padding: 0.65rem;
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 0.5rem;
+    }
+    .btn-login:hover { background: #2563eb; }
+    .btn-login:disabled {
+      background: #1e3a5f;
+      color: #6b7280;
+      cursor: not-allowed;
+    }
+    .error-msg {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+      font-size: 0.8rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .error-msg.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-brand">
+      <h1>Jarvis</h1>
+      <p>Enter your password to continue</p>
+    </div>
+    <div class="login-card">
+      <div class="error-msg" id="errorMsg"></div>
+      <form id="loginForm" autocomplete="on">
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+        </div>
+        <button type="submit" class="btn-login" id="submitBtn">Log in</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    (function() {
+      const form = document.getElementById('loginForm');
+      const passwordInput = document.getElementById('password');
+      const submitBtn = document.getElementById('submitBtn');
+      const errorMsg = document.getElementById('errorMsg');
+
+      let countdownTimer = null;
+
+      function showError(msg) {
+        errorMsg.textContent = msg;
+        errorMsg.classList.add('visible');
+      }
+
+      function hideError() {
+        errorMsg.classList.remove('visible');
+        if (countdownTimer) {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+        }
+      }
+
+      function startCountdown(retryAfterMs) {
+        submitBtn.disabled = true;
+        let remaining = Math.ceil(retryAfterMs / 1000);
+
+        function tick() {
+          if (remaining <= 0) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Log in';
+            hideError();
+            return;
+          }
+          const mins = Math.floor(remaining / 60);
+          const secs = remaining % 60;
+          const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+          showError(`Too many failed attempts. Try again in ${timeStr}.`);
+          submitBtn.textContent = `Locked (${timeStr})`;
+          remaining--;
+        }
+
+        tick();
+        countdownTimer = setInterval(tick, 1000);
+      }
+
+      form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        hideError();
+
+        const password = passwordInput.value;
+        if (!password) return;
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Logging in...';
+
+        try {
+          const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+          });
+
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            window.location.href = '/';
+            return;
+          }
+
+          if (data.retryAfterMs) {
+            startCountdown(data.retryAfterMs);
+          } else {
+            showError(data.error || 'Invalid password');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Log in';
+          }
+        } catch (err) {
+          showError('Connection error. Please try again.');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Log in';
+        }
+
+        passwordInput.value = '';
+        passwordInput.focus();
+      });
+    })();
+  </script>
+</body>
+</html>

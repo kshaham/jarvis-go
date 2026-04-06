@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Jarvis Office - AI Team Dashboard">
+  <meta name="theme-color" content="#09090b">
+  <title>Jarvis - Office</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%2360a5fa'/%3E%3Cstop offset='100%25' stop-color='%233b82f6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='%230a0a0a'/%3E%3Cpath d='M20 6h-7v2h5v12a4 4 0 01-4 4H12' stroke='url(%23g)' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='24' r='2' fill='url(%23g)'/%3E%3Ccircle cx='22' cy='6' r='1.5' fill='%2360a5fa' opacity='.6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="office.css">
+</head>
+<body>
+  <div class="office-app">
+
+    <!-- Header -->
+    <header class="office-header">
+      <div class="office-header-left">
+        <a href="/" class="office-logo">Jarvis</a>
+        <span class="office-header-sep">/</span>
+        <span class="office-header-title">Office</span>
+        <span class="connection-badge" id="connectionStatus">
+          <span class="connection-dot connected" id="connectionDot"></span>
+          <span id="connectionLabel">Connected</span>
+        </span>
+        <div class="mission-badge hidden" id="officeMissionBanner">
+          <span class="mission-badge-label">Mission</span>
+          <span class="mission-badge-text" id="missionBannerText"></span>
+        </div>
+      </div>
+      <div class="office-header-center">
+        <div class="global-search-wrapper">
+          <input id="globalSearch" type="text" placeholder="Search agents, tasks, messages..." class="global-search" autocomplete="off" />
+          <div id="searchResults" class="search-results hidden"></div>
+        </div>
+      </div>
+      <div class="office-header-right">
+        <div class="notification-center">
+          <button class="notification-bell" onclick="office.toggleNotifications()" title="Notifications" aria-label="Toggle notifications">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span id="notifBadge" class="notif-badge hidden">0</span>
+          </button>
+          <div id="notifDropdown" class="notif-dropdown hidden">
+            <div class="notif-header">
+              <h4>Notifications</h4>
+              <button class="notif-clear-btn" onclick="office.clearNotifications()">Clear all</button>
+            </div>
+            <div id="notifList" class="notif-list"></div>
+          </div>
+        </div>
+        <button class="hdr-btn hdr-btn-primary" id="btnSpawnTeam" onclick="office.spawnTeam()">Spawn Team</button>
+        <button class="hdr-btn" id="btnStandup" onclick="office.startStandup()">Standup</button>
+        <button class="hdr-btn" id="btnWrapUp" onclick="office.wrapUpAll()">Wrap Up</button>
+        <button class="hdr-btn hdr-btn-danger" id="btnShutdownTeam" onclick="office.shutdownTeam()">Shut Down</button>
+        <a href="/" class="hdr-btn">Sessions</a>
+      </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <div class="office-stats-bar">
+      <div class="stat-pill">
+        <span class="stat-dot working"></span>
+        <span id="statWorking">0</span>
+        <span class="stat-label">Working</span>
+      </div>
+      <div class="stat-pill">
+        <span class="stat-dot idle"></span>
+        <span id="statIdle">0</span>
+        <span class="stat-label">Idle</span>
+      </div>
+      <div class="stat-pill">
+        <span class="stat-dot meeting"></span>
+        <span id="statMeeting">0</span>
+        <span class="stat-label">Meeting</span>
+      </div>
+      <div class="stat-pill">
+        <span class="stat-dot stuck"></span>
+        <span id="statStuck">0</span>
+        <span class="stat-label">Stuck</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-pill stat-pill-ring">
+        <svg class="progress-ring" id="progressRingSvg" width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="progress-ring-bg" cx="18" cy="18" r="14" fill="none" stroke-width="3"/>
+          <circle class="progress-ring-fill" id="progressRingFill" cx="18" cy="18" r="14" fill="none" stroke-width="3"
+            stroke-dasharray="87.96" stroke-dashoffset="87.96" transform="rotate(-90 18 18)"/>
+        </svg>
+        <span id="statTasks">0/0</span>
+        <span class="stat-label">Tasks</span>
+      </div>
+      <div class="stat-pill">
+        <span id="teamActiveTime">--</span>
+        <span class="stat-label">Uptime</span>
+      </div>
+      <div class="stat-pill">
+        <span id="autoStandupStatus">OFF</span>
+        <span class="stat-label">Auto Standup</span>
+      </div>
+      <div class="stat-pill">
+        <span id="brainstormCooldownStatus">Ready</span>
+        <span class="stat-label">Brainstorm</span>
+      </div>
+    </div>
+
+    <!-- Body: icon-nav | main content | detail panel -->
+    <div class="office-body">
+
+      <!-- Icon Nav (48px) -->
+      <nav class="office-icon-nav" role="navigation" aria-label="Office navigation">
+        <button class="nav-icon active" data-tab="agents" onclick="office.switchTab('agents')" title="Agents">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </button>
+        <button class="nav-icon" data-tab="tasks" onclick="office.switchTab('tasks')" title="Tasks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span class="nav-badge hidden" id="navBadge-tasks">0</span>
+        </button>
+        <button class="nav-icon" data-tab="standup" onclick="office.switchTab('standup')" title="Standup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          <span class="nav-badge hidden" id="navBadge-standup"></span>
+        </button>
+        <button class="nav-icon" data-tab="messages" onclick="office.switchTab('messages')" title="Chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="nav-badge hidden" id="navBadge-messages">0</span>
+        </button>
+        <button class="nav-icon" data-tab="metrics" onclick="office.switchTab('metrics')" title="Metrics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </button>
+        <button class="nav-icon" data-tab="activity" onclick="office.switchTab('activity')" title="Activity">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </button>
+        <button class="nav-icon" data-tab="reports" onclick="office.switchTab('reports')" title="Reports">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+        </button>
+        <button class="nav-icon" data-tab="settings" onclick="office.switchTab('settings')" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </nav>
+
+      <!-- Main Content -->
+      <main class="office-main">
+
+        <!-- Agents Tab -->
+        <div class="tab-panel active" id="panel-agents" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Agents</h2>
+            <div class="view-mode-toggle">
+              <button class="view-mode-btn active" data-mode="grid" onclick="office.setViewMode('grid')" title="Grid view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              </button>
+              <button class="view-mode-btn" data-mode="list" onclick="office.setViewMode('list')" title="List view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="filter-pills" id="agentFilters">
+            <button class="filter-pill active" data-filter="all">All</button>
+            <button class="filter-pill" data-filter="working">Working</button>
+            <button class="filter-pill" data-filter="idle">Idle</button>
+            <button class="filter-pill" data-filter="stuck">Stuck</button>
+          </div>
+          <div class="agent-grid" id="agentGrid">
+            <div class="agent-empty" id="agentEmpty">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <p>No team members yet.</p>
+              <p class="agent-empty-hint">Click "Spawn Team" to create an AI team.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tasks Tab -->
+        <div class="tab-panel hidden" id="panel-tasks" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Tasks</h2>
+          </div>
+          <div class="kanban-board" id="kanbanBoard">
+            <div class="kanban-col kanban-col-backlog">
+              <div class="kanban-col-header">
+                <span class="kanban-col-title">Backlog</span>
+                <span class="kanban-col-count" id="kanbanBacklogCount">0</span>
+              </div>
+              <div class="kanban-cards" id="kanbanBacklog"></div>
+            </div>
+            <div class="kanban-col kanban-col-todo">
+              <div class="kanban-col-header">
+                <span class="kanban-col-title">To Do</span>
+                <span class="kanban-col-count" id="kanbanTodoCount">0</span>
+              </div>
+              <div class="kanban-cards" id="kanbanTodo"></div>
+            </div>
+            <div class="kanban-col kanban-col-wip">
+              <div class="kanban-col-header">
+                <span class="kanban-col-title">In Progress</span>
+                <span class="kanban-col-count" id="kanbanWipCount">0</span>
+              </div>
+              <div class="kanban-cards" id="kanbanWip"></div>
+            </div>
+            <div class="kanban-col kanban-col-review">
+              <div class="kanban-col-header">
+                <span class="kanban-col-title">Review</span>
+                <span class="kanban-col-count" id="kanbanReviewCount">0</span>
+              </div>
+              <div class="kanban-cards" id="kanbanReview"></div>
+            </div>
+            <div class="kanban-col kanban-col-done">
+              <div class="kanban-col-header">
+                <span class="kanban-col-title">Done</span>
+                <span class="kanban-col-count" id="kanbanDoneCount">0</span>
+              </div>
+              <div class="kanban-cards" id="kanbanDone"></div>
+            </div>
+          </div>
+          <div class="tasks-list-section">
+            <div class="tasks-list" id="tasksList">
+              <div class="tasks-empty">No tasks yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Standup Tab -->
+        <div class="tab-panel hidden" id="panel-standup" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Standup</h2>
+            <div class="panel-header-actions">
+              <button class="panel-btn panel-btn-primary" id="btnStartStandupSidebar" onclick="office.startStandup()">Start Standup</button>
+              <button class="panel-btn hidden" id="btnStopStandup" onclick="office.stopStandup()">End Standup</button>
+              <button class="panel-btn" id="btnStandupHistory" onclick="office.toggleStandupHistory()">History</button>
+            </div>
+          </div>
+          <div class="standup-history-list hidden" id="standupHistoryList"></div>
+          <div class="standup-transcript" id="standupTranscript">
+            <div class="standup-empty">No standup in progress. Click "Start Standup" to begin.</div>
+          </div>
+          <div class="standup-user-input hidden" id="standupUserInput">
+            <div class="standup-input-row">
+              <input type="text" class="standup-input-field" id="standupInputField"
+                     placeholder="Type a message or task..." maxlength="500">
+              <button class="panel-btn panel-btn-primary" id="btnStandupSend" onclick="office.sendStandupMessage()">Send</button>
+            </div>
+            <div class="standup-input-hint">Prefix with <code>/task</code> to assign a task to the team</div>
+          </div>
+        </div>
+
+        <!-- Messages Tab -->
+        <div class="tab-panel hidden" id="panel-messages" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Chat</h2>
+          </div>
+          <div class="message-list" id="messageList">
+            <div class="messages-empty">No messages yet.</div>
+          </div>
+          <div class="message-form" id="messageForm">
+            <div class="message-form-selects">
+              <select class="msg-select" id="messageFrom" title="From">
+                <option value="">From...</option>
+              </select>
+              <select class="msg-select" id="messageTo" title="To">
+                <option value="">To...</option>
+              </select>
+            </div>
+            <div class="message-input-row">
+              <input type="text" class="message-input" id="messageInput" placeholder="Type a message..." maxlength="500">
+              <button class="panel-btn panel-btn-primary" onclick="office.sendMessage()">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics Tab -->
+        <div class="tab-panel hidden" id="panel-metrics" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Metrics</h2>
+            <button class="panel-btn" onclick="office.fetchAndRenderMetrics()">Refresh</button>
+          </div>
+          <div class="metrics-dashboard" id="metricsDashboard">
+            <div class="metrics-loading">Loading metrics...</div>
+          </div>
+        </div>
+
+        <!-- Activity Tab -->
+        <div class="tab-panel hidden" id="panel-activity" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Activity</h2>
+          </div>
+          <div class="activity-feed" id="activityFeed">
+            <div class="activity-empty">No activity yet. Events will appear here in real time.</div>
+          </div>
+        </div>
+
+        <!-- Reports Tab -->
+        <div class="tab-panel hidden" id="panel-reports" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Reports</h2>
+            <button class="panel-btn" onclick="office.renderReportDashboard()">Refresh</button>
+          </div>
+          <div class="report-dashboard" id="reportContent">
+            <div class="metrics-loading">Loading report...</div>
+          </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div class="tab-panel hidden" id="panel-settings" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Settings</h2>
+          </div>
+          <div class="settings-panel" id="settingsPanel">
+            <div class="settings-section">
+              <div class="settings-section-title">Team Mission</div>
+              <textarea class="settings-textarea" id="settingTeamMission"
+                        placeholder="Set a mission or goal for the team..."
+                        maxlength="1000" rows="3"></textarea>
+              <button class="panel-btn panel-btn-primary" onclick="office.updateSetting('teamMission')">Save Mission</button>
+              <p class="settings-hint">Agents re-evaluate their work in real-time when you change this.</p>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Auto-Standup</div>
+              <label class="settings-toggle">
+                <input type="checkbox" id="settingAutoStandupEnabled" onchange="office.updateSetting('autoStandupEnabled')">
+                <span>Enable auto-standup</span>
+              </label>
+              <label class="settings-field">
+                <span>Interval (hours)</span>
+                <input type="number" class="settings-number" id="settingAutoStandupInterval" min="0.5" max="24" step="0.5" value="4" onchange="office.updateSetting('autoStandupInterval')">
+              </label>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Brainstorm</div>
+              <label class="settings-field">
+                <span>Cooldown (minutes)</span>
+                <input type="number" class="settings-number" id="settingBrainstormCooldown" min="1" max="120" step="1" value="10" onchange="office.updateSetting('brainstormCooldown')">
+              </label>
+              <label class="settings-field">
+                <span>Response timeout (seconds)</span>
+                <input type="number" class="settings-number" id="settingBrainstormResponseTimeout" min="30" max="600" step="30" value="120" onchange="office.updateSetting('brainstormResponseTimeout')">
+              </label>
+              <button class="panel-btn" onclick="office.triggerBrainstorm()">Trigger Brainstorm Now</button>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Idle Detection</div>
+              <label class="settings-field">
+                <span>Idle threshold (minutes)</span>
+                <input type="number" class="settings-number" id="settingIdleThreshold" min="1" max="60" step="1" value="2" onchange="office.updateSetting('idleThreshold')">
+              </label>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Meetings</div>
+              <label class="settings-field">
+                <span>Inactivity timeout (seconds)</span>
+                <input type="number" class="settings-number" id="settingMeetingTimeout" min="10" max="600" step="10" value="30" onchange="office.updateSetting('meetingTimeout')">
+              </label>
+              <label class="settings-field">
+                <span>Standup response timeout (seconds)</span>
+                <input type="number" class="settings-number" id="settingStandupTimeout" min="30" max="600" step="30" value="300" onchange="office.updateSetting('standupTimeout')">
+              </label>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">File Locks</div>
+              <label class="settings-field">
+                <span>Lock expiry (minutes)</span>
+                <input type="number" class="settings-number" id="settingFileLockExpiry" min="1" max="120" step="1" value="30" onchange="office.updateSetting('fileLockExpiry')">
+              </label>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Quick Actions</div>
+              <div class="settings-quick-actions">
+                <button class="panel-btn" onclick="office.startStandup()">Start Standup</button>
+                <button class="panel-btn" onclick="office.triggerBrainstorm()">Start Brainstorm</button>
+              </div>
+            </div>
+            <div class="settings-status" id="settingsSaveStatus"></div>
+          </div>
+        </div>
+
+      </main>
+
+      <!-- Detail Panel (slides in from right, 360px) -->
+      <aside class="office-detail-panel" id="detailPanel" aria-label="Agent detail">
+        <div class="detail-panel-inner">
+          <button class="detail-close" onclick="office.closeDetail()" aria-label="Close detail panel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <div id="detailPanelContent"></div>
+        </div>
+      </aside>
+
+    </div><!-- end office-body -->
+
+  </div><!-- end office-app -->
+
+  <!-- Member Detail Modal -->
+  <div class="member-modal-overlay hidden" id="memberModal" role="dialog" aria-modal="true" aria-labelledby="modalName">
+    <div class="member-modal">
+      <button class="modal-close" onclick="office.closeMemberModal()" aria-label="Close">&times;</button>
+      <div class="modal-avatar" id="modalAvatar"></div>
+      <h2 class="modal-name" id="modalName"></h2>
+      <p class="modal-role" id="modalRole"></p>
+      <div class="modal-status" id="modalStatus"></div>
+      <div class="modal-workdir" id="modalWorkDir"></div>
+      <div class="modal-current-task hidden" id="modalCurrentTask">
+        <h3>Current Task</h3>
+        <div class="modal-current-task-title" id="modalTaskTitle"></div>
+        <div class="modal-task-progress-bar">
+          <div class="modal-task-progress-fill" id="modalTaskProgressFill"></div>
+        </div>
+        <div class="modal-task-progress-label" id="modalTaskProgressLabel"></div>
+      </div>
+      <div class="modal-last-activity" id="modalLastActivity"></div>
+      <div class="modal-agent-messages" id="modalAgentMessages">
+        <h3>Recent Messages</h3>
+        <div class="modal-agent-messages-list" id="modalAgentMessagesList"></div>
+      </div>
+      <div class="modal-memory" id="modalMemory">
+        <h3>Recent Activity</h3>
+        <div class="modal-memory-content" id="modalMemoryContent">Loading...</div>
+      </div>
+      <div class="modal-personality-section" id="modalPersonalitySection">
+        <h3>Personality / Soul</h3>
+        <div class="modal-personality-form">
+          <label class="personality-field-label">Character</label>
+          <textarea class="modal-personality-input" id="modalPersonalityInput"
+                    placeholder="Agent personality description..." rows="4"></textarea>
+          <label class="personality-field-label">Role Instructions</label>
+          <textarea class="modal-personality-input" id="modalSystemPromptInput"
+                    placeholder="Role-specific instructions..." rows="4"></textarea>
+          <div class="modal-personality-actions">
+            <button class="panel-btn" onclick="office.resetAgentPersonality()">Reset to Default</button>
+            <button class="panel-btn panel-btn-primary" onclick="office.saveAgentPersonality()">Save &amp; Apply</button>
+          </div>
+          <div class="modal-personality-hint">Changes are applied to the running session immediately.</div>
+        </div>
+      </div>
+      <div class="modal-autonomy-section" id="modalAutonomySection">
+        <h3>Autonomy Settings</h3>
+        <div class="autonomy-setting">
+          <label class="personality-field-label">Autonomy Level</label>
+          <select class="autonomy-select" id="modalAutonomySelect" onchange="office.setAutonomy(office.selectedMemberId, this.value)">
+            <option value="full">Full Auto</option>
+            <option value="cautious">Ask on Dangerous</option>
+            <option value="manual">Ask on Everything</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-prompt-section" id="modalPromptSection">
+        <h3>Send Prompt</h3>
+        <div class="modal-prompt-form">
+          <textarea class="modal-prompt-input" id="modalPromptInput" placeholder="Type a prompt to send to this agent..." rows="1"></textarea>
+          <button class="panel-btn panel-btn-primary" onclick="office.sendPromptToMember()">Send</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="panel-btn panel-btn-primary" onclick="office.navigateToSession()">Show Jarvis Session</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spawn Team Config Modal -->
+  <div class="member-modal-overlay hidden" id="spawnConfigModal" role="dialog" aria-modal="true" aria-labelledby="spawnConfigTitle">
+    <div class="member-modal spawn-config-modal">
+      <button class="modal-close" onclick="office.closeSpawnConfigModal()" aria-label="Close">&times;</button>
+
+      <!-- Step 1: Template Selection -->
+      <div id="spawnStep1">
+        <h2 class="spawn-config-title" id="spawnConfigTitle">Choose a Team</h2>
+        <p class="spawn-config-subtitle">Select a pre-built team template to spawn</p>
+        <div class="template-grid" id="templateGrid"></div>
+      </div>
+
+      <!-- Step 2: Configure & Spawn -->
+      <div id="spawnStep2" class="hidden">
+        <div class="spawn-step2-header">
+          <button class="panel-btn" onclick="office.showTemplateStep()">Back</button>
+          <div>
+            <h2 class="spawn-config-title" id="spawnStep2Title">Configure Team</h2>
+            <p class="spawn-config-subtitle" id="spawnStep2Subtitle"></p>
+          </div>
+        </div>
+
+        <div class="spawn-config-section">
+          <label class="spawn-config-label">Team Mission / Goal</label>
+          <textarea id="spawnMission" class="spawn-config-input" rows="3"
+            placeholder="Describe what the team should accomplish..."></textarea>
+          <p class="settings-hint">The team lead will use this to assign tasks and coordinate the team.</p>
+        </div>
+
+        <div class="spawn-config-section">
+          <label class="spawn-config-label">Working Directory</label>
+          <input type="text" class="spawn-config-input" id="spawnWorkingDir" placeholder="/path/to/project">
+        </div>
+
+        <div class="spawn-config-section">
+          <label class="spawn-config-label">Default Provider/Model for All</label>
+          <div class="spawn-config-row">
+            <select class="spawn-config-select" id="spawnDefaultProvider" onchange="office.updateSpawnDefaults()"></select>
+            <select class="spawn-config-select" id="spawnDefaultModel" onchange="office.updateSpawnDefaultModel()"></select>
+            <button class="panel-btn" onclick="office.applySpawnDefaultsToAll()">Apply All</button>
+          </div>
+        </div>
+
+        <div class="spawn-config-members" id="spawnConfigMembers"></div>
+
+        <!-- Telegram Updates -->
+        <div class="spawn-config-section" id="spawnTelegramSection" style="display:none">
+          <label class="spawn-config-label">Telegram Updates</label>
+          <div style="margin-top:4px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="spawnTelegramEnabled" />
+              <span>Enable Telegram updates from team leader</span>
+            </label>
+            <p class="settings-hint">Requires Telegram to be configured in Settings.</p>
+          </div>
+          <div id="spawnTelegramOptions" class="hidden" style="margin-top:8px">
+            <div>
+              <label>Update interval</label>
+              <select id="spawnTelegramInterval" class="spawn-config-select">
+                <option value="30">Every 30 min</option>
+                <option value="60" selected>Every 60 min</option>
+                <option value="120">Every 2 hours</option>
+                <option value="240">Every 4 hours</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="spawn-config-actions">
+          <button class="panel-btn" onclick="office.closeSpawnConfigModal()">Cancel</button>
+          <button class="panel-btn panel-btn-primary" id="btnSpawnConfirm" onclick="office.confirmSpawnTeam()">Spawn Team</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Code Review Modal -->
+  <div id="reviewModal" class="member-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
+    <div class="member-modal modal-large">
+      <div class="modal-header-row">
+        <h2 class="modal-name" id="reviewModalTitle">Code Review</h2>
+        <button class="modal-close" onclick="office.closeReview()" aria-label="Close">&times;</button>
+      </div>
+      <div id="reviewDiff" class="diff-viewer"></div>
+    </div>
+  </div>
+
+  <!-- Command Palette -->
+  <div id="commandPalette" class="cmd-palette hidden">
+    <div class="cmd-palette-overlay" onclick="office.closeCommandPalette()"></div>
+    <div class="cmd-palette-modal">
+      <input id="cmdInput" type="text" placeholder="Type a command..." autocomplete="off" />
+      <div id="cmdResults" class="cmd-results"></div>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="office.js"></script>
+</body>
+</html>

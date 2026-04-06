@@ -1,0 +1,1998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Claude Code session manager with web interface">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Jarvis</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%2360a5fa'/%3E%3Cstop offset='100%25' stop-color='%233b82f6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='%230a0a0a'/%3E%3Cpath d='M20 6h-7v2h5v12a4 4 0 01-4 4H12' stroke='url(%23g)' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='24' r='2' fill='url(%23g)'/%3E%3Ccircle cx='22' cy='6' r='1.5' fill='%2360a5fa' opacity='.6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="code-printer.js" defer></script>
+</head>
+<body>
+  <!-- Skip link for keyboard users -->
+  <a href="#terminalContainer" class="skip-link">Skip to terminal</a>
+  <div class="app">
+    <!-- Compact Header with Session Tabs -->
+    <header class="header">
+      <div class="header-brand">
+        <span class="logo" onclick="app.goHome()" title="Go to main page">Jarvis</span>
+      </div>
+
+      <!-- Session Tabs -->
+      <div class="session-tabs" id="sessionTabs" role="tablist" aria-label="Session tabs">
+      </div>
+
+      <div class="header-right">
+        <div class="header-font-controls">
+          <button class="btn-icon-header btn-sm" onclick="app.decreaseFontSize()" title="Decrease font (Ctrl+-)" aria-label="Decrease font size">A-</button>
+          <span class="font-size-display" id="fontSizeDisplay" aria-label="Current font size">14</span>
+          <button class="btn-icon-header btn-sm" onclick="app.increaseFontSize()" title="Increase font (Ctrl++)" aria-label="Increase font size">A+</button>
+        </div>
+        <div class="header-system-stats" id="headerSystemStats" title="System resource usage">
+          <div class="stat-item">
+            <span class="stat-label">CPU</span>
+            <div class="stat-bar">
+              <div class="stat-bar-fill stat-bar-cpu" id="statCpuBar"></div>
+            </div>
+            <span class="stat-value" id="statCpu">--%</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">MEM</span>
+            <div class="stat-bar">
+              <div class="stat-bar-fill stat-bar-mem" id="statMemBar"></div>
+            </div>
+            <span class="stat-value" id="statMem">--</span>
+          </div>
+        </div>
+        <button class="btn-icon-header btn-notifications" onclick="app.toggleNotifications()" title="Notifications" aria-label="Toggle notifications">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notification-badge" id="notifBadge" style="display:none;">0</span>
+        </button>
+        <button class="btn-icon-header btn-history" onclick="app.toggleHistoryPanel()" title="Session History" aria-label="Toggle session history">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </button>
+        <a href="/office" class="btn-icon-header btn-office-link" title="Virtual Office - AI Team View" aria-label="Open virtual office" style="text-decoration:none;font-size:12px;padding:2px 8px;">Office</a>
+        <button class="btn-icon-header btn-dashboard" onclick="app.toggleActivityDashboard()" title="Activity Dashboard (Ctrl+D)" aria-label="Toggle activity dashboard">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        </button>
+        <button class="btn-icon-header btn-settings" onclick="app.openAppSettings()" title="App Settings" aria-label="Open app settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        <div class="header-tokens" id="headerTokens" title="Total tokens across all sessions">0 tokens</div>
+        <button class="btn-icon-header btn-logout" onclick="app.logout()" title="Log out" aria-label="Log out">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Timer Banner (shown when timed run is active) -->
+    <div class="timer-banner" id="timerBanner" style="display: none;">
+      <div class="timer-content">
+        <span class="timer-value" id="timerValue">00:00:00</span>
+        <div class="timer-progress"><div class="timer-progress-fill" id="timerProgress"></div></div>
+        <span class="timer-meta" id="timerMeta">0 tasks | $0.00</span>
+      </div>
+      <button class="btn-icon-only" onclick="app.stopCurrentRun()" title="Stop" aria-label="Stop current run">&#x25A0;</button>
+    </div>
+
+    <!-- Respawn Banner - Compact 2-column layout -->
+    <div class="respawn-banner" id="respawnBanner" style="display: none;">
+      <div class="respawn-compact-layout">
+        <div class="respawn-status-col">
+          <div class="respawn-status-row1">
+            <span class="respawn-indicator">&#x21BB;</span>
+            <span class="respawn-state" id="respawnState">Watching</span>
+            <span class="detection-confidence" id="detectionConfidence"></span>
+            <span class="respawn-cycles">#<span id="respawnCycleCount">0</span></span>
+            <span class="respawn-timer" id="respawnTimer" style="display: none;"></span>
+            <span class="respawn-tokens" id="respawnTokens" style="display: none;"></span>
+            <select class="respawn-quick-preset" id="respawnQuickPreset" onchange="app.quickApplyPreset(this.value)" title="Quick apply preset">
+              <option value="">Preset...</option>
+            </select>
+            <button class="btn-icon-only" onclick="app.openRespawnConfig()" title="Configure Respawn" aria-label="Configure respawn">&#x2699;</button>
+            <button class="btn-icon-only" onclick="app.stopRespawn()" title="Stop Respawn" aria-label="Stop respawn">&#x25A0;</button>
+          </div>
+          <div class="respawn-status-row2" id="respawnStatusRow2">
+            <span class="detection-hook" id="detectionHook" style="display: none;"></span>
+            <span class="detection-ai-check" id="detectionAiCheck" style="display: none;"></span>
+            <span class="detection-status" id="detectionStatus"></span>
+            <span class="detection-waiting" id="detectionWaiting" style="display: none;"></span>
+            <div class="respawn-countdown-timers" id="respawnCountdownTimers"></div>
+          </div>
+        </div>
+        <div class="respawn-action-log" id="respawnActionLog"></div>
+      </div>
+    </div>
+
+    <!-- Ralph / Todo Tracker Panel -->
+    <div class="ralph-panel collapsed" id="ralphStatePanel" style="display: none;">
+      <!-- Collapsed Summary Bar -->
+      <div class="ralph-summary" id="ralphSummary">
+        <div class="ralph-summary-content" onclick="app.toggleRalphStatePanel()">
+          <div class="ralph-ring-mini" id="ralphRingMini">
+            <svg viewBox="0 0 36 36" class="ralph-ring-svg">
+              <defs>
+                <linearGradient id="ralphGradientMini" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#3b82f6" />
+                  <stop offset="100%" stop-color="#22c55e" />
+                </linearGradient>
+              </defs>
+              <circle class="ralph-ring-bg" cx="18" cy="18" r="15.9" />
+              <circle class="ralph-ring-progress-mini" cx="18" cy="18" r="15.9" id="ralphRingMiniProgress" style="stroke-dashoffset: 100" />
+            </svg>
+            <span class="ralph-ring-text" id="ralphRingMiniText">0%</span>
+          </div>
+          <div class="ralph-summary-info">
+            <span class="ralph-title">Ralph / Todo Tracker</span>
+            <span class="ralph-status-badge" id="ralphStatusBadge">
+              <span class="ralph-status-dot"></span>
+              <span class="ralph-status-text">Idle</span>
+            </span>
+          </div>
+          <div class="ralph-summary-stats">
+            <span class="ralph-stat"><span class="ralph-stat-icon">&#x23F1;</span><span id="ralphStatTime">0m</span></span>
+            <span class="ralph-stat"><span class="ralph-stat-icon">&#x2713;</span><span id="ralphStatTasks">0/0</span></span>
+          </div>
+          <span class="ralph-toggle" id="ralphToggle">&#x25BC;</span>
+        </div>
+        <div class="ralph-controls">
+          <div class="ralph-menu-container">
+            <button class="btn-icon-sm" onclick="event.stopPropagation(); app.toggleRalphMenu()" title="Fix Plan Menu" id="ralphMenuBtn">&#x2630;</button>
+            <div class="ralph-dropdown" id="ralphDropdown">
+              <button onclick="event.stopPropagation(); app.showFixPlan(); app.closeRalphMenu()">View Fix Plan</button>
+              <button onclick="event.stopPropagation(); app.writeFixPlanToFile(); app.closeRalphMenu()">Write to File</button>
+              <button onclick="event.stopPropagation(); app.importFixPlanFromFile(); app.closeRalphMenu()">Import from File</button>
+              <hr>
+              <button onclick="event.stopPropagation(); app.resetCircuitBreaker(); app.closeRalphMenu()">Reset Circuit Breaker</button>
+            </div>
+          </div>
+          <button class="btn-icon-sm" onclick="event.stopPropagation(); app.toggleRalphDetach()" title="Detach/Attach panel" id="ralphDetachBtn">&#x29C9;</button>
+          <button class="btn-icon-sm" onclick="event.stopPropagation(); app.closeRalphTracker()" title="Close tracker">&times;</button>
+        </div>
+      </div>
+
+      <!-- Expanded Detail View - Compact horizontal layout -->
+      <div class="ralph-detail" id="ralphDetail">
+        <div class="ralph-detail-row">
+          <!-- Progress Ring -->
+          <div class="ralph-ring-compact">
+            <svg viewBox="0 0 100 100" class="ralph-ring-svg-large">
+              <defs>
+                <linearGradient id="ralphGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#3b82f6" />
+                  <stop offset="100%" stop-color="#22c55e" />
+                </linearGradient>
+              </defs>
+              <circle class="ralph-ring-track" cx="50" cy="50" r="42" />
+              <circle class="ralph-ring-fill" cx="50" cy="50" r="42" id="ralphRingProgress" style="stroke-dashoffset: 264" />
+            </svg>
+            <div class="ralph-ring-center">
+              <div class="ralph-ring-percent" id="ralphRingPercent">0%</div>
+              <div class="ralph-ring-label">Complete</div>
+            </div>
+          </div>
+          <!-- Meta Info + Tasks unified -->
+          <div class="ralph-info-unified">
+            <div class="ralph-info-labels">
+              <div class="ralph-info-row">
+                <span class="ralph-info-label">Tasks</span>
+                <span class="ralph-tasks-count" id="ralphTasksCount">0/0</span>
+              </div>
+              <div class="ralph-info-row">
+                <span class="ralph-info-label">Phrase</span>
+                <code id="ralphPhrase">--</code>
+              </div>
+              <div class="ralph-info-row">
+                <span class="ralph-info-label">Elapsed</span>
+                <span id="ralphElapsed">0m</span>
+              </div>
+              <div class="ralph-info-row" id="ralphVersionRow" style="display: none;">
+                <span class="ralph-info-label">Plan</span>
+                <div class="ralph-version-info">
+                  <span class="version-badge" id="ralphPlanVersion">v1</span>
+                  <button class="rollback-btn" id="ralphRollbackBtn" onclick="app.showPlanHistory()" title="View history">history</button>
+                </div>
+              </div>
+            </div>
+            <div class="ralph-tasks-grid" id="ralphTasksGrid"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Main Terminal Area -->
+    <main class="main">
+      <div class="terminal-container" id="terminalContainer"></div>
+
+      <!-- Welcome Overlay (shown when no session active) -->
+      <div class="welcome-overlay" id="welcomeOverlay">
+        <div class="welcome-content">
+          <h1 class="welcome-title">Jarvis Terminal</h1>
+          <p class="welcome-desc">Each instance opens a persistent GNU Screen session running Claude or Shell.</p>
+          <p class="welcome-desc">Sessions stay alive for autonomous work, even if you close this browser.</p>
+          <div class="welcome-actions">
+            <button class="welcome-btn welcome-btn-primary" onclick="app.runClaude()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run Claude
+            </button>
+            <button class="welcome-btn welcome-btn-ralph" onclick="app.showRalphWizard()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              Start Ralph Loop Wizard
+            </button>
+          </div>
+          <p class="welcome-hint">Or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to start Claude</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- Project Insights Panel (shows file-viewing Bash commands) -->
+    <div class="project-insights-panel" id="projectInsightsPanel">
+      <div class="project-insights-header">
+        <span class="project-insights-title">Project Insights</span>
+        <button class="btn-icon-sm" onclick="app.closeProjectInsightsPanel()" title="Close">&times;</button>
+      </div>
+      <div class="project-insights-body" id="projectInsightsList"></div>
+      <div class="project-insights-resize-handle"></div>
+    </div>
+
+    <!-- File Browser Panel -->
+    <div class="file-browser-panel" id="fileBrowserPanel">
+      <div class="file-browser-header">
+        <span class="file-browser-title">Files</span>
+        <div class="file-browser-actions">
+          <button class="btn-icon-sm" onclick="app.refreshFileBrowser()" title="Refresh">&#x21BB;</button>
+          <button class="btn-icon-sm" onclick="app.toggleFileBrowserExpand()" title="Expand/Collapse All" id="fileBrowserExpandBtn">&#x229E;</button>
+          <button class="btn-icon-sm" onclick="app.closeFileBrowserPanel()" title="Close">&times;</button>
+        </div>
+      </div>
+      <div class="file-browser-search">
+        <input type="text" id="fileBrowserSearch" placeholder="Filter files..." oninput="app.filterFileBrowser(this.value)">
+      </div>
+      <div class="file-browser-body" id="fileBrowserTree">
+        <div class="file-browser-empty">Select a session to view files</div>
+      </div>
+      <div class="file-browser-status" id="fileBrowserStatus"></div>
+    </div>
+
+    <!-- File Preview Overlay -->
+    <div class="file-preview-overlay" id="filePreviewOverlay">
+      <div class="file-preview-window">
+        <div class="file-preview-header">
+          <span class="file-preview-title" id="filePreviewTitle">file.ts</span>
+          <div class="file-preview-actions">
+            <button class="btn-icon-sm" onclick="app.copyFilePreviewContent()" title="Copy content">&#x2398;</button>
+            <button class="btn-icon-sm" onclick="app.closeFilePreview()" title="Close">&times;</button>
+          </div>
+        </div>
+        <div class="file-preview-body" id="filePreviewBody"></div>
+        <div class="file-preview-footer" id="filePreviewFooter"></div>
+      </div>
+    </div>
+
+    <!-- Bottom Toolbar -->
+    <footer class="toolbar">
+      <div class="toolbar-left">
+        <!-- Run Claude -->
+        <div class="toolbar-group">
+          <button class="btn-toolbar btn-claude" onclick="app.runClaude()" title="Run Claude (Ctrl+Enter)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Run Claude
+          </button>
+          <div class="tab-count-group" title="Instance count">
+            <button class="tab-count-btn" onclick="app.decrementTabCount()">−</button>
+            <input type="number" id="tabCount" class="tab-count-input" value="1" min="1" max="20" readonly>
+            <button class="tab-count-btn" onclick="app.incrementTabCount()">+</button>
+          </div>
+          <button class="btn-toolbar btn-shell" onclick="app.runShell()" title="Run Shell">
+            Run Shell
+          </button>
+          <div class="tab-count-group" title="Instance count">
+            <button class="tab-count-btn" onclick="app.decrementShellCount()">−</button>
+            <input type="number" id="shellCount" class="tab-count-input" value="1" min="1" max="20" readonly>
+            <button class="tab-count-btn" onclick="app.incrementShellCount()">+</button>
+          </div>
+          <div class="case-select-group">
+            <select id="quickStartCase" class="toolbar-select" title="Select case">
+              <option value="testcase">testcase</option>
+            </select>
+            <button class="btn-case-add" onclick="app.showCreateCaseModal()" title="Create new case">+</button>
+          </div>
+        </div>
+
+        <!-- Directory (hidden) -->
+        <div class="toolbar-group" style="display: none;">
+          <button class="btn-toolbar" onclick="app.toggleDirInput()" title="Set working directory">
+            <span id="dirDisplay">No directory</span>
+          </button>
+          <input type="text" id="dirInput" class="toolbar-input hidden" placeholder="Working directory..." onblur="app.hideDirInput()">
+        </div>
+      </div>
+
+      <div class="toolbar-center">
+        <span class="version-display" id="versionDisplay" title="Jarvis version">v0.0.0</span>
+      </div>
+
+      <div class="toolbar-right">
+      </div>
+    </footer>
+
+    <!-- Help Modal -->
+    <div class="modal" id="helpModal">
+      <div class="modal-backdrop" onclick="app.closeHelp()"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Keyboard Shortcuts</h3>
+          <button class="modal-close" onclick="app.closeHelp()" aria-label="Close help">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="shortcuts-grid">
+            <div><kbd>Ctrl</kbd>+<kbd>Enter</kbd></div><div>Run Claude</div>
+            <div><kbd>Ctrl</kbd>+<kbd>W</kbd></div><div>Close Session</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div>Next Session</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div>Previous Session</div>
+            <div><kbd>Alt</kbd>+<kbd>1-9</kbd></div><div>Jump to Tab N</div>
+            <div><kbd>Ctrl</kbd>+<kbd>K</kbd></div><div>Kill All Sessions + Screens</div>
+            <div><kbd>Ctrl</kbd>+<kbd>L</kbd></div><div>Clear Terminal</div>
+            <div><kbd>Ctrl</kbd>+<kbd>G</kbd></div><div>Go Home (Deselect)</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></div><div>Toggle Respawn</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></div><div>Session Options</div>
+            <div><kbd>Ctrl</kbd>+<kbd>+</kbd></div><div>Increase Font</div>
+            <div><kbd>Ctrl</kbd>+<kbd>-</kbd></div><div>Decrease Font</div>
+            <div><kbd>Ctrl</kbd>+<kbd>?</kbd></div><div>Show Help</div>
+            <div><kbd>Escape</kbd></div><div>Close Panels</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monitor Panel (Screen Sessions + Background Tasks) -->
+    <div class="monitor-panel" id="monitorPanel">
+      <div class="monitor-panel-header" id="monitorPanelHeader">
+        <div class="monitor-panel-title">Monitor</div>
+        <div class="monitor-panel-actions">
+          <button class="btn-toolbar btn-sm btn-danger" onclick="app.killAllSessions()" title="Kill all sessions and their screen processes">Kill All</button>
+          <button class="btn-icon-sm" onclick="app.reconcileScreens()" title="Refresh screens">&#x21BB;</button>
+          <button class="btn-icon-sm" onclick="app.toggleMonitorDetach()" title="Detach panel" id="monitorDetachBtn">&#x29C9;</button>
+          <button class="btn-icon-sm" onclick="app.toggleMonitorPanel()" title="Toggle panel" id="monitorToggleBtn">&#x25B2;</button>
+          <button class="btn-icon-sm" onclick="app.closeMonitor()" title="Close monitor">&times;</button>
+        </div>
+      </div>
+      <div class="monitor-resize-handle" id="monitorResizeHandle"></div>
+      <div class="monitor-panel-body" id="monitorTabContent">
+        <div class="monitor-section">
+          <div class="monitor-section-header">
+            <span>Screen Sessions</span>
+          </div>
+          <div class="monitor-section-body" id="screenSessionsBody">
+            <div class="monitor-empty">No screen sessions</div>
+          </div>
+        </div>
+        <div class="monitor-section" id="monitorPlanAgentsSection" style="display: none;">
+          <div class="monitor-section-header">
+            <span>Plan Wizard Agents</span>
+            <span class="task-stats" id="monitorPlanAgentStats">0 active</span>
+            <button class="btn-toolbar btn-sm btn-danger" onclick="app.cancelPlanFromMonitor()" title="Cancel plan generation">Cancel</button>
+          </div>
+          <div class="monitor-section-body" id="monitorPlanAgentsBody">
+            <div class="monitor-empty">No plan agents</div>
+          </div>
+        </div>
+        <div class="monitor-section" id="monitorSubagentsSection">
+          <div class="monitor-section-header">
+            <span>Background Agents</span>
+            <span class="task-stats" id="monitorSubagentStats">0 tracked</span>
+            <button class="btn-toolbar btn-sm btn-danger" onclick="app.clearAllSubagents()" title="Clear all">Clear</button>
+          </div>
+          <div class="monitor-section-body" id="monitorSubagentsBody">
+            <div class="monitor-empty">No background agents</div>
+          </div>
+        </div>
+        <div class="monitor-section" id="backgroundTasksSection" style="display: none;">
+          <div class="monitor-section-header">
+            <span>Background Tasks</span>
+            <span class="task-stats" id="taskPanelStats">0 running</span>
+          </div>
+          <div class="monitor-section-body" id="backgroundTasksBody">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subagents Panel (separate from Monitor) -->
+    <div class="subagents-panel" id="subagentsPanel">
+      <div class="subagents-panel-header" id="subagentsPanelHeader">
+        <div class="subagents-panel-title">
+          Subagents <span id="subagentCountBadge" class="subagent-badge"></span>
+        </div>
+        <div class="subagents-panel-actions">
+          <button class="btn-toolbar btn-sm btn-danger" onclick="app.clearAllSubagents()" title="Clear all tracked subagents">Clear All</button>
+          <button class="btn-icon-sm" onclick="app.toggleSubagentsDetach()" title="Detach panel" id="subagentsDetachBtn">&#x29C9;</button>
+          <button class="btn-icon-sm" onclick="app.toggleSubagentsPanel()" title="Toggle panel" id="subagentsToggleBtn">&#x25B2;</button>
+          <button class="btn-icon-sm" onclick="app.closeSubagentsPanel()" title="Close">&times;</button>
+        </div>
+      </div>
+      <div class="subagents-resize-handle" id="subagentsResizeHandle"></div>
+      <div class="subagents-panel-body" id="subagentsTabContent">
+        <div class="subagent-container">
+          <div class="subagent-list" id="subagentList">
+            <div class="subagent-empty">No background agents detected</div>
+          </div>
+          <div class="subagent-detail" id="subagentDetail">
+            <div class="subagent-empty">Select an agent to view details</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Session Options Modal (includes Respawn Settings) -->
+    <div class="modal" id="sessionOptionsModal">
+      <div class="modal-backdrop" onclick="app.closeSessionOptions()"></div>
+      <div class="modal-content modal-xl">
+        <div class="modal-header">
+          <h3>Session Options</h3>
+          <button class="modal-close" onclick="app.closeSessionOptions()" aria-label="Close session options">&times;</button>
+        </div>
+        <!-- Modal Tabs -->
+        <div class="modal-tabs">
+          <button class="modal-tab-btn active" data-tab="respawn" onclick="app.switchOptionsTab('respawn')">Respawn</button>
+          <button class="modal-tab-btn" data-tab="context" onclick="app.switchOptionsTab('context')">Context</button>
+          <button class="modal-tab-btn" data-tab="ralph" onclick="app.switchOptionsTab('ralph')">Ralph / Todo</button>
+          <button class="modal-tab-btn" data-tab="summary" onclick="app.switchOptionsTab('summary')">Summary</button>
+          <button class="modal-tab-btn" data-tab="expand" onclick="app.switchOptionsTab('expand')">Expand</button>
+        </div>
+        <div class="modal-body">
+          <!-- Respawn Tab Content -->
+          <div class="modal-tab-content" id="respawn-tab">
+          <!-- Respawn Settings Section -->
+          <div class="session-respawn-section" id="sessionRespawnSection">
+            <div class="respawn-header">
+              <div class="session-respawn-status" id="sessionRespawnStatus">
+                <span class="respawn-status-indicator"></span>
+                <span class="respawn-status-text">Not active</span>
+              </div>
+              <div class="respawn-actions">
+                <button class="btn-toolbar btn-success btn-sm" onclick="app.enableRespawnFromModal()" id="modalEnableRespawnBtn">Enable</button>
+                <button class="btn-toolbar btn-danger btn-sm" onclick="app.stopRespawnFromModal()" id="modalStopRespawnBtn" style="display: none;">Stop</button>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <label>Duration</label>
+              <div class="duration-presets">
+                <button type="button" class="duration-preset-btn" data-minutes="30" onclick="app.selectDurationPreset('30')">30m</button>
+                <button type="button" class="duration-preset-btn" data-minutes="60" onclick="app.selectDurationPreset('60')">1h</button>
+                <button type="button" class="duration-preset-btn" data-minutes="120" onclick="app.selectDurationPreset('120')">2h</button>
+                <button type="button" class="duration-preset-btn" data-minutes="240" onclick="app.selectDurationPreset('240')">4h</button>
+                <button type="button" class="duration-preset-btn" data-minutes="480" onclick="app.selectDurationPreset('480')">8h</button>
+                <button type="button" class="duration-preset-btn active" data-minutes="" onclick="app.selectDurationPreset('')">∞</button>
+                <div class="duration-custom">
+                  <button type="button" class="duration-preset-btn" data-minutes="custom" onclick="app.selectDurationPreset('custom')">Custom</button>
+                  <div class="input-suffix input-suffix-sm duration-custom-input">
+                    <input type="number" id="modalRespawnDuration" value="" min="1" placeholder="min">
+                    <span>min</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-section-header">Presets</div>
+            <div class="form-row">
+              <label>Load Preset</label>
+              <div class="preset-selector">
+                <select id="respawnPresetSelect" onchange="app.updatePresetDescription()">
+                  <option value="">-- Select preset --</option>
+                  <optgroup label="Built-in" id="builtinPresetsGroup">
+                  </optgroup>
+                  <optgroup label="Custom" id="customPresetsGroup">
+                  </optgroup>
+                </select>
+                <button type="button" class="btn btn-sm" onclick="app.loadRespawnPreset()" title="Apply preset">Apply</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="app.saveCurrentAsPreset()" title="Save current config as preset">Save As...</button>
+              </div>
+              <p class="form-hint" id="presetDescriptionHint"></p>
+            </div>
+
+            <div class="form-section-header">Respawn Cycle</div>
+            <div class="form-row">
+              <label>1. Update Prompt</label>
+              <input type="text" id="modalRespawnPrompt" value="update all the docs and CLAUDE.md" placeholder="Prompt to send when idle" onchange="app.autoSaveRespawnConfig()">
+            </div>
+
+            <div class="respawn-options-row" style="margin: 8px 0;">
+              <label class="checkbox-inline">
+                <input type="checkbox" id="modalRespawnSendClear" checked onchange="app.autoSaveRespawnConfig()">
+                <span>2. Send /clear</span>
+              </label>
+              <label class="checkbox-inline">
+                <input type="checkbox" id="modalRespawnSendInit" checked onchange="app.autoSaveRespawnConfig()">
+                <span>3. Send /init</span>
+              </label>
+            </div>
+
+            <div class="form-row">
+              <label>4. Kickstart Prompt</label>
+              <input type="text" id="modalRespawnKickstart" value="" placeholder="Optional: prompt if /init doesn't trigger work" onchange="app.autoSaveRespawnConfig()">
+              <span class="form-hint">Sent only when /init completes but Claude stays idle</span>
+            </div>
+
+            <div class="form-section-header">Behavior</div>
+            <div class="respawn-options-row">
+              <label class="checkbox-inline">
+                <input type="checkbox" id="modalRespawnAutoAccept" checked onchange="app.autoSaveRespawnConfig()">
+                <span>Auto-accept prompts</span>
+              </label>
+            </div>
+            <span class="form-hint">Auto-accept presses Enter for plan approvals and default question options</span>
+          </div>
+          </div><!-- End respawn-tab -->
+
+          <!-- Context Management Tab Content -->
+          <div class="modal-tab-content hidden" id="context-tab">
+            <div class="form-section-header">Appearance</div>
+            <div class="form-row">
+              <label>Session Color</label>
+              <div class="color-picker" id="sessionColorPicker">
+                <button type="button" class="color-swatch" data-color="default" title="Default">
+                  <span class="swatch-inner" style="background: var(--bg-hover)"></span>
+                </button>
+                <button type="button" class="color-swatch" data-color="red" title="Red">
+                  <span class="swatch-inner" style="background: var(--session-red)"></span>
+                </button>
+                <button type="button" class="color-swatch" data-color="orange" title="Orange">
+                  <span class="swatch-inner" style="background: var(--session-orange)"></span>
+                </button>
+                <button type="button" class="color-swatch" data-color="yellow" title="Yellow">
+                  <span class="swatch-inner" style="background: var(--session-yellow)"></span>
+                </button>
+                <button type="button" class="color-swatch" data-color="green" title="Green">
+                  <span class="swatch-inner" style="background: var(--session-green)"></span>
+                </button>
+                <button type="button" class="color-swatch" data-color="blue" title="Blue">
+                  <span class="swatch-inner" style="background: var(--session-blue)"></span>
+                </button>
+                <button type="button" class="color-swatch" data-color="purple" title="Purple">
+                  <span class="swatch-inner" style="background: var(--session-purple)"></span>
+                </button>
+                <button type="button" class="color-swatch" data-color="pink" title="Pink">
+                  <span class="swatch-inner" style="background: var(--session-pink)"></span>
+                </button>
+              </div>
+            </div>
+
+            <div class="form-section-header">Token Management</div>
+            <div class="context-settings-grid">
+              <div class="context-setting">
+                <div class="context-setting-header">
+                  <label class="checkbox-inline">
+                    <input type="checkbox" id="modalAutoCompactEnabled" onchange="app.autoSaveAutoCompact()">
+                    <span>Auto-Compact</span>
+                  </label>
+                  <div class="input-suffix input-suffix-sm">
+                    <input type="number" id="modalAutoCompactThreshold" value="110000" min="10000" max="1000000" step="10000" onchange="app.autoSaveAutoCompact()">
+                    <span>tokens</span>
+                  </div>
+                </div>
+                <input type="text" id="modalAutoCompactPrompt" value="" placeholder="Focus prompt (optional)" onchange="app.autoSaveAutoCompact()">
+                <span class="form-hint">Summarizes context while preserving key information</span>
+              </div>
+
+              <div class="context-setting">
+                <div class="context-setting-header">
+                  <label class="checkbox-inline">
+                    <input type="checkbox" id="modalAutoClearEnabled" onchange="app.autoSaveAutoClear()">
+                    <span>Auto-Clear</span>
+                  </label>
+                  <div class="input-suffix input-suffix-sm">
+                    <input type="number" id="modalAutoClearThreshold" value="140000" min="10000" max="1000000" step="10000" onchange="app.autoSaveAutoClear()">
+                    <span>tokens</span>
+                  </div>
+                </div>
+                <span class="form-hint">Full context reset at threshold (use higher than compact)</span>
+              </div>
+
+              <div class="context-setting">
+                <div class="context-setting-header">
+                  <label class="checkbox-inline">
+                    <input type="checkbox" id="modalAutoTrimEnabled" onchange="app.autoSaveAutoTrim()">
+                    <span>Auto-Trim</span>
+                  </label>
+                  <div class="input-suffix input-suffix-sm">
+                    <input type="number" id="modalAutoTrimThreshold" value="80000" min="10000" max="1000000" step="10000" onchange="app.autoSaveAutoTrim()">
+                    <span>tokens</span>
+                  </div>
+                </div>
+                <span class="form-hint">JSONL-level trimming: stubs tool results, removes thinking blocks (fires before compact)</span>
+              </div>
+            </div>
+
+            <div class="form-section-header">Context Analysis</div>
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+              <button type="button" class="btn btn-sm btn-secondary" id="analyzeContextBtn" onclick="app.analyzeSessionContext()">Analyze</button>
+              <button type="button" class="btn btn-sm btn-primary" id="trimContextBtn" onclick="app.trimSessionContext()">Trim Now</button>
+            </div>
+            <div id="contextAnalysisPanel" style="display: none;"></div>
+
+            <div class="form-section-header">File Watching</div>
+            <div class="form-row form-row-switch">
+              <label>Image Watcher</label>
+              <label class="switch">
+                <input type="checkbox" id="modalImageWatcherEnabled" checked onchange="app.toggleSessionImageWatcher()">
+                <span class="slider"></span>
+              </label>
+              <span class="form-hint">Auto-popup new images (screenshots, generated files) in this session's directory</span>
+            </div>
+
+            <div class="form-section-header">Performance</div>
+            <div class="form-row form-row-switch">
+              <label>Flicker Filter</label>
+              <label class="switch">
+                <input type="checkbox" id="modalFlickerFilterEnabled" onchange="app.toggleFlickerFilter()">
+                <span class="slider"></span>
+              </label>
+              <span class="form-hint">Buffers output after screen clears to reduce Ink UI flickering (adds ~50ms latency)</span>
+            </div>
+          </div><!-- End context-tab -->
+
+          <!-- Ralph Wiggum Tab Content -->
+          <div class="modal-tab-content hidden" id="ralph-tab">
+            <div class="form-row form-row-switch">
+              <label>Enable Tracker</label>
+              <label class="switch">
+                <input type="checkbox" id="modalRalphEnabled">
+                <span class="slider"></span>
+              </label>
+              <span class="form-hint">Auto-detects loops and todos in Claude output</span>
+            </div>
+
+            <div class="form-row">
+              <label>Completion Phrase</label>
+              <input type="text" id="modalRalphPhrase" placeholder="e.g., COMPLETE, DONE, FINISHED">
+              <span class="form-hint">Phrase Claude outputs when loop is complete (without &lt;promise&gt; tags)</span>
+            </div>
+
+            <div class="form-section-header">Limits</div>
+            <div class="ralph-limits-grid">
+              <div class="form-col">
+                <label>Max Iterations</label>
+                <input type="number" id="modalRalphMaxIterations" value="0" min="0" max="1000">
+                <span class="form-hint">0 = unlimited</span>
+              </div>
+              <div class="form-col">
+                <label>Max Todos</label>
+                <input type="number" id="modalRalphMaxTodos" value="50" min="1" max="500">
+                <span class="form-hint">Per session</span>
+              </div>
+              <div class="form-col">
+                <label>Todo Expiration</label>
+                <div class="input-suffix input-suffix-sm">
+                  <input type="number" id="modalRalphTodoExpiration" value="60" min="1" max="1440">
+                  <span>min</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="ralph-config-actions">
+              <button class="btn-toolbar btn-primary" onclick="app.saveRalphConfig()">Save Ralph Config</button>
+            </div>
+          </div><!-- End ralph-tab -->
+
+          <!-- Summary Tab Content -->
+          <div class="modal-tab-content hidden" id="summary-tab">
+            <!-- Filter Buttons -->
+            <div class="run-summary-filters">
+              <button class="filter-btn active" data-filter="all" onclick="app.filterRunSummary('all')">All</button>
+              <button class="filter-btn" data-filter="errors" onclick="app.filterRunSummary('errors')">Errors</button>
+              <button class="filter-btn" data-filter="warnings" onclick="app.filterRunSummary('warnings')">Warnings</button>
+              <button class="filter-btn" data-filter="respawn" onclick="app.filterRunSummary('respawn')">Respawn</button>
+              <button class="filter-btn" data-filter="idle" onclick="app.filterRunSummary('idle')">Idle/Working</button>
+            </div>
+
+            <!-- Timeline -->
+            <div class="run-summary-timeline" id="runSummaryTimeline">
+              <p class="empty-message">Select a session to view summary</p>
+            </div>
+
+            <!-- Footer with actions -->
+            <div class="run-summary-footer">
+              <span class="run-summary-session-info" id="runSummarySessionInfo"></span>
+              <div class="run-summary-actions">
+                <label class="auto-refresh-label">
+                  <input type="checkbox" id="runSummaryAutoRefresh" onchange="app.toggleRunSummaryAutoRefresh()">
+                  Auto-refresh
+                </label>
+                <button class="btn-toolbar btn-sm" onclick="app.refreshRunSummary()" title="Refresh summary">&#x21BB; Refresh</button>
+                <button class="btn-toolbar btn-sm" onclick="app.exportRunSummary('json')" title="Export as JSON">Export JSON</button>
+                <button class="btn-toolbar btn-sm" onclick="app.exportRunSummary('md')" title="Export as Markdown">Export MD</button>
+              </div>
+            </div>
+          </div><!-- End summary-tab -->
+
+          <!-- Expand Mode Tab (Per-Session) -->
+          <div class="modal-tab-content hidden" id="expand-tab">
+  <!-- Status Section -->
+  <div class="expand-status-section">
+    <h4 style="margin-bottom: 12px; color: #e0e0e0;">Expand Mode Status</h4>
+    <div class="expand-status-indicator" id="expandStatusIndicator">
+      <span class="status-dot inactive" id="expandStatusDot"></span>
+      <span class="status-text" id="expandStatusText">Inactive</span>
+    </div>
+    <div class="expand-stats" id="expandStats" style="display: none;">
+      <div class="stat-item">
+        <span class="stat-label">Cycles Completed:</span>
+        <span class="stat-value" id="expandCyclesCompleted">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Started:</span>
+        <span class="stat-value" id="expandStartedAt">-</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Ends At:</span>
+        <span class="stat-value" id="expandEndsAt">-</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Configuration Section -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Configuration</h4>
+
+  <div class="form-row">
+    <label>Duration (minutes)</label>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <input type="number" id="expandDuration" class="form-input" value="30" min="0" max="480" style="width: 100px;" />
+      <span style="color: #888; font-size: 12px;">0 = run indefinitely</span>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <label>Interval Between Cycles (minutes)</label>
+    <input type="number" id="expandInterval" class="form-input" value="5" min="1" max="60" style="width: 100px;" />
+  </div>
+
+  <div class="form-row">
+    <label>Max Changes Per Cycle</label>
+    <input type="number" id="expandMaxChanges" class="form-input" value="5" min="1" max="20" style="width: 100px;" />
+  </div>
+
+  <div class="form-row">
+    <label>Focus Areas (optional)</label>
+    <input type="text" id="expandFocusAreas" class="form-input" placeholder="performance, tests, documentation (comma-separated)" />
+    <p style="font-size: 11px; color: #888; margin-top: 4px;">Leave empty to analyze all areas.</p>
+  </div>
+
+  <div class="form-row">
+    <label>Exclude Patterns</label>
+    <input type="text" id="expandExcludePatterns" class="form-input" value="node_modules, .git, dist, build" placeholder="node_modules, .git, *.min.js (comma-separated)" />
+  </div>
+
+  <div class="form-row" style="margin-top: 16px;">
+    <label class="checkbox-label">
+      <input type="checkbox" id="expandAutoCommit" checked />
+      <span>Auto-commit after each cycle</span>
+    </label>
+  </div>
+
+  <div class="form-row" id="commitPrefixRow">
+    <label>Commit Prefix</label>
+    <input type="text" id="expandCommitPrefix" class="form-input" value="expand:" style="width: 150px;" />
+  </div>
+
+  <!-- Control Buttons -->
+  <div class="expand-controls" style="margin-top: 24px;">
+    <button id="expandStartBtn" class="btn btn-primary">
+      <span class="btn-icon">&#9654;</span> Start Expand Mode
+    </button>
+    <button id="expandStopBtn" class="btn btn-danger" style="display: none;">
+      <span class="btn-icon">&#9632;</span> Stop
+    </button>
+    <button id="expandSaveConfigBtn" class="btn btn-secondary">
+      Save Configuration
+    </button>
+    <span id="expandSaveStatus" style="margin-left: 12px; color: #4caf50;"></span>
+  </div>
+
+  <!-- Cycle History Section -->
+  <h4 style="margin-bottom: 12px; margin-top: 32px; color: #e0e0e0;">Cycle History</h4>
+  <div class="expand-history-container" id="expandHistoryContainer">
+    <div class="expand-history-empty" id="expandHistoryEmpty">
+      No cycles completed yet. Start Expand Mode to begin autonomous improvements.
+    </div>
+    <div class="expand-history-list" id="expandHistoryList" style="display: none;">
+      <!-- Cycle entries will be inserted here -->
+    </div>
+  </div>
+
+  <!-- Current Cycle Section (shown when active) -->
+  <div class="expand-current-cycle" id="expandCurrentCycle" style="display: none;">
+    <h4 style="margin-bottom: 12px; color: #e0e0e0;">Current Cycle</h4>
+    <div class="current-cycle-info">
+      <div class="cycle-phase">
+        <span class="phase-label">Phase:</span>
+        <span class="phase-value" id="expandCurrentPhase">Analyzing...</span>
+      </div>
+      <div class="cycle-progress">
+        <div class="progress-bar">
+          <div class="progress-fill" id="expandProgressFill" style="width: 0%;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Close Session Confirmation Modal -->
+    <div class="modal" id="closeConfirmModal">
+      <div class="modal-backdrop" onclick="app.cancelCloseSession()"></div>
+      <div class="modal-content modal-sm">
+        <div class="modal-header">
+          <h3>Close Session</h3>
+          <button class="modal-close" onclick="app.cancelCloseSession()" aria-label="Cancel close session">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-session-name" id="closeConfirmSessionName"></p>
+        </div>
+        <div class="close-options">
+          <button class="close-option" onclick="app.confirmCloseSession(false)">
+            <span class="close-option-title">Remove Tab</span>
+            <span class="close-option-desc">Screen session keeps running in background</span>
+          </button>
+          <button class="close-option close-option-danger" onclick="app.confirmCloseSession(true)">
+            <span class="close-option-title">Kill Claude</span>
+            <span class="close-option-desc">Terminate the session completely</span>
+          </button>
+        </div>
+        <div class="modal-footer-cancel">
+          <button class="btn-toolbar btn-sm" onclick="app.cancelCloseSession()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- App Settings Modal -->
+    <div class="modal" id="appSettingsModal">
+      <div class="modal-backdrop" onclick="app.closeAppSettings()"></div>
+      <div class="modal-content modal-xl">
+        <div class="modal-header">
+          <h3>App Settings</h3>
+          <div class="modal-header-search">
+            <input type="text" id="settingsSearch" placeholder="Search settings..." autocomplete="off">
+            <span class="search-icon">&#128269;</span>
+          </div>
+          <button class="modal-close" onclick="app.closeAppSettings()" aria-label="Close app settings">&times;</button>
+        </div>
+        <div class="modal-tabs">
+          <button class="modal-tab-btn active" data-tab="settings-display">Display</button>
+          <button class="modal-tab-btn" data-tab="settings-claude">Claude CLI</button>
+          <button class="modal-tab-btn" data-tab="settings-models">Models</button>
+          <button class="modal-tab-btn" data-tab="settings-paths">Paths</button>
+          <button class="modal-tab-btn" data-tab="settings-notifications">Notifications</button>
+          <button class="modal-tab-btn" data-tab="settings-telegram">Telegram</button>
+          <button class="modal-tab-btn" data-tab="settings-accounts">Accounts</button>
+          <button class="modal-tab-btn" data-tab="settings-code-printer">Code Printer</button>
+        </div>
+        <div class="modal-body">
+          <!-- Display Tab -->
+          <div class="modal-tab-content" id="settings-display">
+            <div class="settings-grid">
+              <!-- Header Displays Section -->
+              <div class="settings-section-header">Header Displays</div>
+              <div class="settings-item" title="Show A-/A+ font size buttons in header">
+                <span class="settings-item-label">Font Controls</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowFontControls" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Show CPU and memory usage in header">
+                <span class="settings-item-label">System Stats</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowSystemStats" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Show total token count in header">
+                <span class="settings-item-label">Token Count</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowTokenCount" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Show estimated cost next to token count">
+                <span class="settings-item-label">Show Cost ($)</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowCost" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <!-- Panels Section -->
+              <div class="settings-section-header">Panels</div>
+              <div class="settings-item" title="Show Monitor panel at bottom right">
+                <span class="settings-item-label">Monitor</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowMonitor" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Show active tools and file viewers in a floating panel">
+                <span class="settings-item-label">Project Insights</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowProjectInsights" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Show file browser panel on the right side">
+                <span class="settings-item-label">File Browser</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowFileBrowser">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Show the Subagents panel (independent from Monitor)">
+                <span class="settings-item-label">Subagents</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsShowSubagents" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <!-- Subagent Options Section -->
+              <div class="settings-section-header">Subagent Options</div>
+              <div class="settings-item" title="Monitor Claude Code background agents in real-time">
+                <span class="settings-item-label">Enable Tracking</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsSubagentTracking" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Only show subagent windows when their parent tab is selected">
+                <span class="settings-item-label">Active Tab Only</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsSubagentActiveTabOnly">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <!-- Image Watcher Options Section -->
+              <div class="settings-section-header">Image Watcher</div>
+              <div class="settings-item" title="Automatically detect and popup new images in session directories">
+                <span class="settings-item-label">Enable Globally</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsImageWatcherEnabled" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <!-- Claude CLI Tab -->
+          <div class="modal-tab-content hidden" id="settings-claude">
+            <div class="form-row">
+              <label>Startup Mode</label>
+              <select id="appSettingsClaudeMode" class="form-select">
+                <option value="dangerously-skip-permissions">Skip Permissions (default)</option>
+                <option value="normal">Normal (with prompts)</option>
+                <option value="allowedTools">Allowed Tools Only</option>
+              </select>
+              <span class="form-hint">How Claude CLI is started in screen sessions</span>
+            </div>
+            <div class="form-row" id="allowedToolsRow" style="display: none;">
+              <label>Allowed Tools</label>
+              <input type="text" id="appSettingsAllowedTools" placeholder="Read,Glob,Grep,Bash">
+              <span class="form-hint">Comma-separated list of tools to allow</span>
+            </div>
+            <div class="form-row form-row-switch">
+              <label>Enable Ralph / Todo Tracker</label>
+              <label class="switch">
+                <input type="checkbox" id="appSettingsRalphEnabled">
+                <span class="slider"></span>
+              </label>
+              <span class="form-hint">Auto-enable for new sessions (otherwise auto-enables on Ralph pattern detection)</span>
+            </div>
+            <!-- Nice Priority Section -->
+            <div class="form-section-header">Nice Priority</div>
+            <div class="form-row form-row-switch">
+              <label>Enable Nice Priority Reduction</label>
+              <label class="switch">
+                <input type="checkbox" id="appSettingsNiceEnabled">
+                <span class="slider"></span>
+              </label>
+              <span class="form-hint">Lower priority of Claude sessions (reduces system impact, only affects new sessions)</span>
+            </div>
+            <div class="form-row" id="niceValueRow">
+              <label>Nice Value</label>
+              <input type="number" id="appSettingsNiceValue" min="-20" max="19" value="10" style="width: 80px;">
+              <span class="form-hint">Process priority (-20 to 19, higher = lower priority, default: 10)</span>
+            </div>
+          </div>
+          <!-- Models Tab -->
+          <div class="modal-tab-content hidden" id="settings-models">
+            <div class="form-row">
+              <label>Default Model</label>
+              <select id="appSettingsDefaultModel" class="form-select">
+                <option value="sonnet">Sonnet (Recommended - balanced)</option>
+                <option value="opus">Opus (Most capable)</option>
+                <option value="haiku">Haiku (Fast & cheap)</option>
+              </select>
+              <span class="form-hint">Model used for execution tasks. Optimizer suggestions are advisory only.</span>
+            </div>
+            <div class="form-row form-row-switch">
+              <label>Show Optimizer Recommendations</label>
+              <label class="switch">
+                <input type="checkbox" id="appSettingsShowModelRecommendations" checked>
+                <span class="slider"></span>
+              </label>
+              <span class="form-hint">Show what the optimizer recommends (doesn't override your choice)</span>
+            </div>
+            <div class="form-section-header">Agent Type Overrides</div>
+            <p class="form-hint" style="margin: 0 0 12px 0;">Optionally set specific models for each task type. Leave as "Use Default" to use your default model.</p>
+            <div class="form-row">
+              <label>Explore Tasks</label>
+              <select id="appSettingsModelExplore" class="form-select">
+                <option value="">Use Default</option>
+                <option value="haiku">Haiku</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+              </select>
+              <span class="form-hint">Quick searches, codebase exploration</span>
+            </div>
+            <div class="form-row">
+              <label>Implement Tasks</label>
+              <select id="appSettingsModelImplement" class="form-select">
+                <option value="">Use Default</option>
+                <option value="haiku">Haiku</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+              </select>
+              <span class="form-hint">Code writing, feature implementation</span>
+            </div>
+            <div class="form-row">
+              <label>Test Tasks</label>
+              <select id="appSettingsModelTest" class="form-select">
+                <option value="">Use Default</option>
+                <option value="haiku">Haiku</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+              </select>
+              <span class="form-hint">Writing and running tests</span>
+            </div>
+            <div class="form-row">
+              <label>Review Tasks</label>
+              <select id="appSettingsModelReview" class="form-select">
+                <option value="">Use Default</option>
+                <option value="haiku">Haiku</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+              </select>
+              <span class="form-hint">Code review, quality checks</span>
+            </div>
+          </div>
+          <!-- Paths Tab -->
+          <div class="modal-tab-content hidden" id="settings-paths">
+            <div class="form-row">
+              <label>Default CLAUDE.md Template</label>
+              <input type="text" id="appSettingsClaudeMdPath" placeholder="/path/to/CLAUDE.md template">
+              <span class="form-hint">Used when creating new cases. Leave empty for built-in template.</span>
+            </div>
+            <div class="form-row">
+              <label>Default Working Directory</label>
+              <input type="text" id="appSettingsDefaultDir" placeholder="~/projects">
+              <span class="form-hint">Default directory for new sessions.</span>
+            </div>
+          </div>
+          <!-- Notifications Tab -->
+          <div class="modal-tab-content hidden" id="settings-notifications">
+            <div class="settings-grid">
+              <!-- Master Control Section -->
+              <div class="settings-section-header">Master Control</div>
+              <div class="settings-item" title="Master toggle for all notification layers">
+                <span class="settings-item-label">Enable Notifications</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsNotifEnabled" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Show OS-level notifications when tab is hidden">
+                <span class="settings-item-label">Browser</span>
+                <div class="settings-item-actions">
+                  <label class="switch switch-sm">
+                    <input type="checkbox" id="appSettingsNotifBrowser">
+                    <span class="slider"></span>
+                  </label>
+                  <button class="btn-toolbar btn-sm" onclick="app.notificationManager?.requestPermission()" title="Request browser notification permission">Ask</button>
+                  <span class="settings-status" id="notifPermissionStatus">?</span>
+                </div>
+              </div>
+              <span class="form-hint" style="grid-column: 1 / -1; margin-top: -8px;">For remote access, HTTPS is required. Start with: <code>jarvis web --https</code></span>
+
+              <!-- Alerts Section -->
+              <div class="settings-section-header">Alerts</div>
+              <div class="settings-item" title="Play a short beep for critical events">
+                <span class="settings-item-label">Audio Alerts</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsNotifAudio">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Notify when a session is idle longer than this">
+                <span class="settings-item-label">Idle Threshold</span>
+                <div class="settings-item-actions">
+                  <input type="number" id="appSettingsNotifStuckMins" class="settings-item-input" value="10" min="1" max="120">
+                  <span style="font-size: 0.65rem; color: var(--text-muted);">min</span>
+                </div>
+              </div>
+
+              <!-- Notification Levels Section -->
+              <div class="settings-section-header">Notification Levels</div>
+            </div>
+            <div class="settings-grid settings-grid-3col">
+              <div class="settings-item" title="Errors, crashes, agent failures">
+                <span class="settings-item-label">Critical</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsNotifCritical" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Completions, budget warnings, stuck sessions">
+                <span class="settings-item-label">Warning</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsNotifWarning" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="settings-item" title="Auto-accepts, auto-clears, agent completions">
+                <span class="settings-item-label">Info</span>
+                <label class="switch switch-sm">
+                  <input type="checkbox" id="appSettingsNotifInfo" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Event Type Preferences -->
+            <div class="settings-grid" style="margin-top: 12px;">
+              <div class="settings-section-header">Per-Event Settings</div>
+            </div>
+            <div class="event-type-grid">
+              <div class="event-header">Event</div>
+              <div class="event-header">On</div>
+              <div class="event-header">Browser</div>
+              <div class="event-header">Sound</div>
+
+              <div class="event-label">Permission prompts</div>
+              <input type="checkbox" id="eventPermissionEnabled" checked>
+              <input type="checkbox" id="eventPermissionBrowser" checked>
+              <input type="checkbox" id="eventPermissionAudio" checked>
+
+              <div class="event-label">Questions from Claude</div>
+              <input type="checkbox" id="eventQuestionEnabled" checked>
+              <input type="checkbox" id="eventQuestionBrowser" checked>
+              <input type="checkbox" id="eventQuestionAudio" checked>
+
+              <div class="event-label">Session idle</div>
+              <input type="checkbox" id="eventIdleEnabled" checked>
+              <input type="checkbox" id="eventIdleBrowser" checked>
+              <input type="checkbox" id="eventIdleAudio">
+
+              <div class="event-label">Response complete</div>
+              <input type="checkbox" id="eventStopEnabled" checked>
+              <input type="checkbox" id="eventStopBrowser">
+              <input type="checkbox" id="eventStopAudio">
+
+              <div class="event-label">Respawn cycles</div>
+              <input type="checkbox" id="eventRespawnEnabled" checked>
+              <input type="checkbox" id="eventRespawnBrowser">
+              <input type="checkbox" id="eventRespawnAudio">
+
+              <div class="event-label">Task complete</div>
+              <input type="checkbox" id="eventRalphEnabled" checked>
+              <input type="checkbox" id="eventRalphBrowser" checked>
+              <input type="checkbox" id="eventRalphAudio" checked>
+
+              <div class="event-label">Subagent activity</div>
+              <input type="checkbox" id="eventSubagentEnabled">
+              <input type="checkbox" id="eventSubagentBrowser">
+              <input type="checkbox" id="eventSubagentAudio">
+            </div>
+          </div>
+          <!-- Telegram Tab -->
+          <div class="modal-tab-content hidden" id="settings-telegram">
+  <!-- Enable/Disable Section -->
+  <div class="telegram-header">
+    <h4 style="margin-bottom: 0; color: #e0e0e0;">Telegram Integration</h4>
+    <label class="telegram-toggle">
+      <input type="checkbox" id="telegramEnabled" />
+      <span class="toggle-slider"></span>
+      <span class="toggle-label" id="telegramEnabledLabel">Disabled</span>
+    </label>
+  </div>
+  <p style="font-size: 11px; color: #888; margin-top: 8px; margin-bottom: 16px;">
+    Receive notifications and control Jarvis via Telegram bot.
+  </p>
+
+  <!-- Connection Status -->
+  <div id="telegramConnectionStatus" class="telegram-status telegram-status-disconnected">
+    <span class="status-indicator"></span>
+    <span class="status-text">Not Connected</span>
+  </div>
+
+  <!-- Bot Configuration -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Bot Configuration</h4>
+  <div class="form-row">
+    <label>Bot Token</label>
+    <div class="input-with-action">
+      <input type="password" id="telegramBotToken" class="form-input" placeholder="123456789:ABCdefGHI..." />
+      <button type="button" class="btn btn-small" id="toggleBotTokenVisibility" title="Show/Hide">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </div>
+    <p class="form-hint">Get this from @BotFather on Telegram</p>
+  </div>
+
+  <div class="form-row">
+    <label>Default Chat ID</label>
+    <div class="input-with-action">
+      <input type="text" id="telegramChatId" class="form-input" placeholder="-100123456789" />
+      <button type="button" class="btn btn-small" id="getChatIdHelp" title="How to get Chat ID">?</button>
+    </div>
+    <p class="form-hint">Your personal or group chat ID for notifications</p>
+  </div>
+
+  <!-- Mode Selection -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Connection Mode</h4>
+  <div class="form-row">
+    <label>Mode</label>
+    <select id="telegramMode" class="form-select">
+      <option value="polling">Polling (Recommended)</option>
+      <option value="webhook">Webhook (Advanced)</option>
+    </select>
+  </div>
+
+  <!-- Webhook Settings (shown when webhook mode selected) -->
+  <div id="telegramWebhookSettings" class="provider-settings hidden">
+    <div class="form-row" style="margin-top: 12px;">
+      <label>Webhook URL</label>
+      <input type="text" id="telegramWebhookUrl" class="form-input" placeholder="https://your-domain.com" />
+      <p class="form-hint">Your publicly accessible URL (HTTPS required)</p>
+    </div>
+    <div class="form-row">
+      <label>Webhook Secret</label>
+      <input type="password" id="telegramWebhookSecret" class="form-input" placeholder="Optional secret for webhook verification" />
+    </div>
+  </div>
+
+  <!-- Notification Settings -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Notifications</h4>
+  <div class="telegram-notification-grid">
+    <label class="telegram-checkbox">
+      <input type="checkbox" id="notifySessionStart" checked />
+      <span class="checkbox-label">Session Start</span>
+    </label>
+    <label class="telegram-checkbox">
+      <input type="checkbox" id="notifySessionComplete" checked />
+      <span class="checkbox-label">Session Complete</span>
+    </label>
+    <label class="telegram-checkbox">
+      <input type="checkbox" id="notifySessionError" checked />
+      <span class="checkbox-label">Session Error</span>
+    </label>
+    <label class="telegram-checkbox">
+      <input type="checkbox" id="notifyAgentSpawn" checked />
+      <span class="checkbox-label">Agent Spawn</span>
+    </label>
+    <label class="telegram-checkbox">
+      <input type="checkbox" id="notifyAgentComplete" checked />
+      <span class="checkbox-label">Agent Complete</span>
+    </label>
+    <label class="telegram-checkbox">
+      <input type="checkbox" id="notifyProgressUpdates" />
+      <span class="checkbox-label">Progress Updates</span>
+    </label>
+  </div>
+
+  <!-- Progress Interval (shown when progress updates enabled) -->
+  <div id="progressIntervalSettings" class="provider-settings hidden">
+    <div class="form-row" style="margin-top: 12px;">
+      <label>Progress Interval (seconds)</label>
+      <input type="number" id="telegramProgressInterval" class="form-input" value="60" min="10" max="300" />
+      <p class="form-hint">How often to send progress notifications (10-300 seconds)</p>
+    </div>
+  </div>
+
+  <!-- Advanced Settings -->
+  <details class="telegram-advanced">
+    <summary>Advanced Settings</summary>
+    <div class="advanced-content">
+      <div class="form-row">
+        <label>Parse Mode</label>
+        <select id="telegramParseMode" class="form-select">
+          <option value="HTML">HTML (Recommended)</option>
+          <option value="Markdown">Markdown</option>
+          <option value="MarkdownV2">MarkdownV2</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label>Rate Limit (messages/minute)</label>
+        <input type="number" id="telegramRateLimit" class="form-input" value="20" min="1" max="60" />
+        <p class="form-hint">Maximum messages per minute to avoid Telegram API limits</p>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <input type="checkbox" id="telegramRequireChatVerification" checked />
+          <span style="margin-left: 8px;">Require Chat ID Verification</span>
+        </label>
+        <p class="form-hint">Only respond to commands from allowed chat IDs</p>
+      </div>
+
+      <div class="form-row">
+        <label>Allowed Chat IDs</label>
+        <input type="text" id="telegramAllowedChatIds" class="form-input" placeholder="123456789, -100987654321" />
+        <p class="form-hint">Comma-separated list of allowed chat IDs (leave empty to allow all when verification is off)</p>
+      </div>
+    </div>
+  </details>
+
+  <!-- Action Buttons -->
+  <div class="telegram-actions">
+    <button id="testTelegramConnection" class="btn btn-secondary">Test Connection</button>
+    <button id="sendTestMessage" class="btn btn-secondary">Send Test Message</button>
+    <button id="saveTelegramSettings" class="btn btn-primary">Save Settings</button>
+  </div>
+  <span id="telegramSaveStatus" class="save-status"></span>
+
+  <!-- Help Section -->
+  <div class="telegram-help">
+    <h5>Setup Instructions:</h5>
+    <ol>
+      <li>Create a bot with <a href="https://t.me/botfather" target="_blank">@BotFather</a> on Telegram</li>
+      <li>Copy the bot token and paste it above</li>
+      <li>Start a chat with your bot or add it to a group</li>
+      <li>Send any message to the bot, then use <a href="https://api.telegram.org/bot{TOKEN}/getUpdates" target="_blank">getUpdates</a> to find your chat ID</li>
+      <li>Enable the integration and save settings</li>
+    </ol>
+  </div>
+</div>
+          <!-- Accounts Tab -->
+          <div class="modal-tab-content hidden" id="settings-accounts">
+  <!-- Profiles Section - FIRST -->
+  <h4 style="margin-bottom: 12px; color: #e0e0e0;">Account Profiles</h4>
+  <div class="form-row">
+    <label>Active Profile</label>
+    <select id="appSettingsActiveProfile" class="form-select">
+      <option value="default">Default</option>
+      <option value="profile1">Profile 1</option>
+      <option value="profile2">Profile 2</option>
+    </select>
+  </div>
+
+  <!-- Profile Names (expandable) -->
+  <div style="margin-top: 12px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+    <div style="font-size: 12px; color: #888; margin-bottom: 8px;">Profile Names (optional)</div>
+    <div class="form-row" style="margin-bottom: 8px;">
+      <label style="width: 80px;">Profile 1</label>
+      <input type="text" id="appSettingsProfile1Name" class="form-input" placeholder="e.g., Work" style="flex: 1;" />
+    </div>
+    <div class="form-row">
+      <label style="width: 80px;">Profile 2</label>
+      <input type="text" id="appSettingsProfile2Name" class="form-input" placeholder="e.g., Personal" style="flex: 1;" />
+    </div>
+  </div>
+
+  <!-- Provider Selection for Current Profile -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Provider for <span id="currentProfileName" style="color: #4a9eff;">Default</span></h4>
+  <div class="form-row">
+    <label>API Source</label>
+    <select id="appSettingsModelProvider" class="form-select">
+      <option value="claude-subscription">Claude Code Subscription (Max/Pro)</option>
+      <option value="claude-api">Claude API Key</option>
+      <option value="zai-glm">z.ai GLM via Claude Plugin</option>
+    </select>
+  </div>
+
+  <!-- Claude API Key Settings -->
+  <div id="claudeApiSettings" class="provider-settings hidden">
+    <div class="form-row" style="margin-top: 12px;">
+      <label>API Key</label>
+      <input type="password" id="appSettingsClaudeApiKey" class="form-input" placeholder="sk-ant-..." />
+    </div>
+  </div>
+
+  <!-- z.ai GLM Settings -->
+  <div id="zaiSettings" class="provider-settings hidden">
+    <div class="form-row" style="margin-top: 12px;">
+      <label>API Key</label>
+      <input type="password" id="appSettingsZaiApiKey" class="form-input" placeholder="z.ai API key" />
+    </div>
+    <div class="form-row">
+      <label>Main Model</label>
+      <select id="appSettingsZaiModel" class="form-select">
+        <option value="glm-5.1">GLM 5.1 (Latest)</option>
+        <option value="glm-5-turbo">GLM 5 Turbo</option>
+        <option value="glm-5">GLM 5</option>
+        <option value="glm-4.7">GLM 4.7</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Routine Tasks Model (Sonnet)</label>
+      <select id="appSettingsZaiSonnetModel" class="form-select">
+        <option value="glm-5.1">GLM 5.1 (Same as Opus)</option>
+        <option value="glm-5">GLM 5</option>
+        <option value="glm-4.7" selected>GLM 4.7 (Recommended)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Quick Tasks Model (Haiku)</label>
+      <select id="appSettingsZaiHaikuModel" class="form-select">
+        <option value="glm-4.5-air">GLM 4.5 Air (Fast)</option>
+        <option value="glm-4.7-flash">GLM 4.7 Flash</option>
+        <option value="glm-4.5">GLM 4.5</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Default Workspace Path -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Default Workspace</h4>
+  <div class="form-row">
+    <label>Working Directory</label>
+    <input type="text" id="appSettingsDefaultWorkingDir" class="form-input" placeholder="/app/workspace" />
+  </div>
+  <p style="font-size: 11px; color: #888; margin-top: 4px;">Default working directory for new sessions. Leave empty to use container's current directory.</p>
+
+  <!-- Claude CLI Mode Section -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Claude CLI Mode</h4>
+  <div class="form-row">
+    <label>Startup Mode</label>
+    <select id="appSettingsClaudeModeAcct" class="form-select">
+      <option value="skip-permissions">Skip Permissions (Default)</option>
+      <option value="normal">Normal (Requires Permission Grants)</option>
+      <option value="allowed-tools">Allowed Tools Only</option>
+    </select>
+  </div>
+  <div id="allowedToolsSettings" class="provider-settings hidden">
+    <div class="form-row" style="margin-top: 8px;">
+      <label>Allowed Tools</label>
+      <input type="text" id="appSettingsAllowedToolsAcct" class="form-input" placeholder="Bash, Read, Write, Edit (comma-separated)" />
+    </div>
+    <p style="font-size: 11px; color: #888; margin-top: 4px;">Comma-separated list of tools Claude can use without permission prompts.</p>
+  </div>
+
+  <div class="form-row" style="margin-top: 24px;">
+    <button id="saveAccountSettingsBtn" class="btn btn-primary">Save Settings</button>
+    <span id="accountSettingsSaveStatus" style="margin-left: 12px; color: #4caf50;"></span>
+  </div>
+  <p style="font-size: 11px; color: #666; margin-top: 8px;">New sessions will use these settings. Existing sessions are not affected.</p>
+</div>
+
+<!-- Code Printer Tab -->
+<div class="modal-tab-content hidden" id="settings-code-printer">
+  <div class="code-printer-container">
+    <!-- Header Section -->
+    <div class="code-printer-header">
+      <h4 style="margin-bottom: 8px; color: #e0e0e0;">Code Printer</h4>
+      <p style="font-size: 11px; color: #888; margin-bottom: 16px;">
+        Upload screenshots and describe what to build. Get time estimates, task breakdowns, and start building.
+      </p>
+    </div>
+
+    <!-- Prompt Input -->
+    <div class="form-row">
+      <label>Description</label>
+      <textarea id="codePrinterPrompt" class="form-textarea" rows="4"
+        placeholder="Describe what you want to build. E.g., 'A login page with email/password fields, forgot password link, and social login buttons matching this design...'"></textarea>
+      <span class="form-hint">Be specific about functionality, styling, and any frameworks to use.</span>
+    </div>
+
+    <!-- Image Upload Area -->
+    <div class="form-row">
+      <label>Screenshots / Reference Images</label>
+      <div class="code-printer-upload-area" id="codePrinterUploadArea">
+        <div class="upload-dropzone" id="codePrinterDropzone">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+          <span>Drop images here or click to upload</span>
+          <span class="upload-hint">PNG, JPG, WebP up to 10MB each</span>
+          <input type="file" id="codePrinterFileInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+        </div>
+      </div>
+    </div>
+
+    <!-- Image Preview Grid -->
+    <div class="code-printer-previews" id="codePrinterPreviews" style="display: none;">
+      <label>Uploaded Images (<span id="codePrinterImageCount">0</span>)</label>
+      <div class="preview-grid" id="codePrinterPreviewGrid"></div>
+    </div>
+
+    <!-- Working Directory -->
+    <div class="form-row">
+      <label>Working Directory</label>
+      <input type="text" id="codePrinterWorkingDir" class="form-input" placeholder="~/projects/my-app">
+      <span class="form-hint">Where to create the new session. Leave empty for default.</span>
+    </div>
+
+    <!-- Estimate Button -->
+    <div class="code-printer-actions">
+      <button id="codePrinterEstimateBtn" class="btn btn-primary" onclick="codePrinter.estimate()">
+        <span class="btn-text">Estimate</span>
+        <span class="btn-spinner" style="display: none;"></span>
+      </button>
+      <span id="codePrinterEstimateStatus" class="status-text"></span>
+    </div>
+
+    <!-- Results Section (hidden initially) -->
+    <div class="code-printer-results" id="codePrinterResults" style="display: none;">
+      <div class="results-header">
+        <h5>Estimation Report</h5>
+        <span class="results-timestamp" id="codePrinterTimestamp"></span>
+      </div>
+
+      <!-- Time Estimate Card -->
+      <div class="result-card result-time">
+        <div class="result-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+          </svg>
+        </div>
+        <div class="result-content">
+          <span class="result-label">Estimated Time</span>
+          <span class="result-value" id="codePrinterTimeEstimate">--</span>
+        </div>
+      </div>
+
+      <!-- Complexity Card -->
+      <div class="result-card result-complexity">
+        <div class="result-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="result-content">
+          <span class="result-label">Complexity</span>
+          <span class="result-value" id="codePrinterComplexity">--</span>
+        </div>
+      </div>
+
+      <!-- Task Breakdown -->
+      <div class="result-section">
+        <h6>Task Breakdown</h6>
+        <ul class="task-breakdown-list" id="codePrinterTaskList"></ul>
+      </div>
+
+      <!-- Suggested Approach -->
+      <div class="result-section">
+        <h6>Suggested Approach</h6>
+        <div class="suggested-approach" id="codePrinterApproach"></div>
+      </div>
+
+      <!-- Start Building Button -->
+      <div class="code-printer-start-actions">
+        <button id="codePrinterStartBtn" class="btn btn-success" onclick="codePrinter.startBuilding()">
+          Start Building
+        </button>
+        <button class="btn btn-secondary" onclick="codePrinter.reset()">
+          Reset
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+        </div>
+        <div class="form-actions">
+          <button class="btn-toolbar" onclick="app.closeAppSettings()">Cancel</button>
+          <button class="btn-toolbar btn-primary" onclick="app.saveAppSettings()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Case Modal -->
+    <div class="modal" id="createCaseModal">
+      <div class="modal-backdrop" onclick="app.closeCreateCaseModal()"></div>
+      <div class="modal-content modal-lg">
+        <div class="modal-header">
+          <h3>Add Case</h3>
+          <button class="modal-close" onclick="app.closeCreateCaseModal()" aria-label="Close create case">&times;</button>
+        </div>
+        <div class="modal-tabs">
+          <button class="modal-tab-btn active" data-tab="case-create">Create New</button>
+          <button class="modal-tab-btn" data-tab="case-link">Link Existing</button>
+        </div>
+        <div class="modal-body">
+          <!-- Create New Tab -->
+          <div class="modal-tab-content" id="case-create">
+            <div class="form-row">
+              <label>Case Name</label>
+              <input type="text" id="newCaseName" placeholder="my-project" pattern="[a-zA-Z0-9_-]+">
+              <span class="form-hint">Letters, numbers, hyphens, underscores only. Created in ~/jarvis-cases/</span>
+            </div>
+            <div class="form-row">
+              <label>Description (optional)</label>
+              <input type="text" id="newCaseDescription" placeholder="A brief description...">
+            </div>
+          </div>
+          <!-- Link Existing Tab -->
+          <div class="modal-tab-content hidden" id="case-link">
+            <div class="form-row">
+              <label>Case Name</label>
+              <input type="text" id="linkCaseName" placeholder="my-project" pattern="[a-zA-Z0-9_-]+">
+              <span class="form-hint">Name to identify this case in Jarvis</span>
+            </div>
+            <div class="form-row">
+              <label>Folder Path</label>
+              <input type="text" id="linkCasePath" placeholder="/home/user/projects/my-project">
+              <span class="form-hint">Absolute path to an existing project folder</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn-toolbar" onclick="app.closeCreateCaseModal()">Cancel</button>
+          <button class="btn-toolbar btn-primary" id="caseModalSubmit" onclick="app.submitCaseModal()">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ralph Loop Wizard Modal -->
+    <div class="modal" id="ralphWizardModal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content modal-wizard">
+        <div class="modal-header">
+          <h3>Start Ralph Loop</h3>
+          <div class="modal-header-actions">
+            <button class="wizard-minimize-agents" id="wizardMinimizeAgentsBtn" onclick="app.togglePlanAgentsMinimized()" style="display: none;">
+              <span class="icon">🤖</span>
+              <span class="agent-count" id="wizardAgentCount">0</span>
+            </button>
+            <button class="btn-icon-only wizard-minimize-btn" id="wizardMinimizeBtn" onclick="app.minimizeRalphWizard()" title="Minimize wizard">&#x2012;</button>
+            <button class="modal-close" onclick="app.closeRalphWizard()" aria-label="Close Ralph wizard">&times;</button>
+          </div>
+        </div>
+
+        <!-- Wizard Progress Steps -->
+        <div class="wizard-progress">
+          <div class="wizard-step active" data-step="1">
+            <span class="wizard-step-number">1</span>
+            <span class="wizard-step-label">Describe</span>
+          </div>
+          <div class="wizard-step" data-step="2">
+            <span class="wizard-step-number">2</span>
+            <span class="wizard-step-label">Plan</span>
+          </div>
+          <div class="wizard-step" data-step="3">
+            <span class="wizard-step-number">3</span>
+            <span class="wizard-step-label">Launch</span>
+          </div>
+        </div>
+
+        <div class="modal-body">
+          <!-- Step 1: Task & Completion Setup -->
+          <div class="wizard-page wizard-page-compact" id="ralphWizardStep1">
+            <div class="wizard-step-intro">
+              <p>Describe your task below. Claude will generate an implementation plan with testing steps.</p>
+            </div>
+            <div class="form-row">
+              <label>What do you want to build?</label>
+              <div class="textarea-with-assist">
+                <textarea
+                  id="ralphTaskDescription"
+                  rows="3"
+                  placeholder="Build a REST API for user authentication with JWT tokens, login/logout endpoints, and password reset flow."></textarea>
+              </div>
+            </div>
+
+            <div class="wizard-inline-row">
+              <div class="wizard-inline-field">
+                <label>Working Directory <span id="existingPlanBadge" class="existing-plan-badge" style="display:none"></span></label>
+                <div class="case-select-inline">
+                  <select id="ralphCaseSelect" class="form-select" onchange="app.onRalphCaseChange()"></select>
+                  <button class="btn-toolbar btn-sm" onclick="app.showCreateCaseModal()">+</button>
+                </div>
+              </div>
+              <div class="wizard-inline-field wizard-inline-field-small">
+                <label>Iterations</label>
+                <div class="iteration-presets-compact">
+                  <button type="button" class="iteration-preset-btn active" data-iterations="10" onclick="app.selectIterationPreset(10)">10</button>
+                  <button type="button" class="iteration-preset-btn" data-iterations="25" onclick="app.selectIterationPreset(25)">25</button>
+                  <button type="button" class="iteration-preset-btn" data-iterations="50" onclick="app.selectIterationPreset(50)">50</button>
+                  <button type="button" class="iteration-preset-btn" data-iterations="0" onclick="app.selectIterationPreset(0)">&infin;</button>
+                </div>
+              </div>
+            </div>
+            <!-- Hidden completion phrase with default -->
+            <input type="hidden" id="ralphCompletionPhrase" value="COMPLETE">
+          </div>
+
+          <!-- Step 2: Plan Generation -->
+          <div class="wizard-page wizard-page-compact hidden" id="ralphWizardStep2">
+            <!-- Existing plan detected (shown when @fix_plan.md exists) -->
+            <div id="existingPlanSection" class="plan-section hidden">
+              <!-- Content populated by app.updateExistingPlanUI() -->
+            </div>
+
+            <!-- Loading state (shown during generation) -->
+            <div id="planGenerationLoading" class="plan-loading-state hidden">
+              <div class="plan-loading-content">
+                <div class="plan-spinner"></div>
+                <div class="plan-loading-text">
+                  <span class="plan-loading-title" id="planLoadingTitle">Starting Opus 4.5...</span>
+                  <span class="plan-loading-time" id="planLoadingTime">0s</span>
+                </div>
+              </div>
+              <p class="plan-loading-hint" id="planLoadingHint">Initializing deep reasoning model</p>
+              <div class="plan-loading-actions">
+                <button class="btn-toolbar btn-sm plan-cancel-btn" onclick="app.cancelPlanGeneration()">Stop</button>
+                <button class="btn-toolbar btn-sm" onclick="app.regeneratePlan()">Regenerate</button>
+              </div>
+              <!-- Auto-start toggle visible during generation -->
+              <div class="plan-autostart-toggle">
+                <label class="plan-autostart-label">
+                  <input type="checkbox" id="ralphAutoStartStep2" onchange="app.syncAutoStartCheckbox(this)">
+                  <span class="plan-autostart-text">Auto-launch when plan completes</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Stopped/Error state -->
+            <div id="planGenerationError" class="plan-section hidden">
+              <div class="plan-stopped-indicator" id="planStoppedIndicator">
+                <span class="plan-stopped-icon">&#x25A0;</span>
+                <span class="plan-stopped-text">Stopped</span>
+              </div>
+              <p class="plan-error-msg" id="planErrorMsg"></p>
+              <div class="plan-actions">
+                <button class="btn-toolbar btn-primary" onclick="app.generatePlan()">Regenerate Plan</button>
+              </div>
+              <p class="plan-skip-hint">Use <strong>Back</strong> to edit your task, or <strong>Next</strong> to continue without a plan</p>
+            </div>
+
+            <!-- Editor state -->
+            <div id="planEditor" class="plan-section hidden">
+              <div class="plan-editor-header">
+                <span>Implementation Plan <span class="plan-stats" id="planStats"></span></span>
+                <div class="plan-editor-actions">
+                  <div class="plan-option-group">
+                    <label>Detail:</label>
+                    <div class="plan-detail-btns">
+                      <button type="button" class="plan-detail-btn" data-detail="brief" onclick="app.setPlanDetail('brief')" title="High-level milestones only">Brief</button>
+                      <button type="button" class="plan-detail-btn" data-detail="standard" onclick="app.setPlanDetail('standard')" title="Single-pass generation with Opus 4.5">Standard</button>
+                      <button type="button" class="plan-detail-btn active" data-detail="detailed" onclick="app.setPlanDetail('detailed')" title="Enhanced: 4 parallel subagents + verification (slower but more thorough)">Enhanced</button>
+                    </div>
+                  </div>
+                  <button class="btn-toolbar btn-sm" onclick="app.regeneratePlan()">Regenerate</button>
+                </div>
+              </div>
+              <div id="planWarnings" class="hidden"></div>
+              <div id="planItemsList" class="plan-items-list"></div>
+              <div class="plan-editor-footer">
+                <button class="btn-toolbar btn-sm" onclick="app.addPlanItem()">+ Add Step</button>
+                <div class="plan-view-toggle">
+                  <button type="button" class="plan-view-btn active" data-view="list" onclick="app.setPlanViewMode('list')" title="Flat list">&#x2630;</button>
+                  <button type="button" class="plan-view-btn" data-view="grouped" onclick="app.setPlanViewMode('grouped')" title="Group by TDD phase">&#x229E;</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3: Preview & Launch -->
+          <div class="wizard-page hidden" id="ralphWizardStep3">
+            <div class="ralph-preview-section">
+              <label>Prompt Preview</label>
+              <div class="ralph-prompt-preview" id="ralphPromptPreview"></div>
+            </div>
+
+            <div class="ralph-config-summary">
+              <div class="config-summary-row">
+                <span class="config-label">Completion Phrase:</span>
+                <code id="summaryPhrase">COMPLETE</code>
+              </div>
+              <div class="config-summary-row">
+                <span class="config-label">Max Iterations:</span>
+                <span id="summaryIterations">10</span>
+              </div>
+              <div class="config-summary-row">
+                <span class="config-label">Case:</span>
+                <span id="summaryCase">testcase</span>
+              </div>
+              <div class="config-summary-row" style="display: none;">
+                <span class="config-label">Plan:</span>
+                <span id="summaryPlan">-</span>
+              </div>
+            </div>
+
+            <!-- Advanced Options (Collapsible) -->
+            <details class="advanced-options">
+              <summary>Advanced Options</summary>
+              <div class="advanced-options-content">
+                <div class="form-row form-row-switch">
+                  <label>Enable Respawn</label>
+                  <label class="switch">
+                    <input type="checkbox" id="ralphEnableRespawn">
+                    <span class="slider"></span>
+                  </label>
+                  <span class="form-hint">Auto-restart sessions when context fills up (usually not needed)</span>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- Wizard Footer -->
+        <div class="wizard-footer">
+          <button class="btn-toolbar" id="ralphBackBtn" onclick="app.ralphWizardBack()" style="display: none;">Back</button>
+          <div class="wizard-footer-right">
+            <button class="btn-toolbar" onclick="app.closeRalphWizard()">Cancel</button>
+            <button class="btn-toolbar btn-primary" id="ralphNextBtn" onclick="app.ralphWizardNext()">Next</button>
+            <button class="btn-toolbar btn-success" id="ralphStartBtn" onclick="app.startRalphLoop()" style="display: none;">Start Loop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ralph Wizard Minimized Indicator -->
+    <div class="wizard-minimized-indicator" id="wizardMinimizedIndicator" onclick="app.restoreRalphWizard()">
+      <span class="wizard-minimized-icon">🔄</span>
+      <span class="wizard-minimized-text">Ralph Wizard</span>
+      <span class="wizard-minimized-time" id="wizardMinimizedTime">0s</span>
+    </div>
+
+    <!-- Kill All Confirmation Modal -->
+    <div class="modal" id="killAllModal">
+      <div class="modal-backdrop" onclick="app.closeKillAllModal()"></div>
+      <div class="modal-content modal-sm">
+        <div class="modal-header">
+          <h3>Kill All Sessions</h3>
+          <button class="modal-close" onclick="app.closeKillAllModal()" aria-label="Close kill all modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-warning-text">Choose how to close <span id="killAllCount">0</span> session(s):</p>
+        </div>
+        <div class="close-options">
+          <button class="close-option" onclick="app.confirmKillAll(false)">
+            <span class="close-option-title">Remove All Tabs</span>
+            <span class="close-option-desc">Screen sessions keep running in background</span>
+          </button>
+          <button class="close-option close-option-danger" onclick="app.confirmKillAll(true)">
+            <span class="close-option-title">Kill All Claude + Screens</span>
+            <span class="close-option-desc">Terminate everything completely</span>
+          </button>
+        </div>
+        <div class="modal-footer-cancel">
+          <button class="btn-toolbar btn-sm" onclick="app.closeKillAllModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Drawer -->
+    <div class="notification-drawer" id="notifDrawer" role="region" aria-label="Notifications">
+      <div class="notif-drawer-header">
+        <span class="notif-drawer-title">Notifications</span>
+        <div class="notif-drawer-actions">
+          <button class="btn-notif-action" onclick="app.notificationManager?.markAllRead()" title="Mark all read" aria-label="Mark all notifications as read">&#x2713;</button>
+          <button class="btn-notif-action" onclick="app.notificationManager?.clearAll()" title="Clear all" aria-label="Clear all notifications">&#x1F5D1;</button>
+          <button class="btn-notif-action" onclick="app.toggleNotifications()" title="Close" aria-label="Close notifications">&times;</button>
+        </div>
+      </div>
+      <div class="notif-drawer-list" id="notifList" aria-live="polite" aria-relevant="additions"></div>
+      <div class="notif-drawer-empty" id="notifEmpty">No notifications</div>
+    </div>
+
+    <!-- Screen reader announcements (visually hidden) -->
+    <div id="srAnnounce" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+
+    <!-- Token Stats Modal -->
+    <div class="modal" id="tokenStatsModal">
+      <div class="modal-backdrop" onclick="app.closeTokenStats()"></div>
+      <div class="modal-content token-stats-modal">
+        <div class="modal-header">
+          <h3>Token Usage Statistics</h3>
+          <button class="modal-close" onclick="app.closeTokenStats()" aria-label="Close token statistics">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="stats-summary" id="statsSummary"></div>
+          <div class="stats-chart-container">
+            <div class="stats-chart-label">Last 7 Days</div>
+            <div class="stats-chart" id="statsChart"></div>
+            <div class="stats-chart-days" id="statsChartDays"></div>
+          </div>
+          <div class="stats-table-container">
+            <div class="stats-table-label">Daily Breakdown</div>
+            <div class="stats-table" id="statsTable"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Preset Modal -->
+  <div class="modal" id="savePresetModal">
+    <div class="modal-backdrop" onclick="app.closeSavePresetModal()"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3>Save Respawn Preset</h3>
+        <button class="modal-close" onclick="app.closeSavePresetModal()" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>Preset Name</label>
+          <input type="text" id="presetNameInput" placeholder="My Custom Preset" maxlength="30">
+        </div>
+        <div class="form-row">
+          <label>Description (optional)</label>
+          <input type="text" id="presetDescriptionInput" placeholder="When to use this preset" maxlength="100">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.closeSavePresetModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="app.confirmSavePreset()">Save Preset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session History Panel -->
+  <div class="history-panel" id="historyPanel">
+    <div class="history-panel-header">
+      <div class="history-panel-title">Session History</div>
+      <div class="history-panel-actions">
+        <input type="text" id="historySearch" class="history-search" placeholder="Search..." autocomplete="off">
+        <button class="btn-toolbar btn-sm btn-danger" onclick="app.clearSessionHistory()" title="Clear all history">Clear</button>
+        <button class="btn-icon-sm" onclick="app.toggleHistoryPanel()" title="Close">&times;</button>
+      </div>
+    </div>
+    <div class="history-panel-body" id="historyPanelBody">
+      <div class="history-empty">No closed sessions</div>
+    </div>
+  </div>
+
+  <!-- Activity Dashboard Panel -->
+  <div class="activity-dashboard" id="activityDashboard">
+    <div class="dashboard-header">
+      <div class="dashboard-title">Activity Dashboard</div>
+      <div class="dashboard-tabs">
+        <button class="dashboard-tab active" data-tab="sessions" onclick="app.switchDashboardTab('sessions')">Sessions</button>
+        <button class="dashboard-tab" data-tab="timeline" onclick="app.switchDashboardTab('timeline')">Timeline</button>
+        <button class="dashboard-tab" data-tab="alerts" onclick="app.switchDashboardTab('alerts')">Alerts</button>
+      </div>
+      <button class="btn-icon-sm" onclick="app.toggleActivityDashboard()" title="Close">&times;</button>
+    </div>
+    <div class="dashboard-body">
+      <!-- Sessions Tab -->
+      <div class="dashboard-content active" id="dashboardSessions">
+        <div class="session-grid" id="dashboardSessionGrid">
+          <div class="dashboard-empty">No active sessions</div>
+        </div>
+      </div>
+      <!-- Timeline Tab -->
+      <div class="dashboard-content" id="dashboardTimeline">
+        <div class="timeline-chart" id="dashboardTimelineChart">
+          <div class="dashboard-empty">Token usage timeline</div>
+        </div>
+      </div>
+      <!-- Alerts Tab -->
+      <div class="dashboard-content" id="dashboardAlerts">
+        <div class="alerts-list" id="dashboardAlertsList">
+          <div class="dashboard-empty">No active alerts</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SVG Overlay for Subagent Connection Lines -->
+  <svg id="connectionLines" class="connection-lines-svg">
+    <!-- Lines drawn dynamically -->
+  </svg>
+
+  <script src="app.js"></script>
+  <script src="telegram.js"></script>
+  <script src="debounce.js"></script>
+  <script src="logger-client.js"></script>
+  <script src="accounts.js"></script>
+  <script src="expand.js"></script>
+  <script src="claude-login.js"></script>
+</body>
+</html>
