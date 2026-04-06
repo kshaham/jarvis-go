@@ -187,11 +187,12 @@ func (t *Tracker) RecordStateChange(fromState, toState string) {
 	if toState == "WATCHING" && t.inRespawnCycle && fromState != "WATCHING" {
 		t.inRespawnCycle = false
 		t.totalRespawnCycles++
+		cycles := t.totalRespawnCycles
 		t.mu.Unlock()
 		t.Record(EventRespawnCycleComplete, map[string]interface{}{
 			"from":        fromState,
 			"to":          toState,
-			"totalCycles": t.totalRespawnCycles,
+			"totalCycles": cycles,
 		})
 		return
 	}

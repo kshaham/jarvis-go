@@ -136,6 +136,9 @@ func isValidCaseName(name string) bool {
 // The name must match [a-zA-Z0-9_-]+. The target path must exist and be a directory.
 // Returns the linked case info on success.
 func (cm *CaseManager) Link(name, folderPath string) (*CaseInfo, error) {
+	if !isValidCaseName(name) {
+		return nil, fmt.Errorf("invalid case name: %q", name)
+	}
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 

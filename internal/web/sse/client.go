@@ -49,21 +49,21 @@ func NewClient(w http.ResponseWriter, f http.Flusher, ctx context.Context, subs 
 }
 
 // Send queues an event for delivery. Non-blocking.
+// Uses recover to handle the TOCTOU race between the closed check and the channel send.
 func (c *Client) Send(msg EventMessage) {
 	if c.closed.Load() {
-		return // channel already closed, avoid panic
+		return
 	}
+	defer func() { recover() }() // catch send on closed channel
 	select {
 	case c.ch <- msg:
 	default:
-		// Buffer full
 		if IsCriticalEvent(msg.Event) {
 			c.closeOnce.Do(func() {
 				c.closed.Store(true)
 				close(c.ch)
 			})
 		}
-		// Non-critical: silently drop
 	}
 }
 
