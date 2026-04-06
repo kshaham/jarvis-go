@@ -176,6 +176,10 @@ func (m *Manager) runBrainstormFlow(meeting *Meeting, participants []string) {
 	sessions := m.sessions
 	m.mu.RUnlock()
 
+	if sessions == nil {
+		slog.Warn("Brainstorm: sessions unavailable", "agent", facilitatorName)
+		return
+	}
 	sent := sessions.WriteViaScreen(facilitatorID, brainstormPrompt+"\r")
 	if !sent {
 		slog.Warn("Brainstorm prompt delivery failed", "agent", facilitatorName)
@@ -220,6 +224,9 @@ func (m *Manager) runBrainstormFlow(meeting *Meeting, participants []string) {
 			fmt.Sprintf("Pick a task that matches your role as %s and start working on it.", roleName),
 		}, "\n")
 
+		if sessions == nil {
+			continue
+		}
 		taskSent := sessions.WriteViaScreen(sid, taskPrompt+"\r")
 		if taskSent {
 			if agent != nil {

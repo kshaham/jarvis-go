@@ -788,6 +788,13 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		skillCount := len(learningData.Skills)
 
 		score := CalculateAgentScore(a)
+
+		// Avatar fields for frontend rendering
+		avatarInitial := ""
+		if len(a.Config.Name) > 0 {
+			avatarInitial = string([]rune(a.Config.Name)[0:1])
+		}
+
 		members = append(members, map[string]interface{}{
 			"sessionId":      a.SessionID,
 			"configId":       a.ConfigID,
@@ -802,6 +809,13 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 			"learningCount":  learningCount,
 			"skillCount":     skillCount,
 			"score":          score,
+			"avatarColor":    a.Config.Color,
+			"avatarInitial":  avatarInitial,
+			"avatarEmoji":    emoji,
+			"totalCost":      0,
+			"lastActivityAt": time.Now().Format(time.RFC3339),
+			"workingDir":     "",
+			"activeTool":     nil,
 		})
 	}
 

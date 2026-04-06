@@ -169,9 +169,13 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 			`cm standup respond "<your 2-3 sentence status update>"`,
 		}, "\n")
 
-		sent := sessions.WriteInkPrompt(sessionID, standupPrompt)
-		if !sent {
-			slog.Warn("Standup prompt delivery failed", "agent", speakerName)
+		if sessions == nil {
+			slog.Warn("Standup: sessions unavailable, skipping prompt", "agent", speakerName)
+		} else {
+			sent := sessions.WriteInkPrompt(sessionID, standupPrompt)
+			if !sent {
+				slog.Warn("Standup prompt delivery failed", "agent", speakerName)
+			}
 		}
 
 		if agent != nil {
@@ -276,15 +280,17 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 			slog.Info("Standup: nudging agent", "name", speakerName, "nudge", nudgeCount, "max", cfg.StandupMaxNudges)
 
 			// Send Ctrl+C to interrupt, then re-inject short nudge prompt.
-			sessions.WriteViaScreen(sessionID, "\x03")
-			time.Sleep(2 * time.Second)
+			if sessions != nil {
+				sessions.WriteViaScreen(sessionID, "\x03")
+				time.Sleep(2 * time.Second)
 
-			shortNudge := strings.Join([]string{
-				"[STANDUP REMINDER] You haven't responded to the standup yet. This is URGENT - please respond NOW.",
-				"Reply by running this command IMMEDIATELY:",
-				`cm standup respond "<your 2-3 sentence status update>"`,
-			}, "\n")
-			sessions.WriteViaScreen(sessionID, shortNudge+"\r")
+				shortNudge := strings.Join([]string{
+					"[STANDUP REMINDER] You haven't responded to the standup yet. This is URGENT - please respond NOW.",
+					"Reply by running this command IMMEDIATELY:",
+					`cm standup respond "<your 2-3 sentence status update>"`,
+				}, "\n")
+				sessions.WriteViaScreen(sessionID, shortNudge+"\r")
+			}
 
 		case <-timeout.C:
 			slog.Warn("Standup response timeout", "agent", speakerName)
@@ -464,6 +470,10 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 		ch := agent.LeaderTaskCh
 		agent.mu.Unlock()
 
+		if sessions == nil {
+			slog.Warn("Leader task assignment: sessions unavailable", "agent", agent.Config.Name)
+			return
+		}
 		sent := sessions.WriteInkPrompt(agent.SessionID, leaderPrompt)
 		if sent {
 			slog.Info("Leader task assignment prompt sent", "leader", agent.Config.Name)
@@ -541,7 +551,9 @@ func (m *Manager) processLeaderTaskResponse(ch chan string, leader *AgentState, 
 			summaryBuilder.String(),
 			"Monitor your team's progress. If any agent is blocked, triage their task to another agent using `cm task triage`.",
 		}, "\n")
-		sessions.WriteInkPrompt(leader.SessionID, leaderSummary)
+		if sessions != nil {
+			sessions.WriteInkPrompt(leader.SessionID, leaderSummary)
+		}
 		slog.Info("Post-standup summary sent to leader", "leader", leader.Config.Name)
 	}
 
@@ -654,6 +666,10 @@ func (m *Manager) injectTaskQueue(agent *AgentState, tasks []*Task, sessions Ses
 	}
 	b.WriteString("\nUse `cm task ack <id>` to acknowledge, `cm task start <id>` to begin.")
 
+	if sessions == nil {
+		slog.Warn("injectTaskQueue: sessions unavailable", "agent", agent.Config.Name)
+		return
+	}
 	sent := sessions.WriteInkPrompt(agent.SessionID, b.String())
 	if sent {
 		slog.Info("Task queue injected", "agent", agent.Config.Name, "tasks", len(tasks))

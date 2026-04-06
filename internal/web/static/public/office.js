@@ -588,7 +588,7 @@ class OfficeApp {
   handleMemberUpdated(member) {
     const idx = this.state.members.findIndex(m => m.sessionId === member.sessionId);
     if (idx >= 0) {
-      this.state.members[idx] = member;
+      this.state.members[idx] = { ...this.state.members[idx], ...member };
     }
     // Targeted card update -- only patch the one card that changed
     const card = document.querySelector(`.agent-card[data-session-id="${member.sessionId}"]`);
