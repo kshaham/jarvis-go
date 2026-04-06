@@ -694,8 +694,9 @@ func (m *Manager) CheckForIdleAgents() {
 		slog.Info("Agent running low on tasks, finding work", "name", agentName, "remaining", totalWork)
 
 		// Strategy 1: Brainstorm with a strategic-tier (captain/leader) agent.
+		// Only pick leaders that aren't busy with their own tasks.
 		leader := m.findStrategicAgent(agent.SessionID)
-		if leader != nil && leader.ActiveTask() == nil {
+		if leader != nil && leader.ActiveTask() == nil && leader.PendingTaskCount() == 0 {
 			meeting := m.StartBrainstorm([]string{agent.SessionID, leader.SessionID})
 			if meeting != nil {
 				leaderName := leader.SessionID
@@ -756,12 +757,17 @@ func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 
 	preferredRoles := RoleAffinityPartners(requestingRole)
 
+	// Helper: check if agent is truly idle (no active or pending tasks).
+	isIdle := func(a *AgentState) bool {
+		return a.ActiveTask() == nil && a.PendingTaskCount() <= 1
+	}
+
 	// First pass: find an affinity-matched available agent.
 	if len(preferredRoles) > 0 {
 		for _, preferredRole := range preferredRoles {
 			for _, agent := range m.agents {
 				if agent.SessionID != excludeSessionID &&
-					agent.ActiveTask() == nil &&
+					isIdle(agent) &&
 					agent.Config != nil &&
 					agent.Config.Role == preferredRole {
 					return agent
@@ -772,7 +778,7 @@ func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 
 	// Fallback: any available agent.
 	for _, agent := range m.agents {
-		if agent.SessionID != excludeSessionID && agent.ActiveTask() == nil {
+		if agent.SessionID != excludeSessionID && isIdle(agent) {
 			return agent
 		}
 	}
