@@ -76,7 +76,30 @@ func NewManager(configDir string, isHTTPS bool) *Manager {
 		useSecureCookies: isHTTPS,
 	}
 	m.loadOrCreateSecret()
+
+	// Start periodic cleanup of expired sessions and rate limits.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			m.CleanupExpiredRateLimits()
+			m.cleanupExpiredSessions()
+		}
+	}()
+
 	return m
+}
+
+// cleanupExpiredSessions removes sessions that have been inactive beyond the timeout.
+func (m *Manager) cleanupExpiredSessions() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for token, session := range m.sessions {
+		if now.Sub(session.LastActivity) > sessionTimeoutDur {
+			delete(m.sessions, token)
+		}
+	}
 }
 
 // loadOrCreateSecret reads the HMAC signing secret from disk, or generates a new one.
@@ -242,24 +265,19 @@ func (m *Manager) CreateSession() string {
 
 // ValidateSession checks whether the token corresponds to a valid, non-expired session.
 func (m *Manager) ValidateSession(token string) bool {
-	m.mu.RLock()
+	m.mu.Lock()
 	session, ok := m.sessions[token]
-	m.mu.RUnlock()
 	if !ok {
+		m.mu.Unlock()
 		return false
 	}
 	if time.Since(session.LastActivity) > sessionTimeoutDur {
-		m.mu.Lock()
 		delete(m.sessions, token)
 		m.mu.Unlock()
 		slog.Info("Session expired due to inactivity")
 		return false
 	}
-	// Touch last activity
-	m.mu.Lock()
-	if s, ok := m.sessions[token]; ok {
-		s.LastActivity = time.Now()
-	}
+	session.LastActivity = time.Now()
 	m.mu.Unlock()
 	return true
 }

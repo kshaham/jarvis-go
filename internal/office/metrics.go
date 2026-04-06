@@ -7,12 +7,13 @@ import (
 
 // Metrics tracks office-level counters.
 type Metrics struct {
-	TotalStandups        atomic.Int64
+	TotalStandups         atomic.Int64
 	TotalStandupsComplete atomic.Int64
-	TotalTasks           atomic.Int64
-	TotalTasksCompleted  atomic.Int64
-	TotalBugs            atomic.Int64
-	TotalBugsResolved    atomic.Int64
+	TotalTasks            atomic.Int64
+	TotalTasksCompleted   atomic.Int64
+	TotalBugs             atomic.Int64
+	TotalBugTasksCreated  atomic.Int64
+	TotalBugsResolved     atomic.Int64
 	TotalMessages        atomic.Int64
 	TotalReflections     atomic.Int64
 	TotalCuriosity       atomic.Int64
@@ -72,7 +73,7 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 		TotalTasks:                 m.TotalTasks.Load(),
 		TotalTasksCompleted:        m.TotalTasksCompleted.Load(),
 		TotalBugs:                  m.TotalBugs.Load(),
-		TotalBugTasksCreated:       m.TotalBugs.Load(),
+		TotalBugTasksCreated:       m.TotalBugTasksCreated.Load(),
 		TotalBugTasksResolved:      m.TotalBugsResolved.Load(),
 		TotalMessages:              m.TotalMessages.Load(),
 		TotalReflections:           m.TotalReflections.Load(),

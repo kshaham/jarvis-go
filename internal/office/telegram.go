@@ -214,9 +214,16 @@ func (m *Manager) buildSprintSummary() string {
 	}
 
 	result := b.String()
-	// Cap at 3900 chars (Telegram message limit with some margin)
+	// Cap at 3900 bytes (Telegram message limit with some margin).
+	// Truncate at rune boundary to avoid splitting multi-byte UTF-8 characters.
 	if len(result) > 3900 {
-		result = result[:3900]
+		runes := []rune(result)
+		truncated := string(runes)
+		for len(truncated) > 3900 {
+			runes = runes[:len(runes)-1]
+			truncated = string(runes)
+		}
+		result = truncated
 	}
 	return result
 }

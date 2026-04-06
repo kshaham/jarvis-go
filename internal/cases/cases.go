@@ -90,6 +90,9 @@ func (cm *CaseManager) Get(name string) (*CaseInfo, error) {
 
 // Create creates a new case directory and returns its info.
 func (cm *CaseManager) Create(name string) (*CaseInfo, error) {
+	if !isValidCaseName(name) {
+		return nil, fmt.Errorf("invalid case name: %q", name)
+	}
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	casePath := filepath.Join(cm.baseDir, name)
@@ -101,10 +104,32 @@ func (cm *CaseManager) Create(name string) (*CaseInfo, error) {
 
 // Delete removes a case directory and all its contents.
 func (cm *CaseManager) Delete(name string) error {
+	if !isValidCaseName(name) {
+		return fmt.Errorf("invalid case name: %q", name)
+	}
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	casePath := filepath.Join(cm.baseDir, name)
+	// Verify resolved path is still under baseDir
+	abs, _ := filepath.Abs(casePath)
+	absBase, _ := filepath.Abs(cm.baseDir)
+	if !strings.HasPrefix(abs, absBase+string(filepath.Separator)) {
+		return fmt.Errorf("invalid case name: %q", name)
+	}
 	return os.RemoveAll(casePath)
+}
+
+// isValidCaseName checks that a case name is safe for use in file paths.
+func isValidCaseName(name string) bool {
+	if name == "" || len(name) > 128 {
+		return false
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return !strings.Contains(name, "..")
 }
 
 // Link creates a symbolic link from the cases directory to an existing folder.
