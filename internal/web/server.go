@@ -381,7 +381,6 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/settings", h.GetSettings)
 			r.Get("/settings/accounts", h.GetSettingsAccounts)
 			r.Get("/debug/memory", h.GetDebugMemory)
-			r.Get("/system/stats", h.GetSystemStats)
 			r.Get("/prompt-processor/config", h.GetPromptProcessor)
 			r.Get("/prompt-processor/stats", h.GetPromptProcessorRules)
 			r.Get("/respawn/learning/analytics", h.GetRespawnLearning)

@@ -350,6 +350,10 @@ class OfficeApp {
   // ========== SSE ==========
 
   connectSSE() {
+    if (this._sseReconnectTimer) {
+      clearTimeout(this._sseReconnectTimer);
+      this._sseReconnectTimer = null;
+    }
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
@@ -578,7 +582,8 @@ class OfficeApp {
       this.addActivityEntry('system', 'SSE connection lost, reconnecting...');
       console.warn(`SSE connection lost, reconnecting in ${this.sseReconnectDelay}ms...`);
       this.eventSource.close();
-      setTimeout(() => this.connectSSE(), this.sseReconnectDelay);
+      if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
+      this._sseReconnectTimer = setTimeout(() => this.connectSSE(), this.sseReconnectDelay);
       this.sseReconnectDelay = Math.min(this.sseReconnectDelay * 2, this.sseMaxReconnectDelay);
     };
   }
@@ -1845,12 +1850,15 @@ class OfficeApp {
     const name = member ? member.name : 'Agent';
     const prompt = window.prompt(`Send prompt to ${name}:`);
     if (prompt && prompt.trim()) {
-      this.fetchAPI(`/api/sessions/${sessionId}/prompt`, {
+      const headers = { 'Content-Type': 'application/json' };
+      if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
+      fetch(`/api/sessions/${sessionId}/input`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: prompt.trim() }),
-      }).then(() => {
-        this.showNotification(`Prompt sent to ${name}`, 'success');
+        headers: headers,
+        body: JSON.stringify({ input: prompt.trim() + '\n' }),
+      }).then(res => {
+        if (res.ok) this.showNotification(`Prompt sent to ${name}`, 'success');
+        else this.showNotification(`Failed to send prompt to ${name}`, 'error');
       }).catch(() => {
         this.showNotification(`Failed to send prompt to ${name}`, 'error');
       });

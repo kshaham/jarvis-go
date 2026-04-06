@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +23,7 @@ type Client struct {
 	done          chan struct{}
 	ctx           context.Context
 	closeOnce     sync.Once
+	closed        atomic.Bool
 	subscriptions []string // nil = all events
 }
 
@@ -48,12 +50,18 @@ func NewClient(w http.ResponseWriter, f http.Flusher, ctx context.Context, subs 
 
 // Send queues an event for delivery. Non-blocking.
 func (c *Client) Send(msg EventMessage) {
+	if c.closed.Load() {
+		return // channel already closed, avoid panic
+	}
 	select {
 	case c.ch <- msg:
 	default:
 		// Buffer full
 		if IsCriticalEvent(msg.Event) {
-			c.closeOnce.Do(func() { close(c.ch) })
+			c.closeOnce.Do(func() {
+				c.closed.Store(true)
+				close(c.ch)
+			})
 		}
 		// Non-critical: silently drop
 	}

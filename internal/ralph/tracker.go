@@ -96,6 +96,9 @@ type Tracker struct {
 	mu    sync.Mutex
 	state TrackerState
 
+	// Monotonic counter for unique todo IDs
+	nextTodoID int
+
 	// Patterns
 	completionPattern *regexp.Regexp
 	todoPattern       *regexp.Regexp
@@ -315,7 +318,7 @@ func (t *Tracker) updateOrAddTodo(content, status string) {
 	}
 
 	t.state.Todos = append(t.state.Todos, TodoItem{
-		ID:        fmt.Sprintf("todo-%d", len(t.state.Todos)+1),
+		ID:        fmt.Sprintf("todo-%d", func() int { t.nextTodoID++; return t.nextTodoID }()),
 		Content:   content,
 		Status:    status,
 		CreatedAt: time.Now(),

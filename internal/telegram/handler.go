@@ -47,6 +47,9 @@ type Handler struct {
 	linkedSessions map[string]string // chatID -> sessionID
 	unsubscribers  map[string]func() // chatID -> unsubscribe output observer
 
+	// Long-poll HTTP client (reused across getUpdates calls)
+	longPollClient *http.Client
+
 	// Lifecycle state
 	started    atomic.Bool
 	offset     int64
@@ -72,6 +75,7 @@ func NewHandler(bot *Bot, settingsStore *SettingsStore, server ServerBridge) *Ha
 		server:              server,
 		queue:               queue,
 		streamer:            streamer,
+		longPollClient:      &http.Client{Timeout: 35 * time.Second},
 		pendingInteractions: make(map[string]*PendingInteraction),
 		linkedSessions:      make(map[string]string),
 		unsubscribers:       make(map[string]func()),
@@ -276,9 +280,8 @@ func (h *Handler) getUpdates(ctx context.Context, offset int64, timeout int) ([]
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use a longer timeout for long-polling (timeout + buffer).
-	client := &http.Client{Timeout: time.Duration(timeout+5) * time.Second}
-	resp, err := client.Do(req)
+	// Reuse long-poll HTTP client for connection pooling.
+	resp, err := h.longPollClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("getUpdates request: %w", err)
 	}

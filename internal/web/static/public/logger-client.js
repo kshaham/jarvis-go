@@ -1,7 +1,7 @@
 // Client-side logger for Jarvis UI
 var ClientLogger = (function() {
   var LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3, NONE: 4 };
-  var currentLevel = window.JARVIS_LOG_LEVEL || LOG_LEVELS.INFO;
+  var currentLevel = (window.JARVIS_LOG_LEVEL != null) ? window.JARVIS_LOG_LEVEL : LOG_LEVELS.INFO;
 
   function formatMessage(level, module, message) {
     return '[Jarvis] [' + level + '] [' + module + '] ' + message;

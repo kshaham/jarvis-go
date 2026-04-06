@@ -319,11 +319,11 @@
 
   // Start periodic auth check
   function startAuthCheck() {
-    // Check immediately
-    checkAuthStatus();
-
-    // Then check every 30 seconds
+    // Set interval first so it can be cleared if the first check succeeds
     authCheckInterval = setInterval(checkAuthStatus, 30000);
+
+    // Then check immediately
+    checkAuthStatus();
   }
 
   // Initialize when DOM is ready

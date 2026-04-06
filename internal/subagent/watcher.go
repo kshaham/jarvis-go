@@ -30,6 +30,7 @@ type Watcher struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	closeOnce   sync.Once
+	wg          sync.WaitGroup
 
 	// Pending tool calls: agentID -> toolUseID -> toolName
 	pendingTools map[string]map[string]string
@@ -55,13 +56,15 @@ func NewWatcher(ctx context.Context, projectsDir string) *Watcher {
 
 // Start begins scanning for subagent files.
 func (w *Watcher) Start() {
-	go w.scanLoop()
-	go w.cleanupLoop()
+	w.wg.Add(2)
+	go func() { defer w.wg.Done(); w.scanLoop() }()
+	go func() { defer w.wg.Done(); w.cleanupLoop() }()
 }
 
-// Stop halts the watcher.
+// Stop halts the watcher and waits for goroutines to exit before closing the events channel.
 func (w *Watcher) Stop() {
 	w.cancel()
+	w.wg.Wait()
 	w.closeOnce.Do(func() { close(w.events) })
 }
 

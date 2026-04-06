@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -654,11 +655,28 @@ func handleDeleteSkill(args map[string]interface{}) ToolResult {
 		return toolError("failed to get home directory: " + err.Error())
 	}
 
-	skillPath := filepath.Join(homeDir, ".claude", "skills", name)
+	// Validate name to prevent path traversal
+	if strings.ContainsAny(name, "/\\..") || strings.Contains(name, "..") {
+		return toolError("invalid skill name")
+	}
+
+	skillsBase := filepath.Join(homeDir, ".claude", "skills")
+	skillPath := filepath.Join(skillsBase, name)
+
+	// Verify resolved path is still under skills directory
+	absSkillPath, _ := filepath.Abs(skillPath)
+	absSkillsBase, _ := filepath.Abs(skillsBase)
+	if !strings.HasPrefix(absSkillPath, absSkillsBase+string(filepath.Separator)) {
+		return toolError("invalid skill name")
+	}
+
 	file := getStringArg(args, "file", "")
 
 	if file != "" {
-		// Delete a specific file within the skill
+		// Validate file name too
+		if strings.ContainsAny(file, "/\\") || strings.Contains(file, "..") {
+			return toolError("invalid file name")
+		}
 		targetPath := filepath.Join(skillPath, file)
 		if err := os.Remove(targetPath); err != nil {
 			return toolError("failed to delete skill file: " + err.Error())

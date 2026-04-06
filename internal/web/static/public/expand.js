@@ -65,6 +65,9 @@
         }
         updateUI(data.state, data.settings);
         lastKnownState = data.state;
+        if (data.state && data.state.active) {
+          startPolling();
+        }
       })
       .catch(function(err) {
         console.error('[Expand] Error loading status:', err);
@@ -188,7 +191,8 @@
       html += '  <div class="history-details">';
       html += '    ' + entry.changesApplied + ' change(s) applied';
       if (entry.error) {
-        html += ' - <span style="color: #ef4444;">' + entry.error + '</span>';
+        var safeError = String(entry.error).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        html += ' - <span style="color: #ef4444;">' + safeError + '</span>';
       }
       html += '  </div>';
 
@@ -376,13 +380,9 @@
   // Initialize UI when session modal opens
   function initExpandUI(sessionId) {
     currentSessionId = sessionId;
+    lastKnownState = null;
     loadExpandStatus(sessionId);
     loadExpandHistory(sessionId);
-
-    // Start polling if state shows active
-    if (lastKnownState && lastKnownState.active) {
-      startPolling();
-    }
   }
 
   // Cleanup when modal closes
