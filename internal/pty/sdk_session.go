@@ -124,6 +124,15 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	if len(s.providerEnv) > 0 {
 		opts = append(opts, claude.WithEnv(s.providerEnv))
 	}
+
+	// Capture subprocess stderr for diagnostics (API errors, auth issues)
+	opts = append(opts, claude.WithStderr(func(line string) {
+		slog.Debug("SDK subprocess stderr", "session", s.ID, "line", line)
+		if strings.Contains(line, "error") || strings.Contains(line, "Error") || strings.Contains(line, "unauthorized") || strings.Contains(line, "rate") {
+			slog.Warn("SDK subprocess error", "session", s.ID, "stderr", line)
+		}
+	}))
+
 	if len(s.mcpServers) > 0 {
 		opts = append(opts, claude.WithMcpServers(s.mcpServers))
 	}
