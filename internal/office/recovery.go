@@ -64,19 +64,31 @@ func (m *Manager) StartIdleMonitoring() {
 		tickCount := 0
 		for range ticker.C {
 			tickCount++
-			m.checkSessionHealth()
-			m.CleanupExpiredLocks()
-			m.SweepBugTasks()
-			m.autoCompleteIdleAgentTasks()
-			m.checkUnacknowledgedTasks()
-			m.checkStaleInProgressTasks()
-			m.checkForStuckAgents()
-			m.CheckForIdleAgents()
-			m.checkForCuriousAgents()
-			m.checkForReflectionOpportunity()
-			m.checkBlockedTasksForLeaderTriage()
-			m.PersistMetrics()
-			m.maybeTriggerWaterCoolerChat()
+
+			// Recover from panics in any monitoring function so the ticker
+			// goroutine never dies. A crashed monitoring tick is logged and
+			// the next tick runs normally.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("Panic in idle monitoring tick", "panic", r, "tick", tickCount)
+					}
+				}()
+
+				m.checkSessionHealth()
+				m.CleanupExpiredLocks()
+				m.SweepBugTasks()
+				m.autoCompleteIdleAgentTasks()
+				m.checkUnacknowledgedTasks()
+				m.checkStaleInProgressTasks()
+				m.checkForStuckAgents()
+				m.CheckForIdleAgents()
+				m.checkForCuriousAgents()
+				m.checkForReflectionOpportunity()
+				m.checkBlockedTasksForLeaderTriage()
+				m.PersistMetrics()
+				m.maybeTriggerWaterCoolerChat()
+			}()
 
 			if tickCount%5 == 0 {
 				roster := m.GetRoster()
