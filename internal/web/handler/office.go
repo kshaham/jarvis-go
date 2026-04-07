@@ -895,8 +895,8 @@ func (ctx *Context) OfficeDeleteFileLock(w http.ResponseWriter, r *http.Request)
 	ctx.SSEBroker.Broadcast("office:fileLockChanged", map[string]interface{}{
 		"action": "unlocked",
 		"lock": map[string]interface{}{
-			"path":      filePath,
-			"ownerName": "admin",
+			"filePath":  filePath,
+			"agentName": "admin",
 		},
 	})
 	ok(w, nil)
@@ -1896,10 +1896,7 @@ func (ctx *Context) OfficeGetMemberMemory(w http.ResponseWriter, r *http.Request
 		ok(w, map[string]interface{}{"memory": ""})
 		return
 	}
-	workingDir := ""
-	if s, found := ctx.SessionManager.GetSession(sessionID); found {
-		workingDir = s.WorkingDir
-	}
+	workingDir := ctx.getSessionWorkingDir(sessionID)
 	memory := office.LoadAgentMemory(agent.ConfigID, workingDir)
 	ok(w, map[string]interface{}{"memory": memory})
 }

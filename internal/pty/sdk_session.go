@@ -352,14 +352,22 @@ func (s *SDKSession) Stop() {
 		s.mu.Unlock()
 		return
 	}
-	s.isStopped = true
-	s.status = StatusStopped
+	// Emit exit event BEFORE setting isStopped (emitEvent checks isStopped)
 	s.mu.Unlock()
 
-	// Emit exit event before cancelling context (so forwardSDKSessionEvents sees it)
-	s.emitEvent(EventExit{ExitCode: 0})
+	// Direct channel send with recover to avoid panic on closed channel.
+	// Must happen before isStopped is set, since emitEvent guards on it.
+	func() {
+		defer func() { recover() }()
+		select {
+		case s.events <- EventExit{ExitCode: 0}:
+		default:
+		}
+	}()
 
 	s.mu.Lock()
+	s.isStopped = true
+	s.status = StatusStopped
 	if s.cancelFunc != nil {
 		s.cancelFunc()
 	}
