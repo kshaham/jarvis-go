@@ -659,7 +659,14 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 			activeMeetingCount++
 		}
 	}
-	activeLockCount := len(m.fileLocks)
+	// Evict expired locks before counting for accuracy.
+	activeLockCount := 0
+	now := time.Now()
+	for _, lock := range m.fileLocks {
+		if now.Before(lock.ExpiresAt) {
+			activeLockCount++
+		}
+	}
 	m.mu.RUnlock()
 
 	return map[string]interface{}{
@@ -727,6 +734,10 @@ func (m *Manager) UpdateOfficeSettings(settings map[string]interface{}) {
 	}
 	if v, ok := settings["teamMission"].(string); ok {
 		m.teamMission = v
+		// Persist outside the lock since SetTeamMission acquires it.
+		go func() {
+			m.SetTeamMission(v)
+		}()
 	}
 }
 
@@ -799,7 +810,7 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	activeTask := a.ActiveTask()
 	if activeTask != nil {
 		status = "working"
-	} else if a.SDKWorking {
+	} else if a.GetSDKWorking() {
 		status = "working"
 	} else {
 		for _, t := range a.GetTasks() {

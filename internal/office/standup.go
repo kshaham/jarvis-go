@@ -259,11 +259,9 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 		return fmt.Sprintf("%s was unreachable during standup.", speakerName)
 	}
 
-	// Create a buffered response channel if not already present.
+	// Always create a fresh channel to avoid consuming stale responses.
 	agent.mu.Lock()
-	if agent.StandupCh == nil {
-		agent.StandupCh = make(chan string, 1)
-	}
+	agent.StandupCh = make(chan string, 1)
 	ch := agent.StandupCh
 	agent.mu.Unlock()
 
@@ -480,7 +478,7 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 
 		if sessions == nil {
 			slog.Warn("Leader task assignment: sessions unavailable", "agent", agent.Config.Name)
-			return
+			continue
 		}
 		sent := sessions.WriteInkPrompt(agent.SessionID, leaderPrompt)
 		if sent {

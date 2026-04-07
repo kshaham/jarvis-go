@@ -55,54 +55,50 @@ func (MeetingEndedEvent) officeEventType() string { return "meetingEnded" }
 // StartBrainstorm begins a brainstorm meeting. Returns the meeting or nil
 // if the brainstorm was blocked (cooldown, wrap-up, insufficient participants).
 func (m *Manager) StartBrainstorm(participantIDs []string) *Meeting {
-	m.mu.RLock()
+	m.mu.Lock()
 	wrappingUp := m.wrappingUp
 	lastBrainstorm := m.lastBrainstormAt
 	cooldown := m.config.BrainstormCooldown
-	m.mu.RUnlock()
 
 	// Block during wrap-up.
 	if wrappingUp {
+		m.mu.Unlock()
 		slog.Info("Brainstorm blocked: team is wrapping up")
 		return nil
 	}
 
-	// Respect cooldown.
+	// Respect cooldown (atomic check+update to prevent double brainstorms).
 	if !lastBrainstorm.IsZero() && time.Since(lastBrainstorm) < cooldown {
+		m.mu.Unlock()
 		slog.Info("Brainstorm cooldown active, skipping",
 			"remaining", cooldown-time.Since(lastBrainstorm))
 		return nil
 	}
 
-	// Resolve participants.
+	// Record brainstorm time atomically with cooldown check.
+	m.lastBrainstormAt = time.Now()
+
+	// Resolve participants (still under lock -- agents map accessed).
 	participants := participantIDs
 	if len(participants) == 0 {
-		m.mu.RLock()
 		for sessionID := range m.agents {
 			participants = append(participants, sessionID)
 		}
-		m.mu.RUnlock()
 	}
 
 	// Filter to registered agents.
 	active := make([]string, 0, len(participants))
-	m.mu.RLock()
 	for _, id := range participants {
 		if _, ok := m.agents[id]; ok {
 			active = append(active, id)
 		}
 	}
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	if len(active) < 2 {
 		slog.Info("Not enough participants for brainstorm", "count", len(active))
 		return nil
 	}
-
-	// Record brainstorm time.
-	m.mu.Lock()
-	m.lastBrainstormAt = time.Now()
-	m.mu.Unlock()
 
 	// Create the meeting.
 	meeting := m.StartMeeting("brainstorm", active)

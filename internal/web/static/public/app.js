@@ -834,15 +834,17 @@ class JarvisApp {
         const retryToken = await this.getCsrfToken();
         if (retryToken) {
           headers['X-CSRF-Token'] = retryToken;
-          return fetch(url, {
+          const retryRes = await fetch(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(body),
           });
+          return retryRes.json().catch(() => ({}));
         }
       }
+      return { success: false, error: 'CSRF validation failed' };
     }
-    return res;
+    return res.json().catch(() => ({}));
   }
 
   // Make a PUT request with CSRF token
@@ -854,11 +856,12 @@ class JarvisApp {
     if (csrfToken) {
       headers['X-CSRF-Token'] = csrfToken;
     }
-    return fetch(url, {
+    const res = await fetch(url, {
       method: 'PUT',
       headers,
       body: JSON.stringify(body),
     });
+    return res.json().catch(() => ({}));
   }
 
   // Make a DELETE request with CSRF token (retries on CSRF 403)
@@ -2765,6 +2768,7 @@ class JarvisApp {
 
   _renderSessionTabsImmediate() {
     const container = this.$('sessionTabs');
+    if (!container) return;
     const existingTabs = container.querySelectorAll('.session-tab[data-id]');
     const existingIds = new Set([...existingTabs].map(t => t.dataset.id));
     const currentIds = new Set(this.sessions.keys());
@@ -6612,7 +6616,7 @@ class JarvisApp {
       // Step 1: Create all sessions in parallel
       this.terminal.writeln(`\x1b[90m Creating ${tabCount} session(s)...\x1b[0m`);
       const createPromises = sessionNames.map(name =>
-        this.postJson('/api/sessions', { workingDir, name, mode: 'claude' }).then(r => r.json())
+        this.postJson('/api/sessions', { workingDir, name, mode: 'claude' })
       );
       const createResults = await Promise.all(createPromises);
 
@@ -6686,7 +6690,7 @@ class JarvisApp {
 
       // Step 1: Create all sessions in parallel
       const createPromises = sessionNames.map(name =>
-        this.postJson('/api/sessions', { workingDir, mode: 'shell', name }).then(r => r.json())
+        this.postJson('/api/sessions', { workingDir, mode: 'shell', name })
       );
       const createResults = await Promise.all(createPromises);
 
@@ -10663,9 +10667,10 @@ class JarvisApp {
     if (!this.activeSessionId) return;
 
     try {
+      const csrfToken = this._csrfToken || '';
       const res = await fetch(`/api/sessions/${this.activeSessionId}/plan/task/${taskId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ status: newStatus })
       });
 
@@ -10685,9 +10690,10 @@ class JarvisApp {
     if (!this.activeSessionId) return;
 
     try {
+      const csrfToken2 = this._csrfToken || '';
       const res = await fetch(`/api/sessions/${this.activeSessionId}/plan/task/${taskId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken2 },
         body: JSON.stringify({ attempts: 0, lastError: null, status: 'pending' })
       });
 

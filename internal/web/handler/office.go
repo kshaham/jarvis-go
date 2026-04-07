@@ -112,9 +112,11 @@ type agentTaskAckRequest struct {
 }
 
 type agentTaskProgressRequest struct {
-	SessionID string `json:"sessionId"`
-	TaskID    string `json:"taskId"`
-	Progress  string `json:"progress"`
+	SessionID          string `json:"sessionId"`
+	TaskID             string `json:"taskId"`
+	Progress           string `json:"progress"`
+	IsBlocked          bool   `json:"isBlocked,omitempty"`
+	BlockerDescription string `json:"blockerDescription,omitempty"`
 }
 
 type agentTaskSelfAddRequest struct {
@@ -825,6 +827,9 @@ func (ctx *Context) OfficeGetTaskQueues(w http.ResponseWriter, r *http.Request) 
 	roster := ctx.OfficeManager.GetRoster()
 	queues := make([]map[string]interface{}, 0, len(roster))
 	for _, a := range roster {
+		if a.Config == nil {
+			continue
+		}
 		queues = append(queues, map[string]interface{}{
 			"sessionId": a.SessionID,
 			"agentName": a.Config.Name,
@@ -1557,11 +1562,19 @@ func (ctx *Context) OfficeAgentTaskProgress(w http.ResponseWriter, r *http.Reque
 	}
 	agent := ctx.OfficeManager.GetAgent(req.SessionID)
 	if agent != nil {
-		agent.SetTaskProgress(req.TaskID, req.Progress)
+		progress := req.Progress
+		if req.IsBlocked {
+			agent.UpdateTaskStatus(req.TaskID, office.TaskBlocked)
+			if req.BlockerDescription != "" {
+				progress = req.BlockerDescription
+			}
+		}
+		agent.SetTaskProgress(req.TaskID, progress)
 		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 			"taskId":    req.TaskID,
-			"progress":  req.Progress,
+			"progress":  progress,
+			"isBlocked": req.IsBlocked,
 		})
 		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)

@@ -701,7 +701,7 @@ class OfficeApp {
     if (this.activeTab !== 'messages' && message.toSessionId) {
       this._updateUnreadBadgeOnCard(message.toSessionId);
     }
-    this.addActivityEntry('message', `${message.fromName} -> ${message.toName}: ${message.content.slice(0, 60)}`);
+    this.addActivityEntry('message', `${message.fromName} -> ${message.toName}: ${(message.content || '').slice(0, 60)}`);
   }
 
   /** Patch only the unread badge element on a single agent card without re-rendering it. */
@@ -1257,6 +1257,7 @@ class OfficeApp {
       return cached.data;
     }
     const res = await fetch(`/api/sessions/${sessionId}/terminal?tail=4096`);
+    if (!res.ok) return null;
     const data = await res.json();
     this._detailCache.set(sessionId, { data, time: Date.now() });
     return data;
@@ -1800,17 +1801,14 @@ class OfficeApp {
 
     for (const line of lines) {
       if (line.startsWith('diff --git')) {
-        // Start new file section
-        if (line.startsWith('diff --git')) {
-          if (currentFile) files.push(currentFile);
-          const match = line.match(/diff --git a\/(.+) b\/(.+)/);
-          currentFile = {
-            name: match ? match[2] : line,
-            lines: [],
-            adds: 0,
-            dels: 0,
-          };
-        }
+        if (currentFile) files.push(currentFile);
+        const match = line.match(/diff --git a\/(.+) b\/(.+)/);
+        currentFile = {
+          name: match ? match[2] : line,
+          lines: [],
+          adds: 0,
+          dels: 0,
+        };
       } else if (line.startsWith('+++ ') && currentFile) {
         const fname = line.slice(4).replace(/^b\//, '');
         if (fname !== '/dev/null') currentFile.name = fname;
@@ -2961,8 +2959,8 @@ class OfficeApp {
     const fileLockExpiry = el('settingFileLockExpiry');
     const teamMission = el('settingTeamMission');
 
-    if (autoEnabled) autoEnabled.checked = settings.autoStandup.enabled;
-    if (autoInterval) autoInterval.value = Math.round(settings.autoStandup.intervalMs / 3600000 * 10) / 10;
+    if (autoEnabled && settings.autoStandup) autoEnabled.checked = settings.autoStandup.enabled;
+    if (autoInterval && settings.autoStandup) autoInterval.value = Math.round(settings.autoStandup.intervalMs / 3600000 * 10) / 10;
     if (brainstormCooldown) brainstormCooldown.value = Math.round(settings.brainstormCooldownMs / 60000);
     if (brainstormResponseTimeout) brainstormResponseTimeout.value = Math.round(settings.brainstormResponseTimeoutMs / 1000);
     if (idleThreshold) idleThreshold.value = Math.round(settings.idleThresholdMs / 60000);

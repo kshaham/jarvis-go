@@ -228,6 +228,13 @@ func (a *AgentState) SetSDKWorking(working bool) {
 	a.mu.Unlock()
 }
 
+// GetSDKWorking reads the SDK working flag under the mutex.
+func (a *AgentState) GetSDKWorking() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.SDKWorking
+}
+
 // RemoveTask removes a task by ID and returns it, or nil if not found.
 func (a *AgentState) RemoveTask(taskID string) *Task {
 	a.mu.Lock()

@@ -1245,7 +1245,8 @@ func handleOfficeTaskBlocked(args map[string]interface{}) ToolResult {
 	}
 	reason, _ := requireStringArg(args, "reason")
 	result, err := apiPost("/api/office/agent/task-progress", map[string]interface{}{
-		"sessionId": sid, "taskId": taskID, "note": reason, "status": "blocked",
+		"sessionId": sid, "taskId": taskID, "progress": reason,
+		"isBlocked": true, "blockerDescription": reason,
 	})
 	if err != nil {
 		return toolError(err.Error())
@@ -1316,7 +1317,7 @@ func handleOfficeSendMessage(args map[string]interface{}) ToolResult {
 		return toolError("content is required")
 	}
 	result, err := apiPost("/api/office/agent/message", map[string]interface{}{
-		"sessionId": sid, "toSessionId": toSID, "content": content,
+		"fromSessionId": sid, "toSessionId": toSID, "content": content,
 	})
 	if err != nil {
 		return toolError(err.Error())
