@@ -1,8 +1,9 @@
 package pty
 
 // SDK-based session implementation using github.com/shaharia-lab/claude-agent-sdk-go.
-// Replaces PTY screen-scraping with structured JSON streaming for agent sessions.
-// Used when Mode == ModeClaudeSDK.
+// Uses claude.NewSession() for persistent multi-turn sessions where the subprocess
+// stays alive across turns. Standup/brainstorm/replenishment prompts are delivered
+// immediately via Session.Send() without waiting for the current turn to complete.
 
 import (
 	"context"
@@ -17,8 +18,7 @@ import (
 )
 
 // SDKSession wraps the Claude Agent SDK for programmatic agent interaction.
-// It implements the same observable interface as the PTY Session but uses
-// structured JSON streaming instead of terminal scraping.
+// Uses a persistent claude.Session for multi-turn conversations.
 type SDKSession struct {
 	mu sync.RWMutex
 
@@ -34,32 +34,31 @@ type SDKSession struct {
 	isWorking      bool
 	lastActivityAt time.Time
 	isStopped      bool
-	sessionID      string // Claude session ID for multi-turn
-	ctx            context.Context
+	claudeSessionID string
 
 	// Token tracking
 	totalInputTokens  int64
 	totalOutputTokens int64
 	totalCostUSD      float64
 
-	// Buffers (for API compatibility with PTY session)
+	// Buffers
 	terminalBuffer *BufferAccumulator
 	textOutput     *BufferAccumulator
 
-	// Event channels
-	events       chan SessionEvent
-	done         chan struct{}
-	cancelFunc   context.CancelFunc
-	eventsOnce   sync.Once
-	doneOnce     sync.Once
+	// Persistent SDK session (lives for the session lifetime)
+	persistentSession *claude.Session
 
-	// Provider env
+	// Event channels
+	events     chan SessionEvent
+	done       chan struct{}
+	cancelFunc context.CancelFunc
+	eventsOnce sync.Once
+	doneOnce   sync.Once
+
+	// Provider env and config
 	providerEnv  map[string]string
 	systemPrompt string
 	mcpServers   map[string]any
-
-	// Pending prompts (queued when session is busy)
-	pendingPrompts chan string
 
 	// Output observers
 	outputObservers   map[int]func(string)
@@ -84,7 +83,6 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		Mode:           ModeClaudeSDK,
 		name:           config.Name,
 		status:         StatusStopped,
-		ctx:            context.Background(), // default until Start() sets it
 		terminalBuffer: NewBufferAccumulator(MaxTerminalBufferSize, TrimTerminalTo),
 		textOutput:     NewBufferAccumulator(MaxTextOutputSize, TrimTextTo),
 		events:         make(chan SessionEvent, eventChannelSize),
@@ -92,13 +90,11 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		providerEnv:    config.ProviderEnv,
 		systemPrompt:   config.SystemPrompt,
 		mcpServers:     config.McpServers,
-		pendingPrompts: make(chan string, 8),
 		activeTools:    make(map[string]bool),
 	}
 }
 
-// Start begins the SDK session. Unlike PTY sessions, SDK sessions don't spawn
-// a long-lived process. They execute queries on demand.
+// Start creates a persistent claude.Session and begins consuming events.
 func (s *SDKSession) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.status != StatusStopped {
@@ -108,82 +104,13 @@ func (s *SDKSession) Start(ctx context.Context) error {
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s.cancelFunc = cancel
-	s.ctx = sessionCtx
 	s.status = StatusIdle
 	s.lastActivityAt = time.Now()
 	s.isStopped = false
-	prompt := s.systemPrompt // capture immutable field under lock
 	s.mu.Unlock()
 
-	// Close events channel when session context is cancelled (prevents goroutine leaks).
-	// Uses sync.Once to prevent double-close if both Stop() and parent context cancel.
-	const eventDrainGrace = 500 * time.Millisecond // time for in-flight events to be consumed
-	go func() {
-		<-sessionCtx.Done()
-		time.Sleep(eventDrainGrace)
-		s.eventsOnce.Do(func() { close(s.events) })
-	}()
-
-	// If we have a system prompt (kickstart), run the initial query
-	if prompt != "" {
-		go s.runQuery(sessionCtx, prompt)
-	}
-
-	return nil
-}
-
-// runQuery executes a single Claude query using the SDK and streams events.
-func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
-	s.mu.Lock()
-	if s.isStopped {
-		s.mu.Unlock()
-		return
-	}
-	if s.isWorking {
-		s.mu.Unlock()
-		// Queue the prompt for delivery when current query completes
-		select {
-		case s.pendingPrompts <- prompt:
-			slog.Info("SDK session busy, prompt queued", "session", s.ID, "queue_len", len(s.pendingPrompts))
-		default:
-			slog.Warn("SDK session busy and queue full, prompt dropped", "session", s.ID)
-		}
-		return
-	}
-	s.isWorking = true
-	s.status = StatusBusy
-	s.lastActivityAt = time.Now()
-	s.mu.Unlock()
-
-	// Deferred cleanup: transition back to idle and drain pending prompts
-	defer func() {
-		s.mu.Lock()
-		if s.isWorking && !s.isStopped {
-			s.isWorking = false
-			s.status = StatusIdle
-			s.mu.Unlock()
-			s.emitEvent(EventIdle{})
-		} else {
-			if s.isWorking {
-				s.isWorking = false
-				s.status = StatusIdle
-			}
-			s.mu.Unlock()
-		}
-		// Drain pending prompt queue -- run next queued prompt if any
-		select {
-		case next := <-s.pendingPrompts:
-			slog.Info("SDK session draining queued prompt", "session", s.ID)
-			go s.runQuery(ctx, next)
-		default:
-		}
-	}()
-
-	s.emitEvent(EventWorking{})
-
-	// Build SDK options.
-	// Use empty model string so the SDK does NOT pass --model flag,
-	// allowing ANTHROPIC_DEFAULT_*_MODEL env vars (Z.AI) to take effect.
+	// Build SDK options for persistent session.
+	// Empty model string lets ANTHROPIC_DEFAULT_*_MODEL env vars take effect.
 	opts := []claude.Option{
 		claude.WithModel(""),
 		claude.WithCWD(s.WorkingDir),
@@ -192,39 +119,53 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 		claude.WithSettingSources(claude.SettingSourceUser),
 	}
 
-	// Add provider env vars (Z.AI models, API keys, etc.)
 	if len(s.providerEnv) > 0 {
 		opts = append(opts, claude.WithEnv(s.providerEnv))
 	}
-
-	// Add MCP servers
 	if len(s.mcpServers) > 0 {
 		opts = append(opts, claude.WithMcpServers(s.mcpServers))
 	}
 
-	// Resume session for multi-turn conversations
-	s.mu.RLock()
-	resumeID := s.sessionID
-	s.mu.RUnlock()
-	if resumeID != "" {
-		opts = append(opts, claude.WithSessionIDToResume(resumeID))
-	}
-
-	// System prompt is passed as the user prompt on the initial query.
-	// No need for WithAppendSystemPrompt -- the kickstart IS the prompt.
-
-	slog.Info("SDK session query started", "session", s.ID, "prompt_len", len(prompt))
-
-	stream, err := claude.Query(ctx, prompt, opts...)
+	// Create persistent session -- subprocess stays alive across turns.
+	session, err := claude.NewSession(sessionCtx, opts...)
 	if err != nil {
-		slog.Error("SDK session query failed", "session", s.ID, "error", err)
-		s.appendOutput(fmt.Sprintf("[SDK Error] %v\n", err))
-		return // deferred cleanup handles idle transition
+		cancel()
+		return fmt.Errorf("failed to create persistent session: %w", err)
+	}
+	s.persistentSession = session
+
+	// Start event consumer goroutine (lives for session lifetime).
+	go s.eventConsumer(sessionCtx)
+
+	// Send kickstart as the first turn.
+	if s.systemPrompt != "" {
+		if err := session.Send(s.systemPrompt); err != nil {
+			slog.Error("Failed to send kickstart", "session", s.ID, "error", err)
+		} else {
+			s.mu.Lock()
+			s.isWorking = true
+			s.status = StatusBusy
+			s.mu.Unlock()
+			s.emitEvent(EventWorking{})
+			slog.Info("SDK session kickstart sent", "session", s.ID, "prompt_len", len(s.systemPrompt))
+		}
 	}
 
-	// Process streaming events
-	resultReceived := false
-	for event := range stream.Events() {
+	return nil
+}
+
+// eventConsumer ranges over the persistent session's Events() channel.
+// Processes events from ALL turns (kickstart, standup, brainstorm, etc.).
+// Only exits when the session is closed.
+func (s *SDKSession) eventConsumer(ctx context.Context) {
+	defer func() {
+		// Session ended -- emit exit and close channels.
+		s.emitEvent(EventExit{ExitCode: 0})
+		s.eventsOnce.Do(func() { close(s.events) })
+		slog.Info("SDK session event consumer ended", "session", s.ID)
+	}()
+
+	for event := range s.persistentSession.Events() {
 		s.mu.Lock()
 		s.lastActivityAt = time.Now()
 		s.mu.Unlock()
@@ -235,7 +176,7 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 				switch event.System.Subtype {
 				case claude.SubtypeInit:
 					s.mu.Lock()
-					s.sessionID = event.System.SessionID
+					s.claudeSessionID = event.System.SessionID
 					s.mu.Unlock()
 					s.appendOutput(fmt.Sprintf("[Session %s] Model: %s\n", event.System.SessionID, event.System.Model))
 					slog.Info("SDK session initialized", "session", s.ID, "claudeSession", event.System.SessionID, "model", event.System.Model)
@@ -252,10 +193,6 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 				case "text_delta":
 					s.appendOutput(delta.Text)
 				case "thinking_delta":
-					// Track thinking as working state (skip if result already received)
-					if resultReceived {
-						break
-					}
 					s.mu.Lock()
 					if !s.isWorking {
 						s.isWorking = true
@@ -270,7 +207,6 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 
 		case claude.TypeAssistant:
 			if event.Assistant != nil {
-				// Log assistant text output
 				if text := event.Assistant.Text(); text != "" {
 					s.appendOutput(text)
 				}
@@ -281,19 +217,19 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 			s.appendOutput("[Rate Limited] Waiting for API quota...\n")
 
 		case claude.TypeResult:
+			// Turn complete. Session stays alive for the next Send().
 			if event.Result != nil {
-				resultReceived = true
 				s.mu.Lock()
 				s.totalInputTokens += int64(event.Result.Usage.InputTokens)
 				s.totalOutputTokens += int64(event.Result.Usage.OutputTokens)
 				s.totalCostUSD += event.Result.TotalCostUSD
-				s.sessionID = event.Result.SessionID
+				s.claudeSessionID = event.Result.SessionID
 				s.isWorking = false
 				s.status = StatusIdle
 				s.activeTools = make(map[string]bool)
 				s.mu.Unlock()
 
-				s.appendOutput(fmt.Sprintf("\n[Complete] Turns: %d | Cost: $%.4f | Tokens: in=%d out=%d\n",
+				s.appendOutput(fmt.Sprintf("\n[Turn Complete] Turns: %d | Cost: $%.4f | Tokens: in=%d out=%d\n",
 					event.Result.NumTurns, event.Result.TotalCostUSD,
 					event.Result.Usage.InputTokens, event.Result.Usage.OutputTokens))
 
@@ -302,28 +238,47 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 					Output: int64(event.Result.Usage.OutputTokens),
 					Total:  int64(event.Result.Usage.InputTokens) + int64(event.Result.Usage.OutputTokens),
 				})
-				// EventIdle is emitted by the deferred cleanup to avoid race
-				// with a new runQuery observing isWorking=false before idle is sent.
+				s.emitEvent(EventIdle{})
 
 				if event.Result.IsError {
-					slog.Error("SDK session result error", "session", s.ID, "subtype", event.Result.Subtype)
+					slog.Error("SDK session turn error", "session", s.ID, "subtype", event.Result.Subtype)
 				} else {
-					slog.Info("SDK session complete", "session", s.ID,
+					slog.Info("SDK session turn complete", "session", s.ID,
 						"turns", event.Result.NumTurns,
-						"cost", event.Result.TotalCostUSD,
-						"tokens_in", event.Result.Usage.InputTokens,
-						"tokens_out", event.Result.Usage.OutputTokens)
+						"cost", event.Result.TotalCostUSD)
 				}
-				return // Result is terminal -- defer handles EventIdle
 			}
 		}
 	}
 }
 
-// SendPrompt sends a follow-up prompt to this SDK session (multi-turn).
-// This is the SDK equivalent of WriteInkPrompt -- but reliable.
+// SendPrompt sends a message to the persistent session. Non-blocking.
+// The agent receives it immediately, even if a previous turn is still running.
 func (s *SDKSession) SendPrompt(ctx context.Context, prompt string) {
-	go s.runQuery(ctx, prompt)
+	s.mu.RLock()
+	stopped := s.isStopped
+	s.mu.RUnlock()
+	if stopped {
+		return
+	}
+
+	if s.persistentSession == nil {
+		slog.Warn("SDK session not initialized, dropping prompt", "session", s.ID)
+		return
+	}
+
+	if err := s.persistentSession.Send(prompt); err != nil {
+		slog.Error("Failed to send prompt to SDK session", "session", s.ID, "error", err)
+		return
+	}
+
+	s.mu.Lock()
+	s.isWorking = true
+	s.status = StatusBusy
+	s.lastActivityAt = time.Now()
+	s.mu.Unlock()
+	s.emitEvent(EventWorking{})
+	slog.Info("SDK session prompt sent", "session", s.ID, "prompt_len", len(prompt))
 }
 
 // appendOutput writes text to buffers and notifies observers.
@@ -339,7 +294,7 @@ func (s *SDKSession) appendOutput(text string) {
 }
 
 // emitEvent sends an event to the channel without blocking.
-// Uses both isStopped guard AND recover to handle all closed-channel scenarios.
+// Uses isStopped guard + recover for bulletproof closed-channel safety.
 func (s *SDKSession) emitEvent(event SessionEvent) {
 	s.mu.RLock()
 	stopped := s.isStopped
@@ -347,8 +302,6 @@ func (s *SDKSession) emitEvent(event SessionEvent) {
 	if stopped {
 		return
 	}
-	// recover catches the TOCTOU race: isStopped was false when read,
-	// but channel closed between the check and the send.
 	defer func() { recover() }()
 	select {
 	case s.events <- event:
@@ -364,13 +317,12 @@ func (s *SDKSession) notifyOutputObservers(data string) {
 		observers[k] = v
 	}
 	s.observerMu.Unlock()
-
 	for _, fn := range observers {
 		fn(data)
 	}
 }
 
-// --- Interface methods matching PTY Session ---
+// --- Interface methods ---
 
 func (s *SDKSession) Events() <-chan SessionEvent { return s.events }
 
@@ -385,15 +337,7 @@ func (s *SDKSession) Stop() {
 	cancel := s.cancelFunc
 	s.mu.Unlock()
 
-	// Emit exit event with recover (channel may be closed or full).
-	func() {
-		defer func() { recover() }()
-		select {
-		case s.events <- EventExit{ExitCode: 0}:
-		default:
-		}
-	}()
-
+	// Cancel context -- triggers eventConsumer to exit
 	if cancel != nil {
 		cancel()
 	}
@@ -441,7 +385,7 @@ func (s *SDKSession) GetTextOutput() string {
 func (s *SDKSession) GetSessionID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.sessionID
+	return s.claudeSessionID
 }
 
 func (s *SDKSession) GetTotalCostUSD() float64 {
@@ -450,54 +394,33 @@ func (s *SDKSession) GetTotalCostUSD() float64 {
 	return s.totalCostUSD
 }
 
-// WriteToPTY sends a prompt via the SDK. For backward compatibility with PTY interface.
+// WriteToPTY sends a prompt via the persistent session.
 func (s *SDKSession) WriteToPTY(input string) bool {
-	s.mu.RLock()
-	stopped := s.isStopped
-	ctx := s.ctx
-	s.mu.RUnlock()
-	if stopped {
-		return false
-	}
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" || input == "\r" {
 		return false
 	}
-	s.SendPrompt(ctx, strings.TrimRight(input, "\r\n"))
+	s.SendPrompt(context.Background(), strings.TrimRight(input, "\r\n"))
 	return true
 }
 
-// WriteInkPrompt sends a prompt via the SDK. No chunking, no CR hacks needed.
+// WriteInkPrompt sends a prompt via the persistent session. No chunking needed.
 func (s *SDKSession) WriteInkPrompt(prompt string) bool {
-	s.mu.RLock()
-	stopped := s.isStopped
-	ctx := s.ctx
-	s.mu.RUnlock()
-	if stopped {
-		return false
-	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return false
 	}
-	s.SendPrompt(ctx, prompt)
+	s.SendPrompt(context.Background(), prompt)
 	return true
 }
 
-// WriteViaScreen sends a prompt via the SDK (Screen wrapper not used).
+// WriteViaScreen sends a prompt via the persistent session.
 func (s *SDKSession) WriteViaScreen(input string) bool {
-	s.mu.RLock()
-	stopped := s.isStopped
-	ctx := s.ctx
-	s.mu.RUnlock()
-	if stopped {
-		return false
-	}
 	input = strings.TrimRight(input, "\r\n")
 	if input == "" {
 		return false
 	}
-	s.SendPrompt(ctx, input)
+	s.SendPrompt(context.Background(), input)
 	return true
 }
 
