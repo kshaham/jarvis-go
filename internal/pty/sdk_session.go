@@ -51,11 +51,15 @@ type SDKSession struct {
 	done         chan struct{}
 	cancelFunc   context.CancelFunc
 	eventsOnce   sync.Once
+	doneOnce     sync.Once
 
 	// Provider env
 	providerEnv  map[string]string
 	systemPrompt string
 	mcpServers   map[string]any
+
+	// Pending prompts (queued when session is busy)
+	pendingPrompts chan string
 
 	// Output observers
 	outputObservers   map[int]func(string)
@@ -88,6 +92,7 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		providerEnv:    config.ProviderEnv,
 		systemPrompt:   config.SystemPrompt,
 		mcpServers:     config.McpServers,
+		pendingPrompts: make(chan string, 8),
 		activeTools:    make(map[string]bool),
 	}
 }
@@ -136,15 +141,21 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 	}
 	if s.isWorking {
 		s.mu.Unlock()
-		slog.Warn("SDK session already busy, prompt will be sent when current query completes", "session", s.ID)
-		return // Drop the prompt rather than creating unbounded retry goroutines
+		// Queue the prompt for delivery when current query completes
+		select {
+		case s.pendingPrompts <- prompt:
+			slog.Info("SDK session busy, prompt queued", "session", s.ID, "queue_len", len(s.pendingPrompts))
+		default:
+			slog.Warn("SDK session busy and queue full, prompt dropped", "session", s.ID)
+		}
+		return
 	}
 	s.isWorking = true
 	s.status = StatusBusy
 	s.lastActivityAt = time.Now()
 	s.mu.Unlock()
 
-	// Deferred cleanup: ensure we always transition back to idle
+	// Deferred cleanup: transition back to idle and drain pending prompts
 	defer func() {
 		s.mu.Lock()
 		if s.isWorking {
@@ -154,6 +165,13 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 			s.emitEvent(EventIdle{})
 		} else {
 			s.mu.Unlock()
+		}
+		// Drain pending prompt queue -- run next queued prompt if any
+		select {
+		case next := <-s.pendingPrompts:
+			slog.Info("SDK session draining queued prompt", "session", s.ID)
+			go s.runQuery(ctx, next)
+		default:
 		}
 	}()
 
@@ -352,11 +370,12 @@ func (s *SDKSession) Stop() {
 		s.mu.Unlock()
 		return
 	}
-	// Emit exit event BEFORE setting isStopped (emitEvent checks isStopped)
+	s.isStopped = true
+	s.status = StatusStopped
+	cancel := s.cancelFunc
 	s.mu.Unlock()
 
-	// Direct channel send with recover to avoid panic on closed channel.
-	// Must happen before isStopped is set, since emitEvent guards on it.
+	// Emit exit event with recover (channel may be closed or full).
 	func() {
 		defer func() { recover() }()
 		select {
@@ -365,15 +384,11 @@ func (s *SDKSession) Stop() {
 		}
 	}()
 
-	s.mu.Lock()
-	s.isStopped = true
-	s.status = StatusStopped
-	if s.cancelFunc != nil {
-		s.cancelFunc()
+	if cancel != nil {
+		cancel()
 	}
-	s.mu.Unlock()
 
-	close(s.done)
+	s.doneOnce.Do(func() { close(s.done) })
 	slog.Info("SDK session stopped", "session", s.ID)
 }
 
