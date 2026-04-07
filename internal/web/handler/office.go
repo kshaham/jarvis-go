@@ -1406,19 +1406,21 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
 		}
 
-		// Immediate re-tasking: if queue has pending tasks, nudge the agent.
-		// If empty, trigger work-finding immediately (no 30s delay).
+		// Immediate re-tasking (async to avoid blocking the HTTP response).
 		nextTask := agent.NextPendingTask()
 		if nextTask != nil {
-			sessions := ctx.OfficeManager.Sessions()
-			if sessions != nil {
-				prompt := fmt.Sprintf("[NEXT TASK] %s\nAcknowledge and start: cm task ack %s && cm task start %s", nextTask.Title, nextTask.ID, nextTask.ID)
-				sessions.WriteInkPrompt(agent.SessionID, prompt)
-			}
+			sid := agent.SessionID
+			title := nextTask.Title
+			taskID := nextTask.ID
+			go func() {
+				sessions := ctx.OfficeManager.Sessions()
+				if sessions != nil {
+					prompt := fmt.Sprintf("[NEXT TASK] %s\nAcknowledge and start: cm task ack %s && cm task start %s", title, taskID, taskID)
+					sessions.WriteInkPrompt(sid, prompt)
+				}
+			}()
 		} else {
-			// Queue empty -- find work immediately
-			mgr := ctx.OfficeManager
-			go mgr.CheckForIdleAgents()
+			go ctx.OfficeManager.CheckForIdleAgents()
 		}
 	}
 	ok(w, nil)
