@@ -94,6 +94,9 @@ type AgentState struct {
 	// Task queue (private -- use AddTask/GetTasks/UpdateTaskStatus)
 	taskQueue *TaskQueue
 
+	// SDK session working state (set by event forwarder, not task lifecycle)
+	SDKWorking bool
+
 	// Timing state
 	LastPromptSentAt    time.Time
 	LastCuriosityAt     time.Time

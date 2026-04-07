@@ -444,8 +444,8 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"id": sessionID, "status": "idle", "isWorking": false,
 			})
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+				agent.SDKWorking = false
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					payload["status"] = "idle"
 					broker.Broadcast("office:memberUpdated", payload)
 				}
 			}
@@ -455,8 +455,8 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"id": sessionID, "status": "busy", "isWorking": true,
 			})
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+				agent.SDKWorking = true
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					payload["status"] = "working"
 					broker.Broadcast("office:memberUpdated", payload)
 				}
 			}

@@ -789,6 +789,8 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	activeTask := a.ActiveTask()
 	if activeTask != nil {
 		status = "working"
+	} else if a.SDKWorking {
+		status = "working"
 	} else {
 		for _, t := range a.GetTasks() {
 			if t.Status == TaskInProgress {
