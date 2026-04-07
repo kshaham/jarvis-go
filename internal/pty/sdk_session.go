@@ -47,6 +47,7 @@ type SDKSession struct {
 
 	// Persistent SDK session (lives for the session lifetime)
 	persistentSession *claude.Session
+	sendMu            sync.Mutex // serializes all Send() calls
 
 	// Event channels
 	events     chan SessionEvent
@@ -90,7 +91,8 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		providerEnv:    config.ProviderEnv,
 		systemPrompt:   config.SystemPrompt,
 		mcpServers:     config.McpServers,
-		activeTools:    make(map[string]bool),
+		outputObservers: make(map[int]func(string)),
+		activeTools:     make(map[string]bool),
 	}
 }
 
@@ -134,21 +136,28 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	}
 	s.persistentSession = session
 
-	// Start event consumer goroutine (lives for session lifetime).
-	go s.eventConsumer(sessionCtx)
+	// Start event consumer goroutine FIRST, wait for it to be ready
+	// before sending the kickstart to avoid dropping early events.
+	consumerReady := make(chan struct{})
+	go s.eventConsumer(sessionCtx, consumerReady)
+	<-consumerReady
 
 	// Send kickstart as the first turn.
 	if s.systemPrompt != "" {
-		if err := session.Send(s.systemPrompt); err != nil {
+		s.sendMu.Lock()
+		err := session.Send(s.systemPrompt)
+		s.sendMu.Unlock()
+		if err != nil {
 			slog.Error("Failed to send kickstart", "session", s.ID, "error", err)
-		} else {
-			s.mu.Lock()
-			s.isWorking = true
-			s.status = StatusBusy
-			s.mu.Unlock()
-			s.emitEvent(EventWorking{})
-			slog.Info("SDK session kickstart sent", "session", s.ID, "prompt_len", len(s.systemPrompt))
+			cancel()
+			return fmt.Errorf("failed to send kickstart: %w", err)
 		}
+		s.mu.Lock()
+		s.isWorking = true
+		s.status = StatusBusy
+		s.mu.Unlock()
+		s.emitEvent(EventWorking{})
+		slog.Info("SDK session kickstart sent", "session", s.ID, "prompt_len", len(s.systemPrompt))
 	}
 
 	return nil
@@ -157,10 +166,18 @@ func (s *SDKSession) Start(ctx context.Context) error {
 // eventConsumer ranges over the persistent session's Events() channel.
 // Processes events from ALL turns (kickstart, standup, brainstorm, etc.).
 // Only exits when the session is closed.
-func (s *SDKSession) eventConsumer(ctx context.Context) {
+func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
+	// Signal that we're about to start ranging (consumer is ready).
+	close(ready)
+
 	defer func() {
-		// Session ended -- emit exit and close channels.
-		s.emitEvent(EventExit{ExitCode: 0})
+		// Only emit EventExit if Stop() hasn't already run (avoid double cleanup).
+		s.mu.RLock()
+		stopped := s.isStopped
+		s.mu.RUnlock()
+		if !stopped {
+			s.emitEvent(EventExit{ExitCode: 0})
+		}
 		s.eventsOnce.Do(func() { close(s.events) })
 		slog.Info("SDK session event consumer ended", "session", s.ID)
 	}()
@@ -267,7 +284,10 @@ func (s *SDKSession) SendPrompt(ctx context.Context, prompt string) {
 		return
 	}
 
-	if err := s.persistentSession.Send(prompt); err != nil {
+	s.sendMu.Lock()
+	err := s.persistentSession.Send(prompt)
+	s.sendMu.Unlock()
+	if err != nil {
 		slog.Error("Failed to send prompt to SDK session", "session", s.ID, "error", err)
 		return
 	}
