@@ -1802,6 +1802,17 @@ func (ctx *Context) OfficeAgentSkillCreate(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// getSessionWorkingDir returns the working directory for a session (PTY or SDK).
+func (ctx *Context) getSessionWorkingDir(sessionID string) string {
+	if s, found := ctx.SessionManager.GetSession(sessionID); found {
+		return s.WorkingDir
+	}
+	if sdk, found := ctx.SessionManager.GetSDKSession(sessionID); found {
+		return sdk.WorkingDir
+	}
+	return ""
+}
+
 // OfficeAgentGetMemory returns memory for an agent.
 func (ctx *Context) OfficeAgentGetMemory(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("sessionId")
@@ -1810,10 +1821,7 @@ func (ctx *Context) OfficeAgentGetMemory(w http.ResponseWriter, r *http.Request)
 		ok(w, map[string]interface{}{"memory": ""})
 		return
 	}
-	workingDir := ""
-	if s, found := ctx.SessionManager.GetSession(sessionID); found {
-		workingDir = s.WorkingDir
-	}
+	workingDir := ctx.getSessionWorkingDir(sessionID)
 	memory := office.LoadAgentMemory(agent.ConfigID, workingDir)
 	ok(w, map[string]interface{}{"memory": memory})
 }
@@ -1829,10 +1837,7 @@ func (ctx *Context) OfficeAgentPostMemory(w http.ResponseWriter, r *http.Request
 		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	workingDir := ""
-	if s, found := ctx.SessionManager.GetSession(req.SessionID); found {
-		workingDir = s.WorkingDir
-	}
+	workingDir := ctx.getSessionWorkingDir(req.SessionID)
 	if err := office.SaveAgentMemory(agent.ConfigID, workingDir, req.Content); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to write memory")
 		return
@@ -1851,10 +1856,7 @@ func (ctx *Context) OfficeAgentPostMemoryAppend(w http.ResponseWriter, r *http.R
 		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	workingDir := ""
-	if s, found := ctx.SessionManager.GetSession(req.SessionID); found {
-		workingDir = s.WorkingDir
-	}
+	workingDir := ctx.getSessionWorkingDir(req.SessionID)
 	if err := office.AppendAgentMemory(agent.ConfigID, workingDir, req.Entry); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to append memory")
 		return

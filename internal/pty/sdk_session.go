@@ -47,9 +47,10 @@ type SDKSession struct {
 	textOutput     *BufferAccumulator
 
 	// Event channels
-	events     chan SessionEvent
-	done       chan struct{}
-	cancelFunc context.CancelFunc
+	events       chan SessionEvent
+	done         chan struct{}
+	cancelFunc   context.CancelFunc
+	eventsOnce   sync.Once
 
 	// Provider env
 	providerEnv  map[string]string
@@ -109,12 +110,12 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	prompt := s.systemPrompt // capture immutable field under lock
 	s.mu.Unlock()
 
-	// Close events channel when session context is cancelled (prevents goroutine leaks)
+	// Close events channel when session context is cancelled (prevents goroutine leaks).
+	// Uses sync.Once to prevent double-close if both Stop() and parent context cancel.
 	go func() {
 		<-sessionCtx.Done()
-		// Small delay for in-flight events to drain
-		time.Sleep(500 * time.Millisecond)
-		close(s.events)
+		time.Sleep(500 * time.Millisecond) // drain grace period
+		s.eventsOnce.Do(func() { close(s.events) })
 	}()
 
 	// If we have a system prompt (kickstart), run the initial query
@@ -251,6 +252,8 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 
 		case claude.TypeResult:
 			if event.Result != nil {
+				// Capture values, update state, and emit idle ALL under lock
+				// to prevent a new runQuery from starting between state change and emit.
 				s.mu.Lock()
 				s.totalInputTokens += int64(event.Result.Usage.InputTokens)
 				s.totalOutputTokens += int64(event.Result.Usage.OutputTokens)
@@ -270,7 +273,8 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 					Output: int64(event.Result.Usage.OutputTokens),
 					Total:  int64(event.Result.Usage.InputTokens) + int64(event.Result.Usage.OutputTokens),
 				})
-				s.emitEvent(EventIdle{})
+				// EventIdle is emitted by the deferred cleanup to avoid race
+				// with a new runQuery observing isWorking=false before idle is sent.
 
 				if event.Result.IsError {
 					slog.Error("SDK session result error", "session", s.ID, "subtype", event.Result.Subtype)
@@ -281,7 +285,7 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 						"tokens_in", event.Result.Usage.InputTokens,
 						"tokens_out", event.Result.Usage.OutputTokens)
 				}
-				return // Result is the terminal event -- stop processing
+				return // Result is terminal -- defer handles EventIdle
 			}
 		}
 	}
