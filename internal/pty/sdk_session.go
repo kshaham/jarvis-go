@@ -181,8 +181,11 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 
 	s.emitEvent(EventWorking{})
 
-	// Build SDK options
+	// Build SDK options.
+	// Use empty model string so the SDK does NOT pass --model flag,
+	// allowing ANTHROPIC_DEFAULT_*_MODEL env vars (Z.AI) to take effect.
 	opts := []claude.Option{
+		claude.WithModel(""),
 		claude.WithCWD(s.WorkingDir),
 		claude.WithBypassPermissions(),
 		claude.WithIncludePartialMessages(),
