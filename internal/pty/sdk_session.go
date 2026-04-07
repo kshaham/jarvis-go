@@ -158,12 +158,16 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 	// Deferred cleanup: transition back to idle and drain pending prompts
 	defer func() {
 		s.mu.Lock()
-		if s.isWorking {
+		if s.isWorking && !s.isStopped {
 			s.isWorking = false
 			s.status = StatusIdle
 			s.mu.Unlock()
 			s.emitEvent(EventIdle{})
 		} else {
+			if s.isWorking {
+				s.isWorking = false
+				s.status = StatusIdle
+			}
 			s.mu.Unlock()
 		}
 		// Drain pending prompt queue -- run next queued prompt if any
@@ -332,7 +336,7 @@ func (s *SDKSession) appendOutput(text string) {
 }
 
 // emitEvent sends an event to the channel without blocking.
-// Checks isStopped to prevent panic on send to closed channel.
+// Uses both isStopped guard AND recover to handle all closed-channel scenarios.
 func (s *SDKSession) emitEvent(event SessionEvent) {
 	s.mu.RLock()
 	stopped := s.isStopped
@@ -340,6 +344,9 @@ func (s *SDKSession) emitEvent(event SessionEvent) {
 	if stopped {
 		return
 	}
+	// recover catches the TOCTOU race: isStopped was false when read,
+	// but channel closed between the check and the send.
+	defer func() { recover() }()
 	select {
 	case s.events <- event:
 	default:
