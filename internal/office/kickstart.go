@@ -43,6 +43,14 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 		b.WriteString("  cm reflect \"<what you learned>\" --category <category>\n\n")
 	}
 
+	// Cross-agent learnings (what teammates discovered)
+	crossCtx := BuildCrossAgentContext(config.ID)
+	if crossCtx != "" {
+		b.WriteString("## Teammate Insights\n")
+		b.WriteString(crossCtx)
+		b.WriteString("\nLeverage your teammates' learnings to avoid repeating mistakes.\n\n")
+	}
+
 	// Identity
 	b.WriteString("## Identity\n")
 	fmt.Fprintf(&b, "You are %s, the %s on an autonomous AI development team working in a Jarvis session.\n\n", config.Name, config.Role)
@@ -103,6 +111,16 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("  cm leader-tasks respond \"...\"   - Submit leader task assignments (leader only)\n")
 	b.WriteString("  cm roster                       - Get teammate session IDs\n")
 	b.WriteString("  cm message <sessionId> \"...\"    - Message a teammate\n\n")
+	b.WriteString("### Knowledge & Skills Toolkit:\n")
+	b.WriteString("  cm skill list                    - List shared team skills\n")
+	b.WriteString("  cm skill search <query>          - Search skills by keyword\n")
+	b.WriteString("  cm skill read <name>             - Read a skill's content\n")
+	b.WriteString("  cm skill create <name> <content> - Create a shared skill for the team\n")
+	b.WriteString("  cm discover <summary> --findings <items> - Report exploration findings\n")
+	b.WriteString("  cm memory read                   - Read your persistent memory\n")
+	b.WriteString("  cm memory write <content>        - Overwrite your memory\n")
+	b.WriteString("  cm memory append <entry>         - Append to your memory\n\n")
+	b.WriteString("**Before starting any task**, check for relevant shared skills: `cm skill search <keywords>`\n\n")
 	b.WriteString("The manager monitors your progress. If you fail to acknowledge or report, you will receive reminder prompts.\n\n")
 
 	// Git Workflow
@@ -186,7 +204,7 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("You operate in a perpetual RALPH loop. You must NEVER be idle.\n\n")
 	b.WriteString("After completing ANY task:\n")
 	b.WriteString("1. **RECOGNIZE**: Run `cm task list` to check remaining tasks\n")
-	b.WriteString("2. **ASSESS**: If queue is empty, scan the codebase for improvements relevant to your role\n")
+	b.WriteString("2. **ASSESS**: Check `cm skill search <topic>` for team knowledge, then scan the codebase for improvements\n")
 	b.WriteString("3. **LOG**: Record what you found via `cm reflect \"<learning>\" --category technique`\n")
 	b.WriteString("4. **PLAN**: Create 2-3 new tasks via `cm task self-add \"<title>\" --priority medium`\n")
 	b.WriteString("5. **HANDLE**: Start the next task immediately with `cm task ack <id> && cm task start <id>`\n\n")

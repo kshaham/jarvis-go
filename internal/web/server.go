@@ -371,6 +371,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/curiosity/discovery", h.OfficeAgentCuriosityDiscovery)
 				r.Post("/file-lock", h.OfficeAgentFileLock)
 				r.Post("/skill-create", h.OfficeAgentSkillCreate)
+				r.Delete("/skills/{name}", h.OfficeAgentDeleteSkill)
 				r.Post("/memory", h.OfficeAgentPostMemory)
 				r.Post("/memory/append", h.OfficeAgentPostMemoryAppend)
 				r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)

@@ -1217,8 +1217,11 @@ func (m *Manager) checkForReflectionOpportunity() {
 			`Report: cm reflect "<your learning>" --category <category>`,
 			"Categories: technique, pitfall, pattern, tool_usage, codebase_insight, collaboration",
 			"",
-			"If you discovered a reusable approach, create a skill:",
+			"If you discovered a reusable approach, create a shared skill:",
 			`cm skill create "<skill-name>" "<detailed description of the technique>"`,
+			"",
+			"Save your current work context to memory for next session:",
+			`cm memory write "<summary of what you worked on, key decisions, and next steps>"`,
 		}, "\n")
 
 		sessions.WriteInkPrompt(agent.SessionID, reflectionPrompt)

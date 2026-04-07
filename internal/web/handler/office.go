@@ -1207,10 +1207,11 @@ func (ctx *Context) OfficePostWrapUp(w http.ResponseWriter, r *http.Request) {
 
 1. FINISH your current task -- complete what you're working on right now
 2. COMMIT all changes with a clear commit message
-3. DO NOT start any new tasks from your queue
-4. DO NOT pick up any new work
-5. Report your final status: cm task complete <taskId>
-6. Once you've committed and reported status, stop working and exit
+3. SAVE your work context: cm memory write "<summary of what you did, current state, and any unfinished work>"
+4. DO NOT start any new tasks from your queue
+5. DO NOT pick up any new work
+6. Report your final status: cm task complete <taskId>
+7. Once you've committed, saved memory, and reported status, stop working
 
 This is a graceful shutdown. Take the time to finish cleanly, but do not begin anything new.`
 
@@ -1819,6 +1820,30 @@ func (ctx *Context) OfficeAgentSkillCreate(w http.ResponseWriter, r *http.Reques
 		"skillName": req.SkillName,
 		"path":      skillPath,
 	})
+}
+
+// OfficeAgentDeleteSkill deletes a shared skill by name.
+func (ctx *Context) OfficeAgentDeleteSkill(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if !safeName(name) {
+		request.WriteError(w, http.StatusBadRequest, "invalid skill name")
+		return
+	}
+	homeDir, _ := os.UserHomeDir()
+	skillPath := filepath.Join(homeDir, ".claude", "skills", name)
+
+	absSkillPath, _ := filepath.Abs(skillPath)
+	absSkillsBase, _ := filepath.Abs(filepath.Join(homeDir, ".claude", "skills"))
+	if !strings.HasPrefix(absSkillPath, absSkillsBase+string(filepath.Separator)) {
+		request.WriteError(w, http.StatusBadRequest, "invalid skill name")
+		return
+	}
+
+	if err := os.RemoveAll(skillPath); err != nil {
+		request.WriteError(w, http.StatusInternalServerError, "failed to delete skill")
+		return
+	}
+	ok(w, map[string]interface{}{"deleted": name})
 }
 
 // getSessionWorkingDir returns the working directory for a session (PTY or SDK).

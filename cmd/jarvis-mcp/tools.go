@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 )
 
@@ -280,6 +278,68 @@ var allToolDefs = []ToolDefinition{
 		},
 	},
 
+	// --- Office Memory Tools (3) ---
+	{
+		Name:        "office_memory_read",
+		Description: "Read your persistent project memory",
+		InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
+	},
+	{
+		Name:        "office_memory_write",
+		Description: "Write (overwrite) your persistent project memory",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"content": {Type: "string", Description: "Memory content to write"}},
+			Required:   []string{"content"},
+		},
+	},
+	{
+		Name:        "office_memory_append",
+		Description: "Append an entry to your persistent project memory",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"entry": {Type: "string", Description: "Entry to append"}},
+			Required:   []string{"entry"},
+		},
+	},
+
+	// --- Office Skill Tools (4) ---
+	{
+		Name:        "office_skill_list",
+		Description: "List all shared skills available to the team",
+		InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
+	},
+	{
+		Name:        "office_skill_search",
+		Description: "Search shared skills by keyword",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"query": {Type: "string", Description: "Search query"}},
+			Required:   []string{"query"},
+		},
+	},
+	{
+		Name:        "office_skill_read",
+		Description: "Read the content of a shared skill",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"skillName": {Type: "string", Description: "Name of the skill"}},
+			Required:   []string{"skillName"},
+		},
+	},
+	{
+		Name:        "office_skill_create",
+		Description: "Create or update a shared skill for the team",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"skillName": {Type: "string", Description: "Name of the skill"},
+				"content":   {Type: "string", Description: "Skill content in markdown"},
+			},
+			Required: []string{"skillName", "content"},
+		},
+	},
+
 	// --- Skill Tools (5) ---
 	{
 		Name:        "list_skills",
@@ -518,6 +578,13 @@ var allTools = map[string]ToolHandler{
 	"office_reflect":         handleOfficeReflect,
 	"office_team_roster":     handleOfficeTeamRoster,
 	"office_send_message":    handleOfficeSendMessage,
+	"office_memory_read":     handleOfficeMemoryRead,
+	"office_memory_write":    handleOfficeMemoryWrite,
+	"office_memory_append":   handleOfficeMemoryAppend,
+	"office_skill_list":      handleListSkills,
+	"office_skill_search":    handleSearchSkills,
+	"office_skill_read":      handleGetSkill,
+	"office_skill_create":    handleCreateSkill,
 }
 
 // --- Session Tool Handlers ---
@@ -770,47 +837,11 @@ func handleDeleteSkill(args map[string]interface{}) ToolResult {
 	if !ok {
 		return toolError("skillName is required")
 	}
-
-	// delete_skill operates on the local filesystem
-	homeDir, err := os.UserHomeDir()
+	result, err := apiDelete("/api/office/agent/skills/" + url.PathEscape(name))
 	if err != nil {
-		return toolError("failed to get home directory: " + err.Error())
+		return toolError(err.Error())
 	}
-
-	// Validate name to prevent path traversal
-	if strings.ContainsAny(name, "/\\..") || strings.Contains(name, "..") {
-		return toolError("invalid skill name")
-	}
-
-	skillsBase := filepath.Join(homeDir, ".claude", "skills")
-	skillPath := filepath.Join(skillsBase, name)
-
-	// Verify resolved path is still under skills directory
-	absSkillPath, _ := filepath.Abs(skillPath)
-	absSkillsBase, _ := filepath.Abs(skillsBase)
-	if !strings.HasPrefix(absSkillPath, absSkillsBase+string(filepath.Separator)) {
-		return toolError("invalid skill name")
-	}
-
-	file := getStringArg(args, "file", "")
-
-	if file != "" {
-		// Validate file name too
-		if strings.ContainsAny(file, "/\\") || strings.Contains(file, "..") {
-			return toolError("invalid file name")
-		}
-		targetPath := filepath.Join(skillPath, file)
-		if err := os.Remove(targetPath); err != nil {
-			return toolError("failed to delete skill file: " + err.Error())
-		}
-		return toolSuccessText(fmt.Sprintf("Deleted skill file: %s/%s", name, file))
-	}
-
-	// Delete the entire skill directory
-	if err := os.RemoveAll(skillPath); err != nil {
-		return toolError("failed to delete skill: " + err.Error())
-	}
-	return toolSuccessText(fmt.Sprintf("Deleted skill: %s", name))
+	return toolSuccess(result)
 }
 
 // --- Monitoring Tool Handlers ---
@@ -1286,6 +1317,54 @@ func handleOfficeSendMessage(args map[string]interface{}) ToolResult {
 	}
 	result, err := apiPost("/api/office/agent/message", map[string]interface{}{
 		"sessionId": sid, "toSessionId": toSID, "content": content,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeMemoryRead(_ map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	result, err := apiGet("/api/office/agent/memory?sessionId=" + sid)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeMemoryWrite(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	content, ok := requireStringArg(args, "content")
+	if !ok {
+		return toolError("content is required")
+	}
+	result, err := apiPost("/api/office/agent/memory", map[string]interface{}{
+		"sessionId": sid, "content": content,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeMemoryAppend(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	entry, ok := requireStringArg(args, "entry")
+	if !ok {
+		return toolError("entry is required")
+	}
+	result, err := apiPost("/api/office/agent/memory/append", map[string]interface{}{
+		"sessionId": sid, "entry": entry,
 	})
 	if err != nil {
 		return toolError(err.Error())
