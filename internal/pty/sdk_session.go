@@ -112,9 +112,10 @@ func (s *SDKSession) Start(ctx context.Context) error {
 
 	// Close events channel when session context is cancelled (prevents goroutine leaks).
 	// Uses sync.Once to prevent double-close if both Stop() and parent context cancel.
+	const eventDrainGrace = 500 * time.Millisecond // time for in-flight events to be consumed
 	go func() {
 		<-sessionCtx.Done()
-		time.Sleep(500 * time.Millisecond) // drain grace period
+		time.Sleep(eventDrainGrace)
 		s.eventsOnce.Do(func() { close(s.events) })
 	}()
 
@@ -197,6 +198,7 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 	}
 
 	// Process streaming events
+	resultReceived := false
 	for event := range stream.Events() {
 		s.mu.Lock()
 		s.lastActivityAt = time.Now()
@@ -225,7 +227,10 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 				case "text_delta":
 					s.appendOutput(delta.Text)
 				case "thinking_delta":
-					// Track thinking as working state
+					// Track thinking as working state (skip if result already received)
+					if resultReceived {
+						break
+					}
 					s.mu.Lock()
 					if !s.isWorking {
 						s.isWorking = true
@@ -252,8 +257,7 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 
 		case claude.TypeResult:
 			if event.Result != nil {
-				// Capture values, update state, and emit idle ALL under lock
-				// to prevent a new runQuery from starting between state change and emit.
+				resultReceived = true
 				s.mu.Lock()
 				s.totalInputTokens += int64(event.Result.Usage.InputTokens)
 				s.totalOutputTokens += int64(event.Result.Usage.OutputTokens)
@@ -344,6 +348,12 @@ func (s *SDKSession) Stop() {
 	}
 	s.isStopped = true
 	s.status = StatusStopped
+	s.mu.Unlock()
+
+	// Emit exit event before cancelling context (so forwardSDKSessionEvents sees it)
+	s.emitEvent(EventExit{ExitCode: 0})
+
+	s.mu.Lock()
 	if s.cancelFunc != nil {
 		s.cancelFunc()
 	}

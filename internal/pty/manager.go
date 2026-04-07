@@ -154,6 +154,20 @@ func (m *SessionManager) StopSDKSession(id string) error {
 	return nil
 }
 
+// GetAllSessionIDs returns all session IDs (both PTY and SDK) under a single lock.
+func (m *SessionManager) GetAllSessionIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make([]string, 0, len(m.sessions)+len(m.sdkSessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	for id := range m.sdkSessions {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // ForEachSDKSession iterates over all SDK sessions under a read lock.
 func (m *SessionManager) ForEachSDKSession(fn func(id string, s *SDKSession)) {
 	m.mu.RLock()

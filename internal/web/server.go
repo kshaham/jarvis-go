@@ -224,16 +224,7 @@ func (a *sessionStoreAdapter) WriteInkPrompt(sessionID, prompt string) bool {
 }
 
 func (a *sessionStoreAdapter) GetSessionIDs() []string {
-	sessions := a.sm.GetAllSessions()
-	ids := make([]string, len(sessions))
-	for i, s := range sessions {
-		ids[i] = s.ID
-	}
-	// Also include SDK sessions
-	a.sm.ForEachSDKSession(func(id string, _ *pty.SDKSession) {
-		ids = append(ids, id)
-	})
-	return ids
+	return a.sm.GetAllSessionIDs() // atomic snapshot of both PTY and SDK sessions
 }
 
 func (a *sessionStoreAdapter) IsSessionAlive(sessionID string) bool {
