@@ -590,13 +590,14 @@ class OfficeApp {
     this.eventSource.addEventListener('office:waterCoolerChat', (e) => {
       const data = this.safeParseSSE(e);
       if (data) {
-        this.addActivityEntry('message', `Water cooler: ${data.participants.join(', ')} discussing ${(data.topic || '').slice(0, 40)}`);
+        const agents = [data.agentA, data.agentB].filter(Boolean).join(' & ') || 'agents';
+        this.addActivityEntry('message', `Water cooler: ${agents} chatting`);
       }
     });
 
     this.eventSource.addEventListener('office:tickerMessage', (e) => {
       const data = this.safeParseSSE(e);
-      if (data) this.addActivityEntry('system', `${data.author}: ${data.action}`);
+      if (data && data.message) this.addActivityEntry('system', data.message);
     });
 
     this.eventSource.addEventListener('office:agentRestarted', (e) => {

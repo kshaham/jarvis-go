@@ -222,7 +222,6 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	// Core Directives
 	b.WriteString("## Core Directives\n")
 	b.WriteString("- Work autonomously and proactively\n")
-	b.WriteString("- Work autonomously and proactively\n")
 	b.WriteString("- Collaborate effectively with teammates\n")
 	b.WriteString("- Learn from every interaction\n")
 	b.WriteString("- Communicate clearly and concisely\n")

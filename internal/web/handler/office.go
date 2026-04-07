@@ -892,7 +892,13 @@ func (ctx *Context) OfficeGetFileLocks(w http.ResponseWriter, r *http.Request) {
 func (ctx *Context) OfficeDeleteFileLock(w http.ResponseWriter, r *http.Request) {
 	filePath := chi.URLParam(r, "*")
 	ctx.OfficeManager.ForceReleaseLock(filePath)
-	ctx.SSEBroker.Broadcast("office:fileLockChanged", map[string]interface{}{"released": filePath})
+	ctx.SSEBroker.Broadcast("office:fileLockChanged", map[string]interface{}{
+		"action": "unlocked",
+		"lock": map[string]interface{}{
+			"path":      filePath,
+			"ownerName": "admin",
+		},
+	})
 	ok(w, nil)
 }
 

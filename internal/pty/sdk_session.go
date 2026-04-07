@@ -314,11 +314,17 @@ func (s *SDKSession) appendOutput(text string) {
 }
 
 // emitEvent sends an event to the channel without blocking.
+// Checks isStopped to prevent panic on send to closed channel.
 func (s *SDKSession) emitEvent(event SessionEvent) {
+	s.mu.RLock()
+	stopped := s.isStopped
+	s.mu.RUnlock()
+	if stopped {
+		return
+	}
 	select {
 	case s.events <- event:
 	default:
-		// Channel full, drop event
 	}
 }
 
