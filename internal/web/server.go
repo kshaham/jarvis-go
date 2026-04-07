@@ -202,19 +202,25 @@ type sessionStoreAdapter struct {
 }
 
 func (a *sessionStoreAdapter) WriteViaScreen(sessionID, input string) bool {
-	s, ok := a.sm.GetSession(sessionID)
-	if !ok {
-		return false
+	// Try PTY session first, then SDK session
+	if s, ok := a.sm.GetSession(sessionID); ok {
+		return s.WriteViaScreen(input)
 	}
-	return s.WriteViaScreen(input)
+	if sdk, ok := a.sm.GetSDKSession(sessionID); ok {
+		return sdk.WriteViaScreen(input)
+	}
+	return false
 }
 
 func (a *sessionStoreAdapter) WriteInkPrompt(sessionID, prompt string) bool {
-	s, ok := a.sm.GetSession(sessionID)
-	if !ok {
-		return false
+	// Try PTY session first, then SDK session
+	if s, ok := a.sm.GetSession(sessionID); ok {
+		return s.WriteInkPrompt(prompt)
 	}
-	return s.WriteInkPrompt(prompt)
+	if sdk, ok := a.sm.GetSDKSession(sessionID); ok {
+		return sdk.WriteInkPrompt(prompt)
+	}
+	return false
 }
 
 func (a *sessionStoreAdapter) GetSessionIDs() []string {
@@ -223,12 +229,21 @@ func (a *sessionStoreAdapter) GetSessionIDs() []string {
 	for i, s := range sessions {
 		ids[i] = s.ID
 	}
+	// Also include SDK sessions
+	a.sm.ForEachSDKSession(func(id string, _ *pty.SDKSession) {
+		ids = append(ids, id)
+	})
 	return ids
 }
 
 func (a *sessionStoreAdapter) IsSessionAlive(sessionID string) bool {
-	_, ok := a.sm.GetSession(sessionID)
-	return ok
+	if _, ok := a.sm.GetSession(sessionID); ok {
+		return true
+	}
+	if _, ok := a.sm.GetSDKSession(sessionID); ok {
+		return true
+	}
+	return false
 }
 
 // Start begins listening for HTTP connections.

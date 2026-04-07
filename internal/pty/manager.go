@@ -147,6 +147,15 @@ func (m *SessionManager) StopSDKSession(id string) error {
 	return nil
 }
 
+// ForEachSDKSession iterates over all SDK sessions under a read lock.
+func (m *SessionManager) ForEachSDKSession(fn func(id string, s *SDKSession)) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for id, s := range m.sdkSessions {
+		fn(id, s)
+	}
+}
+
 // GetSession returns a session by ID.
 func (m *SessionManager) GetSession(id string) (*Session, bool) {
 	m.mu.RLock()

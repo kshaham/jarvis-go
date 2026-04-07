@@ -408,34 +408,99 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("Spawning office team", "template", templateUsed, "members", len(members), "workingDir", req.WorkingDir)
 
+	// Build kickstart prompts ahead of time for SDK mode
+	teamConfigs := make([]*office.TeamMemberConfig, 0, len(members))
+	for _, m := range members {
+		teamConfigs = append(teamConfigs, &office.TeamMemberConfig{
+			ID: m.ID, Name: m.Name, Role: m.Role, Tier: m.Tier, Color: m.Color,
+		})
+	}
+
+	// Set perpetual mode (default: true)
+	perpetual := true
+	if req.PerpetualMode != nil {
+		perpetual = *req.PerpetualMode
+	}
+
+	// Determine session mode: SDK (default for agents) or PTY (fallback)
+	useSDK := true // Use SDK mode by default for office agents
+
 	for _, member := range members {
 		// Use member-specific provider env if overridden, else apply default with allocated sonnet
 		envVars := defaultProviderEnv
 		if ov, hasOverride := overrideMap[member.ID]; hasOverride {
 			envVars = ov
 		} else if isZAI && sonnetAlloc != nil {
-			// No explicit override but Z.AI -- apply allocated sonnet model
 			envVars = ctx.getProviderEnvVarsFor(provider, "", sonnetAlloc[member.ID])
 		}
 
-		// Create a Claude session for each team member
-		session, err := ctx.SessionManager.CreateSession(
-			context.Background(),
-			pty.SessionConfig{
-				WorkingDir:  req.WorkingDir,
-				Mode:        pty.ModeClaude,
-				Name:        member.Name,
-				ProviderEnv: envVars,
-			},
-		)
-		if err != nil {
-			slog.Error("Failed to create session for team member", "name", member.Name, "error", err)
-			errors = append(errors, fmt.Sprintf("Failed to create session for %s: %s", member.Name, err.Error()))
-			continue
+		var sessionID string
+
+		if useSDK {
+			// SDK mode: pass kickstart as system prompt, no PTY hacks needed
+			agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
+			kickstart := office.BuildKickstartPrompt(
+				&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
+				req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
+			)
+
+			// MCP server config for agents
+			mcpServers := map[string]any{
+				"jarvis": map[string]any{
+					"type":    "stdio",
+					"command": "jarvis-mcp",
+					"env":     map[string]string{"JARVIS_API_URL": "http://localhost:3555"},
+				},
+			}
+
+			sdkSession, err := ctx.SessionManager.CreateSDKSession(
+				context.Background(),
+				pty.SessionConfig{
+					WorkingDir:   req.WorkingDir,
+					Mode:         pty.ModeClaudeSDK,
+					Name:         member.Name,
+					ProviderEnv:  envVars,
+					SystemPrompt: kickstart,
+					McpServers:   mcpServers,
+				},
+			)
+			if err != nil {
+				slog.Error("Failed to create SDK session, falling back to PTY", "name", member.Name, "error", err)
+				// Fall through to PTY mode below
+				goto ptyFallback
+			}
+			sessionID = sdkSession.ID
+
+			go forwardSDKSessionEvents(sdkSession, ctx)
+			goto registerAgent
 		}
 
+	ptyFallback:
+		{
+			// PTY mode: traditional interactive session
+			session, err := ctx.SessionManager.CreateSession(
+				context.Background(),
+				pty.SessionConfig{
+					WorkingDir:  req.WorkingDir,
+					Mode:        pty.ModeClaude,
+					Name:        member.Name,
+					ProviderEnv: envVars,
+				},
+			)
+			if err != nil {
+				slog.Error("Failed to create session for team member", "name", member.Name, "error", err)
+				errors = append(errors, fmt.Sprintf("Failed to create session for %s: %s", member.Name, err.Error()))
+				continue
+			}
+			sessionID = session.ID
+
+			ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+			go forwardSessionEvents(session, ctx)
+		}
+
+	registerAgent:
 		// Register agent with office manager
-		ctx.OfficeManager.RegisterAgent(session.ID, member.ID, &office.TeamMemberConfig{
+		ctx.OfficeManager.RegisterAgent(sessionID, member.ID, &office.TeamMemberConfig{
 			ID:    member.ID,
 			Name:  member.Name,
 			Role:  member.Role,
@@ -443,19 +508,13 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 			Color: member.Color,
 		})
 
-		// Broadcast session created
-		ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
-
-		// Start event forwarding for the session
-		go forwardSessionEvents(session, ctx)
-
 		// Notify Telegram
 		if ctx.TelegramHandler != nil {
-			ctx.TelegramHandler.NotifySessionStart(session.ID, member.Name, req.WorkingDir)
+			ctx.TelegramHandler.NotifySessionStart(sessionID, member.Name, req.WorkingDir)
 		}
 
 		spawned = append(spawned, member.Name)
-		slog.Info("Spawned team member", "name", member.Name, "sessionId", session.ID, "role", member.Role)
+		slog.Info("Spawned team member", "name", member.Name, "sessionId", sessionID, "role", member.Role, "mode", func() string { if useSDK { return "sdk" } else { return "pty" } }())
 	}
 
 	// Mark team as spawned
@@ -466,23 +525,10 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 		ctx.OfficeManager.SetTeamMission(req.Mission)
 	}
 
-	// Set perpetual mode (default: true)
-	perpetual := true
-	if req.PerpetualMode != nil {
-		perpetual = *req.PerpetualMode
-	}
 	ctx.OfficeManager.SetPerpetualMode(perpetual)
 
-	// Build teammate list for kickstart context
-	teamConfigs := make([]*office.TeamMemberConfig, 0, len(members))
-	for _, m := range members {
-		teamConfigs = append(teamConfigs, &office.TeamMemberConfig{
-			ID: m.ID, Name: m.Name, Role: m.Role, Tier: m.Tier, Color: m.Color,
-		})
-	}
-
-	// Inject kickstart prompts into each session.
-	// Wait for Claude's input prompt to appear before injecting.
+	// Inject kickstart prompts into PTY sessions (SDK sessions get kickstart via SystemPrompt).
+	if !useSDK {
 	teamMission := ctx.OfficeManager.GetTeamMission()
 	roster := ctx.OfficeManager.GetRoster()
 	for _, agent := range roster {
@@ -558,6 +604,7 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 			slog.Error("Kickstart failed after all retries", "name", a.Config.Name, "session", a.SessionID)
 		}(agent)
 	}
+	} // end if !useSDK
 
 	// Configure Telegram updates if requested
 	if req.TelegramEnabled {

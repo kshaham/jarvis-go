@@ -405,3 +405,55 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 		}
 	}
 }
+
+// forwardSDKSessionEvents reads events from an SDK session and broadcasts them via SSE.
+// Simpler than the PTY version -- no ANSI parsing, no terminal batching.
+func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
+	sessionID := session.ID
+	broker := ctx.SSEBroker
+	slog.Info("Starting SDK event forwarding for session", "sessionId", sessionID)
+
+	for event := range session.Events() {
+		switch e := event.(type) {
+		case pty.EventTerminal:
+			broker.Broadcast("session:terminal", map[string]interface{}{
+				"id":   sessionID,
+				"data": e.Data,
+			})
+		case pty.EventOutput:
+			broker.Broadcast("session:output", map[string]interface{}{
+				"id":   sessionID,
+				"data": e.Data,
+			})
+		case pty.EventIdle:
+			broker.Broadcast("session:idle", map[string]interface{}{"id": sessionID})
+			broker.Broadcast("session:updated", map[string]interface{}{
+				"id": sessionID, "status": "idle", "isWorking": false,
+			})
+			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+					payload["status"] = "idle"
+					broker.Broadcast("office:memberUpdated", payload)
+				}
+			}
+		case pty.EventWorking:
+			broker.Broadcast("session:working", map[string]interface{}{"id": sessionID})
+			broker.Broadcast("session:updated", map[string]interface{}{
+				"id": sessionID, "status": "busy", "isWorking": true,
+			})
+			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+					payload["status"] = "working"
+					broker.Broadcast("office:memberUpdated", payload)
+				}
+			}
+		case pty.EventTokens:
+			broker.Broadcast("session:updated", map[string]interface{}{
+				"id": sessionID,
+				"tokens": map[string]int64{
+					"input": e.Input, "output": e.Output, "total": e.Input + e.Output,
+				},
+			})
+		}
+	}
+}
