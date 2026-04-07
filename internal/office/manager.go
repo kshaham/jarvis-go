@@ -135,6 +135,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 // RegisterAgent adds a team member to the office.
 func (m *Manager) RegisterAgent(sessionID, configID string, config *TeamMemberConfig) {
 	agent := NewAgentState(sessionID, configID, config)
+	agent.LastPromptSentAt = time.Now() // Mark spawn time so stuck detection can track it
 
 	m.mu.Lock()
 	m.agents[sessionID] = agent
