@@ -1637,6 +1637,15 @@ func (ctx *Context) OfficeAgentTaskTriage(w http.ResponseWriter, r *http.Request
 	task.AssignedAt = time.Now()
 	task.Source = "triage"
 	target.AddTask(task)
+
+	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.SessionID})
+	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.ToSessionID})
+	if payload := ctx.OfficeManager.BuildMemberPayload(source); payload != nil {
+		ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+	}
+	if payload := ctx.OfficeManager.BuildMemberPayload(target); payload != nil {
+		ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+	}
 	ok(w, nil)
 }
 

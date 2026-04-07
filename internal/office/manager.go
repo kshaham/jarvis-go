@@ -44,7 +44,8 @@ type Manager struct {
 	teamMission        string
 	lastBrainstormAt   time.Time
 	lastWaterCoolerAt  time.Time
-	triageAttempts     map[string]int // taskID -> triage attempt count
+	triageAttempts     map[string]int       // taskID -> triage attempt count
+	lastTriageAt       map[string]time.Time // taskID -> last triage prompt time
 
 	idleTicker   *time.Ticker
 	monitorDone  chan struct{}
@@ -127,6 +128,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		autoStandupEnabled: true,
 		curiosityEnabled:   true,
 		triageAttempts:     make(map[string]int),
+		lastTriageAt:       make(map[string]time.Time),
 		events:             make(chan OfficeEvent, 64),
 	}
 	mgr.loadPersistedMission()
@@ -207,6 +209,11 @@ func (m *Manager) UnregisterAgent(sessionID string) {
 		name := sessionID
 		if agent.Config != nil {
 			name = agent.Config.Name
+			m.broadcast("office:memberUpdated", map[string]interface{}{
+				"sessionId": sessionID, "configId": agent.ConfigID,
+				"name": agent.Config.Name, "role": agent.Config.Role,
+				"status": "stopped",
+			})
 		}
 		m.auditLog("office:memberLeft", sessionID, name, nil)
 		m.emitEvent(MemberLeftEvent{ConfigID: agent.ConfigID, SessionID: sessionID})

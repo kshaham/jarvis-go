@@ -90,6 +90,7 @@ func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 	}
 	sessions := m.sessions
 	cfg := m.config
+	standupResult := m.standup // capture before unlock
 	m.mu.Unlock()
 
 	m.broadcast("office:standupStarted", map[string]interface{}{
@@ -108,7 +109,7 @@ func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 	// Run round-robin async.
 	go m.runStandupRoundRobin(standupID, active, sessions, cfg)
 
-	return m.standup
+	return standupResult
 }
 
 // runStandupRoundRobin iterates through participants, sending prompts and
@@ -287,17 +288,18 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 			}
 			slog.Info("Standup: nudging agent", "name", speakerName, "nudge", nudgeCount, "max", cfg.StandupMaxNudges)
 
-			// Send Ctrl+C to interrupt, then re-inject short nudge prompt.
+			// Send Ctrl+C then nudge prompt in a goroutine to keep select responsive.
 			if sessions != nil {
-				sessions.WriteViaScreen(sessionID, "\x03")
-				time.Sleep(2 * time.Second)
-
-				shortNudge := strings.Join([]string{
-					"[STANDUP REMINDER] You haven't responded to the standup yet. This is URGENT - please respond NOW.",
-					"Reply by running this command IMMEDIATELY:",
-					`cm standup respond "<your 2-3 sentence status update>"`,
-				}, "\n")
-				sessions.WriteViaScreen(sessionID, shortNudge+"\r")
+				go func() {
+					sessions.WriteViaScreen(sessionID, "\x03")
+					time.Sleep(2 * time.Second)
+					shortNudge := strings.Join([]string{
+						"[STANDUP REMINDER] You haven't responded to the standup yet. This is URGENT - please respond NOW.",
+						"Reply by running this command IMMEDIATELY:",
+						`cm standup respond "<your 2-3 sentence status update>"`,
+					}, "\n")
+					sessions.WriteInkPrompt(sessionID, shortNudge)
+				}()
 			}
 
 		case <-timeout.C:

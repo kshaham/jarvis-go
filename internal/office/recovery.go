@@ -343,7 +343,11 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 		agent.mu.Unlock()
 
 		// Task must have been in_progress for at least the threshold.
-		taskAge := now.Sub(active.AssignedAt)
+		baseline := active.StartedAt
+		if baseline.IsZero() {
+			baseline = active.AssignedAt
+		}
+		taskAge := now.Sub(baseline)
 		if taskAge < autoCompleteThreshold {
 			continue
 		}
@@ -431,7 +435,11 @@ func (m *Manager) checkStaleInProgressTasks() {
 			continue
 		}
 
-		taskAge := now.Sub(active.AssignedAt)
+		staleBaseline := active.StartedAt
+		if staleBaseline.IsZero() {
+			staleBaseline = active.AssignedAt
+		}
+		taskAge := now.Sub(staleBaseline)
 		if taskAge < gentleThreshold {
 			continue
 		}
@@ -923,10 +931,15 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 				continue
 			}
 
-			// Check triage attempt count.
+			// Check triage cooldown (5 min between attempts per task).
 			m.mu.Lock()
 			attempts := m.triageAttempts[task.ID]
+			lastAt := m.lastTriageAt[task.ID]
 			m.mu.Unlock()
+
+			if !lastAt.IsZero() && time.Since(lastAt) < 5*time.Minute {
+				continue
+			}
 
 			if attempts >= maxAttempts {
 				// Auto-fail the task after max triage attempts.
@@ -969,6 +982,7 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 
 			m.mu.Lock()
 			m.triageAttempts[task.ID] = attempts + 1
+			m.lastTriageAt[task.ID] = time.Now()
 			m.mu.Unlock()
 
 			slog.Info("Sent blocked task triage to leader",

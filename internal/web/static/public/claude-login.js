@@ -10,15 +10,17 @@
   let loginStatusInterval = null;
   const AUTH_SESSION_ID = '__claude_auth__';
   let csrfToken = null;
+  let csrfTokenFetchedAt = 0;
 
-  // Fetch CSRF token for POST requests
+  // Fetch CSRF token for POST requests (re-fetches if > 45 min old)
   async function getCsrfToken() {
-    if (csrfToken) return csrfToken;
+    if (csrfToken && (Date.now() - csrfTokenFetchedAt) < 45 * 60 * 1000) return csrfToken;
     try {
       const res = await fetch('/api/csrf-token');
       if (res.ok) {
         const data = await res.json();
         csrfToken = data.token;
+        csrfTokenFetchedAt = Date.now();
         return csrfToken;
       }
     } catch (err) {
@@ -308,6 +310,7 @@
         console.error('[ClaudeLogin] Error checking status:', err);
       }
     }, 2000);
+    if (window.app && window.app.registerTimer) window.app.registerTimer(loginStatusInterval);
   }
 
   function stopLoginStatusCheck() {

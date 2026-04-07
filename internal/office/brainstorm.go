@@ -180,7 +180,7 @@ func (m *Manager) runBrainstormFlow(meeting *Meeting, participants []string) {
 		slog.Warn("Brainstorm: sessions unavailable", "agent", facilitatorName)
 		return
 	}
-	sent := sessions.WriteViaScreen(facilitatorID, brainstormPrompt+"\r")
+	sent := sessions.WriteInkPrompt(facilitatorID, brainstormPrompt)
 	if !sent {
 		slog.Warn("Brainstorm prompt delivery failed", "agent", facilitatorName)
 		return
@@ -227,7 +227,7 @@ func (m *Manager) runBrainstormFlow(meeting *Meeting, participants []string) {
 		if sessions == nil {
 			continue
 		}
-		taskSent := sessions.WriteViaScreen(sid, taskPrompt+"\r")
+		taskSent := sessions.WriteInkPrompt(sid, taskPrompt)
 		if taskSent {
 			if agent != nil {
 				agent.mu.Lock()

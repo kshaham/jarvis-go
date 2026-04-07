@@ -343,6 +343,7 @@ func (s *SDKSession) emitEvent(event SessionEvent) {
 	select {
 	case s.events <- event:
 	default:
+		slog.Debug("SDK session event dropped (channel full)", "session", s.ID, "event", fmt.Sprintf("%T", event))
 	}
 }
 

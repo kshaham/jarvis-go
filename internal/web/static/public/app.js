@@ -1062,8 +1062,9 @@ class JarvisApp {
     };
 
     window.addEventListener('resize', throttledResize);
-    const resizeObserver = new ResizeObserver(throttledResize);
-    resizeObserver.observe(container);
+    if (this._terminalResizeObserver) this._terminalResizeObserver.disconnect();
+    this._terminalResizeObserver = new ResizeObserver(throttledResize);
+    this._terminalResizeObserver.observe(container);
 
     // Handle keyboard input with batching for rapid keystrokes
     this._pendingInput = '';
@@ -1075,9 +1076,8 @@ class JarvisApp {
         const input = this._pendingInput;
         const sessionId = this.activeSessionId;
         this._pendingInput = '';
-        // Always refresh CSRF token before input (tokens are single-use on the server)
-        await this.refreshCsrfToken();
-        const csrfToken = await this.getCsrfToken();
+        // Use current CSRF token (refreshed on 45-min interval; 403 retry handles expiry)
+        const csrfToken = this._csrfToken || '';
         const headers = { 'Content-Type': 'application/json' };
         if (csrfToken) {
           headers['X-CSRF-Token'] = csrfToken;
@@ -1903,7 +1903,8 @@ class JarvisApp {
         this.respawnStatus[data.sessionId].cycleCount = data.cycleNumber;
       }
       if (data.sessionId === this.activeSessionId) {
-        document.getElementById('respawnCycleCount').textContent = data.cycleNumber;
+        const cycleEl = document.getElementById('respawnCycleCount');
+        if (cycleEl) cycleEl.textContent = data.cycleNumber;
       }
     });
 
@@ -2129,7 +2130,7 @@ class JarvisApp {
 
     addListener('screen:statsUpdated', (e) => {
       this.screenSessions = JSON.parse(e.data);
-      if (document.getElementById('monitorPanel').classList.contains('open')) {
+      if (document.getElementById('monitorPanel')?.classList.contains('open')) {
         this.renderScreenSessions();
       }
     });

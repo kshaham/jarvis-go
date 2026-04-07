@@ -151,7 +151,7 @@
   // Load settings from server
   function loadTelegramSettings(callback) {
     fetch('/api/settings/telegram')
-      .then(function(response) { return response.json(); })
+      .then(function(response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); })
       .then(function(data) {
         callback(data);
       })

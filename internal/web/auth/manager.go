@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -53,15 +54,16 @@ type RateLimitEntry struct {
 
 // Manager handles password authentication, session management, and rate limiting.
 type Manager struct {
-	configDir        string
-	authConfigPath   string
-	secretKeyPath    string
-	signingSecret    []byte
-	sessions         map[string]*SessionEntry
-	rateLimits       map[string]*RateLimitEntry
-	useSecureCookies bool
-	setupInProgress  bool
-	mu               sync.RWMutex
+	configDir          string
+	authConfigPath     string
+	secretKeyPath      string
+	signingSecret      []byte
+	sessions           map[string]*SessionEntry
+	rateLimits         map[string]*RateLimitEntry
+	useSecureCookies   bool
+	setupInProgress    bool
+	passwordConfigured int32 // 0=unknown, 1=yes, -1=no (atomic cache)
+	mu                 sync.RWMutex
 }
 
 // NewManager creates a new auth manager. configDir is typically ~/.jarvis.
@@ -134,16 +136,33 @@ func (m *Manager) loadOrCreateSecret() {
 }
 
 // IsPasswordConfigured returns true if a password hash exists in auth.json.
+// Result is cached to avoid disk I/O on every authenticated request.
 func (m *Manager) IsPasswordConfigured() bool {
+	cached := atomic.LoadInt32(&m.passwordConfigured)
+	if cached != 0 {
+		return cached > 0
+	}
 	data, err := os.ReadFile(m.authConfigPath)
 	if err != nil {
+		atomic.StoreInt32(&m.passwordConfigured, -1)
 		return false
 	}
 	var cfg authConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
+		atomic.StoreInt32(&m.passwordConfigured, -1)
 		return false
 	}
-	return cfg.PasswordHash != ""
+	if cfg.PasswordHash != "" {
+		atomic.StoreInt32(&m.passwordConfigured, 1)
+		return true
+	}
+	atomic.StoreInt32(&m.passwordConfigured, -1)
+	return false
+}
+
+// invalidatePasswordCache resets the cached IsPasswordConfigured result.
+func (m *Manager) invalidatePasswordCache() {
+	atomic.StoreInt32(&m.passwordConfigured, 0)
 }
 
 // ValidatePasswordInput checks that a password meets length requirements.
@@ -179,6 +198,7 @@ func (m *Manager) SetPassword(password string) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename auth config: %w", err)
 	}
+	m.invalidatePasswordCache()
 	slog.Info("Password configured")
 	return nil
 }

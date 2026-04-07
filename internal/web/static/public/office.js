@@ -194,6 +194,8 @@ class OfficeApp {
       if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
       if (this.csrfInterval) clearInterval(this.csrfInterval);
       if (this._stateRefreshInterval) clearInterval(this._stateRefreshInterval);
+      if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
+      if (this._searchDebounceTimer) clearTimeout(this._searchDebounceTimer);
     });
 
     // Handle Enter key in message input
@@ -635,8 +637,8 @@ class OfficeApp {
       console.warn(`SSE connection lost, reconnecting in ${this.sseReconnectDelay}ms...`);
       this.eventSource.close();
       if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
-      this._sseReconnectTimer = setTimeout(() => this.connectSSE(), this.sseReconnectDelay);
       this.sseReconnectDelay = Math.min(this.sseReconnectDelay * 2, this.sseMaxReconnectDelay);
+      this._sseReconnectTimer = setTimeout(() => this.connectSSE(), this.sseReconnectDelay);
     };
   }
 
@@ -3081,6 +3083,7 @@ class OfficeApp {
           if (!this.sseConnected) {
             this.updateConnectionStatus('reconnecting');
             if (this.eventSource) this.eventSource.close();
+            if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
             this.sseReconnecting = false;
             this.sseReconnectDelay = 1000;
             this.connectSSE();
