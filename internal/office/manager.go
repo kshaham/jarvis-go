@@ -238,6 +238,13 @@ func (m *Manager) GetRoster() []*AgentState {
 	return result
 }
 
+// Sessions returns the session store for direct PTY writes.
+func (m *Manager) Sessions() SessionStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sessions
+}
+
 // AgentCount returns the number of registered agents.
 func (m *Manager) AgentCount() int {
 	m.mu.RLock()

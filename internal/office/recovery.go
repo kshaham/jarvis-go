@@ -668,8 +668,8 @@ func (m *Manager) CheckForIdleAgents() {
 		if agent.ActiveTask() != nil {
 			totalWork++
 		}
-		if totalWork > 2 {
-			continue // Still has enough work queued
+		if totalWork > 1 {
+			continue // Still has work queued
 		}
 
 		// Check replenishment cooldown per agent.
@@ -797,26 +797,36 @@ func (m *Manager) sendSelfReplenishmentPrompt(agent *AgentState) {
 		missionLine = fmt.Sprintf("\nTeam Mission: %s\n", mission)
 	}
 
-	prompt := fmt.Sprintf(`[FIND MORE WORK] You've completed all assigned tasks. Great work!
-%s
-Look for more ways to contribute to the project:
-1. Review your teammates' recent commits for issues
-2. Look for TODOs, FIXMEs, or technical debt in the codebase
-3. Write tests for untested code paths
-4. Improve documentation
-5. Check for security issues or performance optimizations
-6. Refactor code that could be cleaner or more efficient
+	roleName := ""
+	if agent.Config != nil {
+		roleName = agent.Config.Role
+	}
 
-Use 'cm task self-add "<title>" "<description>"' to add tasks to your queue.
-Use 'cm message <sessionId> "<content>"' to coordinate with teammates.
-Use 'cm roster' to see your team.`, missionLine)
+	prompt := fmt.Sprintf(`[URGENT: FIND MORE WORK NOW] Your task queue is empty. You must NOT be idle.
+%s
+As a %s, scan the codebase RIGHT NOW and create tasks for yourself:
+
+1. Run 'git log --oneline -20' to see recent changes -- review for bugs or improvements
+2. Search for TODOs/FIXMEs: grep -r "TODO\|FIXME" . --include="*.go" --include="*.js" --include="*.ts"
+3. Run the test suite and fix any failures
+4. Check 'cm roster' to see what teammates are doing -- avoid overlapping work
+5. Look for code relevant to your role that could be improved
+
+CREATE TASKS NOW using these commands:
+  cm task self-add "Review recent commits for bugs" --priority high
+  cm task self-add "Write tests for untested paths" --priority medium
+  cm task self-add "Refactor and improve code quality" --priority medium
+
+Then immediately start working: cm task ack <id> && cm task start <id>
+
+DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, roleName)
 
 	m.mu.RLock()
 	sessions := m.sessions
 	m.mu.RUnlock()
 
 	if sessions != nil {
-		sessions.WriteViaScreen(agent.SessionID, prompt+"\r")
+		sessions.WriteInkPrompt(agent.SessionID, prompt)
 	}
 
 	agentName := agent.SessionID

@@ -155,6 +155,18 @@ func (a *AgentState) PendingTaskCount() int {
 	return count
 }
 
+// NextPendingTask returns the first pending/acknowledged task, or nil.
+func (a *AgentState) NextPendingTask() *Task {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.taskQueue.Tasks {
+		if t.Status == TaskPending || t.Status == TaskAcknowledged {
+			return t
+		}
+	}
+	return nil
+}
+
 // AddTask appends a task to the agent's queue under the mutex.
 func (a *AgentState) AddTask(task *Task) {
 	a.mu.Lock()
