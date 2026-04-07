@@ -451,9 +451,16 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 			broker.Broadcast("session:updated", map[string]interface{}{
 				"id": sessionID,
 				"tokens": map[string]int64{
-					"input": e.Input, "output": e.Output, "total": e.Input + e.Output,
+					"input": e.Input, "output": e.Output, "total": e.Total,
 				},
 			})
 		}
 	}
+
+	// Channel closed -- session stopped. Clean up agent state.
+	slog.Info("SDK session event forwarding ended", "sessionId", sessionID)
+	if ctx.OfficeManager.GetAgent(sessionID) != nil {
+		ctx.OfficeManager.HandleAgentDeath(sessionID)
+	}
+	ctx.cleanupSessionResources(sessionID)
 }

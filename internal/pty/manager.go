@@ -80,17 +80,24 @@ func (m *SessionManager) StopSession(_ context.Context, id string) error {
 	return nil
 }
 
-// StopAllSessions stops all sessions.
+// StopAllSessions stops all sessions (both PTY and SDK).
 func (m *SessionManager) StopAllSessions(ctx context.Context) error {
 	m.mu.RLock()
-	ids := make([]string, 0, len(m.sessions))
+	ptyIDs := make([]string, 0, len(m.sessions))
 	for id := range m.sessions {
-		ids = append(ids, id)
+		ptyIDs = append(ptyIDs, id)
+	}
+	sdkIDs := make([]string, 0, len(m.sdkSessions))
+	for id := range m.sdkSessions {
+		sdkIDs = append(sdkIDs, id)
 	}
 	m.mu.RUnlock()
 
-	for _, id := range ids {
+	for _, id := range ptyIDs {
 		_ = m.StopSession(ctx, id)
+	}
+	for _, id := range sdkIDs {
+		_ = m.StopSDKSession(id)
 	}
 	return nil
 }
@@ -179,7 +186,7 @@ func (m *SessionManager) GetAllSessions() []*Session {
 func (m *SessionManager) GetSessionCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return len(m.sessions)
+	return len(m.sessions) + len(m.sdkSessions)
 }
 
 // Events returns the aggregated event channel.

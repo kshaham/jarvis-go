@@ -35,6 +35,7 @@ type SDKSession struct {
 	lastActivityAt time.Time
 	isStopped      bool
 	sessionID      string // Claude session ID for multi-turn
+	ctx            context.Context
 
 	// Token tracking
 	totalInputTokens  int64
@@ -100,14 +101,24 @@ func (s *SDKSession) Start(ctx context.Context) error {
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s.cancelFunc = cancel
+	s.ctx = sessionCtx
 	s.status = StatusIdle
 	s.lastActivityAt = time.Now()
 	s.isStopped = false
+	prompt := s.systemPrompt // capture immutable field under lock
 	s.mu.Unlock()
 
+	// Close events channel when session context is cancelled (prevents goroutine leaks)
+	go func() {
+		<-sessionCtx.Done()
+		// Small delay for in-flight events to drain
+		time.Sleep(500 * time.Millisecond)
+		close(s.events)
+	}()
+
 	// If we have a system prompt (kickstart), run the initial query
-	if s.systemPrompt != "" {
-		go s.runQuery(sessionCtx, s.systemPrompt)
+	if prompt != "" {
+		go s.runQuery(sessionCtx, prompt)
 	}
 
 	return nil
@@ -116,10 +127,35 @@ func (s *SDKSession) Start(ctx context.Context) error {
 // runQuery executes a single Claude query using the SDK and streams events.
 func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 	s.mu.Lock()
+	if s.isStopped {
+		s.mu.Unlock()
+		return
+	}
+	if s.isWorking {
+		s.mu.Unlock()
+		slog.Warn("SDK session already busy, queuing prompt", "session", s.ID, "prompt_len", len(prompt))
+		// Wait for current query to finish, then retry
+		time.Sleep(2 * time.Second)
+		go s.runQuery(ctx, prompt)
+		return
+	}
 	s.isWorking = true
 	s.status = StatusBusy
 	s.lastActivityAt = time.Now()
 	s.mu.Unlock()
+
+	// Deferred cleanup: ensure we always transition back to idle
+	defer func() {
+		s.mu.Lock()
+		if s.isWorking {
+			s.isWorking = false
+			s.status = StatusIdle
+			s.mu.Unlock()
+			s.emitEvent(EventIdle{})
+		} else {
+			s.mu.Unlock()
+		}
+	}()
 
 	s.emitEvent(EventWorking{})
 
@@ -149,10 +185,8 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 		opts = append(opts, claude.WithSessionIDToResume(resumeID))
 	}
 
-	// Add system prompt for initial queries
-	if s.systemPrompt != "" && resumeID == "" {
-		opts = append(opts, claude.WithAppendSystemPrompt(s.systemPrompt))
-	}
+	// System prompt is passed as the user prompt on the initial query.
+	// No need for WithAppendSystemPrompt -- the kickstart IS the prompt.
 
 	slog.Info("SDK session query started", "session", s.ID, "prompt_len", len(prompt))
 
@@ -241,6 +275,7 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 				s.emitEvent(EventTokens{
 					Input:  int64(event.Result.Usage.InputTokens),
 					Output: int64(event.Result.Usage.OutputTokens),
+					Total:  int64(event.Result.Usage.InputTokens) + int64(event.Result.Usage.OutputTokens),
 				})
 				s.emitEvent(EventIdle{})
 
@@ -368,33 +403,51 @@ func (s *SDKSession) GetTotalCostUSD() float64 {
 	return s.totalCostUSD
 }
 
-// WriteToPTY is a no-op for SDK sessions. Use SendPrompt instead.
+// WriteToPTY sends a prompt via the SDK. For backward compatibility with PTY interface.
 func (s *SDKSession) WriteToPTY(input string) bool {
-	// For backward compatibility, treat as a prompt submission
-	if strings.TrimSpace(input) != "" && input != "\r" {
-		s.SendPrompt(context.Background(), strings.TrimRight(input, "\r\n"))
-		return true
+	s.mu.RLock()
+	stopped := s.isStopped
+	s.mu.RUnlock()
+	if stopped {
+		return false
 	}
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" || input == "\r" {
+		return false
+	}
+	s.SendPrompt(s.ctx, strings.TrimRight(input, "\r\n"))
 	return true
 }
 
 // WriteInkPrompt sends a prompt via the SDK. No chunking, no CR hacks needed.
 func (s *SDKSession) WriteInkPrompt(prompt string) bool {
+	s.mu.RLock()
+	stopped := s.isStopped
+	s.mu.RUnlock()
+	if stopped {
+		return false
+	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return false
 	}
-	s.SendPrompt(context.Background(), prompt)
+	s.SendPrompt(s.ctx, prompt)
 	return true
 }
 
 // WriteViaScreen sends a prompt via the SDK (Screen wrapper not used).
 func (s *SDKSession) WriteViaScreen(input string) bool {
+	s.mu.RLock()
+	stopped := s.isStopped
+	s.mu.RUnlock()
+	if stopped {
+		return false
+	}
 	input = strings.TrimRight(input, "\r\n")
 	if input == "" {
 		return false
 	}
-	s.SendPrompt(context.Background(), input)
+	s.SendPrompt(s.ctx, input)
 	return true
 }
 

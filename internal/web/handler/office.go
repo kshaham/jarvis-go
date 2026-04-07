@@ -338,6 +338,65 @@ func (ctx *Context) OfficeHealth(w http.ResponseWriter, r *http.Request) {
 // OfficeSpawnTeam spawns a team from a template.
 // Creates a Claude session for each team member, registers them with the
 // office manager, and broadcasts session:created events.
+// spawnAgentSession creates either an SDK or PTY session for a team member.
+// Returns the sessionID and mode used, or empty string on failure.
+func spawnAgentSession(ctx *Context, member templateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool) (string, string) {
+	if trySDK {
+		agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
+		kickstart := office.BuildKickstartPrompt(
+			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
+			req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
+		)
+		mcpServers := map[string]any{
+			"jarvis": map[string]any{
+				"type":    "stdio",
+				"command": "jarvis-mcp",
+				"env":     map[string]string{"JARVIS_API_URL": "http://localhost:3555"},
+			},
+		}
+		sdkSession, err := ctx.SessionManager.CreateSDKSession(
+			context.Background(),
+			pty.SessionConfig{
+				WorkingDir:   req.WorkingDir,
+				Mode:         pty.ModeClaudeSDK,
+				Name:         member.Name,
+				ProviderEnv:  envVars,
+				SystemPrompt: kickstart,
+				McpServers:   mcpServers,
+			},
+		)
+		if err != nil {
+			slog.Error("Failed to create SDK session, falling back to PTY", "name", member.Name, "error", err)
+		} else {
+			// Broadcast session:created for SDK sessions too
+			ctx.SSEBroker.Broadcast("session:created", map[string]interface{}{
+				"id": sdkSession.ID, "name": member.Name, "workingDir": req.WorkingDir,
+				"mode": "claude-sdk", "status": "idle", "createdAt": sdkSession.CreatedAt.UnixMilli(),
+			})
+			go forwardSDKSessionEvents(sdkSession, ctx)
+			return sdkSession.ID, "sdk"
+		}
+	}
+
+	// PTY fallback
+	session, err := ctx.SessionManager.CreateSession(
+		context.Background(),
+		pty.SessionConfig{
+			WorkingDir:  req.WorkingDir,
+			Mode:        pty.ModeClaude,
+			Name:        member.Name,
+			ProviderEnv: envVars,
+		},
+	)
+	if err != nil {
+		slog.Error("Failed to create PTY session", "name", member.Name, "error", err)
+		return "", ""
+	}
+	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+	go forwardSessionEvents(session, ctx)
+	return session.ID, "pty"
+}
+
 func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	var req spawnTeamRequest
 	if !decodeBody(w, r, &req) {
@@ -434,71 +493,12 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 			envVars = ctx.getProviderEnvVarsFor(provider, "", sonnetAlloc[member.ID])
 		}
 
-		var sessionID string
-
-		if useSDK {
-			// SDK mode: pass kickstart as system prompt, no PTY hacks needed
-			agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
-			kickstart := office.BuildKickstartPrompt(
-				&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
-				req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
-			)
-
-			// MCP server config for agents
-			mcpServers := map[string]any{
-				"jarvis": map[string]any{
-					"type":    "stdio",
-					"command": "jarvis-mcp",
-					"env":     map[string]string{"JARVIS_API_URL": "http://localhost:3555"},
-				},
-			}
-
-			sdkSession, err := ctx.SessionManager.CreateSDKSession(
-				context.Background(),
-				pty.SessionConfig{
-					WorkingDir:   req.WorkingDir,
-					Mode:         pty.ModeClaudeSDK,
-					Name:         member.Name,
-					ProviderEnv:  envVars,
-					SystemPrompt: kickstart,
-					McpServers:   mcpServers,
-				},
-			)
-			if err != nil {
-				slog.Error("Failed to create SDK session, falling back to PTY", "name", member.Name, "error", err)
-				// Fall through to PTY mode below
-				goto ptyFallback
-			}
-			sessionID = sdkSession.ID
-
-			go forwardSDKSessionEvents(sdkSession, ctx)
-			goto registerAgent
+		sessionID, usedMode := spawnAgentSession(ctx, member, req, envVars, teamConfigs, perpetual, useSDK)
+		if sessionID == "" {
+			errors = append(errors, fmt.Sprintf("Failed to create session for %s", member.Name))
+			continue
 		}
 
-	ptyFallback:
-		{
-			// PTY mode: traditional interactive session
-			session, err := ctx.SessionManager.CreateSession(
-				context.Background(),
-				pty.SessionConfig{
-					WorkingDir:  req.WorkingDir,
-					Mode:        pty.ModeClaude,
-					Name:        member.Name,
-					ProviderEnv: envVars,
-				},
-			)
-			if err != nil {
-				slog.Error("Failed to create session for team member", "name", member.Name, "error", err)
-				errors = append(errors, fmt.Sprintf("Failed to create session for %s: %s", member.Name, err.Error()))
-				continue
-			}
-			sessionID = session.ID
-
-			ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
-			go forwardSessionEvents(session, ctx)
-		}
-
-	registerAgent:
 		// Register agent with office manager
 		ctx.OfficeManager.RegisterAgent(sessionID, member.ID, &office.TeamMemberConfig{
 			ID:    member.ID,
@@ -508,13 +508,12 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 			Color: member.Color,
 		})
 
-		// Notify Telegram
 		if ctx.TelegramHandler != nil {
 			ctx.TelegramHandler.NotifySessionStart(sessionID, member.Name, req.WorkingDir)
 		}
 
 		spawned = append(spawned, member.Name)
-		slog.Info("Spawned team member", "name", member.Name, "sessionId", sessionID, "role", member.Role, "mode", func() string { if useSDK { return "sdk" } else { return "pty" } }())
+		slog.Info("Spawned team member", "name", member.Name, "sessionId", sessionID, "role", member.Role, "mode", usedMode)
 	}
 
 	// Mark team as spawned
@@ -640,11 +639,13 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 	// Send shutdown message to each agent and stop their sessions.
 	roster := ctx.OfficeManager.GetRoster()
 	for _, agent := range roster {
-		s, found := ctx.SessionManager.GetSession(agent.SessionID)
-		if found {
+		// Try PTY session first, then SDK session
+		if s, found := ctx.SessionManager.GetSession(agent.SessionID); found {
 			s.WriteViaScreen("SHUTDOWN: The team is shutting down. Your session will be terminated.\r")
+			_ = ctx.SessionManager.StopSession(context.Background(), agent.SessionID)
+		} else {
+			_ = ctx.SessionManager.StopSDKSession(agent.SessionID)
 		}
-		_ = ctx.SessionManager.StopSession(context.Background(), agent.SessionID)
 		ctx.cleanupSessionResources(agent.SessionID)
 		ctx.OfficeManager.UnregisterAgent(agent.SessionID)
 	}
@@ -1196,9 +1197,10 @@ This is a graceful shutdown. Take the time to finish cleanly, but do not begin a
 
 	roster := mgr.GetRoster()
 	for _, agent := range roster {
-		s, found := ctx.SessionManager.GetSession(agent.SessionID)
-		if found {
+		if s, found := ctx.SessionManager.GetSession(agent.SessionID); found {
 			s.WriteInkPrompt(wrapUpPrompt)
+		} else if sdk, found := ctx.SessionManager.GetSDKSession(agent.SessionID); found {
+			sdk.WriteInkPrompt(wrapUpPrompt)
 		}
 	}
 
