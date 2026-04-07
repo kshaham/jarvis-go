@@ -369,10 +369,38 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	// Build default provider env vars
 	defaultProviderEnv := ctx.getProviderEnvVars()
 
-	// Build per-member provider override map
+	// Check if using Z.AI -- allocate models across agents to respect rate limits.
+	settings := ctx.StateStore.GetSettings()
+	provider, _ := settings["provider"].(string)
+	isZAI := provider == "zai-glm"
+
+	// Collect requested models per member for rate-limit-aware allocation
+	memberIDs := make([]string, 0, len(members))
+	requestedModels := make(map[string]string)
+	memberProviders := make(map[string]string)
+	for _, member := range members {
+		memberIDs = append(memberIDs, member.ID)
+	}
+	for _, ov := range req.MemberOverrides {
+		requestedModels[ov.ID] = ov.Model
+		memberProviders[ov.ID] = ov.Provider
+	}
+
+	// Allocate Sonnet models across agents to distribute rate limits
+	var sonnetAlloc map[string]string
+	if isZAI {
+		sonnetAlloc = AllocateZAIModels(requestedModels, memberIDs)
+		slog.Info("Z.AI model allocation", "allocation", sonnetAlloc)
+	}
+
+	// Build per-member provider override map with allocated Sonnet models
 	overrideMap := make(map[string]map[string]string)
 	for _, ov := range req.MemberOverrides {
-		overrideMap[ov.ID] = ctx.getProviderEnvVarsFor(ov.Provider, ov.Model)
+		sonnet := ""
+		if sonnetAlloc != nil {
+			sonnet = sonnetAlloc[ov.ID]
+		}
+		overrideMap[ov.ID] = ctx.getProviderEnvVarsFor(ov.Provider, ov.Model, sonnet)
 	}
 
 	spawned := make([]string, 0, len(members))
@@ -381,10 +409,13 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Spawning office team", "template", templateUsed, "members", len(members), "workingDir", req.WorkingDir)
 
 	for _, member := range members {
-		// Use member-specific provider env if overridden, else default
+		// Use member-specific provider env if overridden, else apply default with allocated sonnet
 		envVars := defaultProviderEnv
 		if ov, hasOverride := overrideMap[member.ID]; hasOverride {
 			envVars = ov
+		} else if isZAI && sonnetAlloc != nil {
+			// No explicit override but Z.AI -- apply allocated sonnet model
+			envVars = ctx.getProviderEnvVarsFor(provider, "", sonnetAlloc[member.ID])
 		}
 
 		// Create a Claude session for each team member

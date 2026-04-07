@@ -159,9 +159,72 @@ func (ctx *Context) getProviderEnvVars() map[string]string {
 	return env
 }
 
+// Z.AI model rate limits (max concurrent requests per model).
+var zaiModelRateLimits = map[string]int{
+	"glm-5.1":     2,
+	"glm-5":       2,
+	"glm-4.7":     3,
+	"glm-4.7-flash": 5,
+	"glm-4.5-air": 5,
+}
+
+// zaiModelDowngradePath defines the fallback chain when a model's slots are full.
+var zaiModelDowngradePath = []string{"glm-5.1", "glm-5", "glm-4.7", "glm-4.7-flash", "glm-4.5-air"}
+
+// AllocateZAIModels distributes models across agents to respect rate limits.
+// For each agent, it tries to use the requested model; if that model's concurrent
+// slots are full, it cascades down to the next model version.
+// Returns a map of memberID -> allocated model (for the Sonnet/primary tier).
+func AllocateZAIModels(requestedModels map[string]string, memberIDs []string) map[string]string {
+	allocated := make(map[string]string)
+	usage := make(map[string]int) // model -> count of agents assigned
+
+	for _, id := range memberIDs {
+		requested := requestedModels[id]
+		if requested == "" {
+			requested = "glm-5.1"
+		}
+
+		// Try the requested model, then cascade down
+		assigned := false
+		startIdx := -1
+		for i, m := range zaiModelDowngradePath {
+			if m == requested {
+				startIdx = i
+				break
+			}
+		}
+		if startIdx < 0 {
+			startIdx = 0 // unknown model, start from top
+		}
+
+		for i := startIdx; i < len(zaiModelDowngradePath); i++ {
+			model := zaiModelDowngradePath[i]
+			limit := zaiModelRateLimits[model]
+			if limit == 0 {
+				limit = 3 // default
+			}
+			if usage[model] < limit {
+				allocated[id] = model
+				usage[model]++
+				assigned = true
+				break
+			}
+		}
+		if !assigned {
+			// All slots full, use the lowest model as fallback
+			allocated[id] = "glm-4.7"
+			usage["glm-4.7"]++
+		}
+	}
+
+	return allocated
+}
+
 // getProviderEnvVarsFor returns env vars for a specific provider/model combination.
 // Used for per-member overrides in office team spawning.
-func (ctx *Context) getProviderEnvVarsFor(provider, model string) map[string]string {
+// sonnetOverride allows per-agent Sonnet model assignment for rate limit distribution.
+func (ctx *Context) getProviderEnvVarsFor(provider, model, sonnetOverride string) map[string]string {
 	env := make(map[string]string)
 	settings := ctx.StateStore.GetSettings()
 
@@ -175,13 +238,15 @@ func (ctx *Context) getProviderEnvVarsFor(provider, model string) map[string]str
 	case "zai-glm":
 		if key, ok := settings["zaiApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_AUTH_TOKEN"] = key
-			// model param is the Opus-tier model (from per-member override)
 			if model == "" {
 				model = "glm-5.1"
 			}
-			sonnetModel, _ := settings["zaiSonnetModel"].(string)
+			sonnetModel := sonnetOverride
 			if sonnetModel == "" {
-				sonnetModel = "glm-4.7"
+				sonnetModel, _ = settings["zaiSonnetModel"].(string)
+				if sonnetModel == "" {
+					sonnetModel = "glm-4.7"
+				}
 			}
 			haikuModel, _ := settings["zaiHaikuModel"].(string)
 			if haikuModel == "" {
