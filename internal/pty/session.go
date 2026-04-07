@@ -3,6 +3,7 @@ package pty
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -43,7 +44,8 @@ type Session struct {
 	pid            int
 	isWorking      bool
 	lastActivityAt time.Time
-	lastPromptTime time.Time
+	lastPromptTime   time.Time
+	lastAutoResponse time.Time
 	isStopped      bool
 
 	// Token tracking
@@ -492,6 +494,11 @@ func (s *Session) processOutput(rawData string) {
 	clean := StripANSI(data)
 	s.detectWorkingState(data, clean)
 
+	// Auto-respond to Claude Code interactive selection menus.
+	// When Claude presents a numbered choice (❯ 1. ...), agents get stuck.
+	// Auto-select option 1 to keep agents moving autonomously.
+	s.detectAndAutoRespondMenu(clean)
+
 	// Track active tool invocations
 	s.trackToolInvocations(clean)
 
@@ -512,6 +519,52 @@ func (s *Session) processOutput(rawData string) {
 		})
 	}
 	s.mu.Unlock()
+}
+
+// detectAndAutoRespondMenu detects Claude Code's Ink interactive selection menus
+// and auto-selects option 1 to prevent agents from getting stuck.
+// Menus have patterns like "❯ 1. Title" with numbered options below.
+func (s *Session) detectAndAutoRespondMenu(cleanData string) {
+	// Only auto-respond in Claude mode (not shell sessions)
+	if s.Mode != ModeClaude {
+		return
+	}
+
+	// Debounce: don't auto-respond more than once per 5 seconds
+	s.mu.Lock()
+	lastAuto := s.lastAutoResponse
+	s.mu.Unlock()
+	if !lastAuto.IsZero() && time.Since(lastAuto) < 5*time.Second {
+		return
+	}
+
+	// Detect selection menu patterns:
+	// - "❯ 1." at start of a line (Ink's selection arrow)
+	// - "Pick task" or "Which" question followed by numbered items
+	// - "Type something" as an option (Claude Code's free-text fallback)
+	hasSelector := strings.Contains(cleanData, "❯") || strings.Contains(cleanData, ">")
+	hasNumbered := strings.Contains(cleanData, "1.") && strings.Contains(cleanData, "2.")
+	hasTypeSomething := strings.Contains(cleanData, "Type something")
+	hasPickTask := strings.Contains(cleanData, "Pick task") || strings.Contains(cleanData, "Which task") || strings.Contains(cleanData, "Which option")
+	hasChatAbout := strings.Contains(cleanData, "Chat about this")
+
+	if hasSelector && hasNumbered && (hasTypeSomething || hasPickTask || hasChatAbout) {
+		s.mu.Lock()
+		s.lastAutoResponse = time.Now()
+		ptyFile := s.ptyFile
+		s.mu.Unlock()
+
+		if ptyFile != nil {
+			// Send "1" + Enter to select the first option
+			go func() {
+				time.Sleep(500 * time.Millisecond) // brief delay for Ink to be ready
+				ptyFile.Write([]byte("1"))
+				time.Sleep(200 * time.Millisecond)
+				ptyFile.Write([]byte("\r"))
+				slog.Info("Auto-selected menu option 1", "session", s.ID)
+			}()
+		}
+	}
 }
 
 func (s *Session) detectWorkingState(rawData, cleanData string) {
