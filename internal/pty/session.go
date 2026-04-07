@@ -310,14 +310,20 @@ func (s *Session) WriteInkPrompt(prompt string) bool {
 		}
 	}
 
-	// Delay before sending Enter so Ink finishes processing all text.
-	time.Sleep(2 * time.Second)
-	// Send carriage return (Ink's onSubmit trigger).
-	// Send twice with delay as reliability measure -- if first CR arrives
-	// while Ink is still processing, the second one catches it.
-	s.WriteToPTY("\r")
-	time.Sleep(1 * time.Second)
-	s.WriteToPTY("\r")
+	// Delay before sending Enter so Ink finishes processing all pasted text.
+	// Longer prompts need more time -- scale delay by prompt length.
+	baseDelay := 2 * time.Second
+	if len(prompt) > 2000 {
+		baseDelay = 3 * time.Second
+	}
+	time.Sleep(baseDelay)
+
+	// Send CR multiple times with delays as reliability measure.
+	// Ink sometimes doesn't respond to the first CR if it's still processing.
+	for attempt := 0; attempt < 3; attempt++ {
+		s.WriteToPTY("\r")
+		time.Sleep(800 * time.Millisecond)
+	}
 	return true
 }
 
@@ -498,6 +504,26 @@ func (s *Session) processOutput(rawData string) {
 	// When Claude presents a numbered choice (❯ 1. ...), agents get stuck.
 	// Auto-select option 1 to keep agents moving autonomously.
 	s.detectAndAutoRespondMenu(clean)
+
+	// Detect unsent pasted text at the prompt and send CR to submit it.
+	if s.Mode == ModeClaude && strings.Contains(clean, "[Pasted text") {
+		s.mu.Lock()
+		lastAuto := s.lastAutoResponse
+		s.mu.Unlock()
+		if lastAuto.IsZero() || time.Since(lastAuto) > 3*time.Second {
+			s.mu.Lock()
+			s.lastAutoResponse = time.Now()
+			ptyFile := s.ptyFile
+			s.mu.Unlock()
+			if ptyFile != nil {
+				go func() {
+					time.Sleep(1 * time.Second)
+					ptyFile.Write([]byte("\r"))
+					slog.Info("Auto-submitted pasted text", "session", s.ID)
+				}()
+			}
+		}
+	}
 
 	// Track active tool invocations
 	s.trackToolInvocations(clean)
