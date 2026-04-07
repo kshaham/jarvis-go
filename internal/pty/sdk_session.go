@@ -79,6 +79,7 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		Mode:           ModeClaudeSDK,
 		name:           config.Name,
 		status:         StatusStopped,
+		ctx:            context.Background(), // default until Start() sets it
 		terminalBuffer: NewBufferAccumulator(MaxTerminalBufferSize, TrimTerminalTo),
 		textOutput:     NewBufferAccumulator(MaxTextOutputSize, TrimTextTo),
 		events:         make(chan SessionEvent, eventChannelSize),
@@ -133,11 +134,8 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 	}
 	if s.isWorking {
 		s.mu.Unlock()
-		slog.Warn("SDK session already busy, queuing prompt", "session", s.ID, "prompt_len", len(prompt))
-		// Wait for current query to finish, then retry
-		time.Sleep(2 * time.Second)
-		go s.runQuery(ctx, prompt)
-		return
+		slog.Warn("SDK session already busy, prompt will be sent when current query completes", "session", s.ID)
+		return // Drop the prompt rather than creating unbounded retry goroutines
 	}
 	s.isWorking = true
 	s.status = StatusBusy
@@ -194,12 +192,7 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 	if err != nil {
 		slog.Error("SDK session query failed", "session", s.ID, "error", err)
 		s.appendOutput(fmt.Sprintf("[SDK Error] %v\n", err))
-		s.mu.Lock()
-		s.isWorking = false
-		s.status = StatusIdle
-		s.mu.Unlock()
-		s.emitEvent(EventIdle{})
-		return
+		return // deferred cleanup handles idle transition
 	}
 
 	// Process streaming events
@@ -288,6 +281,7 @@ func (s *SDKSession) runQuery(ctx context.Context, prompt string) {
 						"tokens_in", event.Result.Usage.InputTokens,
 						"tokens_out", event.Result.Usage.OutputTokens)
 				}
+				return // Result is the terminal event -- stop processing
 			}
 		}
 	}
@@ -407,6 +401,7 @@ func (s *SDKSession) GetTotalCostUSD() float64 {
 func (s *SDKSession) WriteToPTY(input string) bool {
 	s.mu.RLock()
 	stopped := s.isStopped
+	ctx := s.ctx
 	s.mu.RUnlock()
 	if stopped {
 		return false
@@ -415,7 +410,7 @@ func (s *SDKSession) WriteToPTY(input string) bool {
 	if trimmed == "" || input == "\r" {
 		return false
 	}
-	s.SendPrompt(s.ctx, strings.TrimRight(input, "\r\n"))
+	s.SendPrompt(ctx, strings.TrimRight(input, "\r\n"))
 	return true
 }
 
@@ -423,6 +418,7 @@ func (s *SDKSession) WriteToPTY(input string) bool {
 func (s *SDKSession) WriteInkPrompt(prompt string) bool {
 	s.mu.RLock()
 	stopped := s.isStopped
+	ctx := s.ctx
 	s.mu.RUnlock()
 	if stopped {
 		return false
@@ -431,7 +427,7 @@ func (s *SDKSession) WriteInkPrompt(prompt string) bool {
 	if prompt == "" {
 		return false
 	}
-	s.SendPrompt(s.ctx, prompt)
+	s.SendPrompt(ctx, prompt)
 	return true
 }
 
@@ -439,6 +435,7 @@ func (s *SDKSession) WriteInkPrompt(prompt string) bool {
 func (s *SDKSession) WriteViaScreen(input string) bool {
 	s.mu.RLock()
 	stopped := s.isStopped
+	ctx := s.ctx
 	s.mu.RUnlock()
 	if stopped {
 		return false
@@ -447,7 +444,7 @@ func (s *SDKSession) WriteViaScreen(input string) bool {
 	if input == "" {
 		return false
 	}
-	s.SendPrompt(s.ctx, input)
+	s.SendPrompt(ctx, input)
 	return true
 }
 
