@@ -5,8 +5,9 @@ import "time"
 type SessionMode string
 
 const (
-	ModeClaude SessionMode = "claude"
-	ModeShell  SessionMode = "shell"
+	ModeClaude    SessionMode = "claude"
+	ModeClaudeSDK SessionMode = "claude-sdk"
+	ModeShell     SessionMode = "shell"
 )
 
 type SessionStatus string
@@ -27,7 +28,12 @@ type SessionConfig struct {
 	ScreenManager ScreenManagerInterface
 	NiceConfig    NiceConfig
 	ProviderEnv   map[string]string
+
+	// SDK mode fields (only used when Mode == ModeClaudeSDK)
+	SystemPrompt string            // Initial system prompt (kickstart)
+	McpServers   map[string]any    // MCP server configurations
 }
+
 
 type NiceConfig struct {
 	Enabled  bool

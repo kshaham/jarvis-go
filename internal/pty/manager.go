@@ -8,10 +8,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// SessionManager coordinates multiple Session instances.
+// SessionManager coordinates multiple Session instances (both PTY and SDK).
 type SessionManager struct {
 	mu          sync.RWMutex
 	sessions    map[string]*Session
+	sdkSessions map[string]*SDKSession
 	createMu    sync.Mutex
 	maxSessions int
 	events      chan SessionEvent
@@ -21,6 +22,7 @@ type SessionManager struct {
 func NewSessionManager(maxSessions int) *SessionManager {
 	return &SessionManager{
 		sessions:    make(map[string]*Session),
+		sdkSessions: make(map[string]*SDKSession),
 		maxSessions: maxSessions,
 		events:      make(chan SessionEvent, eventChannelSize),
 	}
@@ -32,7 +34,7 @@ func (m *SessionManager) CreateSession(ctx context.Context, config SessionConfig
 	defer m.createMu.Unlock()
 
 	m.mu.RLock()
-	count := len(m.sessions)
+	count := len(m.sessions) + len(m.sdkSessions)
 	m.mu.RUnlock()
 
 	if count >= m.maxSessions {
@@ -90,6 +92,58 @@ func (m *SessionManager) StopAllSessions(ctx context.Context) error {
 	for _, id := range ids {
 		_ = m.StopSession(ctx, id)
 	}
+	return nil
+}
+
+// CreateSDKSession creates and starts a new SDK-based session (no PTY).
+func (m *SessionManager) CreateSDKSession(ctx context.Context, config SessionConfig) (*SDKSession, error) {
+	m.createMu.Lock()
+	defer m.createMu.Unlock()
+
+	m.mu.RLock()
+	count := len(m.sessions) + len(m.sdkSessions)
+	m.mu.RUnlock()
+
+	if count >= m.maxSessions {
+		return nil, fmt.Errorf("max sessions reached (%d)", m.maxSessions)
+	}
+
+	if config.ID == "" {
+		config.ID = uuid.New().String()
+	}
+
+	session := NewSDKSession(config)
+	if err := session.Start(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start SDK session: %w", err)
+	}
+
+	m.mu.Lock()
+	m.sdkSessions[session.ID] = session
+	m.mu.Unlock()
+
+	return session, nil
+}
+
+// GetSDKSession returns an SDK session by ID.
+func (m *SessionManager) GetSDKSession(id string) (*SDKSession, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.sdkSessions[id]
+	return s, ok
+}
+
+// StopSDKSession stops and removes an SDK session.
+func (m *SessionManager) StopSDKSession(id string) error {
+	m.mu.RLock()
+	session, ok := m.sdkSessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("SDK session not found: %s", id)
+	}
+	session.Stop()
+	m.mu.Lock()
+	delete(m.sdkSessions, id)
+	m.mu.Unlock()
 	return nil
 }
 
