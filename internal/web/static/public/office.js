@@ -2252,10 +2252,12 @@ class OfficeApp {
 
     try {
       const mission = document.getElementById('spawnMission')?.value?.trim() || '';
+      const perpetualMode = document.getElementById('spawnPerpetualMode')?.checked ?? true;
       const data = await this.postJson('/api/office/spawn-team', {
         workingDir,
         mission,
         memberOverrides,
+        perpetualMode,
         templateId: this._selectedTemplateId || undefined,
         telegramEnabled,
         telegramIntervalMin,

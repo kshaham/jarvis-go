@@ -657,6 +657,9 @@ func (m *Manager) CheckForIdleAgents() {
 	if m.IsWrappingUp() {
 		return // Don't assign new work during wrap-up
 	}
+	if !m.IsPerpetualMode() {
+		return // Goal mode: don't force-replenish, agents stop when tasks are done
+	}
 	roster := m.GetRoster()
 	for _, agent := range roster {
 		if agent.Config == nil {

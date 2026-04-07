@@ -486,6 +486,14 @@
         </div>
 
         <div class="spawn-config-section">
+          <label class="spawn-config-label" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+            <input type="checkbox" id="spawnPerpetualMode" checked style="width:16px;height:16px;accent-color:#3b82f6">
+            <span>Perpetual Improvement Mode</span>
+          </label>
+          <p class="settings-hint" style="margin-top:4px">ON: Agents continuously find new work, write tests, refactor, and improve beyond the goal. OFF: Agents complete assigned tasks then stop.</p>
+        </div>
+
+        <div class="spawn-config-section">
           <label class="spawn-config-label">Default Provider/Model for All</label>
           <div class="spawn-config-row">
             <select class="spawn-config-select" id="spawnDefaultProvider" onchange="office.updateSpawnDefaults()"></select>

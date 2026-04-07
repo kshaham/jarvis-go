@@ -9,7 +9,7 @@ import (
 // session. This is injected after session creation to establish the personality
 // and role. It follows the proven pattern from ai-dev-team's buildSystemPrompt()
 // with multiple sections for deep role immersion.
-func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string) string {
+func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string, perpetualMode bool) string {
 	var b strings.Builder
 
 	// Header
@@ -179,6 +179,8 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("- When you restart, review the project state and continue where you left off\n")
 	b.WriteString("- Use the first standup after restart to sync with teammates\n\n")
 
+	// Work mode: perpetual improvement vs goal-focused
+	if perpetualMode {
 	// RALPH Continuous Improvement Loop
 	b.WriteString("## RALPH Continuous Improvement Loop (MANDATORY)\n\n")
 	b.WriteString("You operate in a perpetual RALPH loop. You must NEVER be idle.\n\n")
@@ -203,10 +205,23 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("- If you see a teammate already working on something similar, pick a DIFFERENT task\n")
 	b.WriteString("- Coordinate via `cm message` if you're unsure about task ownership\n\n")
 	b.WriteString("NEVER wait for instructions. NEVER sit idle. Create your own work.\n\n")
+	} else {
+	// Goal-Focused Mode
+	b.WriteString("## Work Mode: Goal-Focused\n\n")
+	b.WriteString("Complete your assigned tasks thoroughly and to the highest quality.\n")
+	b.WriteString("When all tasks are done:\n")
+	b.WriteString("1. Run `cm task list` to verify all tasks are completed\n")
+	b.WriteString("2. Review your work for quality -- run tests, check for bugs\n")
+	b.WriteString("3. Commit all changes with clear, descriptive commit messages\n")
+	b.WriteString("4. Report completion and wait for new assignments from standup or leader\n")
+	b.WriteString("5. Check `git log --oneline -10` and `cm roster` to avoid conflicting with teammates\n\n")
+	b.WriteString("Do NOT create new tasks beyond the assigned mission scope.\n")
+	b.WriteString("Focus on quality and completeness over quantity.\n\n")
+	}
 
 	// Core Directives
 	b.WriteString("## Core Directives\n")
-	b.WriteString("- NEVER be idle -- always find or create work (see RALPH loop above)\n")
+	b.WriteString("- Work autonomously and proactively\n")
 	b.WriteString("- Work autonomously and proactively\n")
 	b.WriteString("- Collaborate effectively with teammates\n")
 	b.WriteString("- Learn from every interaction\n")

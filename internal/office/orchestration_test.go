@@ -334,7 +334,7 @@ func TestBuildKickstartPrompt_ContainsSections(t *testing.T) {
 		{ID: "sage", Name: "Sage", Role: "Senior Architect"},
 	}
 
-	prompt := BuildKickstartPrompt(config, "/home/project", teammates, "", "")
+	prompt := BuildKickstartPrompt(config, "/home/project", teammates, "", "", true)
 
 	// Check key sections exist.
 	sections := []string{
@@ -377,7 +377,7 @@ func TestBuildKickstartPrompt_StrategicTierIncludesLeaderSection(t *testing.T) {
 		SystemPrompt: "Lead the team.",
 	}
 
-	prompt := BuildKickstartPrompt(config, "/project", nil, "", "")
+	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true)
 
 	if !strings.Contains(prompt, "## Leader Task Assignment Protocol") {
 		t.Error("expected strategic tier to include Leader Task Assignment Protocol")
@@ -395,7 +395,7 @@ func TestBuildKickstartPrompt_WorkerTierExcludesLeaderSection(t *testing.T) {
 		SystemPrompt: "Build UIs.",
 	}
 
-	prompt := BuildKickstartPrompt(config, "/project", nil, "", "")
+	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true)
 
 	if strings.Contains(prompt, "## Leader Task Assignment Protocol") {
 		t.Error("expected worker tier to NOT include Leader Task Assignment Protocol")
@@ -413,7 +413,7 @@ func TestBuildKickstartPrompt_ExcludesSelfFromTeammates(t *testing.T) {
 		{ID: "bolt", Name: "Bolt", Role: "Backend"},
 	}
 
-	prompt := BuildKickstartPrompt(config, "/project", teammates, "", "")
+	prompt := BuildKickstartPrompt(config, "/project", teammates, "", "", true)
 
 	// Should mention Bolt but not list Vex as a teammate.
 	if !strings.Contains(prompt, "Bolt (Backend)") {

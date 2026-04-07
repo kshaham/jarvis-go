@@ -43,6 +43,7 @@ type spawnTeamRequest struct {
 	TemplateID          string           `json:"templateId"`
 	Mission             string           `json:"mission"`
 	MemberOverrides     []memberOverride `json:"memberOverrides"`
+	PerpetualMode       *bool            `json:"perpetualMode"` // nil = default true
 	TelegramEnabled     bool             `json:"telegramEnabled"`
 	TelegramIntervalMin int              `json:"telegramIntervalMin"`
 }
@@ -434,6 +435,13 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 		ctx.OfficeManager.SetTeamMission(req.Mission)
 	}
 
+	// Set perpetual mode (default: true)
+	perpetual := true
+	if req.PerpetualMode != nil {
+		perpetual = *req.PerpetualMode
+	}
+	ctx.OfficeManager.SetPerpetualMode(perpetual)
+
 	// Build teammate list for kickstart context
 	teamConfigs := make([]*office.TeamMemberConfig, 0, len(members))
 	for _, m := range members {
@@ -449,7 +457,7 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	for _, agent := range roster {
 		go func(a *office.AgentState) {
 			agentMemory := office.LoadAgentMemory(a.ConfigID, req.WorkingDir)
-			prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory)
+			prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual)
 			if prompt == "" {
 				return
 			}

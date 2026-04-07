@@ -36,6 +36,7 @@ type Manager struct {
 
 	teamSpawned        bool
 	wrappingUp         bool
+	perpetualMode      bool
 	teamSpawnedAt      time.Time
 	wrapUpStartedAt    time.Time
 	autoStandupEnabled bool
@@ -455,6 +456,20 @@ func (m *Manager) SetWrappingUp(v bool) {
 	}
 }
 
+// SetPerpetualMode sets whether agents should continuously find new work.
+func (m *Manager) SetPerpetualMode(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.perpetualMode = v
+}
+
+// IsPerpetualMode returns whether agents are in continuous improvement mode.
+func (m *Manager) IsPerpetualMode() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.perpetualMode
+}
+
 // GetStandup returns the current standup state.
 func (m *Manager) GetStandup() *StandupState {
 	m.mu.RLock()
@@ -829,6 +844,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	}
 	teamSpawned := m.teamSpawned
 	wrappingUp := m.wrappingUp
+	perpetualMode := m.perpetualMode
 	m.mu.RUnlock()
 
 	roster := m.GetRoster()
@@ -883,6 +899,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"meetings":          meetings,
 		"fileLocks":         locks,
 		"teamSpawned":       teamSpawned,
+		"perpetualMode":     perpetualMode,
 		"whiteboardNotes":   whiteboardNotes,
 		"bugTasks":          bugTasks,
 		"taskQueues":        taskQueues,
