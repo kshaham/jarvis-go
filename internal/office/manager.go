@@ -63,13 +63,13 @@ type Manager struct {
 
 // OfficeMessage represents a team message.
 type OfficeMessage struct {
-	ID        string    `json:"id"`
-	From      string    `json:"from"`
-	To        string    `json:"to,omitempty"`
-	FromName  string    `json:"fromName,omitempty"`
-	ToName    string    `json:"toName,omitempty"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	ID            string    `json:"id"`
+	From          string    `json:"fromSessionId"`
+	To            string    `json:"toSessionId,omitempty"`
+	FromName      string    `json:"fromName,omitempty"`
+	ToName        string    `json:"toName,omitempty"`
+	Content       string    `json:"content"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 // Meeting represents a brainstorm or ad-hoc meeting.

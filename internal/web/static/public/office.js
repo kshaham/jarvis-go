@@ -370,7 +370,25 @@ class OfficeApp {
       const res = await fetch('/api/office/status');
       const data = await res.json();
       if (data.success !== false) {
+        // Preserve standup transcript and messages across state refreshes
+        const prevTranscript = this.state.standupTranscript;
+        const prevMessages = this.state.recentMessages;
         this.state = data;
+        // Restore transcript if server sent empty but we had a local copy
+        if ((!data.standupTranscript || data.standupTranscript.length === 0) && prevTranscript && prevTranscript.length > 0) {
+          this.state.standupTranscript = prevTranscript;
+        }
+        // Merge messages: keep local messages not in server response
+        if (prevMessages && prevMessages.length > 0) {
+          const serverMsgIds = new Set((data.recentMessages || []).map(m => m.id));
+          const merged = [...(data.recentMessages || [])];
+          for (const m of prevMessages) {
+            if (m.id && !serverMsgIds.has(m.id)) {
+              merged.push(m);
+            }
+          }
+          this.state.recentMessages = merged.slice(-50);
+        }
         if (data.bugTasks) this.bugTasks = data.bugTasks;
         if (data.taskQueues) this.taskQueues = data.taskQueues;
         this.updateWrapUpButton(data.wrapUp && data.wrapUp.active);
