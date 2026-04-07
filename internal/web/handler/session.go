@@ -65,6 +65,19 @@ func (ctx *Context) ListSessions(w http.ResponseWriter, r *http.Request) {
 	for _, s := range sessions {
 		result = append(result, sessionToJSON(s))
 	}
+	// Include SDK sessions
+	ctx.SessionManager.ForEachSDKSession(func(id string, sdk *pty.SDKSession) {
+		result = append(result, sessionJSON{
+			ID:         sdk.ID,
+			Name:       sdk.GetName(),
+			Status:     string(sdk.GetStatus()),
+			Mode:       string(sdk.Mode),
+			WorkingDir: sdk.WorkingDir,
+			PID:        0,
+			CreatedAt:  sdk.CreatedAt.Format(time.RFC3339),
+			IsWorking:  sdk.IsWorking(),
+		})
+	})
 	request.WriteJSON(w, http.StatusOK, result)
 }
 

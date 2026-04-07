@@ -148,6 +148,16 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 				"tokens": map[string]int64{"input": input, "output": output, "total": total},
 			})
 		}
+		// Include SDK sessions in the session list
+		sessionManager.ForEachSDKSession(func(id string, sdk *pty.SDKSession) {
+			sessionList = append(sessionList, map[string]interface{}{
+				"id": sdk.ID, "name": sdk.GetName(), "status": string(sdk.GetStatus()),
+				"mode": string(sdk.Mode), "workingDir": sdk.WorkingDir,
+				"pid": 0, "createdAt": sdk.CreatedAt,
+				"isWorking": sdk.IsWorking(),
+				"tokens": map[string]int64{"input": 0, "output": 0, "total": 0},
+			})
+		})
 
 		// Collect respawn status from handler context (nil-safe)
 		respawnStatus := make(map[string]interface{})
