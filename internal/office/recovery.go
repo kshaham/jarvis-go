@@ -57,12 +57,20 @@ func (m *Manager) StartIdleMonitoring() {
 		return
 	}
 	m.idleTicker = time.NewTicker(m.config.IdleCheckInterval)
+	m.monitorDone = make(chan struct{})
 	ticker := m.idleTicker
+	done := m.monitorDone
 	m.mu.Unlock()
 
 	go func() {
 		tickCount := 0
-		for range ticker.C {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+
 			tickCount++
 
 			// Recover from panics in any monitoring function so the ticker
@@ -114,6 +122,10 @@ func (m *Manager) StartIdleMonitoring() {
 // StopIdleMonitoring stops the idle monitoring goroutine and auto-standup timer.
 func (m *Manager) StopIdleMonitoring() {
 	m.mu.Lock()
+	if m.monitorDone != nil {
+		close(m.monitorDone)
+		m.monitorDone = nil
+	}
 	if m.idleTicker != nil {
 		m.idleTicker.Stop()
 		m.idleTicker = nil
@@ -138,11 +150,18 @@ func (m *Manager) startAutoStandup() {
 	}
 
 	m.standupTimer = time.NewTicker(m.config.AutoStandupInterval)
+	m.standupDone = make(chan struct{})
 	ticker := m.standupTimer
+	done := m.standupDone
 	m.mu.Unlock()
 
 	go func() {
-		for range ticker.C {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
 			m.mu.RLock()
 			enabled := m.autoStandupEnabled
 			standupActive := m.standup != nil && m.standup.Active
@@ -184,6 +203,10 @@ func (m *Manager) startAutoStandup() {
 // stopAutoStandup stops the auto-standup timer.
 func (m *Manager) stopAutoStandup() {
 	m.mu.Lock()
+	if m.standupDone != nil {
+		close(m.standupDone)
+		m.standupDone = nil
+	}
 	if m.standupTimer != nil {
 		m.standupTimer.Stop()
 		m.standupTimer = nil
@@ -612,6 +635,9 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 		sessions.WriteViaScreen(sessionID, "\x03")
 		go func() {
 			time.Sleep(3 * time.Second)
+			if sessions == nil || !sessions.IsSessionAlive(sessionID) {
+				return
+			}
 			recoveryPrompt := strings.Join([]string{
 				"[RECOVERY] You appear to be stuck. Please resume your current task.",
 				"If you were waiting for input, check your task list:",
@@ -626,6 +652,9 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 		sessions.WriteViaScreen(sessionID, "\x03")
 		go func() {
 			time.Sleep(3 * time.Second)
+			if sessions == nil || !sessions.IsSessionAlive(sessionID) {
+				return
+			}
 			diagnosticPrompt := strings.Join([]string{
 				"[DIAGNOSTIC] Recovery check - please report your current status.",
 				"1. What were you last working on?",

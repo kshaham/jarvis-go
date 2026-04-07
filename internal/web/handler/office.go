@@ -650,13 +650,15 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 	ctx.OfficeManager.StopIdleMonitoring()
 
 	// Send shutdown message to each agent and stop their sessions.
+	shutdownMsg := "SHUTDOWN: The team is shutting down. Your session will be terminated."
 	roster := ctx.OfficeManager.GetRoster()
 	for _, agent := range roster {
 		// Try PTY session first, then SDK session
 		if s, found := ctx.SessionManager.GetSession(agent.SessionID); found {
-			s.WriteViaScreen("SHUTDOWN: The team is shutting down. Your session will be terminated.\r")
+			s.WriteViaScreen(shutdownMsg + "\r")
 			_ = ctx.SessionManager.StopSession(context.Background(), agent.SessionID)
-		} else {
+		} else if sdk, found := ctx.SessionManager.GetSDKSession(agent.SessionID); found {
+			sdk.WriteInkPrompt(shutdownMsg)
 			_ = ctx.SessionManager.StopSDKSession(agent.SessionID)
 		}
 		ctx.cleanupSessionResources(agent.SessionID)
@@ -1600,6 +1602,9 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 		ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 		})
+		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+		}
 	}
 	ok(w, nil)
 }

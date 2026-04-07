@@ -444,7 +444,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"id": sessionID, "status": "idle", "isWorking": false,
 			})
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				agent.SDKWorking = false
+				agent.SetSDKWorking(false)
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}
@@ -455,7 +455,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"id": sessionID, "status": "busy", "isWorking": true,
 			})
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				agent.SDKWorking = true
+				agent.SetSDKWorking(true)
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}
@@ -469,6 +469,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 			})
 		case pty.EventExit:
 			broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
+			broker.Broadcast("session:exit", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
 			broker.Broadcast("session:updated", map[string]interface{}{"id": sessionID, "status": "stopped", "isWorking": false})
 			if ctx.OfficeManager.GetAgent(sessionID) != nil {
 				ctx.OfficeManager.HandleAgentDeath(sessionID)

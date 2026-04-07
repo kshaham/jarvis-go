@@ -37,6 +37,7 @@ type Task struct {
 	Status             TaskStatus `json:"status"`
 	Priority           string     `json:"priority"` // "high", "medium", "low"
 	AssignedAt         time.Time  `json:"assignedAt"`
+	StartedAt          time.Time  `json:"startedAt,omitempty"`
 	CompletedAt        time.Time  `json:"completedAt,omitempty"`
 	Source             string     `json:"source"` // "leader", "self", "bug"
 	BlockedBy          []string   `json:"blockedBy,omitempty"`
@@ -193,6 +194,13 @@ func (a *AgentState) UpdateTaskStatus(taskID string, status TaskStatus) bool {
 	for _, t := range a.taskQueue.Tasks {
 		if t.ID == taskID {
 			t.Status = status
+			now := time.Now()
+			if status == TaskInProgress && t.StartedAt.IsZero() {
+				t.StartedAt = now
+			}
+			if status == TaskCompleted || status == TaskFailed {
+				t.CompletedAt = now
+			}
 			return true
 		}
 	}
@@ -211,6 +219,13 @@ func (a *AgentState) SetTaskProgress(taskID string, progress string) bool {
 		}
 	}
 	return false
+}
+
+// SetSDKWorking sets the SDK working flag under the mutex.
+func (a *AgentState) SetSDKWorking(working bool) {
+	a.mu.Lock()
+	a.SDKWorking = working
+	a.mu.Unlock()
 }
 
 // RemoveTask removes a task by ID and returns it, or nil if not found.

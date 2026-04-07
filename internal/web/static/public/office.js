@@ -1686,7 +1686,7 @@ class OfficeApp {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRF-Token': this.csrfToken,
+          'X-CSRF-Token': this.csrfToken || '',
         },
         body: JSON.stringify({ input: prompt }),
       });
@@ -1797,7 +1797,7 @@ class OfficeApp {
     let currentFile = null;
 
     for (const line of lines) {
-      if (line.startsWith('diff --git') || line.startsWith('--- ') && line.length > 4) {
+      if (line.startsWith('diff --git')) {
         // Start new file section
         if (line.startsWith('diff --git')) {
           if (currentFile) files.push(currentFile);

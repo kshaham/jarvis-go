@@ -229,5 +229,8 @@ func (s *AppState) flushLocked() {
 		slog.Error("Failed to write state", "error", err)
 		return
 	}
-	os.Rename(tmp, s.filePath)
+	if err := os.Rename(tmp, s.filePath); err != nil {
+		slog.Error("Failed to rename state file", "error", err)
+		os.Remove(tmp) // clean up temp file
+	}
 }

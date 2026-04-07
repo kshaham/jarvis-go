@@ -47,7 +47,9 @@ type Manager struct {
 	triageAttempts     map[string]int // taskID -> triage attempt count
 
 	idleTicker   *time.Ticker
+	monitorDone  chan struct{}
 	standupTimer *time.Ticker
+	standupDone  chan struct{}
 
 	events chan OfficeEvent
 

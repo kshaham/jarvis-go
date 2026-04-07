@@ -241,6 +241,7 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 
 		// Persist to disk.
 		m.persistStandup(standupID, participants, transcript, standupStartedAt)
+		m.metrics.TotalStandupsComplete.Add(1)
 
 		// Trigger leader task assignment by notifying strategic-tier agents.
 		m.triggerLeaderTaskAssignment(standupID, participants, transcript)
@@ -469,11 +470,9 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 			`Respond using: cm leader-tasks respond "TASKS_FOR:agentId\n- [HIGH] title | description\n..."`,
 		}, "\n")
 
-		// Initialize leader task channel for response collection.
+		// Reset leader task channel for this standup round.
 		agent.mu.Lock()
-		if agent.LeaderTaskCh == nil {
-			agent.LeaderTaskCh = make(chan string, 1)
-		}
+		agent.LeaderTaskCh = make(chan string, 1)
 		ch := agent.LeaderTaskCh
 		agent.mu.Unlock()
 

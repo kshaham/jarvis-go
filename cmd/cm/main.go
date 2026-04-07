@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -228,7 +229,7 @@ func handleTask(args []string) {
 		fmt.Printf("Task %s marked as blocked.\n", subargs[0])
 
 	case "list":
-		result := get(fmt.Sprintf("/api/office/agent/tasks?sessionId=%s", sessionID))
+		result := get(fmt.Sprintf("/api/office/agent/tasks?sessionId=%s", url.QueryEscape(sessionID)))
 		printJSON(result)
 
 	case "self-add":
@@ -264,7 +265,7 @@ func handleSkill(args []string) {
 		printJSON(get("/api/office/agent/skills"))
 	case "read":
 		requireArgs(args[1:], 1, "cm skill read <name>")
-		printJSON(get(fmt.Sprintf("/api/office/agent/skills/%s", args[1])))
+		printJSON(get(fmt.Sprintf("/api/office/agent/skills/%s", url.PathEscape(args[1]))))
 	case "create":
 		requireArgs(args[1:], 2, "cm skill create <name> <content>")
 		post("/api/office/agent/skill-create", map[string]interface{}{
@@ -273,7 +274,7 @@ func handleSkill(args []string) {
 		fmt.Printf("Skill %q created.\n", args[1])
 	case "search":
 		requireArgs(args[1:], 1, "cm skill search <query>")
-		printJSON(get(fmt.Sprintf("/api/office/agent/skills/search?q=%s", args[1])))
+		printJSON(get(fmt.Sprintf("/api/office/agent/skills/search?q=%s", url.QueryEscape(args[1]))))
 	default:
 		fatal("Unknown skill subcommand: " + args[0])
 	}
@@ -285,7 +286,7 @@ func handleMemory(args []string) {
 	}
 	switch args[0] {
 	case "read":
-		printJSON(get(fmt.Sprintf("/api/office/agent/memory?sessionId=%s", sessionID)))
+		printJSON(get(fmt.Sprintf("/api/office/agent/memory?sessionId=%s", url.QueryEscape(sessionID))))
 	case "write":
 		requireArgs(args[1:], 1, "cm memory write <content>")
 		post("/api/office/agent/memory", map[string]interface{}{

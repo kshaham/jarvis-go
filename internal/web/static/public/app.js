@@ -2566,7 +2566,7 @@ class JarvisApp {
     addListener('plan:telegram-approved', (e) => {
       const data = JSON.parse(e.data);
       console.log('[Plan Telegram Approved]', data);
-      this.toast('Plan approved via Telegram', 'success');
+      this.showToast('Plan approved via Telegram', 'success');
       // Auto-start the plan if wizard is open and ready
       const startBtn = document.querySelector('.ralph-wizard .btn-primary[onclick*="startRalphLoop"]');
       if (startBtn && !startBtn.disabled) {
@@ -2578,7 +2578,7 @@ class JarvisApp {
     addListener('plan:telegram-declined', (e) => {
       const data = JSON.parse(e.data);
       console.log('[Plan Telegram Declined]', data);
-      this.toast('Plan declined via Telegram', 'warning');
+      this.showToast('Plan declined via Telegram', 'warning');
     });
   }
 
@@ -13878,9 +13878,9 @@ class JarvisApp {
           this.renderScreenSessions();
           this.terminal.clear();
           this.terminal.reset();
-          this.toast(`All sessions and screens killed (${data.data?.killed ?? 0})`, 'success');
+          this.showToast(`All sessions and screens killed (${data.data?.killed ?? 0})`, 'success');
         } else {
-          this.toast('Failed to kill sessions: ' + (data.error || res.statusText), 'error');
+          this.showToast('Failed to kill sessions: ' + (data.error || res.statusText), 'error');
         }
       } else {
         // Just remove tabs, keep screens running
@@ -13889,11 +13889,11 @@ class JarvisApp {
         this.renderSessionTabs();
         this.terminal.clear();
         this.terminal.reset();
-        this.toast('All tabs removed, screens still running', 'info');
+        this.showToast('All tabs removed, screens still running', 'info');
       }
     } catch (err) {
       console.error('Failed to kill sessions:', err);
-      this.toast('Failed to kill sessions: ' + err.message, 'error');
+      this.showToast('Failed to kill sessions: ' + err.message, 'error');
     }
   }
 
