@@ -347,20 +347,33 @@ func spawnAgentSession(ctx *Context, member templateMember, req spawnTeamRequest
 			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
 			req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
 		)
+		// Pre-generate session ID so we can inject it into MCP env and subprocess env.
+		sessionID := uuid.New().String()
 		mcpServers := map[string]any{
 			"jarvis": map[string]any{
 				"type":    "stdio",
 				"command": "jarvis-mcp",
-				"env":     map[string]string{"JARVIS_API_URL": "http://localhost:3555"},
+				"env": map[string]string{
+					"JARVIS_API_URL":    "http://localhost:3555",
+					"JARVIS_SESSION_ID": sessionID,
+				},
 			},
 		}
+		// Also inject Jarvis env into subprocess so `cm` bash commands work.
+		agentEnv := make(map[string]string, len(envVars)+2)
+		for k, v := range envVars {
+			agentEnv[k] = v
+		}
+		agentEnv["JARVIS_API_URL"] = "http://localhost:3555"
+		agentEnv["JARVIS_SESSION_ID"] = sessionID
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
 			pty.SessionConfig{
+				ID:           sessionID,
 				WorkingDir:   req.WorkingDir,
 				Mode:         pty.ModeClaudeSDK,
 				Name:         member.Name,
-				ProviderEnv:  envVars,
+				ProviderEnv:  agentEnv,
 				SystemPrompt: kickstart,
 				McpServers:   mcpServers,
 			},

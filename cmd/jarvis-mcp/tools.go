@@ -171,6 +171,115 @@ var allToolDefs = []ToolDefinition{
 		},
 	},
 
+	// --- Office Agent Task Tools (7) ---
+	{
+		Name:        "office_task_list",
+		Description: "List your office task queue (assigned and self-generated tasks)",
+		InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
+	},
+	{
+		Name:        "office_task_self_add",
+		Description: "Add a self-generated task to your office task queue",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"title":       {Type: "string", Description: "Task title"},
+				"description": {Type: "string", Description: "Task description"},
+				"priority":    {Type: "string", Description: "Task priority", Enum: []string{"low", "medium", "high"}},
+			},
+			Required: []string{"title", "description"},
+		},
+	},
+	{
+		Name:        "office_task_ack",
+		Description: "Acknowledge receipt of an assigned task",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"taskId": {Type: "string", Description: "Task ID to acknowledge"}},
+			Required:   []string{"taskId"},
+		},
+	},
+	{
+		Name:        "office_task_start",
+		Description: "Mark a task as in-progress",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"taskId": {Type: "string", Description: "Task ID to start"}},
+			Required:   []string{"taskId"},
+		},
+	},
+	{
+		Name:        "office_task_complete",
+		Description: "Mark a task as completed",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"taskId": {Type: "string", Description: "Task ID to complete"}},
+			Required:   []string{"taskId"},
+		},
+	},
+	{
+		Name:        "office_task_progress",
+		Description: "Report progress on a task",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"taskId": {Type: "string", Description: "Task ID"},
+				"note":   {Type: "string", Description: "Progress update note"},
+			},
+			Required: []string{"taskId", "note"},
+		},
+	},
+	{
+		Name:        "office_task_blocked",
+		Description: "Report that a task is blocked",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"taskId": {Type: "string", Description: "Task ID"},
+				"reason": {Type: "string", Description: "What is blocking the task"},
+			},
+			Required: []string{"taskId", "reason"},
+		},
+	},
+	{
+		Name:        "office_standup_respond",
+		Description: "Submit your standup status update",
+		InputSchema: InputSchema{
+			Type:       "object",
+			Properties: map[string]Property{"content": {Type: "string", Description: "Standup response content"}},
+			Required:   []string{"content"},
+		},
+	},
+	{
+		Name:        "office_reflect",
+		Description: "Submit a post-task reflection/learning",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"learning": {Type: "string", Description: "What you learned"},
+				"category": {Type: "string", Description: "Category", Enum: []string{"technique", "pattern", "tool", "insight", "mistake"}},
+			},
+			Required: []string{"learning", "category"},
+		},
+	},
+	{
+		Name:        "office_team_roster",
+		Description: "Get the team roster (names, roles, session IDs of all agents)",
+		InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
+	},
+	{
+		Name:        "office_send_message",
+		Description: "Send a message to a teammate",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"toSessionId": {Type: "string", Description: "Session ID of the recipient"},
+				"content":     {Type: "string", Description: "Message content"},
+			},
+			Required: []string{"toSessionId", "content"},
+		},
+	},
+
 	// --- Skill Tools (5) ---
 	{
 		Name:        "list_skills",
@@ -396,6 +505,19 @@ var allTools = map[string]ToolHandler{
 	"unregister_tool":   handleUnregisterTool,
 	"list_dynamic_tools": handleListDynamicTools,
 	"run_prompt":        handleRunPrompt,
+
+	// Office Agent Tools
+	"office_task_list":       handleOfficeTaskList,
+	"office_task_self_add":   handleOfficeTaskSelfAdd,
+	"office_task_ack":        handleOfficeTaskAck,
+	"office_task_start":      handleOfficeTaskStart,
+	"office_task_complete":   handleOfficeTaskComplete,
+	"office_task_progress":   handleOfficeTaskProgress,
+	"office_task_blocked":    handleOfficeTaskBlocked,
+	"office_standup_respond": handleOfficeStandupRespond,
+	"office_reflect":         handleOfficeReflect,
+	"office_team_roster":     handleOfficeTeamRoster,
+	"office_send_message":    handleOfficeSendMessage,
 }
 
 // --- Session Tool Handlers ---
@@ -966,5 +1088,208 @@ func getAllToolDefs() []ToolDefinition {
 	}
 
 	return defs
+}
+
+// --- Office Agent Tool Handlers ---
+
+// officeSessionID returns the JARVIS_SESSION_ID env var, required for office agent tools.
+func officeSessionID() (string, error) {
+	sid := os.Getenv("JARVIS_SESSION_ID")
+	if sid == "" {
+		return "", fmt.Errorf("JARVIS_SESSION_ID not set -- office tools require a session context")
+	}
+	return sid, nil
+}
+
+func handleOfficeTaskList(_ map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	result, err := apiGet("/api/office/agent/tasks?sessionId=" + sid)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTaskSelfAdd(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	title, ok := requireStringArg(args, "title")
+	if !ok {
+		return toolError("title is required")
+	}
+	desc, _ := requireStringArg(args, "description")
+	priority := getStringArg(args, "priority", "medium")
+	result, err := apiPost("/api/office/agent/task/self-add", map[string]interface{}{
+		"sessionId":   sid,
+		"title":       title,
+		"description": desc,
+		"priority":    priority,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTaskAck(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	taskID, ok := requireStringArg(args, "taskId")
+	if !ok {
+		return toolError("taskId is required")
+	}
+	result, err := apiPost("/api/office/agent/task-ack", map[string]interface{}{"sessionId": sid, "taskId": taskID})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTaskStart(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	taskID, ok := requireStringArg(args, "taskId")
+	if !ok {
+		return toolError("taskId is required")
+	}
+	result, err := apiPost("/api/office/agent/task-start", map[string]interface{}{"sessionId": sid, "taskId": taskID})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTaskComplete(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	taskID, ok := requireStringArg(args, "taskId")
+	if !ok {
+		return toolError("taskId is required")
+	}
+	result, err := apiPost("/api/office/agent/task-complete", map[string]interface{}{"sessionId": sid, "taskId": taskID})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTaskProgress(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	taskID, ok := requireStringArg(args, "taskId")
+	if !ok {
+		return toolError("taskId is required")
+	}
+	note, _ := requireStringArg(args, "note")
+	result, err := apiPost("/api/office/agent/task-progress", map[string]interface{}{
+		"sessionId": sid, "taskId": taskID, "note": note,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTaskBlocked(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	taskID, ok := requireStringArg(args, "taskId")
+	if !ok {
+		return toolError("taskId is required")
+	}
+	reason, _ := requireStringArg(args, "reason")
+	result, err := apiPost("/api/office/agent/task-progress", map[string]interface{}{
+		"sessionId": sid, "taskId": taskID, "note": reason, "status": "blocked",
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeStandupRespond(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	content, ok := requireStringArg(args, "content")
+	if !ok {
+		return toolError("content is required")
+	}
+	result, err := apiPost("/api/office/agent/standup/response", map[string]interface{}{
+		"sessionId": sid, "content": content,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeReflect(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	learning, ok := requireStringArg(args, "learning")
+	if !ok {
+		return toolError("learning is required")
+	}
+	category := getStringArg(args, "category", "insight")
+	result, err := apiPost("/api/office/agent/reflection/response", map[string]interface{}{
+		"sessionId": sid, "learning": learning, "category": category,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTeamRoster(_ map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	result, err := apiGet("/api/office/agent/team-roster?sessionId=" + sid)
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeSendMessage(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	toSID, ok := requireStringArg(args, "toSessionId")
+	if !ok {
+		return toolError("toSessionId is required")
+	}
+	content, ok := requireStringArg(args, "content")
+	if !ok {
+		return toolError("content is required")
+	}
+	result, err := apiPost("/api/office/agent/message", map[string]interface{}{
+		"sessionId": sid, "toSessionId": toSID, "content": content,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
 }
 

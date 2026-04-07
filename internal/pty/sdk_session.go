@@ -123,6 +123,14 @@ func (s *SDKSession) Start(ctx context.Context) error {
 
 	if len(s.providerEnv) > 0 {
 		opts = append(opts, claude.WithEnv(s.providerEnv))
+		// Log env keys (not values) for auth diagnostics
+		keys := make([]string, 0, len(s.providerEnv))
+		for k := range s.providerEnv {
+			keys = append(keys, k)
+		}
+		slog.Info("SDK session env vars", "session", s.ID, "keys", keys)
+	} else {
+		slog.Warn("SDK session has no provider env vars", "session", s.ID)
 	}
 
 	// Capture subprocess stderr for diagnostics (API errors, auth issues)
