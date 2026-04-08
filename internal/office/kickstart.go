@@ -61,6 +61,15 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("Every improvement you make contributes to a real codebase.\n")
 	b.WriteString("Start by exploring the project structure, then find tasks matching your role.\n\n")
 
+	// Context optimization
+	b.WriteString("## Context Optimization (CRITICAL)\n")
+	b.WriteString("You have a CodeGraphContext MCP server available. Use it to understand code efficiently:\n")
+	b.WriteString("- Use `mcp__codegraphcontext__*` tools to query code structure, call graphs, and dependencies\n")
+	b.WriteString("- NEVER read entire large files. Instead, query for specific functions, classes, or relationships\n")
+	b.WriteString("- Use `cgc analyze callers <function>` and `cgc find pattern <keyword>` via the MCP tools\n")
+	b.WriteString("- This dramatically reduces context usage and keeps your session efficient\n")
+	b.WriteString("- If context gets large, use /compact to compress it\n\n")
+
 	// Personality
 	b.WriteString("## Personality\n")
 	b.WriteString(config.Personality)

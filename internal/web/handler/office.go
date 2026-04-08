@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -360,6 +361,11 @@ func spawnAgentSession(ctx *Context, member templateMember, req spawnTeamRequest
 					"JARVIS_SESSION_ID": sessionID,
 				},
 			},
+			"codegraphcontext": map[string]any{
+				"type":    "stdio",
+				"command": "cgc",
+				"args":    []string{"mcp", "start"},
+			},
 		}
 		// Also inject Jarvis env into subprocess so `cm` bash commands work.
 		agentEnv := make(map[string]string, len(envVars)+2)
@@ -495,6 +501,21 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	if req.PerpetualMode != nil {
 		perpetual = *req.PerpetualMode
 	}
+
+	// Index the project with CodeGraphContext for optimized context.
+	go func() {
+		cmd := exec.CommandContext(context.Background(), "cgc", "index", req.WorkingDir)
+		cmd.Dir = req.WorkingDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			outStr := string(out)
+			if len(outStr) > 200 {
+				outStr = outStr[:200]
+			}
+			slog.Warn("CGC index failed (non-fatal)", "error", err, "output", outStr)
+		} else {
+			slog.Info("CGC index complete", "workingDir", req.WorkingDir)
+		}
+	}()
 
 	// Determine session mode: SDK (default for agents) or PTY (fallback)
 	useSDK := true // Use SDK mode by default for office agents
