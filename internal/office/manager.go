@@ -865,7 +865,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	m.mu.RLock()
 	standupActive := m.standup != nil && m.standup.Active
 	var standupTranscript interface{}
-	if m.standup != nil && m.standup.Active {
+	if m.standup != nil && len(m.standup.Responses) > 0 {
 		standupTranscript = m.standup.Responses
 	}
 	teamSpawned := m.teamSpawned
