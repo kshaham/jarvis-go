@@ -55,6 +55,7 @@ type SDKSession struct {
 	cancelFunc context.CancelFunc
 	eventsOnce sync.Once
 	doneOnce   sync.Once
+	wg         sync.WaitGroup
 
 	// Provider env and config
 	providerEnv  map[string]string
@@ -156,6 +157,7 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	// Start event consumer goroutine FIRST, wait for it to be ready
 	// before sending the kickstart to avoid dropping early events.
 	consumerReady := make(chan struct{})
+	s.wg.Add(1)
 	go s.eventConsumer(sessionCtx, consumerReady)
 	<-consumerReady
 
@@ -188,6 +190,7 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 	close(ready)
 
 	defer func() {
+		defer s.wg.Done()
 		// Only emit EventExit if Stop() hasn't already run (avoid double cleanup).
 		s.mu.RLock()
 		stopped := s.isStopped
@@ -378,6 +381,15 @@ func (s *SDKSession) Stop() {
 	// Cancel context -- triggers eventConsumer to exit
 	if cancel != nil {
 		cancel()
+	}
+
+	// Wait for eventConsumer to finish (bounded to 5s to avoid hanging).
+	waitDone := make(chan struct{})
+	go func() { s.wg.Wait(); close(waitDone) }()
+	select {
+	case <-waitDone:
+	case <-time.After(5 * time.Second):
+		slog.Warn("SDK session eventConsumer did not exit within 5s", "session", s.ID)
 	}
 
 	s.doneOnce.Do(func() { close(s.done) })

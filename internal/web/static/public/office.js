@@ -1148,7 +1148,7 @@ class OfficeApp {
       const ago = this.formatTimeAgo(msg.timestamp);
       return `<div class="detail-message-item">
         <div class="detail-message-meta">${direction} (${ago})</div>
-        ${this.escapeHtml(msg.content.slice(0, 120))}
+        ${this.escapeHtml((msg.content || '').slice(0, 120))}
       </div>`;
     }).join('');
 
@@ -1222,7 +1222,7 @@ class OfficeApp {
     this._fetchTerminalPreview(sessionId)
       .then(data => {
         const termEl = detailContent ? detailContent.querySelector('.detail-terminal') : null;
-        if (termEl && data.terminalBuffer) {
+        if (termEl && data && data.terminalBuffer) {
           const lines = data.terminalBuffer.split('\n').slice(-30).join('\n');
           termEl.textContent = lines;
 
@@ -1619,7 +1619,7 @@ class OfficeApp {
         const ago = this.formatTimeAgo(msg.timestamp);
         return `<div class="modal-agent-message-entry">
           <div class="modal-agent-message-header">${direction} (${ago})</div>
-          ${this.escapeHtml(msg.content.slice(0, 200))}
+          ${this.escapeHtml((msg.content || '').slice(0, 200))}
         </div>`;
       }).join('');
       document.getElementById('modalAgentMessages').classList.remove('hidden');

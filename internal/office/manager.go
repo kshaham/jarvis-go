@@ -166,16 +166,17 @@ func (m *Manager) HandleAgentDeath(sessionID string) {
 	}
 	slog.Warn("Agent session died", "name", agentName, "session", sessionID)
 
-	// Reassign pending/acknowledged tasks to a strategic-tier agent
+	// Reassign pending/acknowledged tasks to a strategic-tier agent (deep copy to avoid races).
 	tasks := agent.GetTasks()
 	for _, task := range tasks {
 		if task.Status == TaskPending || task.Status == TaskAcknowledged {
+			copied := *task
+			copied.Source = "reassigned"
 			m.mu.RLock()
 			for _, other := range m.agents {
 				if other.SessionID != sessionID && other.Config != nil && other.Config.Tier == "strategic" {
-					task.Source = "reassigned"
-					other.AddTask(task)
-					slog.Info("Reassigned task from dead agent", "task", task.Title, "to", other.Config.Name)
+					other.AddTask(&copied)
+					slog.Info("Reassigned task from dead agent", "task", copied.Title, "to", other.Config.Name)
 					break
 				}
 			}
@@ -703,7 +704,6 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 // UpdateOfficeSettings applies validated setting changes from a JSON body.
 func (m *Manager) UpdateOfficeSettings(settings map[string]interface{}) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if v, ok := settings["brainstormCooldownMs"].(float64); ok && v >= 60000 {
 		m.config.BrainstormCooldown = time.Duration(v) * time.Millisecond
@@ -732,12 +732,15 @@ func (m *Manager) UpdateOfficeSettings(settings map[string]interface{}) {
 	if v, ok := settings["reflectionResponseTimeoutMs"].(float64); ok && v >= 15000 {
 		m.config.ReflectionTimeout = time.Duration(v) * time.Millisecond
 	}
+	var missionUpdate string
 	if v, ok := settings["teamMission"].(string); ok {
-		m.teamMission = v
-		// Persist outside the lock since SetTeamMission acquires it.
-		go func() {
-			m.SetTeamMission(v)
-		}()
+		missionUpdate = v
+	}
+	m.mu.Unlock()
+
+	// SetTeamMission acquires its own lock, so call after releasing.
+	if missionUpdate != "" {
+		m.SetTeamMission(missionUpdate)
 	}
 }
 

@@ -843,7 +843,7 @@ func (ctx *Context) OfficeGetTaskQueues(w http.ResponseWriter, r *http.Request) 
 func (ctx *Context) OfficeGetTaskQueueBySession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	agent := ctx.OfficeManager.GetAgent(sessionID)
-	if agent == nil {
+	if agent == nil || agent.Config == nil {
 		ok(w, map[string]interface{}{"queue": nil})
 		return
 	}

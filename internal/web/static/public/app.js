@@ -882,11 +882,13 @@ class JarvisApp {
         const retryToken = await this.getCsrfToken();
         if (retryToken) {
           headers['X-CSRF-Token'] = retryToken;
-          return fetch(url, { method: 'DELETE', headers });
+          const retryRes = await fetch(url, { method: 'DELETE', headers });
+          return retryRes.json().catch(() => ({}));
         }
       }
+      return { success: false, error: 'CSRF validation failed' };
     }
-    return res;
+    return res.json().catch(() => ({}));
   }
 
   async logout() {
@@ -4151,7 +4153,9 @@ class JarvisApp {
     const hasPlan = config.generatedPlan && config.generatedPlan.filter(i => i.enabled).length > 0;
 
     // Build the formatted prompt (abbreviated for preview)
-    let prompt = config.taskDescription;
+    // HTML-escape user input to prevent XSS in innerHTML
+    const escDesc = (config.taskDescription || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    let prompt = escDesc;
     prompt += '\n\n---\n\n';
 
     if (hasPlan) {
