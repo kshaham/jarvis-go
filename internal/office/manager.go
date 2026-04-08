@@ -133,6 +133,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 	}
 	mgr.loadPersistedMission()
 	mgr.LoadPersistedMetrics()
+	mgr.loadPersistedMessages()
 	return mgr
 }
 
@@ -330,6 +331,7 @@ func (m *Manager) SendMessage(from, to, content string) {
 
 	m.broadcast("office:message", msg)
 	m.metrics.TotalMessages.Add(1)
+	go m.persistMessages()
 
 	// Deliver the message to the target session so the agent sees it.
 	if to != "" && sessions != nil {
@@ -350,6 +352,54 @@ func (m *Manager) GetMessages() []OfficeMessage {
 	result := make([]OfficeMessage, len(m.messages))
 	copy(result, m.messages)
 	return result
+}
+
+// persistMessages writes the current messages to disk atomically.
+func (m *Manager) persistMessages() {
+	m.mu.RLock()
+	msgs := make([]OfficeMessage, len(m.messages))
+	copy(msgs, m.messages)
+	m.mu.RUnlock()
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+	os.MkdirAll(dir, 0o755)
+	data, err := json.Marshal(msgs)
+	if err != nil {
+		return
+	}
+	tmp := filepath.Join(dir, "messages.json.tmp")
+	target := filepath.Join(dir, "messages.json")
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return
+	}
+	os.Rename(tmp, target)
+}
+
+// loadPersistedMessages restores messages from disk on startup.
+func (m *Manager) loadPersistedMessages() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "messages.json"))
+	if err != nil {
+		return
+	}
+	var msgs []OfficeMessage
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		return
+	}
+	m.mu.Lock()
+	m.messages = msgs
+	if len(m.messages) > m.config.MaxMessages {
+		m.messages = m.messages[len(m.messages)-m.config.MaxMessages:]
+	}
+	m.mu.Unlock()
+	slog.Info("Loaded persisted messages", "count", len(msgs))
 }
 
 func (m *Manager) emitEvent(event OfficeEvent) {

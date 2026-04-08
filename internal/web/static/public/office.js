@@ -182,7 +182,7 @@ class OfficeApp {
     // Periodic state sync -- safety net to self-correct any missed SSE updates
     this._stateRefreshInterval = setInterval(() => {
       if (this.state.teamSpawned && this.state.members && this.state.members.length > 0) {
-        this.fetchInitialState().then(() => this.renderAgentCards());
+        this.fetchInitialState().then(() => { this.renderAgentCards(); this.renderMessages(); });
       }
     }, 30000);
 
@@ -816,6 +816,8 @@ class OfficeApp {
     this.renderAgentCards();
     this.updateSpawnButton();
     this.renderKanbanBoard();
+    this.renderMessages();
+    this.renderStandup();
     this.updateStatusBar();
   }
 
