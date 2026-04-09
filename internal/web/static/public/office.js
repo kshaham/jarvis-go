@@ -1360,7 +1360,7 @@ class OfficeApp {
       for (const msg of this.state.standupTranscript) {
         transcript.appendChild(this.createStandupEntry(msg));
       }
-      this.lastRenderedStandupCount = 0;
+      this.lastRenderedStandupCount = this.state.standupTranscript.length;
       return;
     }
 

@@ -6224,9 +6224,8 @@ class JarvisApp {
       this.terminal.writeln('');
 
       // Create session via quick-start
-      const res = await this.postJson('/api/quick-start', { caseName: config.caseName, mode: 'claude' });
+      const data = await this.postJson('/api/quick-start', { caseName: config.caseName, mode: 'claude' });
 
-      const data = await res.json();
       if (!data.success) {
         this.showToast(data.error || 'Failed to start session', 'error');
         return;
@@ -6250,8 +6249,7 @@ class JarvisApp {
         if (enabledItems.length > 0) {
           const planContent = this.generateFixPlanContent(enabledItems);
           // Import the plan content and get the todos back
-          const importRes = await this.postJson(`/api/sessions/${sessionId}/fix-plan/import`, { content: planContent });
-          const importData = await importRes.json();
+          const importData = await this.postJson(`/api/sessions/${sessionId}/fix-plan/import`, { content: planContent });
 
           // Update local ralph state immediately to avoid 100% display bug
           // (SSE event might arrive after selectSession is called)
@@ -6337,7 +6335,7 @@ class JarvisApp {
         console.log('[RalphWizard] Sending /init to load research context from CLAUDE.md...');
         const initRes = await this.postJson(`/api/sessions/${sessionId}/input`, { input: '/init\r', useScreen: true });
 
-        if (!initRes.ok) {
+        if (initRes.error) {
           console.warn('[RalphWizard] Failed to send /init, continuing anyway...');
         } else {
           // Wait for /init to complete - can take up to 3 minutes for large CLAUDE.md files
@@ -6383,9 +6381,8 @@ class JarvisApp {
       const readCommand = 'Read @ralph_prompt.md and follow the instructions. Start working immediately.\r';
       const inputRes = await this.postJson(`/api/sessions/${sessionId}/input`, { input: readCommand, useScreen: true });
 
-      if (!inputRes.ok) {
-        const errorData = await inputRes.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to send input: ${inputRes.status}`);
+      if (inputRes.error) {
+        throw new Error(inputRes.error || 'Failed to send input');
       }
 
       console.log('[RalphWizard] Read command sent, verifying it was received...');
@@ -6581,8 +6578,7 @@ class JarvisApp {
 
         // Create the case if it doesn't exist
         if (!caseData.path) {
-          const createCaseRes = await this.postJson('/api/cases', { name: caseName, description: '' });
-          const createCaseData = await createCaseRes.json();
+          const createCaseData = await this.postJson('/api/cases', { name: caseName, description: '' });
           if (!createCaseData.success) throw new Error(createCaseData.error || 'Failed to create case');
           // Use the newly created case data (API returns { success, case: { name, path } })
           caseData = createCaseData.case;

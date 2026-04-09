@@ -1171,14 +1171,26 @@ func AppendAgentMemory(configID, workingDir, entry string) error {
 // across spawns (analogous to AutoAgent's program.md self-improvement).
 func (m *Manager) AppendMissionInsight(insight string) {
 	m.mu.Lock()
-	if m.teamMission != "" && insight != "" {
-		m.teamMission += "\n\n[Learned] " + insight
+	if m.teamMission == "" || insight == "" {
+		m.mu.Unlock()
+		return
 	}
+	m.teamMission += "\n\n[Learned] " + insight
 	updated := m.teamMission
 	m.mu.Unlock()
 
-	// Persist via SetTeamMission which handles disk write and broadcast.
-	m.SetTeamMission(updated)
+	// Persist to disk and broadcast (same logic as SetTeamMission but avoids double-lock race).
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+		os.MkdirAll(dir, 0o755)
+		tmp := filepath.Join(dir, "team-mission.txt.tmp")
+		target := filepath.Join(dir, "team-mission.txt")
+		if err := os.WriteFile(tmp, []byte(updated), 0o644); err == nil {
+			os.Rename(tmp, target)
+		}
+	}
+	m.broadcast("office:missionUpdated", map[string]interface{}{"mission": updated})
 }
 
 // GetTeamSpawnedAt returns the time the team was spawned, or a zero time if not spawned.

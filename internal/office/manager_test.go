@@ -14,7 +14,12 @@ func (m *mockSessionStore) GetSessionIDs() []string                      { retur
 func (m *mockSessionStore) IsSessionAlive(sessionID string) bool         { return true }
 
 func newTestManager() *Manager {
-	return NewManager(&mockSessionStore{}, func(event string, data interface{}) {}, nil)
+	m := NewManager(&mockSessionStore{}, func(event string, data interface{}) {}, nil)
+	// Clear any persisted messages from disk so tests start clean.
+	m.mu.Lock()
+	m.messages = make([]OfficeMessage, 0)
+	m.mu.Unlock()
+	return m
 }
 
 func TestNewManager(t *testing.T) {

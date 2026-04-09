@@ -504,7 +504,9 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 
 	// Index the project with CodeGraphContext for optimized context.
 	go func() {
-		cmd := exec.CommandContext(context.Background(), "cgc", "index", req.WorkingDir)
+		cgcCtx, cgcCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cgcCancel()
+		cmd := exec.CommandContext(cgcCtx, "cgc", "index", req.WorkingDir)
 		cmd.Dir = req.WorkingDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			outStr := string(out)
@@ -1442,6 +1444,9 @@ func (ctx *Context) OfficeAgentTeamRoster(w http.ResponseWriter, r *http.Request
 	roster := ctx.OfficeManager.GetRoster()
 	result := make([]map[string]interface{}, 0, len(roster))
 	for _, a := range roster {
+		if a.Config == nil {
+			continue
+		}
 		result = append(result, map[string]interface{}{
 			"sessionId": a.SessionID,
 			"configId":  a.ConfigID,
