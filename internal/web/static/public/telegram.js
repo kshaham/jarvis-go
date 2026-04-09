@@ -284,6 +284,7 @@
         headers: headers,
         body: JSON.stringify(settings)
       });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
       var data = await response.json();
 
       if (data.success) {
@@ -344,6 +345,7 @@
         headers: headers,
         body: JSON.stringify(settings)
       });
+      if (!saveResponse.ok) throw new Error('HTTP ' + saveResponse.status);
       var saveData = await saveResponse.json();
 
       if (!saveData.success) {
@@ -424,6 +426,7 @@
         headers: headers,
         body: JSON.stringify(settings)
       });
+      if (!saveResponse.ok) throw new Error('HTTP ' + saveResponse.status);
       var saveData = await saveResponse.json();
 
       if (!saveData.success) {

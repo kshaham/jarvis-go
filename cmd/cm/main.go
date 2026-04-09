@@ -246,7 +246,7 @@ func handleTask(args []string) {
 	case "triage":
 		requireArgs(subargs, 3, "cm task triage <taskId> <toSessionId> <reason>")
 		post("/api/office/agent/task/triage", map[string]interface{}{
-			"taskId": subargs[0], "fromSessionId": sessionID,
+			"taskId": subargs[0], "sessionId": sessionID,
 			"toSessionId": subargs[1], "reason": strings.Join(subargs[2:], " "),
 		})
 		fmt.Printf("Task %s triaged to %s.\n", subargs[0], subargs[1])

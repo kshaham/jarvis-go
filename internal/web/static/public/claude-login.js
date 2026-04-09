@@ -130,7 +130,9 @@
     try {
       // First, check if auth session already exists (search by name since server generates UUIDs)
       const sessionsRes = await fetch('/api/sessions');
+      if (!sessionsRes.ok) throw new Error('HTTP ' + sessionsRes.status);
       const sessions = await sessionsRes.json();
+      if (!Array.isArray(sessions)) throw new Error('Invalid sessions response');
 
       let authSession = sessions.find(s => s.name === 'Claude Authentication');
 

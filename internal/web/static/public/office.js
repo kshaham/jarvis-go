@@ -348,6 +348,22 @@ class OfficeApp {
     return this.parseJsonResponse(res);
   }
 
+  async deleteJson(url) {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': this.csrfToken || '' },
+    });
+    if (res.status === 403) {
+      await this.fetchCsrfToken();
+      const retry = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': this.csrfToken || '' },
+      });
+      return this.parseJsonResponse(retry);
+    }
+    return this.parseJsonResponse(res);
+  }
+
   safeParseSSE(e) {
     try {
       return JSON.parse(e.data);
@@ -1687,16 +1703,8 @@ class OfficeApp {
     if (!prompt) return;
 
     try {
-      const res = await fetch(`/api/sessions/${this.selectedMemberId}/input`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': this.csrfToken || '',
-        },
-        body: JSON.stringify({ input: prompt }),
-      });
-
-      if (res.ok) {
+      const data = await this.postJson(`/api/sessions/${this.selectedMemberId}/input`, { input: prompt });
+      if (data && !data.error) {
         input.value = '';
         this.showNotification(`Prompt sent to ${this.state.members.find(m => m.sessionId === this.selectedMemberId)?.name || 'agent'}`, 'success');
       } else {
@@ -2433,10 +2441,7 @@ class OfficeApp {
         const timer = setTimeout(async () => {
           if (this.shutdownPending && this.shutdownPending.has(sessionId)) {
             try {
-              await fetch(`/api/sessions/${sessionId}`, {
-                method: 'DELETE',
-                headers: { 'X-CSRF-Token': this.csrfToken || '' },
-              });
+              await this.deleteJson(`/api/sessions/${sessionId}`);
             } catch {
               // ignore
             }
@@ -2453,10 +2458,7 @@ class OfficeApp {
 
   handleShutdownIdle(sessionId) {
     if (!this.shutdownPending || !this.shutdownPending.has(sessionId)) return;
-    fetch(`/api/sessions/${sessionId}`, {
-      method: 'DELETE',
-      headers: { 'X-CSRF-Token': this.csrfToken || '' },
-    }).catch(() => {});
+    this.deleteJson(`/api/sessions/${sessionId}`).catch(() => {});
   }
 
   handleShutdownMemberLeft(sessionId) {
@@ -2522,9 +2524,9 @@ class OfficeApp {
         fetch('/api/office/task-queues'),
         fetch('/api/office/file-locks'),
       ]);
-      const bugData = await bugRes.json();
-      const queueData = await queueRes.json();
-      const lockData = await lockRes.json();
+      const bugData = bugRes.ok ? await bugRes.json() : { success: false };
+      const queueData = queueRes.ok ? await queueRes.json() : { success: false };
+      const lockData = lockRes.ok ? await lockRes.json() : { success: false };
 
       this.bugTasks = bugData.success ? bugData.tasks : [];
       this.taskQueues = queueData.success ? queueData.queues : [];
@@ -2813,12 +2815,8 @@ class OfficeApp {
 
   async forceUnlock(filePath) {
     try {
-      const res = await fetch(`/api/office/file-locks/${encodeURIComponent(filePath)}`, {
-        method: 'DELETE',
-        headers: { 'X-CSRF-Token': this.csrfToken || '' },
-      });
-      const data = await res.json();
-      if (data.success) {
+      const data = await this.deleteJson(`/api/office/file-locks/${encodeURIComponent(filePath)}`);
+      if (data && data.success) {
         this.fetchFileLocks();
       }
     } catch (err) {

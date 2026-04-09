@@ -235,6 +235,24 @@ func (a *AgentState) GetSDKWorking() bool {
 	return a.SDKWorking
 }
 
+// GetPersonalityOverride returns a snapshot of the override under the mutex.
+func (a *AgentState) GetPersonalityOverride() *PersonalityOverride {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.PersonalityOverride == nil {
+		return nil
+	}
+	copied := *a.PersonalityOverride
+	return &copied
+}
+
+// SetPersonalityOverride sets the override under the mutex.
+func (a *AgentState) SetPersonalityOverride(override *PersonalityOverride) {
+	a.mu.Lock()
+	a.PersonalityOverride = override
+	a.mu.Unlock()
+}
+
 // RemoveTask removes a task by ID and returns it, or nil if not found.
 func (a *AgentState) RemoveTask(taskID string) *Task {
 	a.mu.Lock()

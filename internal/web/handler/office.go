@@ -2005,12 +2005,12 @@ func (ctx *Context) OfficeGetMemberPersonality(w http.ResponseWriter, r *http.Re
 	}
 	personality := agent.Config.Personality
 	systemPrompt := agent.Config.SystemPrompt
-	if agent.PersonalityOverride != nil {
-		if agent.PersonalityOverride.Personality != "" {
-			personality = agent.PersonalityOverride.Personality
+	if override := agent.GetPersonalityOverride(); override != nil {
+		if override.Personality != "" {
+			personality = override.Personality
 		}
-		if agent.PersonalityOverride.SystemPrompt != "" {
-			systemPrompt = agent.PersonalityOverride.SystemPrompt
+		if override.SystemPrompt != "" {
+			systemPrompt = override.SystemPrompt
 		}
 	}
 	ok(w, map[string]interface{}{
@@ -2028,10 +2028,10 @@ func (ctx *Context) OfficePutMemberPersonality(w http.ResponseWriter, r *http.Re
 	}
 	agent := ctx.OfficeManager.GetAgent(sessionID)
 	if agent != nil {
-		agent.PersonalityOverride = &office.PersonalityOverride{
+		agent.SetPersonalityOverride(&office.PersonalityOverride{
 			Personality:  req.Personality,
 			SystemPrompt: req.SystemPrompt,
-		}
+		})
 		ctx.SSEBroker.Broadcast("office:personalityUpdated", map[string]interface{}{"sessionId": sessionID})
 	}
 	ok(w, nil)

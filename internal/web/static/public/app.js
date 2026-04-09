@@ -847,7 +847,7 @@ class JarvisApp {
     return res.json().catch(() => ({}));
   }
 
-  // Make a PUT request with CSRF token
+  // Make a PUT request with CSRF token (retries on CSRF 403)
   async putJson(url, body = {}) {
     const csrfToken = await this.getCsrfToken();
     const headers = {
@@ -861,6 +861,23 @@ class JarvisApp {
       headers,
       body: JSON.stringify(body),
     });
+    if (res.status === 403) {
+      const text = await res.text();
+      if (text.includes('CSRF')) {
+        await this.refreshCsrfToken();
+        const retryToken = await this.getCsrfToken();
+        if (retryToken) {
+          headers['X-CSRF-Token'] = retryToken;
+          const retryRes = await fetch(url, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify(body),
+          });
+          return retryRes.json().catch(() => ({}));
+        }
+      }
+      return { success: false, error: 'CSRF validation failed' };
+    }
     return res.json().catch(() => ({}));
   }
 
@@ -1136,7 +1153,6 @@ class JarvisApp {
         // Debug logging - only log if line changed to avoid spam
         if (bufferLineNumber !== lastInvokedLine) {
           lastInvokedLine = bufferLineNumber;
-          console.debug('[LinkProvider] Checking line:', bufferLineNumber);
         }
 
         const buffer = self.terminal.buffer.active;
@@ -1208,9 +1224,6 @@ class JarvisApp {
           addLink(match[1], match.index);
         }
 
-        if (links.length > 0) {
-          console.debug('[LinkProvider] Found links:', links.map(l => l.text));
-        }
         callback(links.length > 0 ? links : undefined);
       }
     });
