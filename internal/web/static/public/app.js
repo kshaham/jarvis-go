@@ -910,7 +910,7 @@ class JarvisApp {
 
   async logout() {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await this.postJson('/api/auth/logout', {});
     } catch (err) {
       // Ignore errors, redirect anyway
     }
@@ -1098,17 +1098,8 @@ class JarvisApp {
         const input = this._pendingInput;
         const sessionId = this.activeSessionId;
         this._pendingInput = '';
-        // Use current CSRF token (refreshed on 45-min interval; 403 retry handles expiry)
-        const csrfToken = this._csrfToken || '';
-        const headers = { 'Content-Type': 'application/json' };
-        if (csrfToken) {
-          headers['X-CSRF-Token'] = csrfToken;
-        }
-        fetch(`/api/sessions/${sessionId}/input`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ input })
-        });
+        // postJson handles CSRF retry on token expiry
+        this.postJson(`/api/sessions/${sessionId}/input`, { input }).catch(() => {});
         // Clear pending hooks when user sends input (they've addressed the prompt)
         this.clearPendingHooks(sessionId);
       }
@@ -11800,9 +11791,10 @@ class JarvisApp {
     this.renderSubagentWindowContent(agentId);
 
     // Focus on click
-    win.addEventListener('mousedown', () => {
+    const mousedownHandler = () => {
       win.style.zIndex = ++this.subagentWindowZIndex;
-    });
+    };
+    win.addEventListener('mousedown', mousedownHandler);
 
     // Update connection lines when window is resized
     const resizeObserver = new ResizeObserver(() => {
@@ -11810,8 +11802,10 @@ class JarvisApp {
     });
     resizeObserver.observe(win);
 
-    // Store observer for cleanup
-    this.subagentWindows.get(agentId).resizeObserver = resizeObserver;
+    // Store observer and handler for cleanup
+    const windowData = this.subagentWindows.get(agentId);
+    windowData.resizeObserver = resizeObserver;
+    windowData.mousedownHandler = mousedownHandler;
 
     // Animate to final position if spawning from tab
     if (parentTab) {
@@ -11922,6 +11916,9 @@ class JarvisApp {
     for (const [agentId, windowData] of this.subagentWindows) {
       if (windowData.resizeObserver) {
         windowData.resizeObserver.disconnect();
+      }
+      if (windowData.mousedownHandler) {
+        windowData.element.removeEventListener('mousedown', windowData.mousedownHandler);
       }
       if (windowData.dragListeners) {
         document.removeEventListener('mousemove', windowData.dragListeners.move);

@@ -1915,23 +1915,20 @@ class OfficeApp {
     this.navigateToSessionById(sessionId);
   }
 
-  quickPrompt(sessionId) {
+  async quickPrompt(sessionId) {
     const member = this.state.members.find(m => m.sessionId === sessionId);
     const name = member ? member.name : 'Agent';
     const prompt = window.prompt(`Send prompt to ${name}:`);
-    if (prompt && prompt.trim()) {
-      const headers = { 'Content-Type': 'application/json' };
-      if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
-      fetch(`/api/sessions/${sessionId}/input`, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({ input: prompt.trim() + '\n' }),
-      }).then(res => {
-        if (res.ok) this.showNotification(`Prompt sent to ${name}`, 'success');
-        else this.showNotification(`Failed to send prompt to ${name}`, 'error');
-      }).catch(() => {
+    if (!prompt || !prompt.trim()) return;
+    try {
+      const data = await this.postJson(`/api/sessions/${sessionId}/input`, { input: prompt.trim() + '\n' });
+      if (data && !data.error) {
+        this.showNotification(`Prompt sent to ${name}`, 'success');
+      } else {
         this.showNotification(`Failed to send prompt to ${name}`, 'error');
-      });
+      }
+    } catch {
+      this.showNotification(`Failed to send prompt to ${name}`, 'error');
     }
   }
 

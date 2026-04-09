@@ -186,11 +186,14 @@ func (s *SDKSession) Start(ctx context.Context) error {
 // Processes events from ALL turns (kickstart, standup, brainstorm, etc.).
 // Only exits when the session is closed.
 func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
+	// wg.Done must be the LAST deferred call (runs last) so Stop() only
+	// unblocks after all cleanup (channel close, log) has completed.
+	defer s.wg.Done()
+
 	// Signal that we're about to start ranging (consumer is ready).
 	close(ready)
 
 	defer func() {
-		defer s.wg.Done()
 		// Only emit EventExit if Stop() hasn't already run (avoid double cleanup).
 		s.mu.RLock()
 		stopped := s.isStopped

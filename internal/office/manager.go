@@ -689,7 +689,18 @@ func (m *Manager) ActiveLockCount() int {
 // GetOfficeSettings returns the full office settings matching the Node.js response shape.
 func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	m.mu.RLock()
-	cfg := m.config
+	// Snapshot all config fields while holding the lock to avoid torn reads
+	// if another goroutine replaces m.config concurrently.
+	autoStandupIntervalMs := m.config.AutoStandupInterval.Milliseconds()
+	brainstormCooldownMs := m.config.BrainstormCooldown.Milliseconds()
+	brainstormTimeoutMs := m.config.BrainstormTimeout.Milliseconds()
+	idleThresholdMs := m.config.IdleThreshold.Milliseconds()
+	idleCheckIntervalMs := m.config.IdleCheckInterval.Milliseconds()
+	meetingInactivityTimeoutMs := m.config.MeetingInactivityTimeout.Milliseconds()
+	standupResponseTimeoutMs := m.config.StandupResponseTimeout.Milliseconds()
+	fileLockTTLMs := m.config.FileLockTTL.Milliseconds()
+	curiosityCooldownMs := m.config.CuriosityCooldown.Milliseconds()
+	reflectionTimeoutMs := m.config.ReflectionTimeout.Milliseconds()
 	teamSpawned := m.teamSpawned
 	var teamSpawnedAtMs int64
 	if !m.teamSpawnedAt.IsZero() {
@@ -723,18 +734,18 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	return map[string]interface{}{
 		"autoStandup": map[string]interface{}{
 			"enabled":    autoStandupEnabled,
-			"intervalMs": cfg.AutoStandupInterval.Milliseconds(),
+			"intervalMs": autoStandupIntervalMs,
 		},
-		"brainstormCooldownMs":        cfg.BrainstormCooldown.Milliseconds(),
-		"brainstormResponseTimeoutMs": cfg.BrainstormTimeout.Milliseconds(),
-		"idleThresholdMs":             cfg.IdleThreshold.Milliseconds(),
-		"idleCheckIntervalMs":         cfg.IdleCheckInterval.Milliseconds(),
-		"meetingInactivityTimeoutMs":  cfg.MeetingInactivityTimeout.Milliseconds(),
-		"standupResponseTimeoutMs":    cfg.StandupResponseTimeout.Milliseconds(),
-		"fileLockExpiryMs":            cfg.FileLockTTL.Milliseconds(),
+		"brainstormCooldownMs":        brainstormCooldownMs,
+		"brainstormResponseTimeoutMs": brainstormTimeoutMs,
+		"idleThresholdMs":             idleThresholdMs,
+		"idleCheckIntervalMs":         idleCheckIntervalMs,
+		"meetingInactivityTimeoutMs":  meetingInactivityTimeoutMs,
+		"standupResponseTimeoutMs":    standupResponseTimeoutMs,
+		"fileLockExpiryMs":            fileLockTTLMs,
 		"curiosityEnabled":            curiosityEnabled,
-		"curiosityCooldownMs":         cfg.CuriosityCooldown.Milliseconds(),
-		"reflectionResponseTimeoutMs": cfg.ReflectionTimeout.Milliseconds(),
+		"curiosityCooldownMs":         curiosityCooldownMs,
+		"reflectionResponseTimeoutMs": reflectionTimeoutMs,
 		"teamSpawned":                 teamSpawned,
 		"teamSpawnedAt":               teamSpawnedAtMs,
 		"memberCount":                 memberCount,
@@ -882,9 +893,13 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	}
 
 	learningData := LoadLearningData(a.ConfigID)
-	learningCount := len(learningData.Learnings) + len(learningData.DistilledInsights)
-	skillCount := len(learningData.Skills)
-	score := CalculateAgentScore(a)
+	learningCount := 0
+	skillCount := 0
+	if learningData != nil {
+		learningCount = len(learningData.Learnings) + len(learningData.DistilledInsights)
+		skillCount = len(learningData.Skills)
+	}
+	score := CalculateAgentScoreWithData(a, learningData)
 
 	return map[string]interface{}{
 		"sessionId":      a.SessionID,

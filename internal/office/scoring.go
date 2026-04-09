@@ -13,7 +13,14 @@ type AgentScore struct {
 }
 
 // CalculateAgentScore computes a score for an agent based on task history and learnings.
+// Loads learning data from disk. Use CalculateAgentScoreWithData to avoid the disk read
+// when you already have the learning data loaded.
 func CalculateAgentScore(agent *AgentState) AgentScore {
+	return CalculateAgentScoreWithData(agent, LoadLearningData(agent.ConfigID))
+}
+
+// CalculateAgentScoreWithData computes a score using pre-loaded learning data.
+func CalculateAgentScoreWithData(agent *AgentState, ld *AgentLearningData) AgentScore {
 	tasks := agent.GetTasks()
 	total := float64(len(tasks))
 	completed := 0.0
@@ -48,8 +55,10 @@ func CalculateAgentScore(agent *AgentState) AgentScore {
 	qualityScore := completionRate
 
 	// Collaboration: based on learning count and skills discovered.
-	ld := LoadLearningData(agent.ConfigID)
-	collabScore := minFloat(1.0, float64(len(ld.Learnings)+len(ld.Skills))/10.0)
+	collabScore := 0.0
+	if ld != nil {
+		collabScore = minFloat(1.0, float64(len(ld.Learnings)+len(ld.Skills))/10.0)
+	}
 
 	overall := completionRate*0.4 + speedScore*0.2 + qualityScore*0.2 + collabScore*0.2
 
