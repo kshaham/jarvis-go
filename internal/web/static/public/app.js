@@ -10671,10 +10671,10 @@ class JarvisApp {
     if (!this.activeSessionId) return;
 
     try {
-      const csrfToken = this._csrfToken || '';
+      const csrfToken = await this.getCsrfToken();
       const res = await fetch(`/api/sessions/${this.activeSessionId}/plan/task/${taskId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ status: newStatus })
       });
 
@@ -10694,10 +10694,10 @@ class JarvisApp {
     if (!this.activeSessionId) return;
 
     try {
-      const csrfToken2 = this._csrfToken || '';
+      const csrfToken2 = await this.getCsrfToken();
       const res = await fetch(`/api/sessions/${this.activeSessionId}/plan/task/${taskId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken2 },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken2 || '' },
         body: JSON.stringify({ attempts: 0, lastError: null, status: 'pending' })
       });
 
