@@ -357,6 +357,7 @@
         method: 'POST',
         headers: headers
       });
+      if (!testResponse.ok) throw new Error('HTTP ' + testResponse.status);
       var data = await testResponse.json();
 
       if (data.success) {
@@ -439,6 +440,7 @@
         headers: headers,
         body: JSON.stringify({ message: 'Test message from Jarvis at ' + new Date().toLocaleTimeString() })
       });
+      if (!sendResponse.ok) throw new Error('HTTP ' + sendResponse.status);
       var data = await sendResponse.json();
 
       if (data.success) {

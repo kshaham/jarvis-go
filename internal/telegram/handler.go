@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // ---------------------------------------------------------------------------
@@ -454,13 +456,8 @@ func (h *Handler) WebhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate webhook secret from URL path.
-	// Extract the last path segment as the secret.
-	pathParts := strings.Split(strings.TrimRight(r.URL.Path, "/"), "/")
-	urlSecret := ""
-	if len(pathParts) > 0 {
-		urlSecret = pathParts[len(pathParts)-1]
-	}
+	// Validate webhook secret from URL path via chi route parameter.
+	urlSecret := chi.URLParam(r, "secret")
 
 	settings := h.settings.Get()
 	if settings.WebhookSecret == "" {

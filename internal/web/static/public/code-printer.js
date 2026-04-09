@@ -161,7 +161,7 @@
 
     elements.previewGrid.innerHTML = state.images.map((img, idx) => `
       <div class="preview-item" data-index="${idx}">
-        <img src="${img.dataUrl}" alt="${img.name}">
+        <img src="${img.dataUrl}" alt="${escapeHtml(img.name || '')}">
         <button class="remove-btn" onclick="codePrinter.removeImage(${idx})" title="Remove">&times;</button>
       </div>
     `).join('');

@@ -175,31 +175,39 @@
     emptyDiv.style.display = 'none';
     listDiv.style.display = 'flex';
 
+    // HTML-escape helper for all server-supplied fields
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
     // Build history HTML (newest first)
     var html = '';
     var reversedHistory = history.slice().reverse();
 
     for (var i = 0; i < reversedHistory.length && i < 20; i++) {
       var entry = reversedHistory[i];
-      var statusClass = entry.status || 'success';
+      // Whitelist status class so CSS classes can't be injected
+      var rawStatus = String(entry.status || 'success');
+      var statusClass = /^[a-zA-Z0-9_-]+$/.test(rawStatus) ? rawStatus : 'success';
 
       html += '<div class="history-entry ' + statusClass + '">';
       html += '  <div class="history-header">';
-      html += '    <span class="history-cycle-num">Cycle ' + entry.cycleNumber + '</span>';
-      html += '    <span class="history-time">' + formatTime(entry.timestamp) + ' (' + formatDuration(entry.duration) + ')</span>';
+      html += '    <span class="history-cycle-num">Cycle ' + esc(entry.cycleNumber) + '</span>';
+      html += '    <span class="history-time">' + esc(formatTime(entry.timestamp)) + ' (' + esc(formatDuration(entry.duration)) + ')</span>';
       html += '  </div>';
       html += '  <div class="history-details">';
-      html += '    ' + entry.changesApplied + ' change(s) applied';
+      html += '    ' + esc(entry.changesApplied) + ' change(s) applied';
       if (entry.error) {
-        var safeError = String(entry.error).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        html += ' - <span style="color: #ef4444;">' + safeError + '</span>';
+        html += ' - <span style="color: #ef4444;">' + esc(entry.error) + '</span>';
       }
       html += '  </div>';
 
       if (entry.filesModified && entry.filesModified.length > 0) {
         html += '  <div class="history-files">';
         html += '    <div class="history-files-label">Files modified:</div>';
-        html += '    <div class="history-file-list">' + entry.filesModified.slice(0, 5).join(', ');
+        html += '    <div class="history-file-list">' + entry.filesModified.slice(0, 5).map(esc).join(', ');
         if (entry.filesModified.length > 5) {
           html += ' ... +' + (entry.filesModified.length - 5) + ' more';
         }
@@ -208,7 +216,7 @@
       }
 
       if (entry.commitHash) {
-        html += '  <div class="history-commit">Committed: ' + entry.commitHash.substring(0, 7) + '</div>';
+        html += '  <div class="history-commit">Committed: ' + esc(String(entry.commitHash).substring(0, 7)) + '</div>';
       }
 
       html += '</div>';
