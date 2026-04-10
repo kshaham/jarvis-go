@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -132,11 +133,8 @@ func (w *Watcher) readNewContent() {
 	}
 
 	scanner := bufio.NewScanner(f)
-	var bytesRead int64
 	for scanner.Scan() {
 		line := scanner.Text()
-		bytesRead += int64(len(line)) + 1 // +1 for newline
-
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -149,9 +147,15 @@ func (w *Watcher) readNewContent() {
 		w.processEntry(entry)
 	}
 
-	// Update file position by counting bytes of complete lines read
+	// Use the actual file position instead of accumulating len(line)+1, which
+	// is wrong for \r\n line endings. Scanner reads ahead in chunks, so after
+	// Scan returns false, the file position reflects everything consumed.
+	newPos, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		newPos = pos
+	}
 	w.mu.Lock()
-	w.filePos = pos + bytesRead
+	w.filePos = newPos
 	w.mu.Unlock()
 }
 

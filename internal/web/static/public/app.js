@@ -4158,7 +4158,9 @@ class JarvisApp {
 
     // Build the formatted prompt (abbreviated for preview)
     // HTML-escape user input to prevent XSS in innerHTML
-    const escDesc = (config.taskDescription || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const escHtml = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const escDesc = escHtml(config.taskDescription);
+    const escPhrase = escHtml(config.completionPhrase);
     let prompt = escDesc;
     prompt += '\n\n---\n\n';
 
@@ -4171,7 +4173,7 @@ class JarvisApp {
     prompt += '• Check previous work • Make progress • Commit changes\n\n';
 
     prompt += '## Completion Criteria\n';
-    prompt += `Output \`<promise>${config.completionPhrase}</promise>\` when done\n\n`;
+    prompt += `Output \`<promise>${escPhrase}</promise>\` when done\n\n`;
 
     prompt += '## If Stuck\n';
     prompt += 'Output `<promise>BLOCKED</promise>` with explanation';

@@ -427,35 +427,45 @@ func (s *Session) GetActiveTools() []string {
 func (s *Session) readLoop(ctx context.Context) {
 	defer s.wg.Done()
 
-	// PTY file descriptors don't support SetReadDeadline (they're not net.Conn).
-	// Use a goroutine to do blocking reads, and select on ctx.Done() for cancellation.
+	// PTY file descriptors don't support SetReadDeadline. Use a SINGLE long-lived
+	// reader goroutine to avoid spawning N goroutines (one per iteration) which
+	// could leak if Stop() races with a blocking read.
 	type readResult struct {
 		data []byte
 		err  error
 	}
 	readCh := make(chan readResult, 1)
 
-	for {
-		s.mu.RLock()
-		ptyFile := s.ptyFile
-		s.mu.RUnlock()
-		if ptyFile == nil {
-			s.reapProcess()
-			return
-		}
+	s.mu.RLock()
+	ptyFile := s.ptyFile
+	s.mu.RUnlock()
+	if ptyFile == nil {
+		s.reapProcess()
+		return
+	}
 
-		// Start blocking read in a goroutine with its own buffer to avoid data races.
-		go func(f *os.File) {
+	// Single reader goroutine: exits when the PTY file is closed (f.Read returns error).
+	go func(f *os.File) {
+		for {
 			buf := make([]byte, readBufSize)
 			n, err := f.Read(buf)
 			if err != nil {
-				readCh <- readResult{nil, err}
-			} else {
-				readCh <- readResult{buf[:n], nil}
+				// Use non-blocking send so we don't block forever if no one is reading.
+				select {
+				case readCh <- readResult{nil, err}:
+				default:
+				}
+				return
 			}
-		}(ptyFile)
+			select {
+			case readCh <- readResult{buf[:n], nil}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}(ptyFile)
 
-		// Wait for either read completion or context cancellation
+	for {
 		select {
 		case <-ctx.Done():
 			s.reapProcess()
@@ -474,8 +484,11 @@ func (s *Session) readLoop(ctx context.Context) {
 
 // reapProcess calls cmd.Wait() to reap the child process and populate ProcessState.
 func (s *Session) reapProcess() {
-	if s.cmd != nil {
-		_ = s.cmd.Wait()
+	s.mu.RLock()
+	cmd := s.cmd
+	s.mu.RUnlock()
+	if cmd != nil {
+		_ = cmd.Wait()
 	}
 }
 
