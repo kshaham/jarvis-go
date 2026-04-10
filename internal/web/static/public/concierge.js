@@ -18,9 +18,11 @@
   const GEMINI_WS_URL =
     'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 
-  const SYSTEM_PROMPT = `You are the Jarvis Concierge -- a friendly voice assistant that helps the user deploy and manage teams of AI engineers on their codebase.
+  const DEFAULT_VOICE = 'Charon';
 
-You have these team templates. Pick the best one based on the user's request:
+  const SYSTEM_PROMPT = `You are Jarvis -- a composed, knowledgeable AI butler who manages a virtual office of AI software engineers for the user. Your tone is measured, concise, and subtly witty, in the style of a dignified personal assistant. Address the user respectfully. Never over-explain; execute tools and confirm briefly.
+
+You can deploy these team templates:
 
 - office-7: Classic full-stack team (7 members: Eng Manager, Architect, Designer, Frontend, Backend, DevOps, QA). Default for general work.
 - backend-ai-6: AI/ML focus (6 members: AI Lead, ML, Prompt Eng, Data, API, AI QA). Use for data/ML/API projects.
@@ -29,14 +31,14 @@ You have these team templates. Pick the best one based on the user's request:
 - research-lab-7: Research focus (7 members: Director, Researcher, Analyst, POC, Presenter, Brand, Writer). Use for investigation and POCs.
 - innovation-sprint-6: Rapid validation (6 members: Innovation Lead, Scout, Prototype, Storyteller, Writer, Validator). Use for new ideas.
 
-When the user asks you to build something, immediately call the spawn_team function with:
+When the user asks you to build something, immediately call spawn_team with:
   - templateId: the best-fit template
   - mission: a clear, specific mission statement (what the team should accomplish)
-  - perpetual: true (default) unless they specifically ask for a goal-focused run
+  - perpetual: true (default) unless they explicitly want a goal-focused run
 
-Then confirm to the user what you just did. Keep responses short and conversational -- do not over-explain. You are talking through voice so avoid long lists or markdown.
+When asked about status, call get_office_status. For meetings, call trigger_standup or trigger_brainstorm. To stop, call shutdown_team.
 
-If they ask about current state, call get_office_status. If they want a standup or brainstorm, call the matching tool. If they want to stop, call shutdown_team.`;
+Keep spoken responses short (one or two sentences). Avoid reading long lists, URLs, or markdown. Acknowledge, execute, confirm.`;
 
   const TOOL_DECLARATIONS = [
     {
@@ -98,6 +100,7 @@ If they ask about current state, call get_office_status. If they want a standup 
   const Concierge = {
     apiKey: null,
     model: 'gemini-live-2.5-flash-native-audio',
+    voice: DEFAULT_VOICE,
     workingDir: '/app/workspace',
     ws: null,
     wsModality: null, // 'AUDIO' or 'TEXT' -- modality the current ws was opened for
@@ -105,10 +108,17 @@ If they ask about current state, call get_office_status. If they want a standup 
     captureCtx: null,
     playbackCtx: null,
     pcmNode: null,
+    micSource: null,
     micStream: null,
     nextPlaybackTime: 0,
     csrfToken: null,
     status: 'disconnected',
+    debug: true, // set false in production -- logs all Gemini messages
+    // Accumulators for streaming transcriptions across a single turn
+    currentInputTranscript: '',
+    currentOutputTranscript: '',
+    lastUserTranscriptEl: null,
+    lastAssistantTranscriptEl: null,
 
     async init() {
       this.bindUi();
@@ -125,6 +135,7 @@ If they ask about current state, call get_office_status. If they want a standup 
         const data = await res.json();
         this.apiKey = data.apiKey;
         this.model = data.model || this.model;
+        this.voice = data.voice || this.voice;
         this.workingDir = data.workingDir || this.workingDir;
         await this.refreshCsrfToken();
       } catch (err) {
@@ -151,6 +162,7 @@ If they ask about current state, call get_office_status. If they want a standup 
       const input = document.getElementById('conciergeText');
       const mic = document.getElementById('conciergeMic');
       const chat = document.getElementById('conciergeChat');
+      const talkCta = document.getElementById('conciergeTalkCta');
 
       if (toggle) toggle.addEventListener('click', () => chat.classList.remove('collapsed'));
       if (close) close.addEventListener('click', () => chat.classList.add('collapsed'));
@@ -164,6 +176,17 @@ If they ask about current state, call get_office_status. If they want a standup 
         });
       }
       if (mic) mic.addEventListener('click', () => this.toggleVoice());
+      if (talkCta) talkCta.addEventListener('click', () => this.handleTalkCta());
+    },
+
+    // handleTalkCta is the prominent "Talk to Jarvis" button handler.
+    // Ensures the chat widget is open, then toggles voice mode.
+    async handleTalkCta() {
+      const chat = document.getElementById('conciergeChat');
+      if (chat && chat.classList.contains('collapsed')) {
+        chat.classList.remove('collapsed');
+      }
+      await this.toggleVoice();
     },
 
     setStatus(text, level) {
@@ -239,18 +262,36 @@ If they ask about current state, call get_office_status. If they want a standup 
       ws.onerror = () => this.setStatus('Error', 'error');
 
       // Setup message per Live API spec.
-      const setup = {
-        setup: {
-          model: 'models/' + this.model,
-          generationConfig: {
-            responseModalities: [desiredModality],
-          },
-          systemInstruction: {
-            parts: [{ text: SYSTEM_PROMPT }],
-          },
-          tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
-        },
+      // https://ai.google.dev/api/live
+      const generationConfig = {
+        responseModalities: [desiredModality],
       };
+      if (desiredModality === 'AUDIO') {
+        generationConfig.speechConfig = {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: this.voice || DEFAULT_VOICE },
+          },
+        };
+      }
+
+      const setupPayload = {
+        model: 'models/' + this.model,
+        generationConfig,
+        systemInstruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
+        tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+      };
+
+      // Enable transcriptions when in voice mode so the user sees what was
+      // said on both sides of the conversation.
+      if (desiredModality === 'AUDIO') {
+        setupPayload.inputAudioTranscription = {};
+        setupPayload.outputAudioTranscription = {};
+      }
+
+      const setup = { setup: setupPayload };
+      if (this.debug) console.log('[Concierge] setup', setup);
       ws.send(JSON.stringify(setup));
       this.wsModality = desiredModality;
       this.setStatus('Ready');
@@ -270,13 +311,25 @@ If they ask about current state, call get_office_status. If they want a standup 
         return;
       }
 
+      if (this.debug) console.log('[Concierge] <<', data);
+
       if (data.setupComplete) {
-        this.setStatus(this.voiceMode ? 'Voice ready' : 'Ready');
+        this.setStatus(this.voiceMode ? 'Listening' : 'Ready', this.voiceMode ? 'listening' : null);
         return;
       }
 
       if (data.serverContent) {
         const sc = data.serverContent;
+
+        // Streaming input transcription -- what the user is saying.
+        if (sc.inputTranscription && sc.inputTranscription.text) {
+          this.appendTranscript('user', sc.inputTranscription.text);
+        }
+        // Streaming output transcription -- what Jarvis is saying.
+        if (sc.outputTranscription && sc.outputTranscription.text) {
+          this.appendTranscript('assistant', sc.outputTranscription.text);
+        }
+
         if (sc.modelTurn && sc.modelTurn.parts) {
           for (const part of sc.modelTurn.parts) {
             if (part.text) {
@@ -289,6 +342,8 @@ If they ask about current state, call get_office_status. If they want a standup 
           }
         }
         if (sc.turnComplete) {
+          // Finalize the accumulated transcripts for this turn.
+          this.finalizeTranscripts();
           this.setStatus(this.voiceMode ? 'Listening' : 'Ready', this.voiceMode ? 'listening' : null);
         }
       }
@@ -298,6 +353,35 @@ If they ask about current state, call get_office_status. If they want a standup 
           this.handleFunctionCall(fc);
         }
       }
+    },
+
+    // appendTranscript accumulates streaming transcript text into a single
+    // rolling bubble per role per turn. A new bubble is created when
+    // finalizeTranscripts is called at turn end.
+    appendTranscript(role, text) {
+      if (!text) return;
+      const wrap = document.getElementById('conciergeMessages');
+      if (!wrap) return;
+      const elField = role === 'user' ? 'lastUserTranscriptEl' : 'lastAssistantTranscriptEl';
+      let el = this[elField];
+      if (!el) {
+        const msg = document.createElement('div');
+        msg.className = 'concierge-message concierge-' + role + ' concierge-transcript';
+        const content = document.createElement('div');
+        content.className = 'concierge-message-content';
+        content.textContent = '';
+        msg.appendChild(content);
+        wrap.appendChild(msg);
+        this[elField] = content;
+        el = content;
+      }
+      el.textContent = (el.textContent || '') + text;
+      wrap.scrollTop = wrap.scrollHeight;
+    },
+
+    finalizeTranscripts() {
+      this.lastUserTranscriptEl = null;
+      this.lastAssistantTranscriptEl = null;
     },
 
     async handleFunctionCall(fc) {
@@ -446,34 +530,59 @@ If they ask about current state, call get_office_status. If they want a standup 
       }
     },
 
-    async toggleVoice() {
+    setTalkCtaState(active) {
       const micBtn = document.getElementById('conciergeMic');
+      const cta = document.getElementById('conciergeTalkCta');
+      const label = cta ? cta.querySelector('.concierge-talk-cta-label') : null;
+      if (active) {
+        micBtn && micBtn.classList.add('active');
+        cta && cta.classList.add('active');
+        if (label) label.textContent = 'Stop talking';
+      } else {
+        micBtn && micBtn.classList.remove('active');
+        cta && cta.classList.remove('active');
+        if (label) label.textContent = 'Talk to Jarvis';
+      }
+    },
+
+    async toggleVoice() {
       if (this.voiceMode) {
         // Stop voice mode
         this.voiceMode = false;
-        micBtn && micBtn.classList.remove('active');
+        this.setTalkCtaState(false);
         this.stopMic();
         if (this.ws) {
           try {
             this.ws.close();
           } catch {}
           this.ws = null;
+          this.wsModality = null;
         }
+        this.finalizeTranscripts();
         this.setStatus('Ready');
         return;
       }
 
       // Start voice mode
+      if (!this.apiKey) {
+        this.showSystem('Gemini API key not configured. Set it in Settings first.');
+        return;
+      }
       this.voiceMode = true;
-      micBtn && micBtn.classList.add('active');
+      this.setTalkCtaState(true);
+      this.setStatus('Connecting...');
       try {
         await this.startMic();
         await this.ensureConnected();
         this.setStatus('Listening', 'listening');
       } catch (err) {
-        this.showSystem('Voice mode failed: ' + err.message);
+        let msg = err.message || String(err);
+        if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+          msg = 'Microphone permission denied. Enable it in your browser.';
+        }
+        this.showSystem('Voice mode failed: ' + msg);
         this.voiceMode = false;
-        micBtn && micBtn.classList.remove('active');
+        this.setTalkCtaState(false);
         this.stopMic();
       }
     },

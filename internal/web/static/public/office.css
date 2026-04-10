@@ -3892,3 +3892,68 @@
     height: calc(100vh - 120px);
   }
 }
+
+/* ========== Concierge Talk-to-Jarvis CTA button ========== */
+
+.concierge-talk-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: calc(100% - 28px);
+  margin: 14px 14px 4px 14px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease;
+}
+
+.concierge-talk-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(99, 102, 241, 0.45);
+}
+
+.concierge-talk-cta:active {
+  transform: translateY(0);
+}
+
+.concierge-talk-cta.active {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  box-shadow: 0 6px 18px rgba(220, 38, 38, 0.45);
+  animation: concierge-talk-pulse 1.8s ease-in-out infinite;
+}
+
+.concierge-talk-cta.active::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #fef2f2;
+  border-radius: 50%;
+  margin-right: 6px;
+  box-shadow: 0 0 0 0 rgba(254, 242, 242, 0.9);
+  animation: concierge-dot-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes concierge-talk-pulse {
+  0%, 100% { box-shadow: 0 6px 18px rgba(220, 38, 38, 0.4); }
+  50% { box-shadow: 0 6px 26px rgba(220, 38, 38, 0.7); }
+}
+
+@keyframes concierge-dot-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(254, 242, 242, 0.9); }
+  50% { transform: scale(1.2); box-shadow: 0 0 0 6px rgba(254, 242, 242, 0); }
+}
+
+/* Streaming transcript bubble (slightly dimmed to differentiate from final) */
+.concierge-transcript .concierge-message-content {
+  font-style: italic;
+  opacity: 0.92;
+}

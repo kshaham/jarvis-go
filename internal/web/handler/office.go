@@ -705,8 +705,8 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 // Concierge handlers (Gemini Live voice assistant)
 // ---------------------------------------------------------------------------
 
-// ConciergeConfig returns the Gemini API key + model to the authenticated browser
-// so it can connect directly to the Gemini Live WebSocket API.
+// ConciergeConfig returns the Gemini API key + model + voice to the authenticated
+// browser so it can connect directly to the Gemini Live WebSocket API.
 func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
 	apiKey, _ := settings["geminiApiKey"].(string)
@@ -718,9 +718,14 @@ func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 	if workingDir == "" {
 		workingDir = "/app/workspace"
 	}
+	voice, _ := settings["geminiVoice"].(string)
+	if voice == "" {
+		voice = "Charon" // Jarvis-style butler voice default
+	}
 	ok(w, map[string]interface{}{
 		"apiKey":     apiKey,
 		"model":      "gemini-live-2.5-flash-native-audio",
+		"voice":      voice,
 		"workingDir": workingDir,
 	})
 }

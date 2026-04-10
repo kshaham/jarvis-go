@@ -148,6 +148,7 @@
       zaiSonnetModel: 'glm-4.7',
       zaiHaikuModel: 'glm-4.5-air',
       geminiApiKey: '',
+      geminiVoice: 'Charon',
       activeProfile: 'default',
       profile1Name: '',
       profile2Name: '',
