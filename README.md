@@ -1,23 +1,32 @@
 # Jarvis Go
 
-> Multi-agent orchestration platform — manage teams of autonomous Claude Code agents working on real codebases.
+> Multi-agent orchestration platform -- manage teams of autonomous Claude Code agents working on real codebases.
 
-![Go 1.25](https://img.shields.io/badge/go-1.25-blue) ![License MIT](https://img.shields.io/badge/license-MIT-green) ![Tests 311+](https://img.shields.io/badge/tests-311%2B-brightgreen)
+![Go 1.25](https://img.shields.io/badge/go-1.25-blue) ![License MIT](https://img.shields.io/badge/license-MIT-green) ![Tests 340+](https://img.shields.io/badge/tests-340%2B-brightgreen) ![Fixes 95+](https://img.shields.io/badge/fixes-95%2B-purple)
 
 ---
 
 ## Overview
 
-Jarvis Go is a full port of the Node.js Jarvis server, implemented in pure Go with zero CGO dependencies. It runs a web server that manages PTY sessions hosting Claude Code agents, coordinates them as a virtual office team, and provides a clean browser-based dashboard for monitoring and control.
+Jarvis Go is a production-grade multi-agent orchestration system implemented in pure Go with zero CGO dependencies. It runs a web server that manages both **Claude Agent SDK** sessions (persistent multi-turn) and traditional **PTY** sessions hosting Claude Code agents, coordinates them as a virtual office team with self-improvement feedback loops, and provides a browser-based dashboard for monitoring and control.
 
-Key capabilities:
-- Spawn teams of Claude Code agents in isolated PTY sessions with role-specific kickstart prompts
-- Autonomous monitoring loop with 12 functions: stuck detection, reflection, curiosity, task triage, water-cooler chat, and more
-- Self-improvement engine: agents reflect on completed tasks, build a learning store, distill insights, and share skills across the team
-- 5-column kanban for task tracking with dependencies, priorities, and leader assignment
-- Telegram bot integration for remote monitoring and session control
-- MCP server exposing 30 tools for external orchestration
-- Z.AI Coding Plan support (GLM models via Anthropic-compatible API)
+### Key Capabilities
+
+- **Dual session modes**: Claude Agent SDK (Go) for persistent multi-turn sessions with immediate prompt delivery, plus PTY fallback mode
+- **Virtual office team**: 6 prebuilt templates (31 agent configs) across full-stack, backend/AI, frontend, research, and innovation categories
+- **Autonomous monitoring loop**: 12 functions on a 15-second tick (stuck detection, reflection, curiosity, task triage, water-cooler chat, bug sweeps, blocked-task escalation, more)
+- **Self-improvement engine**: agents reflect on completed tasks, build a per-agent learning store, auto-distill insights at 30 entries, and share skills across the team
+- **Perpetual RALPH loop**: agents never idle -- they find TODOs, write tests, review commits, refactor code, generate their own tasks
+- **Cross-agent knowledge sharing**: teammate learnings and mission insights injected into each agent's kickstart prompt
+- **Agent memory persistence**: per-project memory files via `cm memory read/write/append` survive restarts and team respawns
+- **CodeGraphContext (CGC) integration**: agents use an MCP-backed code graph to query call chains, dependencies, and patterns instead of reading entire files (cuts context consumption 5-10x)
+- **5-column kanban** for task tracking with dependencies, priorities, leader assignment, and blocked-task triage
+- **44+ MCP tools**: full `office_*` tool suite for agent task/memory/skill/message operations plus 26 session/monitoring/planning tools
+- **Z.AI Coding Plan support**: GLM models via Anthropic-compatible API with rate-limit-aware model allocation across team members (GLM-5.1 Opus, GLM-5 Sonnet, GLM-4.7 per agent)
+- **Telegram bot integration**: remote monitoring, session control, periodic office summaries
+- **Chat & standup transcript persistence**: inter-agent messages and standup transcripts saved to disk, restored on page refresh and server restart
+- **37 agent SVG icons** + 11 role-based fallbacks for visual team identity
+- **Hardened for production**: 95+ bug fixes across 10 review rounds (goroutine leaks, data races, XSS, CSRF, path traversal, nil panics, resource cleanup)
 
 ---
 
@@ -26,37 +35,42 @@ Key capabilities:
 ```
 jarvis-go/
 ├── cmd/
-│   ├── jarvis/          # Main web server binary
-│   ├── jarvis-mcp/      # MCP stdio server (30 tools)
-│   ├── cm/                 # Agent CLI (injected into sessions)
+│   ├── jarvis/             # Main web server binary
+│   ├── jarvis-mcp/         # MCP stdio server (44+ tools)
+│   ├── cm/                 # Agent CLI (injected into agent sessions)
 │   └── ptyserver/          # Standalone PTY server
 │
 └── internal/
-    ├── office/             # Virtual office: manager, agents, tasks, learning, recovery
-    ├── pty/                # PTY session management, screen buffering, idle detection
+    ├── office/             # Virtual office: manager, agents, tasks, learning, recovery,
+    │                       #   standup, brainstorm, kickstart, scoring, metrics
+    ├── pty/                # Dual-mode sessions: SDK (claude-agent-sdk-go) + PTY fallback,
+    │                       #   screen buffering, idle detection, rate-limit allocation
     ├── respawn/            # Automatic session respawn state machine
     ├── ralph/              # RALPH loop tracker and circuit breaker
     ├── subagent/           # Subagent watcher (Claude Code sub-tasks)
-    ├── telegram/           # Telegram bot, commands, streaming, queue
+    ├── telegram/           # Telegram bot, commands, streaming, queue, webhook
     ├── templates/          # Session/team configuration templates
-    ├── state/              # Persistent application settings (JSON)
+    ├── state/              # Persistent application settings (JSON, atomic write)
     ├── cases/              # Saved prompt cases
-    ├── collections/        # Shared data structures
+    ├── collections/        # LRU map, stale expiration map
     ├── integrations/       # External integration state
     ├── runsummary/         # Run summary parsing and storage
-    ├── transcript/         # Transcript read/parse utilities
+    ├── transcript/         # Transcript read/parse with authoritative file position
     ├── cleanup/            # Graceful shutdown helpers
     ├── filewatcher/        # File system watcher for hot-reload
     └── web/
         ├── handler/        # HTTP handlers (session, office, config, monitoring)
         ├── sse/            # Server-Sent Events broker and client pool
-        ├── middleware/     # Auth, CSRF, request logging
-        ├── auth/           # Session authentication
+        ├── middleware/     # Auth, CSRF (with retry), request logging, rate limiting
+        ├── auth/           # Session authentication with cached IsPasswordConfigured
         ├── request/        # Request parsing helpers
-        └── static/         # Embedded frontend assets
+        └── static/         # Embedded frontend assets (office.html, office.js, etc.)
 ```
 
-**22 packages**, ~31,700 lines of Go.
+**22 packages**, ~32,500 lines of Go. Dual session architecture: SDK sessions spawn
+a persistent `claude.NewSession()` subprocess that stays alive across all turns
+(kickstart, standup, brainstorm, replenishment), while PTY sessions use traditional
+screen-scraping for fallback compatibility.
 
 ---
 
@@ -100,8 +114,15 @@ The container exposes port **3555** by default. See `docker-compose.yml` for vol
 
 | Variable | Description | Default |
 |---|---|---|
-| `JARVIS_API_URL` | Server URL (used by `cm` CLI inside sessions) | — |
-| `JARVIS_SESSION_ID` | Current session ID (set automatically per agent) | — |
+| `JARVIS_API_URL` | Server URL (used by `cm` CLI and `jarvis-mcp` inside sessions) | `http://localhost:3555` |
+| `JARVIS_SESSION_ID` | Current session ID (injected per agent) | auto-generated |
+| `ANTHROPIC_AUTH_TOKEN` | Z.AI API key (Coding Plan proxy auth) | — |
+| `ANTHROPIC_BASE_URL` | Anthropic-compatible endpoint URL | `https://api.z.ai/api/anthropic` |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | Opus model mapping | `glm-5.1` |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | Sonnet model mapping (per-agent override by allocator) | `glm-4.7` |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Haiku model mapping | `glm-4.5-air` |
+| `ANTHROPIC_API_KEY` | Direct Anthropic API key (if not using Z.AI) | — |
+| `API_TIMEOUT_MS` | Request timeout for agent API calls | `3000000` |
 | `GEMINI_API_KEY` | Gemini API key (for Nano Banana image generation) | — |
 | `HEADLESS_BROWSER_HOST` | Chrome headless host for agent browser testing | `headless-shell` |
 | `HEADLESS_BROWSER_PORT` | Chrome DevTools port | `9222` |
@@ -112,14 +133,35 @@ The container exposes port **3555** by default. See `docker-compose.yml` for vol
 
 ### Team Templates
 
-Jarvis ships with prebuilt team configurations accessible via `GET /api/office/templates`. Templates define member roles, personalities, skills, and tier assignments. Custom teams can be created and saved through the UI.
+Jarvis ships with **6 prebuilt team templates** (31 agent configs) accessible via `GET /api/office/templates`:
+
+| Template | Category | Members | Composition |
+|----------|----------|---------|-------------|
+| **Office (Default)** | fullstack | 7 | Max (Eng Manager), Sage (Architect), Nova (Designer), Vex (Frontend), Bolt (Backend), Forge (DevOps), Lint (QA) |
+| **Backend/AI** | backend | 6 | Aria (AI Lead), Tensor (ML), Prompt (Prompt Eng), Dataflow (Data), Nexus (API), Guardian (AI QA) |
+| **Frontend Studio** | frontend | 6 | Pixel (Design Lead), React (Architect), Craft (UI), Flow (Interaction), Access (A11y), Perf (Performance) |
+| **Full-Stack Compact** | fullstack | 5 | Captain (Tech Lead), Dash (Frontend), Stack (Backend), Shield (QA/Security), Ops (DevOps) |
+| **Research Lab** | research | 7 | Atlas (Director), Cipher (Researcher), Prism (Analyst), Proto (POC), Slide (Presentation), Muse (Brand), Quill (Writer) |
+| **Innovation Sprint** | research | 6 | Spark (Lead), Scout (Research), Flux (Prototype), Pitch (Storyteller), Brief (Writer), Verify (Validator) |
 
 Each team member has:
-- **Role** — e.g., Frontend Engineer, Backend Engineer, QA Engineer, Tech Lead, DevOps Engineer
-- **Tier** — `strategic` (leader) or `worker`
-- **Personality** — multi-paragraph character description injected at session start
-- **Skills** — list of domain competencies
-- **Color** — visual identifier in the dashboard
+- **Role** -- e.g., Frontend Engineer, Backend Engineer, QA Engineer, Tech Lead, DevOps Engineer, Researcher
+- **Tier** -- `strategic` (leader) or `worker`
+- **Personality** -- multi-paragraph character description injected at session start
+- **Skills** -- list of domain competencies
+- **Color** -- visual identifier in the dashboard
+- **Emoji** -- Unicode glyph for at-a-glance identification
+
+Custom teams can be created and saved through the UI.
+
+### Perpetual vs Goal-Focused Mode
+
+At spawn time, the UI exposes a **Perpetual Improvement Mode** toggle (default: ON):
+
+- **Perpetual mode**: Agents run the RALPH (Recognize, Assess, Log, Plan, Handle) loop continuously. They never idle -- when task queues empty, they scan for TODOs, write tests, review commits, refactor code, and generate their own tasks via `cm task self-add`. Recovery system injects replenishment prompts if an agent genuinely runs out of work.
+- **Goal-focused mode**: Agents complete their assigned tasks then stop. Useful for mission-critical work where you want the team to halt after the goal is met rather than continue self-directing.
+
+The selected mode is injected into the kickstart prompt and governs whether the recovery system's idle-replenishment loop is active.
 
 ### Spawn Flow
 
@@ -131,17 +173,25 @@ Each team member has:
 
 ### Kickstart Prompt Sections
 
+The kickstart prompt is composed dynamically per agent and includes:
+
 | Section | Description |
 |---|---|
-| Team Mission | Project-level goal shared by all members |
-| Previous Work Memory | Persisted memory from prior sessions via `cm memory` |
-| Learned Knowledge | Distilled insights from past `cm reflect` calls |
-| Identity + Personality | Deep role immersion paragraph |
-| Team Relationships | Names and roles of all teammates |
-| Task Queue | Current assigned tasks |
-| File Lock Protocol | How to use `cm lock`/`cm unlock` before editing |
-| Communication | How to use `cm message`, `cm standup`, `cm brainstorm` |
-| cm CLI Reference | Full command reference inline |
+| Team Mission | Project-level goal (plus appended mission insights from `AppendMissionInsight`) |
+| Previous Work Memory | Persisted memory from prior sessions via `cm memory` (per-project) |
+| Learned Knowledge | Top 10 recent learnings + top 5 skills + all distilled insights from past reflections |
+| **Teammate Insights** | Cross-agent context: up to 3 recent learnings from each teammate |
+| **Context Optimization** | Instructions to use `mcp__codegraphcontext__*` tools for code queries instead of reading full files |
+| Identity + Personality | Deep role immersion paragraph (supports runtime override via API) |
+| Self-Improvement Mission | Working-directory context and autonomous improvement framing |
+| Team Relationships | Names, roles, tiers of all teammates |
+| Task Queue Status | Current assigned/pending task count |
+| File Lock Protocol | How to use `cm lock`/`cm unlock` before editing shared files |
+| Communication Protocol | Task lifecycle (ack → start → progress → complete), standup/brainstorm commands |
+| **Knowledge & Skills Toolkit** | Commands for shared skills (`cm skill list/search/read/create`), curiosity discovery (`cm discover`), memory management (`cm memory read/write/append`) |
+| Git Workflow | Branch/worktree guidance per agent (no-push policy, conventional commits) |
+| RALPH Loop (perpetual) | Continuous improvement loop if perpetualMode is enabled |
+| Goal-Focused (goal mode) | Alternative stop-after-goal guidance |
 
 ### Standup
 
@@ -256,7 +306,45 @@ Skills are deduplicated by name and tracked with a `usageCount` and `lastUsedAt`
 
 ### Cross-Agent Sharing
 
-When building the kickstart prompt, `BuildCrossAgentContext` loads learning stores from all other agents on the team (excluding self) and includes a summary. This lets workers benefit from techniques discovered by teammates without manual coordination.
+When building the kickstart prompt, `BuildCrossAgentContext` loads learning stores from all other agents on the team (excluding self) and includes up to 3 recent learnings per teammate in the kickstart as a "Teammate Insights" section. This lets workers benefit from techniques discovered by teammates without manual coordination.
+
+### Agent Memory (Per-Project Persistence)
+
+Each agent has a **project-scoped memory file** at `~/.jarvis/agent-memory/{projectHash}/{configId}.md`. Memory survives team respawns, server restarts, and project switches. Agents read/write their memory via:
+
+```bash
+cm memory read                  # Read current memory
+cm memory write "<content>"     # Overwrite memory (for full restructuring)
+cm memory append "<entry>"      # Append a new entry (most common)
+```
+
+Memory is loaded into the kickstart as "Previous Work Memory" -- agents resume where they left off. The reflection trigger and wrap-up prompt both remind agents to save their current context via `cm memory write` before ending a session.
+
+### Team Mission Insights
+
+As agents complete work and discover new context about the mission, they can contribute back via `AppendMissionInsight`. The mission becomes a living document:
+
+```
+Original mission: "Build a real-time chat application"
++ [Learned] WebSocket heartbeats required for NAT traversal
++ [Learned] Message deduplication needed after reconnect
+```
+
+The updated mission is persisted to `~/.jarvis/office-memory/team-mission.txt` and included in every future kickstart prompt. This creates a feedback loop where team knowledge accumulates across sprints.
+
+### Curiosity & Discovery
+
+The monitoring loop fires `checkForCuriousAgents` which sends exploration prompts on a cooldown. Agents respond via `cm discover`:
+
+```bash
+cm discover "Found unused legacy auth code" \
+  --findings "src/auth/legacy.go has 200 LoC of unused OAuth1 code" \
+               "Migration is gated on removing OAuth1 flow" \
+  --self-assigned "Remove legacy OAuth1 code" \
+  --committed
+```
+
+Discoveries feed into the learning store with the `curiosity` category and trigger optional self-task creation.
 
 ---
 
@@ -380,20 +468,22 @@ When the office team is active, Telegram receives periodic updates (configurable
 
 ## MCP Server
 
-The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio transport. It exposes 30 tools for external orchestrators (e.g., Claude Desktop, another Claude Code agent) to control Jarvis programmatically.
+The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio transport. It exposes **44+ tools** split into two categories: **agent-facing `office_*` tools** that use `JARVIS_SESSION_ID` automatically (for in-session agents), and **orchestration tools** for external controllers (Claude Desktop, other Claude Code instances).
 
-### Session Tools
+Jarvis-MCP is also registered as an MCP server inside every spawned agent session, giving agents a natively-scoped toolset for task/memory/skill operations.
+
+### Session Tools (orchestration)
 
 | Tool | Description |
 |---|---|
-| `create_session` | Create a new PTY session |
+| `create_session` | Create a new PTY or SDK session |
 | `list_sessions` | List all active sessions |
 | `get_session` | Get session details by ID |
 | `stop_session` | Stop a session |
 | `send_to_session` | Send input to a session |
 | `get_session_output` | Retrieve recent session output |
 
-### Agent / Office Tools
+### Agent Introspection
 
 | Tool | Description |
 |---|---|
@@ -401,16 +491,49 @@ The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio t
 | `get_agent_status` | Get agent state and task queue |
 | `get_agent_transcript` | Read agent conversation transcript |
 
-### Task Tools
+### Office Agent Tools (in-session, auto-scoped to `JARVIS_SESSION_ID`)
+
+These tools let agents manage their own task queue, memory, skills, and team coordination directly via MCP without shelling out to the `cm` CLI.
+
+**Task lifecycle:**
 
 | Tool | Description |
 |---|---|
-| `add_task` | Assign a task to an agent |
-| `list_tasks` | List tasks for an agent |
-| `get_task` | Get task details |
-| `remove_task` | Remove a task |
+| `office_task_list` | List your own task queue |
+| `office_task_self_add` | Add a self-generated task (title, description, priority) |
+| `office_task_ack` | Acknowledge receipt of an assigned task |
+| `office_task_start` | Mark a task in-progress |
+| `office_task_progress` | Report progress with note |
+| `office_task_complete` | Mark a task complete |
+| `office_task_blocked` | Report a blocker (captures reason + `isBlocked` flag) |
 
-### Skill Tools
+**Collaboration:**
+
+| Tool | Description |
+|---|---|
+| `office_standup_respond` | Submit standup status update |
+| `office_reflect` | Submit a post-task learning with category |
+| `office_team_roster` | Get current team roster |
+| `office_send_message` | Send a direct message to a teammate (via `fromSessionId`) |
+
+**Persistent memory:**
+
+| Tool | Description |
+|---|---|
+| `office_memory_read` | Read your project-scoped persistent memory |
+| `office_memory_write` | Overwrite your memory |
+| `office_memory_append` | Append an entry to your memory |
+
+**Shared skill library (office-scoped):**
+
+| Tool | Description |
+|---|---|
+| `office_skill_list` | List all shared team skills |
+| `office_skill_search` | Search skills by keyword |
+| `office_skill_read` | Read a skill's content |
+| `office_skill_create` | Create or update a shared skill |
+
+### Shared Skill Tools (orchestration)
 
 | Tool | Description |
 |---|---|
@@ -419,6 +542,15 @@ The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio t
 | `create_skill` | Create a shared skill |
 | `search_skills` | Search skills by keyword |
 | `delete_skill` | Remove a skill |
+
+### Scheduled Task Queue Tools
+
+| Tool | Description |
+|---|---|
+| `add_task` | Add to the scheduled task queue |
+| `list_tasks` | List scheduled tasks |
+| `get_task` | Get scheduled task details |
+| `remove_task` | Remove a scheduled task |
 
 ### Monitoring Tools
 
@@ -432,7 +564,7 @@ The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio t
 | `get_stats` | Server statistics |
 | `get_config` | Current server configuration |
 
-### Generation + Dynamic Tools
+### Planning + Dynamic Tools
 
 | Tool | Description |
 |---|---|
@@ -457,6 +589,74 @@ Add to `~/.claude/settings.json` or `claude_desktop_config.json`:
     }
   }
 }
+```
+
+---
+
+## Claude Agent SDK (Go) Sessions
+
+Jarvis uses the [Claude Agent SDK for Go](https://github.com/shaharia-lab/claude-agent-sdk-go) to run agents in **persistent multi-turn sessions**. This replaces the traditional single-shot `claude.Query()` model with a long-lived `claude.NewSession()` subprocess that stays alive across all turns.
+
+### Why SDK Sessions?
+
+The old PTY screen-scraping approach had brittleness issues: chunked Ink input, magic-string idle detection, menu auto-selection hacks, pasted-text detection, and ANSI stripping. The SDK provides:
+
+- **Structured events** (TypeSystem, TypeAssistant, TypeStreamEvent, TypeResult, TypeRateLimitEvent) instead of ANSI output parsing
+- **Persistent subprocess**: kickstart is Turn 1; standup/brainstorm/replenishment prompts are subsequent turns delivered immediately via `Session.Send()` without waiting for the current turn to complete
+- **Non-blocking prompt delivery**: when you want an agent to pay attention RIGHT NOW (standup response, urgent reassignment), `SendPrompt()` writes to stdin instantly
+- **Explicit token/cost tracking** per turn via `TypeResult` events
+- **MCP integration**: agents receive the `jarvis` and `codegraphcontext` MCP servers automatically via `claude.WithMcpServers(...)`
+
+### Session Lifecycle
+
+```
+OfficeSpawnTeam → spawnAgentSession (per member)
+     │
+     ├── Pre-generate sessionID for MCP/env injection
+     ├── Build kickstart prompt (memory, learnings, cross-agent, CGC instructions, RALPH loop)
+     ├── Inject JARVIS_SESSION_ID + JARVIS_API_URL into subprocess env
+     ├── Create SDK session via claude.NewSession(ctx, options...)
+     ├── eventConsumer goroutine ranges over session.Events()
+     ├── Send kickstart as Turn 1
+     └── Session stays alive; subsequent Send() calls deliver standup/brainstorm/reflection prompts
+```
+
+### PTY Fallback
+
+If SDK session creation fails, `spawnAgentSession` falls back to creating a traditional PTY session (`pty.NewSession`) so the system degrades gracefully. Both session types implement the same `SessionStore` interface, so all office manager code works against either.
+
+---
+
+## CodeGraphContext (CGC) Integration
+
+Agents are spawned with an additional MCP server: [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext). CGC builds a knowledge graph of the codebase (functions, classes, relationships, dependencies) in an embedded KuzuDB and exposes query tools via MCP.
+
+### Why?
+
+Long-running autonomous agents on real codebases accumulate massive context as they read entire files to understand what calls what. After a few hours of work, a single agent may have spent $40+ on context alone. CGC lets agents query structured relationships instead:
+
+- **Before**: "Read `auth.go` to understand how login flow works" → 2000 lines in context
+- **After**: `mcp__codegraphcontext__find_callers(authenticateUser)` → list of 5 callers + their line numbers
+
+Token usage drops 5-10x on exploration tasks.
+
+### Auto-Index on Spawn
+
+When `OfficeSpawnTeam` is called, Jarvis kicks off `cgc index <workingDir>` in a background goroutine (5-minute timeout). The index is built while agents are already working on their kickstart, so it's ready by the time they need to query it.
+
+### Integration Points
+
+1. **Kickstart**: Every agent's kickstart includes a "Context Optimization (CRITICAL)" section instructing them to prefer `mcp__codegraphcontext__*` tools over reading full files
+2. **MCP Server**: `cgc mcp start` is registered as an MCP server in every agent's Claude Code config
+3. **RALPH ASSESS step**: The perpetual loop tells agents to run `cgc find pattern <topic>` before scanning the codebase
+
+### Install
+
+Included in the Docker image via `pip install codegraphcontext`. For manual setup:
+
+```bash
+pip install codegraphcontext
+cgc init   # Initialize KuzuDB (first time only)
 ```
 
 ---
@@ -490,6 +690,28 @@ API_TIMEOUT_MS                 = 3000000
 ```
 
 Per-member model overrides are supported: individual team members can be configured to use a different model than the team default.
+
+### Rate-Limit-Aware Model Allocation
+
+Z.AI's Coding Plan imposes concurrent-request limits per model tier (e.g., 2 concurrent requests for GLM-5.1, 2 for GLM-5, 3 for GLM-4.7, 5 for GLM-4.7-flash). With a 5-agent team all running on GLM-5.1, you'd rapidly hit the rate limit and agents would stall.
+
+Jarvis' `AllocateZAIModels()` distributes agents across model tiers at spawn time so the team stays under rate limits while keeping the most important agents on the best models:
+
+- **Strategic-tier agents** (leaders) get the premium model first (GLM-5.1)
+- **Remaining slots** on each tier are filled by workers in priority order
+- **Overflow workers** are downgraded to the next tier (GLM-5 → GLM-4.7 → GLM-4.7-flash)
+
+Example allocation for a 5-agent team:
+
+```
+Captain (strategic) → glm-5.1   [premium, slot 1 of 2]
+Dash    (worker)    → glm-5.1   [premium, slot 2 of 2]
+Shield  (worker)    → glm-5     [sonnet, slot 1 of 2]
+Stack   (worker)    → glm-5     [sonnet, slot 2 of 2]
+Ops     (worker)    → glm-4.7   [sonnet-lite, slot 1 of 3]
+```
+
+Each agent gets its own `ANTHROPIC_DEFAULT_SONNET_MODEL` environment variable injected via `claude.WithEnv(...)`, so Claude Code transparently uses the allocated tier.
 
 ---
 
@@ -569,23 +791,75 @@ Each agent has a unique SVG icon based on their role/personality (24 icons acros
 
 ### View Modes
 
-Toggle between grid view (responsive card grid) and compact list view. Preference persists in localStorage.
+Toggle between **grid view** (responsive card grid, default) and **compact list view** via the view-mode toggle in the agents panel header. Preference persists in localStorage.
 
 ### Quick Actions
 
-Hover over any agent card to reveal quick-action buttons: open details modal, send prompt, or jump to terminal session.
+Hover over any agent card to reveal quick-action buttons:
+- **Open Details** -- expand agent modal with memory, personality override, task queue
+- **Send Prompt** -- inline prompt composer that routes through CSRF-protected `postJson`
+- **Jump to Terminal** -- navigate to the session's terminal tab
 
 ### Nav Tab Badges
 
-Tab icons show live count badges: in-progress tasks, unread messages, active standup indicator.
+Tab icons show live count badges:
+- **Agents tab**: count of active agents
+- **Tasks tab**: count of in-progress tasks across team
+- **Chat tab**: unread inter-agent message count
+- **Standup tab**: green dot when a standup is active
+
+### Agent Personality Icons
+
+Each agent has a unique **SVG icon** based on their role/personality:
+- **37 custom icons** mapped to specific agent IDs (crown for managers, compass for architects, palette for designers, code brackets for frontend, server for backend, wrench for devops, shield for QA, brain for AI leads, atom for React, rocket for ops, microscope for researchers, prism for analysts, etc.)
+- **11 role-based fallback icons** matched by keyword in the role name (design, frontend, backend, devops, qa, lead, test, security, research, analyst, writer)
+
+Icons render in Feather-style outlines in the agent card avatar slot. The mapping is defined in `office.js` `AGENT_ICONS` constant and degrades to an emoji fallback if neither ID nor role matches.
+
+### Chat Message Persistence
+
+Inter-agent messages (sent via `cm message` or the `office_send_message` MCP tool) are:
+1. Appended to an in-memory `OfficeMessage` slice (capped at 50 via FIFO eviction)
+2. Broadcast over SSE as `office:message` events for real-time display
+3. **Persisted to disk** at `~/.jarvis/office-memory/messages.json` after each send (async)
+4. **Loaded on server restart** so the chat history survives crashes
+5. **Re-rendered on periodic refresh** -- the frontend's 30-second state-sync call invokes `renderMessages()` so stale DOM is refreshed
+
+### Standup Transcript Persistence
+
+Standup conversations are similarly persisted:
+- **Server-side**: Completed standups are saved to `~/.jarvis/office-memory/standups/{standupId}.json`
+- **During standup**: The server returns `standupTranscript` in `GetOfficeState` whenever the standup has responses, regardless of active state
+- **Frontend**: Periodic refresh preserves the local transcript if the server sends an empty one, and `renderStandup` is called from the unified `render()` function
+- **After standup**: The last completed standup is shown as "Previous Standup" in the standup panel until a new one starts
+
+### Perpetual Mode Toggle
+
+The spawn modal includes a **Perpetual Improvement Mode** checkbox (default: checked). When enabled, agents run the RALPH continuous-improvement loop and never idle. When disabled, agents complete assigned tasks and stop, useful for goal-focused work.
 
 ---
 
-## PTY Session Management
+## Session Management (PTY + SDK)
 
-### WriteInkPrompt
+Jarvis supports **two session types** via a shared `SessionStore` interface:
 
-Claude Code uses Ink (React-based terminal UI) which requires special input handling. `WriteInkPrompt` chunks text at 700 bytes with inter-chunk delays, then sends CR separately -- Ink's text input doesn't respond to CR embedded in the same write as text content. This is critical for kickstart prompt delivery.
+### SDK Sessions (default for office agents)
+
+SDK sessions use `claude.NewSession()` from [claude-agent-sdk-go](https://github.com/shaharia-lab/claude-agent-sdk-go). The subprocess stays alive across all turns, and prompts are delivered via `Session.Send()`. See the **Claude Agent SDK (Go) Sessions** section above for details.
+
+Key components:
+- **`SDKSession`** in `internal/pty/sdk_session.go` -- wraps `claude.Session`, manages event consumer goroutine, provides `SendPrompt`/`WriteInkPrompt`/`WriteViaScreen` methods for compatibility with PTY code paths
+- **`eventConsumer`** goroutine -- ranges over `session.Events()`, emits `EventIdle`/`EventWorking`/`EventTokens`/`EventExit`/`EventTerminal` to the session's event channel
+- **Single reader pattern** -- one long-lived goroutine consumes all events, avoiding the goroutine-per-read race that the original PTY implementation had
+- **Graceful shutdown** -- `Stop()` cancels the context, waits for the event consumer via `sync.WaitGroup` with a 5-second timeout, then closes the event channel
+
+### PTY Sessions (fallback / interactive shells)
+
+PTY sessions use `creack/pty` to spawn a child process attached to a pseudo-terminal. Jarvis uses these for interactive shell sessions and as a fallback if SDK session creation fails.
+
+**WriteInkPrompt**: Claude Code uses Ink (React-based terminal UI) which requires special input handling. `WriteInkPrompt` chunks text at 700 bytes with inter-chunk delays, then sends CR separately -- Ink's text input doesn't respond to CR embedded in the same write as text content. This is critical for kickstart prompt delivery.
+
+**Screen-scraping idle detection**: PTY mode strips ANSI sequences and pattern-matches on Claude's terminal output to detect idle/working state. This is inherently brittle (hence the SDK migration).
 
 ### Respawn Controllers
 
@@ -647,6 +921,37 @@ All endpoints are prefixed with `/api`. Mutating endpoints (POST/PUT/DELETE) req
 | `GET` | `/api/office/memory/{sessionId}` | Agent persistent memory |
 | `POST` | `/api/office/brainstorm` | Trigger brainstorm session |
 
+### Agent Callback Endpoints (auth-exempt, called by `cm` CLI and `jarvis-mcp`)
+
+These endpoints are placed outside the auth middleware group so in-session agents can reach them using only their injected `JARVIS_SESSION_ID`. They are not exposed in the authenticated UI routes.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/office/agent/tasks` | Get agent's task queue |
+| `GET` | `/api/office/agent/team-roster` | Get team roster |
+| `GET` | `/api/office/agent/file-locks` | List file locks |
+| `GET` | `/api/office/agent/skills` | List shared skills |
+| `GET` | `/api/office/agent/skills/{name}` | Read a skill |
+| `GET` | `/api/office/agent/skills/search` | Search skills |
+| `GET` | `/api/office/agent/memory` | Read agent memory |
+| `POST` | `/api/office/agent/memory` | Write agent memory |
+| `POST` | `/api/office/agent/memory/append` | Append to memory |
+| `POST` | `/api/office/agent/standup/response` | Submit standup response |
+| `POST` | `/api/office/agent/message` | Send inter-agent message |
+| `POST` | `/api/office/agent/task-start` | Mark task in-progress |
+| `POST` | `/api/office/agent/task-complete` | Mark task complete |
+| `POST` | `/api/office/agent/task-ack` | Acknowledge task |
+| `POST` | `/api/office/agent/task-progress` | Report progress (with `isBlocked` flag for blockers) |
+| `POST` | `/api/office/agent/task/self-add` | Self-generate a task |
+| `POST` | `/api/office/agent/task/triage` | Transfer task to teammate |
+| `POST` | `/api/office/agent/brainstorm/response` | Submit brainstorm proposals |
+| `POST` | `/api/office/agent/leader-tasks/response` | Submit leader task assignments |
+| `POST` | `/api/office/agent/reflection/response` | Submit post-task learning |
+| `POST` | `/api/office/agent/curiosity/discovery` | Report curiosity discovery |
+| `POST` | `/api/office/agent/file-lock` | Acquire file lock |
+| `POST` | `/api/office/agent/skill-create` | Create/update skill |
+| `DELETE` | `/api/office/agent/skills/{name}` | Delete a skill |
+
 ### Config Endpoints
 
 | Method | Path | Description |
@@ -688,17 +993,68 @@ make test-race
 make bench
 ```
 
-**311+ tests** across 22 packages. Key test coverage areas:
+**340+ tests** across 22 packages. Key test coverage areas:
 
 | Package | Coverage Focus |
 |---|---|
-| `internal/office` | Manager lifecycle, task queues, standup, brainstorm, reflection, locks, orchestration |
-| `internal/pty` | Session creation, PTY I/O, idle detection, buffer management |
+| `internal/office` | Manager lifecycle, task queues, standup, brainstorm, reflection, locks, orchestration, learning, metrics |
+| `internal/pty` | Session creation, PTY I/O, SDK session lifecycle, idle detection, buffer management |
 | `internal/respawn` | State machine transitions, signal aggregation, timer pool |
 | `internal/ralph` | RALPH loop tracking, circuit breaker trips, status parsing |
-| `internal/telegram` | Bot commands, message queue, streaming |
+| `internal/telegram` | Bot commands, message queue, streaming, webhook |
 | `internal/web/handler` | HTTP handler responses, monitoring endpoints |
 | `internal/web/sse` | Broker subscribe/broadcast, client write goroutines, event batching |
+
+All tests pass with `go test -race ./...` (full race-detector coverage).
+
+---
+
+## Security & Resilience
+
+Jarvis has undergone **10 comprehensive code review rounds** with **95+ bug fixes** across security, correctness, concurrency, and resource management. Every change is race-tested and the codebase is hardened against common failure modes.
+
+### Fix Categories (10 rounds, 95+ total)
+
+| Round | Fixes | Focus |
+|-------|-------|-------|
+| 1 | 15 | Goroutine leaks, data races, crash fixes, SDK session env |
+| 2 | 20 | Correctness, frontend timers, resource management |
+| 3 | 17 | API contract mismatches, TOCTOU races, JSON parsing |
+| 4 | 8 | XSS, task pointer races, Stop() synchronization |
+| 5 | 8 | postJson regressions, nil guards, brainstorm lock promotion |
+| 6 | 10 | Triage contract fix, CSRF retry, null guards |
+| 7 | 8 | N+1 disk reads, wg.Done ordering, raw fetch cleanup |
+| 8 | 1 | PATCH handler CSRF freshness |
+| 9 | 4 | Telegram webhook chi routing, XSS in quieter files |
+| 10 | 4 | PTY reader leak, transcript position, XSS regression |
+
+### Security Hardening
+
+- **CSRF protection** with automatic retry on token expiry (postJson/putJson/deleteJson helpers)
+- **Path traversal prevention**: `safeName()` validator (`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`, max 128 chars) applied to all user-supplied names (skills, cases, memory paths, task IDs)
+- **Shell injection prevention**: `/api/run` endpoint uses `exec.Command` with split args, never `sh -c`
+- **State file permissions**: `~/.jarvis/state.json` written with 0600 mode (contains API keys)
+- **Auth middleware**: Password authentication with session cookies, rate-limited login attempts, cached `IsPasswordConfigured` to avoid disk reads on every request
+- **XSS prevention**: All HTML insertion in frontend uses escaped helpers or textContent; Ralph wizard preview escapes `taskDescription` and `completionPhrase`; expand history renders escape all server-supplied fields
+- **Agent endpoint isolation**: `/api/office/agent/*` routes are auth-exempt but require valid `sessionId` from the `cm` CLI's JARVIS_SESSION_ID env var; path-parameter routing uses `chi.URLParam` for consistency
+
+### Concurrency Safety
+
+- **Zero goroutine leaks**: All background goroutines have explicit `done` channels or `sync.WaitGroup` coordination. `StartIdleMonitoring`/`startAutoStandup` use done channels in their select loops so `Stop()` reliably terminates them.
+- **Lock ordering discipline**: `m.mu` (office manager) is always acquired before any `agent.mu` (agent state), never the reverse. `HandleAgentDeath` deep-copies tasks before reassignment to avoid racing on shared pointers.
+- **Race-free agent state**: `SetSDKWorking`/`GetSDKWorking` and `SetPersonalityOverride`/`GetPersonalityOverride` wrap mutations in the agent mutex; concurrent readers get stable snapshots.
+- **Non-blocking SSE delivery**: The SSE broker uses per-client write goroutines with bounded buffers; slow clients don't block the broadcast path.
+- **Brainstorm cooldown TOCTOU fix**: The cooldown check and `lastBrainstormAt` update happen under a single `m.mu.Lock()` so two concurrent goroutines can't launch duplicate brainstorms.
+- **SDK event consumer shutdown**: `eventConsumer`'s `defer s.wg.Done()` is the outermost defer so `Stop()` only unblocks after the events channel is closed and the final log line is written.
+
+### Resource Management
+
+- **Bounded buffers**: Terminal buffer (2MB trim to 1.5MB), text output (1MB trim to 768KB), message log (50 entries FIFO), activity log (200 entries)
+- **Agent memory caps**: 50 learnings, 25 skills, 10 distilled insights per agent (auto-distillation at 30 learnings)
+- **I/O limits**: `jarvis-mcp` wraps HTTP response bodies with `io.LimitReader(resp.Body, 32<<20)` to cap at 32MB
+- **Context timeouts**: CGC indexing has a 5-minute timeout, state file writes use atomic tmp-file rename with error logging
+- **Single PTY reader**: Only one goroutine reads from each PTY file descriptor, eliminating the reader-per-iteration leak pattern
+- **Transcript position accounting**: Uses `f.Seek(0, io.SeekCurrent)` instead of `len(line)+1` to handle CRLF line endings correctly
 
 ---
 
