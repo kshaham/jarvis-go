@@ -99,7 +99,10 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
 
   const Concierge = {
     apiKey: null,
-    model: 'gemini-live-2.5-flash-native-audio',
+    // Separate models per modality. Native-audio models only return AUDIO;
+    // text chat needs a general Live model that supports TEXT responses.
+    voiceModel: 'gemini-2.5-flash-native-audio-preview-12-2025',
+    textModel: 'gemini-2.0-flash-live-001',
     voice: DEFAULT_VOICE,
     workingDir: '/app/workspace',
     ws: null,
@@ -134,7 +137,8 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
         }
         const data = await res.json();
         this.apiKey = data.apiKey;
-        this.model = data.model || this.model;
+        if (data.voiceModel) this.voiceModel = data.voiceModel;
+        if (data.textModel) this.textModel = data.textModel;
         this.voice = data.voice || this.voice;
         this.workingDir = data.workingDir || this.workingDir;
         await this.refreshCsrfToken();
@@ -289,8 +293,9 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
         };
       }
 
+      const modelId = desiredModality === 'AUDIO' ? this.voiceModel : this.textModel;
       const setupPayload = {
-        model: 'models/' + this.model,
+        model: 'models/' + modelId,
         generationConfig,
         systemInstruction: {
           parts: [{ text: SYSTEM_PROMPT }],

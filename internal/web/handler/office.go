@@ -722,9 +722,15 @@ func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 	if voice == "" {
 		voice = "Charon" // Jarvis-style butler voice default
 	}
+	// Two models:
+	//   voiceModel: native-audio Live model for voice (AUDIO-only responses)
+	//   textModel:  general Live model for text chat (supports TEXT responses)
+	// Note the Developer API model IDs differ from Vertex AI names; on
+	// generativelanguage.googleapis.com we use the dated preview IDs.
 	ok(w, map[string]interface{}{
 		"apiKey":     apiKey,
-		"model":      "gemini-live-2.5-flash-native-audio",
+		"voiceModel": "gemini-2.5-flash-native-audio-preview-12-2025",
+		"textModel":  "gemini-2.0-flash-live-001",
 		"voice":      voice,
 		"workingDir": workingDir,
 	})
