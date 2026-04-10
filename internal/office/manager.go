@@ -104,6 +104,7 @@ type StandupState struct {
 	Active       bool
 	Participants []string
 	Responses    map[string]string
+	Transcript   []StandupMessage
 	StartedAt    time.Time
 	CurrentIndex int
 }
@@ -930,8 +931,11 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	m.mu.RLock()
 	standupActive := m.standup != nil && m.standup.Active
 	var standupTranscript interface{}
-	if m.standup != nil && len(m.standup.Responses) > 0 {
-		standupTranscript = m.standup.Responses
+	if m.standup != nil && len(m.standup.Transcript) > 0 {
+		// Return full transcript (array of StandupMessage) so the frontend
+		// can render it. Persists after the standup ends so page refreshes
+		// show the last completed standup's messages.
+		standupTranscript = m.standup.Transcript
 	}
 	teamSpawned := m.teamSpawned
 	wrappingUp := m.wrappingUp

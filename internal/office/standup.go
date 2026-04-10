@@ -85,6 +85,7 @@ func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 		Active:       true,
 		Participants: active,
 		Responses:    make(map[string]string),
+		Transcript:   make([]StandupMessage, 0, len(active)+2),
 		StartedAt:    time.Now(),
 		CurrentIndex: 0,
 	}
@@ -115,15 +116,24 @@ func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 // runStandupRoundRobin iterates through participants, sending prompts and
 // waiting for responses with nudge/timeout logic.
 func (m *Manager) runStandupRoundRobin(standupID string, participants []string, sessions SessionStore, cfg *Config) {
-	transcript := []StandupMessage{
-		{
-			SessionID:   "system",
-			SpeakerName: "Standup",
-			Content:     fmt.Sprintf("Daily standup started with %d participants.", len(participants)),
-			Type:        "opening",
-			Timestamp:   time.Now().UnixMilli(),
-		},
+	openingMsg := StandupMessage{
+		SessionID:   "system",
+		SpeakerName: "Standup",
+		Content:     fmt.Sprintf("Daily standup started with %d participants.", len(participants)),
+		Type:        "opening",
+		Timestamp:   time.Now().UnixMilli(),
 	}
+	transcript := []StandupMessage{openingMsg}
+
+	// Also store the opening on the shared standup state so GetOfficeState returns it.
+	m.mu.Lock()
+	if m.standup != nil {
+		m.standup.Transcript = append(m.standup.Transcript, openingMsg)
+	}
+	m.mu.Unlock()
+
+	// Broadcast the opening message so frontend SSE listeners see it.
+	m.broadcast("office:standupMessage", openingMsg)
 
 	for i, sessionID := range participants {
 		// Check if standup was cancelled.
@@ -193,13 +203,6 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 		// Wait for response with nudge logic.
 		response := m.waitForStandupResponse(sessionID, speakerName, sessions, cfg)
 
-		// Record response.
-		m.mu.Lock()
-		if m.standup != nil {
-			m.standup.Responses[sessionID] = response
-		}
-		m.mu.Unlock()
-
 		msg := StandupMessage{
 			SessionID:   sessionID,
 			SpeakerName: speakerName,
@@ -207,6 +210,15 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 			Type:        "status_report",
 			Timestamp:   time.Now().UnixMilli(),
 		}
+
+		// Record response AND append to shared transcript so GetOfficeState can return it.
+		m.mu.Lock()
+		if m.standup != nil {
+			m.standup.Responses[sessionID] = response
+			m.standup.Transcript = append(m.standup.Transcript, msg)
+		}
+		m.mu.Unlock()
+
 		transcript = append(transcript, msg)
 		m.broadcast("office:standupMessage", msg)
 	}
@@ -231,8 +243,13 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 		if m.standup != nil {
 			standupStartedAt = m.standup.StartedAt
 			m.standup.Active = false
+			// Keep transcript on state so GetOfficeState returns it after standup ends.
+			m.standup.Transcript = append(m.standup.Transcript, closingMsg)
 		}
 		m.mu.Unlock()
+
+		// Broadcast the closing message too so frontend SSE listeners see it.
+		m.broadcast("office:standupMessage", closingMsg)
 
 		m.broadcast("office:standupEnded", map[string]interface{}{
 			"id":         standupID,
