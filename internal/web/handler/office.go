@@ -722,15 +722,6 @@ func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 	if voice == "" {
 		voice = "Charon" // Jarvis-style butler voice default
 	}
-	// ElevenLabs config -- when the API key is set, the client will route
-	// voice synthesis through ElevenLabs for an authentic JARVIS voice
-	// instead of Gemini's prebuilt voices. The API key itself NEVER leaves
-	// the server; the client only gets a boolean + voice id.
-	elevenKey, _ := settings["elevenlabsApiKey"].(string)
-	elevenVoice, _ := settings["elevenlabsVoiceId"].(string)
-	if elevenVoice == "" {
-		elevenVoice = "3MXKu1RJpMOkTNUUELrK" // default JARVIS voice id
-	}
 	// Two models:
 	//   voiceModel: native-audio Live model for voice (AUDIO-only responses)
 	//   textModel:  general Live model for text chat (supports TEXT responses)
@@ -742,10 +733,6 @@ func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 		"textModel":  "gemini-2.0-flash-live-001",
 		"voice":      voice,
 		"workingDir": workingDir,
-		"elevenlabs": map[string]interface{}{
-			"enabled": elevenKey != "",
-			"voiceId": elevenVoice,
-		},
 	})
 }
 
@@ -812,138 +799,6 @@ func (ctx *Context) ConciergeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 		PerpetualMode: req.Perpetual,
 	}
 	ctx.spawnTeamFromRequest(w, spawnReq)
-}
-
-// conciergeTTSRequest carries a short text chunk to synthesize.
-type conciergeTTSRequest struct {
-	Text    string `json:"text"`
-	VoiceID string `json:"voiceId"`
-}
-
-// ConciergeElevenLabsStream proxies a text-to-speech request through
-// ElevenLabs, streaming raw 24kHz Int16 PCM audio bytes back to the
-// browser. The API key stays on the server -- the client only sees a
-// per-sentence audio stream it can queue straight into its existing
-// 24kHz playback AudioContext.
-//
-// ElevenLabs streaming endpoint docs:
-// https://elevenlabs.io/docs/api-reference/text-to-speech/stream
-func (ctx *Context) ConciergeElevenLabsStream(w http.ResponseWriter, r *http.Request) {
-	settings := ctx.StateStore.GetSettings()
-	apiKey, _ := settings["elevenlabsApiKey"].(string)
-	if apiKey == "" {
-		request.WriteError(w, http.StatusPreconditionFailed, "ElevenLabs API key not configured")
-		return
-	}
-
-	var body conciergeTTSRequest
-	if !decodeBody(w, r, &body) {
-		return
-	}
-	body.Text = strings.TrimSpace(body.Text)
-	if body.Text == "" {
-		request.WriteError(w, http.StatusBadRequest, "text is required")
-		return
-	}
-	// Cap per-request size -- ElevenLabs bills by character; we want
-	// small per-sentence calls, not paragraph blasts.
-	if len(body.Text) > 2000 {
-		body.Text = body.Text[:2000]
-	}
-
-	// Pick voice id: explicit in request, else settings default, else
-	// the hard-coded JARVIS voice.
-	voiceID := body.VoiceID
-	if voiceID == "" {
-		voiceID, _ = settings["elevenlabsVoiceId"].(string)
-	}
-	if voiceID == "" {
-		voiceID = "3MXKu1RJpMOkTNUUELrK"
-	}
-	// Validate voice id: ElevenLabs ids are base62-ish alphanumerics.
-	for _, c := range voiceID {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-			request.WriteError(w, http.StatusBadRequest, "invalid voiceId")
-			return
-		}
-	}
-
-	elevenPayload := map[string]interface{}{
-		"text":     body.Text,
-		"model_id": "eleven_flash_v2_5", // low-latency model, ~75ms to first byte
-		"voice_settings": map[string]interface{}{
-			"stability":        0.5,
-			"similarity_boost": 0.75,
-			"style":            0.0,
-			"use_speaker_boost": true,
-		},
-	}
-	payloadBytes, err := json.Marshal(elevenPayload)
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to encode tts payload")
-		return
-	}
-
-	// Request raw 24kHz Int16 PCM so the browser can feed chunks straight
-	// into its existing 24kHz playback AudioContext (matches the old
-	// Gemini native audio format).
-	elevenURL := "https://api.elevenlabs.io/v1/text-to-speech/" + voiceID + "/stream?output_format=pcm_24000"
-
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, elevenURL, strings.NewReader(string(payloadBytes)))
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to build upstream request")
-		return
-	}
-	req.Header.Set("xi-api-key", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "audio/pcm")
-
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		slog.Warn("elevenlabs request failed", "error", err)
-		request.WriteError(w, http.StatusBadGateway, "elevenlabs request failed")
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Surface ElevenLabs' error body so the client can show a
-		// useful message (e.g. invalid voice, quota exhausted).
-		errBody := make([]byte, 1024)
-		n, _ := resp.Body.Read(errBody)
-		slog.Warn("elevenlabs non-200",
-			"status", resp.StatusCode,
-			"body", string(errBody[:n]))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
-		fmt.Fprintf(w, `{"success":false,"error":"elevenlabs: %d %s"}`,
-			resp.StatusCode, strings.TrimSpace(string(errBody[:n])))
-		return
-	}
-
-	// Stream PCM bytes through to the client. Use chunked transfer so
-	// the browser can start playing while synthesis is still in flight.
-	w.Header().Set("Content-Type", "audio/pcm")
-	w.Header().Set("X-Sample-Rate", "24000")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.WriteHeader(http.StatusOK)
-	flusher, _ := w.(http.Flusher)
-	buf := make([]byte, 4096)
-	for {
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
-				return
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-		}
-		if readErr != nil {
-			return
-		}
-	}
 }
 
 // ---------------------------------------------------------------------------

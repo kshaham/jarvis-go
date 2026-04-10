@@ -118,24 +118,20 @@ func (ctx *Context) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 func (ctx *Context) GetSettingsAccounts(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
 	result := map[string]interface{}{
-		"success":           true,
-		"provider":          settings["provider"],
-		"claudeApiKey":      settings["claudeApiKey"],
-		"zaiApiKey":         settings["zaiApiKey"],
-		"zaiModel":          settings["zaiModel"],
-		"zaiSonnetModel":    settings["zaiSonnetModel"],
-		"zaiHaikuModel":     settings["zaiHaikuModel"],
-		"zaiBaseUrl":        settings["zaiBaseUrl"],
-		"geminiApiKey":      settings["geminiApiKey"],
-		"geminiVoice":       settings["geminiVoice"],
-		"elevenlabsApiKey":  settings["elevenlabsApiKey"],
-		"elevenlabsVoiceId": settings["elevenlabsVoiceId"],
-		"activeProfile":     settings["activeProfile"],
-		"profile1Name":      settings["profile1Name"],
-		"profile2Name":      settings["profile2Name"],
+		"success":          true,
+		"provider":         settings["provider"],
+		"claudeApiKey":     settings["claudeApiKey"],
+		"zaiApiKey":        settings["zaiApiKey"],
+		"zaiModel":         settings["zaiModel"],
+		"zaiSonnetModel":   settings["zaiSonnetModel"],
+		"zaiHaikuModel":    settings["zaiHaikuModel"],
+		"zaiBaseUrl":       settings["zaiBaseUrl"],
+		"activeProfile":    settings["activeProfile"],
+		"profile1Name":     settings["profile1Name"],
+		"profile2Name":     settings["profile2Name"],
 		"defaultWorkingDir": settings["defaultWorkingDir"],
-		"claudeMode":        settings["claudeMode"],
-		"allowedTools":      settings["allowedTools"],
+		"claudeMode":       settings["claudeMode"],
+		"allowedTools":     settings["allowedTools"],
 	}
 	request.WriteJSON(w, http.StatusOK, result)
 }

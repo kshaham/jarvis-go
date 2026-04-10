@@ -149,8 +149,6 @@
       zaiHaikuModel: 'glm-4.5-air',
       geminiApiKey: '',
       geminiVoice: 'Charon',
-      elevenlabsApiKey: '',
-      elevenlabsVoiceId: '3MXKu1RJpMOkTNUUELrK',
       activeProfile: 'default',
       profile1Name: '',
       profile2Name: '',
@@ -186,12 +184,6 @@
     var geminiApiKey = getElement('appSettingsGeminiApiKey');
     if (geminiApiKey) geminiApiKey.value = settings.geminiApiKey || '';
 
-    var elevenKey = getElement('appSettingsElevenlabsApiKey');
-    if (elevenKey) elevenKey.value = settings.elevenlabsApiKey || '';
-
-    var elevenVoice = getElement('appSettingsElevenlabsVoiceId');
-    if (elevenVoice) elevenVoice.value = settings.elevenlabsVoiceId || '3MXKu1RJpMOkTNUUELrK';
-
     var activeProfile = getElement('appSettingsActiveProfile');
     if (activeProfile) activeProfile.value = settings.activeProfile || 'default';
 
@@ -226,8 +218,6 @@
       zaiSonnetModel: (getElement('appSettingsZaiSonnetModel') || {}).value || 'glm-4.7',
       zaiHaikuModel: (getElement('appSettingsZaiHaikuModel') || {}).value || 'glm-4.5-air',
       geminiApiKey: (getElement('appSettingsGeminiApiKey') || {}).value || '',
-      elevenlabsApiKey: (getElement('appSettingsElevenlabsApiKey') || {}).value || '',
-      elevenlabsVoiceId: (getElement('appSettingsElevenlabsVoiceId') || {}).value || '3MXKu1RJpMOkTNUUELrK',
       activeProfile: (getElement('appSettingsActiveProfile') || {}).value || 'default',
       profile1Name: (getElement('appSettingsProfile1Name') || {}).value || '',
       profile2Name: (getElement('appSettingsProfile2Name') || {}).value || '',
@@ -248,8 +238,7 @@
         profile2Name: settings.profile2Name,
         defaultWorkingDir: settings.defaultWorkingDir,
         claudeMode: settings.claudeMode,
-        allowedTools: settings.allowedTools,
-        elevenlabsVoiceId: settings.elevenlabsVoiceId
+        allowedTools: settings.allowedTools
       };
       localStorage.setItem('jarvis-account-settings-nonsensitive', JSON.stringify(nonSensitiveSettings));
       // Remove old key that may contain sensitive data

@@ -655,12 +655,11 @@ func (s *Server) setupRouter() chi.Router {
 			r.Route("/concierge", func(r chi.Router) {
 				r.Get("/config", h.ConciergeConfig)
 				r.Get("/templates", h.ConciergeTemplates)
-				// Concierge spawn + TTS proxy use the same session cookie auth;
-				// CSRF inside the CSRF subgroup.
+				// Concierge spawn uses the same session cookie auth; CSRF inside the
+				// CSRF subgroup.
 				r.Group(func(r chi.Router) {
 					r.Use(mw.CSRF(s.csrfStore))
 					r.Post("/spawn-team", h.ConciergeSpawnTeam)
-					r.Post("/tts-stream", h.ConciergeElevenLabsStream)
 				})
 			})
 		})
