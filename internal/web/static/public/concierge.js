@@ -252,14 +252,29 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
       }
 
       ws.onmessage = (e) => this.handleServerMessage(e);
-      ws.onclose = () => {
-        this.setStatus('Disconnected');
+      ws.onclose = (ev) => {
+        // Surface close code + reason so we can debug why Gemini dropped us.
+        // Common codes: 1000 normal, 1006 abnormal, 1008 policy, 1011 server
+        // error. Gemini Live also emits custom 4xxx codes with JSON reasons.
+        const detail = 'code=' + ev.code + (ev.reason ? ' reason=' + ev.reason : '') + (ev.wasClean ? '' : ' (abnormal)');
+        console.warn('[Concierge] WebSocket closed', ev);
+        this.setStatus('Disconnected', 'error');
         if (this.ws === ws) {
           this.ws = null;
           this.wsModality = null;
         }
+        // If we thought we were mid-voice, tell the user why we dropped.
+        if (this.voiceMode) {
+          this.showSystem('Gemini WebSocket closed: ' + detail);
+          this.voiceMode = false;
+          this.setTalkCtaState(false);
+          this.stopMic();
+        }
       };
-      ws.onerror = () => this.setStatus('Error', 'error');
+      ws.onerror = (ev) => {
+        console.warn('[Concierge] WebSocket error', ev);
+        this.setStatus('Error', 'error');
+      };
 
       // Setup message per Live API spec.
       // https://ai.google.dev/api/live
