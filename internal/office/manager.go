@@ -532,11 +532,31 @@ func (m *Manager) IsPerpetualMode() bool {
 	return m.perpetualMode
 }
 
-// GetStandup returns the current standup state.
+// GetStandup returns a snapshot of the current standup state.
+// Returns a deep copy (new struct, copied slices/maps) to avoid races with the
+// runStandupRoundRobin goroutine that mutates m.standup under the lock.
 func (m *Manager) GetStandup() *StandupState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.standup
+	if m.standup == nil {
+		return nil
+	}
+	participants := make([]string, len(m.standup.Participants))
+	copy(participants, m.standup.Participants)
+	responses := make(map[string]string, len(m.standup.Responses))
+	for k, v := range m.standup.Responses {
+		responses[k] = v
+	}
+	transcript := make([]StandupMessage, len(m.standup.Transcript))
+	copy(transcript, m.standup.Transcript)
+	return &StandupState{
+		Active:       m.standup.Active,
+		Participants: participants,
+		Responses:    responses,
+		Transcript:   transcript,
+		StartedAt:    m.standup.StartedAt,
+		CurrentIndex: m.standup.CurrentIndex,
+	}
 }
 
 // SetStandup sets the standup state.
@@ -932,10 +952,12 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	standupActive := m.standup != nil && m.standup.Active
 	var standupTranscript interface{}
 	if m.standup != nil && len(m.standup.Transcript) > 0 {
-		// Return full transcript (array of StandupMessage) so the frontend
-		// can render it. Persists after the standup ends so page refreshes
-		// show the last completed standup's messages.
-		standupTranscript = m.standup.Transcript
+		// Return a COPY of the transcript slice so callers don't hold a
+		// reference to the live slice (which could be reallocated by the
+		// next append in runStandupRoundRobin after we release the lock).
+		copied := make([]StandupMessage, len(m.standup.Transcript))
+		copy(copied, m.standup.Transcript)
+		standupTranscript = copied
 	}
 	teamSpawned := m.teamSpawned
 	wrappingUp := m.wrappingUp

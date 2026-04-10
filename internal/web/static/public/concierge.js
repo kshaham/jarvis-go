@@ -100,6 +100,7 @@ If they ask about current state, call get_office_status. If they want a standup 
     model: 'gemini-live-2.5-flash-native-audio',
     workingDir: '/app/workspace',
     ws: null,
+    wsModality: null, // 'AUDIO' or 'TEXT' -- modality the current ws was opened for
     voiceMode: false,
     captureCtx: null,
     playbackCtx: null,
@@ -190,6 +191,16 @@ If they ask about current state, call get_office_status. If they want a standup 
     },
 
     async ensureConnected() {
+      const desiredModality = this.voiceMode ? 'AUDIO' : 'TEXT';
+
+      // If an existing socket is open but was opened for a different modality,
+      // close it so we reopen with the correct responseModalities setup.
+      if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsModality !== desiredModality) {
+        try { this.ws.close(); } catch {}
+        this.ws = null;
+        this.wsModality = null;
+      }
+
       if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
       if (!this.apiKey) {
         throw new Error('Gemini API key not loaded');
@@ -200,16 +211,30 @@ If they ask about current state, call get_office_status. If they want a standup 
       this.ws = ws;
       this.setStatus('Connecting...');
 
-      await new Promise((resolve, reject) => {
-        ws.onopen = () => resolve();
-        ws.onerror = (e) => reject(new Error('WebSocket error'));
-        setTimeout(() => reject(new Error('WebSocket connect timeout')), 10000);
-      });
+      let timeoutHandle;
+      try {
+        await new Promise((resolve, reject) => {
+          ws.onopen = () => resolve();
+          ws.onerror = () => reject(new Error('WebSocket error'));
+          timeoutHandle = setTimeout(() => {
+            // Important: close the stale socket and clear ws so a later
+            // onopen callback can't resurrect it as the current connection.
+            try { ws.close(); } catch {}
+            if (this.ws === ws) this.ws = null;
+            reject(new Error('WebSocket connect timeout'));
+          }, 10000);
+        });
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      }
 
       ws.onmessage = (e) => this.handleServerMessage(e);
       ws.onclose = () => {
         this.setStatus('Disconnected');
-        this.ws = null;
+        if (this.ws === ws) {
+          this.ws = null;
+          this.wsModality = null;
+        }
       };
       ws.onerror = () => this.setStatus('Error', 'error');
 
@@ -218,7 +243,7 @@ If they ask about current state, call get_office_status. If they want a standup 
         setup: {
           model: 'models/' + this.model,
           generationConfig: {
-            responseModalities: this.voiceMode ? ['AUDIO'] : ['TEXT'],
+            responseModalities: [desiredModality],
           },
           systemInstruction: {
             parts: [{ text: SYSTEM_PROMPT }],
@@ -227,6 +252,7 @@ If they ask about current state, call get_office_status. If they want a standup 
         },
       };
       ws.send(JSON.stringify(setup));
+      this.wsModality = desiredModality;
       this.setStatus('Ready');
     },
 
@@ -477,7 +503,7 @@ If they ask about current state, call get_office_status. If they want a standup 
         // Module may already be loaded
       }
 
-      const source = this.captureCtx.createMediaStreamSource(this.micStream);
+      this.micSource = this.captureCtx.createMediaStreamSource(this.micStream);
       this.pcmNode = new AudioWorkletNode(this.captureCtx, 'pcm-capture');
       this.pcmNode.port.onmessage = (e) => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
@@ -498,7 +524,7 @@ If they ask about current state, call get_office_status. If they want a standup 
           })
         );
       };
-      source.connect(this.pcmNode);
+      this.micSource.connect(this.pcmNode);
 
       if (!this.playbackCtx) {
         this.playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
@@ -518,9 +544,24 @@ If they ask about current state, call get_office_status. If they want a standup 
         } catch {}
         this.pcmNode = null;
       }
+      if (this.micSource) {
+        try { this.micSource.disconnect(); } catch {}
+        this.micSource = null;
+      }
       if (this.micStream) {
         this.micStream.getTracks().forEach((t) => t.stop());
         this.micStream = null;
+      }
+      // Close both AudioContexts so next activation rebuilds fresh ones.
+      // Without this, repeated voice toggles orphan stale source nodes.
+      if (this.captureCtx) {
+        try { this.captureCtx.close(); } catch {}
+        this.captureCtx = null;
+      }
+      if (this.playbackCtx) {
+        try { this.playbackCtx.close(); } catch {}
+        this.playbackCtx = null;
+        this.nextPlaybackTime = 0;
       }
     },
 

@@ -1,11 +1,9 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -425,6 +423,13 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
+	ctx.spawnTeamFromRequest(w, req)
+}
+
+// spawnTeamFromRequest performs the validated spawn flow given a decoded
+// spawnTeamRequest. Extracted from OfficeSpawnTeam so ConciergeSpawnTeam can
+// call it directly without re-marshalling and rewriting r.Body.
+func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamRequest) {
 	if req.WorkingDir == "" {
 		request.WriteError(w, http.StatusBadRequest, "workingDir is required")
 		return
@@ -735,7 +740,7 @@ type conciergeSpawnRequest struct {
 
 // ConciergeSpawnTeam is called by the Gemini concierge's function-call handler.
 // It validates the request, falls back to the default working directory, and
-// synthesizes a spawnTeamRequest that flows through the normal spawn logic.
+// forwards to the shared spawnTeamFromRequest helper.
 func (ctx *Context) ConciergeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	var req conciergeSpawnRequest
 	if !decodeBody(w, r, &req) {
@@ -772,27 +777,17 @@ func (ctx *Context) ConciergeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 		req.WorkingDir = wd
 	}
 
-	if ctx.OfficeManager.IsTeamSpawned() {
-		request.WriteError(w, http.StatusConflict, "Team has already been spawned")
-		return
-	}
-
-	// Synthesize a spawnTeamRequest and marshal it into r.Body so OfficeSpawnTeam
-	// can reuse the full validation + spawn flow.
+	// Build the spawnTeamRequest and call the shared helper directly.
+	// (No r.Body rewriting -- avoids double MaxBytesReader wrap and
+	// header/content-length mismatch.) The IsTeamSpawned check is
+	// authoritative inside spawnTeamFromRequest, so no redundant check here.
 	spawnReq := spawnTeamRequest{
 		WorkingDir:    req.WorkingDir,
 		TemplateID:    req.TemplateID,
 		Mission:       req.Mission,
 		PerpetualMode: req.Perpetual,
 	}
-	body, err := json.Marshal(spawnReq)
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to marshal spawn request")
-		return
-	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.ContentLength = int64(len(body))
-	ctx.OfficeSpawnTeam(w, r)
+	ctx.spawnTeamFromRequest(w, spawnReq)
 }
 
 // ---------------------------------------------------------------------------
