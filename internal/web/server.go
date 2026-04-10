@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -35,6 +34,7 @@ import (
 type Server struct {
 	port            int
 	isHTTPS         bool
+	dataDir         string
 	httpServer      *http.Server
 	sessionManager  *pty.SessionManager
 	sseBroker       *sse.Broker
@@ -188,6 +188,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 	srv := &Server{
 		port:            port,
 		isHTTPS:         isHTTPS,
+		dataDir:         dataDir,
 		sessionManager:  sessionManager,
 		sseBroker:       broker,
 		csrfStore:       mw.NewCSRFStore(ctx),
@@ -248,6 +249,14 @@ func (a *sessionStoreAdapter) IsSessionAlive(sessionID string) bool {
 }
 
 // Start begins listening for HTTP connections.
+//
+// When --https is enabled, Jarvis listens on BOTH:
+//   - the configured HTTP port (e.g. 3555) -- for internal services
+//     (cm CLI, jarvis-mcp) that call http://localhost:PORT
+//   - port+1 HTTPS (e.g. 3556) -- for browsers needing a secure context
+//     to enable voice (getUserMedia requires https://)
+//
+// This keeps backwards compatibility while enabling browser voice.
 func (s *Server) Start() error {
 	router := s.setupRouter()
 
@@ -264,12 +273,29 @@ func (s *Server) Start() error {
 
 	slog.Info("Starting Jarvis Go server", "port", s.port, "https", s.isHTTPS)
 
+	// Optionally start a second HTTPS listener alongside HTTP.
 	if s.isHTTPS {
-		if s.httpServer.TLSConfig == nil {
-			return errors.New("HTTPS enabled but no TLS configuration provided")
+		tlsCfg, err := ensureSelfSignedCert(s.dataDir)
+		if err != nil {
+			return fmt.Errorf("load self-signed cert: %w", err)
 		}
-		return s.httpServer.ListenAndServeTLS("", "")
+		httpsPort := s.port + 1
+		tlsServer := &http.Server{
+			Addr:         fmt.Sprintf(":%d", httpsPort),
+			Handler:      router,
+			TLSConfig:    tlsCfg,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 0,
+			IdleTimeout:  120 * time.Second,
+		}
+		slog.Info("Starting HTTPS listener", "port", httpsPort, "tls_dir", filepath.Join(s.dataDir, "tls"))
+		go func() {
+			if err := tlsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				slog.Error("HTTPS listener failed", "error", err)
+			}
+		}()
 	}
+
 	return s.httpServer.ListenAndServe()
 }
 

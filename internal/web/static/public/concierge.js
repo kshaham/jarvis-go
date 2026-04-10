@@ -588,6 +588,24 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
     },
 
     async startMic() {
+      // Browsers only expose navigator.mediaDevices in "secure contexts"
+      // (HTTPS or http://localhost). If we're on plain HTTP over LAN, the
+      // API will be undefined -- surface an actionable error instead of a
+      // cryptic TypeError.
+      if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        const origin = window.location.origin;
+        throw new Error(
+          'Voice requires a secure context (HTTPS or localhost). ' +
+          'You are on ' + origin + ' which the browser treats as insecure, ' +
+          'so microphone access is blocked.\n\n' +
+          'Fix options:\n' +
+          '  1. Restart Jarvis with --https (self-signed cert auto-generated)\n' +
+          '  2. Access via http://localhost:3555 from the server itself\n' +
+          '  3. Chrome workaround: open chrome://flags/#unsafely-treat-insecure-origin-as-secure, ' +
+          'add "' + origin + '", set to Enabled, relaunch Chrome'
+        );
+      }
+
       if (!this.captureCtx) {
         this.captureCtx = new (window.AudioContext || window.webkitAudioContext)({
           sampleRate: 16000,
