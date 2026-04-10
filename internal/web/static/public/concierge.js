@@ -122,6 +122,14 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
     currentOutputTranscript: '',
     lastUserTranscriptEl: null,
     lastAssistantTranscriptEl: null,
+    // ElevenLabs voice pipeline -- when enabled, voice mode switches to the
+    // text-capable Gemini Live model, still sends audio input, accumulates
+    // the text response, and routes each sentence through ElevenLabs for
+    // authentic JARVIS synthesis.
+    elevenEnabled: false,
+    elevenVoiceId: '',
+    pendingAssistantText: '',
+    assistantBubbleEl: null,
 
     async init() {
       this.bindUi();
@@ -141,6 +149,10 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
         if (data.textModel) this.textModel = data.textModel;
         this.voice = data.voice || this.voice;
         this.workingDir = data.workingDir || this.workingDir;
+        if (data.elevenlabs) {
+          this.elevenEnabled = !!data.elevenlabs.enabled;
+          this.elevenVoiceId = data.elevenlabs.voiceId || '';
+        }
         await this.refreshCsrfToken();
       } catch (err) {
         this.showSystem('Concierge config error: ' + err.message);
@@ -217,8 +229,19 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
       this.showMessage('system', text);
     },
 
+    // useElevenPipeline returns true when we should synthesize voice via
+    // ElevenLabs instead of Gemini native audio. Controlled by server
+    // config (i.e. whether an ElevenLabs API key is configured).
+    useElevenPipeline() {
+      return this.voiceMode && this.elevenEnabled;
+    },
+
     async ensureConnected() {
-      const desiredModality = this.voiceMode ? 'AUDIO' : 'TEXT';
+      // With the ElevenLabs pipeline we want TEXT responses from Gemini
+      // (even in voice mode) so we can forward each sentence to ElevenLabs
+      // for synthesis. Without ElevenLabs, voice mode asks Gemini for
+      // native AUDIO.
+      const desiredModality = this.useElevenPipeline() || !this.voiceMode ? 'TEXT' : 'AUDIO';
 
       // If an existing socket is open but was opened for a different modality,
       // close it so we reopen with the correct responseModalities setup.
@@ -353,7 +376,15 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
         if (sc.modelTurn && sc.modelTurn.parts) {
           for (const part of sc.modelTurn.parts) {
             if (part.text) {
-              this.showMessage('assistant', part.text);
+              // When ElevenLabs is the voice pipeline, stream text chunks
+              // into a rolling bubble and dispatch each complete sentence
+              // to ElevenLabs for synthesis. Otherwise behave as before.
+              if (this.useElevenPipeline()) {
+                this.appendStreamingText(part.text);
+                this.drainSentencesToEleven();
+              } else {
+                this.showMessage('assistant', part.text);
+              }
             }
             if (part.inlineData && part.inlineData.data) {
               this.playAudioChunk(part.inlineData.data);
@@ -362,6 +393,13 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
           }
         }
         if (sc.turnComplete) {
+          // Flush any trailing partial sentence through ElevenLabs so the
+          // user hears the last bit of the reply.
+          if (this.useElevenPipeline() && this.pendingAssistantText.trim()) {
+            this.speakWithEleven(this.pendingAssistantText.trim());
+            this.pendingAssistantText = '';
+          }
+          this.assistantBubbleEl = null;
           // Finalize the accumulated transcripts for this turn.
           this.finalizeTranscripts();
           this.setStatus(this.voiceMode ? 'Listening' : 'Ready', this.voiceMode ? 'listening' : null);
@@ -402,6 +440,139 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
     finalizeTranscripts() {
       this.lastUserTranscriptEl = null;
       this.lastAssistantTranscriptEl = null;
+    },
+
+    // appendStreamingText appends a text chunk to the current assistant
+    // bubble, creating it if it doesn't yet exist. Used when Gemini is
+    // streaming a text response that will be spoken via ElevenLabs.
+    appendStreamingText(text) {
+      if (!text) return;
+      this.pendingAssistantText += text;
+      const wrap = document.getElementById('conciergeMessages');
+      if (!wrap) return;
+      if (!this.assistantBubbleEl) {
+        const msg = document.createElement('div');
+        msg.className = 'concierge-message concierge-assistant';
+        const content = document.createElement('div');
+        content.className = 'concierge-message-content';
+        content.textContent = '';
+        msg.appendChild(content);
+        wrap.appendChild(msg);
+        this.assistantBubbleEl = content;
+      }
+      this.assistantBubbleEl.textContent = (this.assistantBubbleEl.textContent || '') + text;
+      wrap.scrollTop = wrap.scrollHeight;
+    },
+
+    // drainSentencesToEleven pulls complete sentences off pendingAssistantText
+    // and fires them at ElevenLabs one at a time. A "sentence" is any span
+    // ending in . ! ? followed by whitespace or end-of-buffer. This gives
+    // smooth per-sentence streaming without waiting for turnComplete.
+    drainSentencesToEleven() {
+      if (!this.pendingAssistantText) return;
+      // Match sentence boundaries. Only emit a sentence when we're sure
+      // it's terminated -- we keep the trailing partial in the buffer.
+      const re = /[^.!?\n]+[.!?]+(?=\s|$)/g;
+      let lastEnd = 0;
+      let match;
+      while ((match = re.exec(this.pendingAssistantText)) !== null) {
+        const sentence = match[0].trim();
+        if (sentence) this.speakWithEleven(sentence);
+        lastEnd = re.lastIndex;
+      }
+      if (lastEnd > 0) {
+        this.pendingAssistantText = this.pendingAssistantText.slice(lastEnd);
+      }
+    },
+
+    // speakWithEleven posts a sentence to our /api/concierge/tts-stream
+    // proxy, reads the chunked PCM response, and queues it into the
+    // existing 24kHz playback AudioContext. Playback is gap-free across
+    // concurrent sentences because each chunk is scheduled after the
+    // previous one on a shared nextPlaybackTime cursor.
+    async speakWithEleven(text) {
+      if (!text) return;
+      // Make sure the playback context exists -- in ElevenLabs mode we
+      // never called startMic's playback-ctx init path.
+      if (!this.playbackCtx) {
+        this.playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 24000,
+        });
+        this.nextPlaybackTime = this.playbackCtx.currentTime;
+      }
+      if (this.playbackCtx.state === 'suspended') {
+        try { await this.playbackCtx.resume(); } catch {}
+      }
+
+      try {
+        await this.refreshCsrfToken();
+        const res = await fetch('/api/concierge/tts-stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': this.csrfToken || '',
+          },
+          body: JSON.stringify({ text: text, voiceId: this.elevenVoiceId }),
+        });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          console.warn('[Concierge] tts-stream error', res.status, errText);
+          this.showSystem('Voice synthesis failed: HTTP ' + res.status);
+          return;
+        }
+        this.setStatus('Speaking', 'speaking');
+
+        // Read chunked PCM from the response body and schedule playback
+        // chunk-by-chunk. We buffer per-chunk into an Int16Array aligned
+        // to even byte counts (Int16 = 2 bytes per sample).
+        const reader = res.body.getReader();
+        let leftover = new Uint8Array(0);
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value || value.length === 0) continue;
+          // Concatenate with any leftover byte from the previous chunk.
+          let combined;
+          if (leftover.length > 0) {
+            combined = new Uint8Array(leftover.length + value.length);
+            combined.set(leftover, 0);
+            combined.set(value, leftover.length);
+          } else {
+            combined = value;
+          }
+          const evenLen = combined.length & ~1;
+          if (evenLen === 0) {
+            leftover = combined;
+            continue;
+          }
+          // Int16Array requires even alignment; stash any trailing odd byte
+          // for the next read.
+          const alignedBuf = combined.buffer.slice(combined.byteOffset, combined.byteOffset + evenLen);
+          const int16 = new Int16Array(alignedBuf);
+          leftover = combined.slice(evenLen);
+          this.playPcmInt16(int16);
+        }
+      } catch (err) {
+        console.warn('[Concierge] tts-stream fetch failed', err);
+        this.showSystem('Voice synthesis error: ' + (err.message || err));
+      }
+    },
+
+    // playPcmInt16 schedules a chunk of 24kHz Int16 PCM into the playback
+    // AudioContext. Shared with Gemini native audio via playAudioChunk --
+    // both paths feed audio through this queue so sequencing is correct.
+    playPcmInt16(int16) {
+      if (!this.playbackCtx || !int16 || int16.length === 0) return;
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+      const buffer = this.playbackCtx.createBuffer(1, float32.length, 24000);
+      buffer.copyToChannel(float32, 0);
+      const src = this.playbackCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(this.playbackCtx.destination);
+      const startAt = Math.max(this.nextPlaybackTime, this.playbackCtx.currentTime);
+      src.start(startAt);
+      this.nextPlaybackTime = startAt + buffer.duration;
     },
 
     async handleFunctionCall(fc) {
@@ -594,6 +765,9 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
       try {
         await this.startMic();
         await this.ensureConnected();
+        if (this.elevenEnabled) {
+          this.showSystem('Voice mode: JARVIS (ElevenLabs) active.');
+        }
         this.setStatus('Listening', 'listening');
       } catch (err) {
         let msg = err.message || String(err);
@@ -718,18 +892,7 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
-      const float32 = new Float32Array(int16.length);
-      for (let i = 0; i < int16.length; i++) {
-        float32[i] = int16[i] / 32768;
-      }
-      const buffer = this.playbackCtx.createBuffer(1, float32.length, 24000);
-      buffer.copyToChannel(float32, 0);
-      const src = this.playbackCtx.createBufferSource();
-      src.buffer = buffer;
-      src.connect(this.playbackCtx.destination);
-      const startAt = Math.max(this.nextPlaybackTime, this.playbackCtx.currentTime);
-      src.start(startAt);
-      this.nextPlaybackTime = startAt + buffer.duration;
+      this.playPcmInt16(int16);
     },
   };
 

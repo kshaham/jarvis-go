@@ -1438,6 +1438,26 @@
     </div>
   </div>
 
+  <!-- Jarvis Concierge (voice assistant) -->
+  <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Jarvis Concierge (Voice)</h4>
+  <div class="form-row">
+    <label>Gemini API Key</label>
+    <input type="password" id="appSettingsGeminiApiKey" class="form-input" placeholder="Gemini Live API key" />
+  </div>
+  <p style="font-size: 11px; color: #888; margin-top: 4px;">Used for speech-to-text, reasoning, and tool calls over the Gemini Live API.</p>
+
+  <div class="form-row" style="margin-top: 12px;">
+    <label>ElevenLabs API Key</label>
+    <input type="password" id="appSettingsElevenlabsApiKey" class="form-input" placeholder="ElevenLabs API key (optional -- enables JARVIS voice)" />
+  </div>
+  <p style="font-size: 11px; color: #888; margin-top: 4px;">When set, voice replies are synthesized via ElevenLabs instead of Gemini's prebuilt voices.</p>
+
+  <div class="form-row" style="margin-top: 12px;">
+    <label>ElevenLabs Voice ID</label>
+    <input type="text" id="appSettingsElevenlabsVoiceId" class="form-input" placeholder="3MXKu1RJpMOkTNUUELrK" />
+  </div>
+  <p style="font-size: 11px; color: #888; margin-top: 4px;">Default is the JARVIS voice (3MXKu1RJpMOkTNUUELrK). Any voice id from your ElevenLabs library works.</p>
+
   <!-- Default Workspace Path -->
   <h4 style="margin-bottom: 12px; margin-top: 24px; color: #e0e0e0;">Default Workspace</h4>
   <div class="form-row">
