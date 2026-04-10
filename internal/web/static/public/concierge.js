@@ -102,7 +102,7 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
     // Separate models per modality. Native-audio models only return AUDIO;
     // text chat needs a general Live model that supports TEXT responses.
     voiceModel: 'gemini-2.5-flash-native-audio-preview-12-2025',
-    textModel: 'gemini-live-2.5-flash-preview',
+    textModel: 'gemini-2.0-flash-live-001',
     voice: DEFAULT_VOICE,
     workingDir: '/app/workspace',
     ws: null,
@@ -237,14 +237,11 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
     },
 
     async ensureConnected() {
-      // Modality selection:
-      //   voice mode (with or without ElevenLabs): AUDIO on the native
-      //     audio model. When ElevenLabs is on, we still request AUDIO
-      //     (the only modality that model supports) but IGNORE Gemini's
-      //     audio chunks and feed outputAudioTranscription.text into
-      //     ElevenLabs per sentence instead.
-      //   text mode: TEXT on the text-capable Live model.
-      const desiredModality = this.voiceMode ? 'AUDIO' : 'TEXT';
+      // With the ElevenLabs pipeline we want TEXT responses from Gemini
+      // (even in voice mode) so we can forward each sentence to ElevenLabs
+      // for synthesis. Without ElevenLabs, voice mode asks Gemini for
+      // native AUDIO.
+      const desiredModality = this.useElevenPipeline() || !this.voiceMode ? 'TEXT' : 'AUDIO';
 
       // If an existing socket is open but was opened for a different modality,
       // close it so we reopen with the correct responseModalities setup.
@@ -373,23 +370,15 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
         }
         // Streaming output transcription -- what Jarvis is saying.
         if (sc.outputTranscription && sc.outputTranscription.text) {
-          if (this.useElevenPipeline()) {
-            // In ElevenLabs mode we drive voice off the transcription
-            // stream from the native-audio model: accumulate text and
-            // dispatch each completed sentence to ElevenLabs for
-            // synthesis. Gemini's own audio chunks are ignored below.
-            this.appendStreamingText(sc.outputTranscription.text);
-            this.drainSentencesToEleven();
-          } else {
-            this.appendTranscript('assistant', sc.outputTranscription.text);
-          }
+          this.appendTranscript('assistant', sc.outputTranscription.text);
         }
 
         if (sc.modelTurn && sc.modelTurn.parts) {
           for (const part of sc.modelTurn.parts) {
             if (part.text) {
-              // Text-only turn (text chat mode, not voice). ElevenLabs
-              // voice flows through the outputTranscription path above.
+              // When ElevenLabs is the voice pipeline, stream text chunks
+              // into a rolling bubble and dispatch each complete sentence
+              // to ElevenLabs for synthesis. Otherwise behave as before.
               if (this.useElevenPipeline()) {
                 this.appendStreamingText(part.text);
                 this.drainSentencesToEleven();
@@ -398,9 +387,6 @@ Keep spoken responses short (one or two sentences). Avoid reading long lists, UR
               }
             }
             if (part.inlineData && part.inlineData.data) {
-              // Skip Gemini's native audio when ElevenLabs is the voice
-              // pipeline -- otherwise we'd hear two voices overlapping.
-              if (this.useElevenPipeline()) continue;
               this.playAudioChunk(part.inlineData.data);
               this.setStatus('Speaking', 'speaking');
             }

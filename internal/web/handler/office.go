@@ -739,7 +739,7 @@ func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]interface{}{
 		"apiKey":     apiKey,
 		"voiceModel": "gemini-2.5-flash-native-audio-preview-12-2025",
-		"textModel":  "gemini-live-2.5-flash-preview",
+		"textModel":  "gemini-2.0-flash-live-001",
 		"voice":      voice,
 		"workingDir": workingDir,
 		"elevenlabs": map[string]interface{}{
