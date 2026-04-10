@@ -60,22 +60,21 @@ type Manager struct {
 	signingSecret      []byte
 	sessions           map[string]*SessionEntry
 	rateLimits         map[string]*RateLimitEntry
-	useSecureCookies   bool
 	setupInProgress    bool
 	passwordConfigured int32 // 0=unknown, 1=yes, -1=no (atomic cache)
 	mu                 sync.RWMutex
 }
 
 // NewManager creates a new auth manager. configDir is typically ~/.jarvis.
-// The https parameter controls whether session cookies include the Secure flag.
-func NewManager(configDir string, isHTTPS bool) *Manager {
+// The Secure flag on session cookies is decided per-request based on whether
+// the request arrived over TLS -- see BuildSessionCookie.
+func NewManager(configDir string, _ bool) *Manager {
 	m := &Manager{
-		configDir:        configDir,
-		authConfigPath:   filepath.Join(configDir, "auth.json"),
-		secretKeyPath:    filepath.Join(configDir, "auth-secret.key"),
-		sessions:         make(map[string]*SessionEntry),
-		rateLimits:       make(map[string]*RateLimitEntry),
-		useSecureCookies: isHTTPS,
+		configDir:      configDir,
+		authConfigPath: filepath.Join(configDir, "auth.json"),
+		secretKeyPath:  filepath.Join(configDir, "auth-secret.key"),
+		sessions:       make(map[string]*SessionEntry),
+		rateLimits:     make(map[string]*RateLimitEntry),
 	}
 	m.loadOrCreateSecret()
 
@@ -317,8 +316,30 @@ func (m *Manager) signToken(token string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// isRequestSecure returns true if the request arrived over TLS. This is
+// used to decide whether cookies should carry the Secure flag on a
+// per-request basis (the server may be running both HTTP and HTTPS
+// listeners when --https is enabled).
+func isRequestSecure(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	// Honor reverse proxy headers if the server is fronted by one.
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return true
+	}
+	return false
+}
+
 // BuildSessionCookie returns an http.Cookie for the given session token.
-func (m *Manager) BuildSessionCookie(token string) *http.Cookie {
+// The Secure flag is set when either (a) the server is globally configured
+// for HTTPS-only AND the request is TLS, or (b) the request is TLS.
+// On the parallel HTTP listener, Secure is intentionally omitted so the
+// browser will actually send the cookie back.
+func (m *Manager) BuildSessionCookie(token string, r *http.Request) *http.Cookie {
 	signature := m.signToken(token)
 	value := token + "." + signature
 
@@ -330,14 +351,14 @@ func (m *Manager) BuildSessionCookie(token string) *http.Cookie {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(sessionTimeoutDur.Seconds()),
 	}
-	if m.useSecureCookies {
+	if isRequestSecure(r) {
 		cookie.Secure = true
 	}
 	return cookie
 }
 
 // BuildClearCookie returns an http.Cookie that clears the session cookie.
-func (m *Manager) BuildClearCookie() *http.Cookie {
+func (m *Manager) BuildClearCookie(r *http.Request) *http.Cookie {
 	cookie := &http.Cookie{
 		Name:     cookieName,
 		Value:    "",
@@ -346,7 +367,7 @@ func (m *Manager) BuildClearCookie() *http.Cookie {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	}
-	if m.useSecureCookies {
+	if isRequestSecure(r) {
 		cookie.Secure = true
 	}
 	return cookie

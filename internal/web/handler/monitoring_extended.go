@@ -83,7 +83,7 @@ func (ctx *Context) AuthSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := ctx.AuthManager.CreateSession()
-	http.SetCookie(w, ctx.AuthManager.BuildSessionCookie(token))
+	http.SetCookie(w, ctx.AuthManager.BuildSessionCookie(token, r))
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 	})
@@ -154,7 +154,7 @@ func (ctx *Context) AuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	ctx.AuthManager.ResetRateLimit(ip)
 	token := ctx.AuthManager.CreateSession()
-	http.SetCookie(w, ctx.AuthManager.BuildSessionCookie(token))
+	http.SetCookie(w, ctx.AuthManager.BuildSessionCookie(token, r))
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 	})
@@ -167,7 +167,7 @@ func (ctx *Context) AuthLogout(w http.ResponseWriter, r *http.Request) {
 	if token != "" {
 		ctx.AuthManager.DestroySession(token)
 	}
-	http.SetCookie(w, ctx.AuthManager.BuildClearCookie())
+	http.SetCookie(w, ctx.AuthManager.BuildClearCookie(r))
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 	})
@@ -238,7 +238,7 @@ func (ctx *Context) AuthChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	ctx.AuthManager.ResetRateLimit(ip)
 	token := ctx.AuthManager.CreateSession()
-	http.SetCookie(w, ctx.AuthManager.BuildSessionCookie(token))
+	http.SetCookie(w, ctx.AuthManager.BuildSessionCookie(token, r))
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 	})
