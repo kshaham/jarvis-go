@@ -1,0 +1,555 @@
+// Jarvis Concierge -- Gemini Live voice + text chat that drives the office UI.
+// Connects directly (browser -> WSS) to the Gemini Live API for real-time
+// bidirectional voice and function calling. When the model calls a tool, we
+// fetch the matching Jarvis backend endpoint and send the result back.
+//
+// Tools exposed to Gemini:
+//   spawn_team          - Spawn an office team from a template + mission
+//   get_office_status   - Current team state
+//   trigger_standup     - Start a standup meeting
+//   trigger_brainstorm  - Start a brainstorm meeting
+//   shutdown_team       - Graceful wrap-up + shutdown
+//
+// Docs: https://ai.google.dev/gemini-api/docs/live-api
+
+(function () {
+  'use strict';
+
+  const GEMINI_WS_URL =
+    'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+
+  const SYSTEM_PROMPT = `You are the Jarvis Concierge -- a friendly voice assistant that helps the user deploy and manage teams of AI engineers on their codebase.
+
+You have these team templates. Pick the best one based on the user's request:
+
+- office-7: Classic full-stack team (7 members: Eng Manager, Architect, Designer, Frontend, Backend, DevOps, QA). Default for general work.
+- backend-ai-6: AI/ML focus (6 members: AI Lead, ML, Prompt Eng, Data, API, AI QA). Use for data/ML/API projects.
+- frontend-studio-6: Frontend focus (6 members: Design Lead, React Architect, UI, Interaction, A11y, Performance). Use for UI/UX work.
+- fullstack-compact-5: Lean shipping team (5 members: Tech Lead, Frontend, Backend, QA/Security, DevOps). Use when speed matters.
+- research-lab-7: Research focus (7 members: Director, Researcher, Analyst, POC, Presenter, Brand, Writer). Use for investigation and POCs.
+- innovation-sprint-6: Rapid validation (6 members: Innovation Lead, Scout, Prototype, Storyteller, Writer, Validator). Use for new ideas.
+
+When the user asks you to build something, immediately call the spawn_team function with:
+  - templateId: the best-fit template
+  - mission: a clear, specific mission statement (what the team should accomplish)
+  - perpetual: true (default) unless they specifically ask for a goal-focused run
+
+Then confirm to the user what you just did. Keep responses short and conversational -- do not over-explain. You are talking through voice so avoid long lists or markdown.
+
+If they ask about current state, call get_office_status. If they want a standup or brainstorm, call the matching tool. If they want to stop, call shutdown_team.`;
+
+  const TOOL_DECLARATIONS = [
+    {
+      name: 'spawn_team',
+      description: 'Spawn a team of AI engineers from a template with a mission',
+      parameters: {
+        type: 'object',
+        properties: {
+          templateId: {
+            type: 'string',
+            enum: [
+              'office-7',
+              'backend-ai-6',
+              'frontend-studio-6',
+              'fullstack-compact-5',
+              'research-lab-7',
+              'innovation-sprint-6',
+            ],
+            description: 'Which prebuilt team template best fits the request',
+          },
+          mission: {
+            type: 'string',
+            description: "The team's mission statement -- what they should accomplish",
+          },
+          workingDir: {
+            type: 'string',
+            description: 'Working directory path (optional, defaults to configured path)',
+          },
+          perpetual: {
+            type: 'boolean',
+            description: 'Run indefinitely vs stop after goal (default true)',
+          },
+        },
+        required: ['templateId', 'mission'],
+      },
+    },
+    {
+      name: 'get_office_status',
+      description: 'Get the current office state: active agents, tasks, standup status',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'trigger_standup',
+      description: 'Start a standup meeting with all active team members',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'trigger_brainstorm',
+      description: 'Start a brainstorm meeting between active team members',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'shutdown_team',
+      description: 'Gracefully shut down the currently active team',
+      parameters: { type: 'object', properties: {} },
+    },
+  ];
+
+  const Concierge = {
+    apiKey: null,
+    model: 'gemini-live-2.5-flash-native-audio',
+    workingDir: '/app/workspace',
+    ws: null,
+    voiceMode: false,
+    captureCtx: null,
+    playbackCtx: null,
+    pcmNode: null,
+    micStream: null,
+    nextPlaybackTime: 0,
+    csrfToken: null,
+    status: 'disconnected',
+
+    async init() {
+      this.bindUi();
+      try {
+        const res = await fetch('/api/concierge/config');
+        if (!res.ok) {
+          if (res.status === 412) {
+            this.showSystem('Gemini API key not configured. Set it in Settings -> Accounts.');
+          } else {
+            this.showSystem('Concierge config failed: HTTP ' + res.status);
+          }
+          return;
+        }
+        const data = await res.json();
+        this.apiKey = data.apiKey;
+        this.model = data.model || this.model;
+        this.workingDir = data.workingDir || this.workingDir;
+        await this.refreshCsrfToken();
+      } catch (err) {
+        this.showSystem('Concierge config error: ' + err.message);
+      }
+    },
+
+    async refreshCsrfToken() {
+      try {
+        const res = await fetch('/api/csrf-token');
+        if (res.ok) {
+          const data = await res.json();
+          this.csrfToken = data.token;
+        }
+      } catch (err) {
+        // non-fatal
+      }
+    },
+
+    bindUi() {
+      const toggle = document.getElementById('conciergeToggle');
+      const close = document.getElementById('conciergeClose');
+      const send = document.getElementById('conciergeSend');
+      const input = document.getElementById('conciergeText');
+      const mic = document.getElementById('conciergeMic');
+      const chat = document.getElementById('conciergeChat');
+
+      if (toggle) toggle.addEventListener('click', () => chat.classList.remove('collapsed'));
+      if (close) close.addEventListener('click', () => chat.classList.add('collapsed'));
+      if (send) send.addEventListener('click', () => this.sendText());
+      if (input) {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.sendText();
+          }
+        });
+      }
+      if (mic) mic.addEventListener('click', () => this.toggleVoice());
+    },
+
+    setStatus(text, level) {
+      const el = document.getElementById('conciergeStatus');
+      if (!el) return;
+      el.textContent = text;
+      el.className = 'concierge-status' + (level ? ' ' + level : '');
+    },
+
+    showMessage(role, text) {
+      const wrap = document.getElementById('conciergeMessages');
+      if (!wrap) return;
+      const msg = document.createElement('div');
+      msg.className = 'concierge-message concierge-' + role;
+      const content = document.createElement('div');
+      content.className = 'concierge-message-content';
+      content.textContent = text;
+      msg.appendChild(content);
+      wrap.appendChild(msg);
+      wrap.scrollTop = wrap.scrollHeight;
+    },
+
+    showSystem(text) {
+      this.showMessage('system', text);
+    },
+
+    async ensureConnected() {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+      if (!this.apiKey) {
+        throw new Error('Gemini API key not loaded');
+      }
+
+      const url = GEMINI_WS_URL + '?key=' + encodeURIComponent(this.apiKey);
+      const ws = new WebSocket(url);
+      this.ws = ws;
+      this.setStatus('Connecting...');
+
+      await new Promise((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = (e) => reject(new Error('WebSocket error'));
+        setTimeout(() => reject(new Error('WebSocket connect timeout')), 10000);
+      });
+
+      ws.onmessage = (e) => this.handleServerMessage(e);
+      ws.onclose = () => {
+        this.setStatus('Disconnected');
+        this.ws = null;
+      };
+      ws.onerror = () => this.setStatus('Error', 'error');
+
+      // Setup message per Live API spec.
+      const setup = {
+        setup: {
+          model: 'models/' + this.model,
+          generationConfig: {
+            responseModalities: this.voiceMode ? ['AUDIO'] : ['TEXT'],
+          },
+          systemInstruction: {
+            parts: [{ text: SYSTEM_PROMPT }],
+          },
+          tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+        },
+      };
+      ws.send(JSON.stringify(setup));
+      this.setStatus('Ready');
+    },
+
+    async handleServerMessage(e) {
+      let data;
+      try {
+        if (e.data instanceof Blob) {
+          const text = await e.data.text();
+          data = JSON.parse(text);
+        } else {
+          data = JSON.parse(e.data);
+        }
+      } catch (err) {
+        console.warn('[Concierge] Could not parse message', err);
+        return;
+      }
+
+      if (data.setupComplete) {
+        this.setStatus(this.voiceMode ? 'Voice ready' : 'Ready');
+        return;
+      }
+
+      if (data.serverContent) {
+        const sc = data.serverContent;
+        if (sc.modelTurn && sc.modelTurn.parts) {
+          for (const part of sc.modelTurn.parts) {
+            if (part.text) {
+              this.showMessage('assistant', part.text);
+            }
+            if (part.inlineData && part.inlineData.data) {
+              this.playAudioChunk(part.inlineData.data);
+              this.setStatus('Speaking', 'speaking');
+            }
+          }
+        }
+        if (sc.turnComplete) {
+          this.setStatus(this.voiceMode ? 'Listening' : 'Ready', this.voiceMode ? 'listening' : null);
+        }
+      }
+
+      if (data.toolCall && data.toolCall.functionCalls) {
+        for (const fc of data.toolCall.functionCalls) {
+          this.handleFunctionCall(fc);
+        }
+      }
+    },
+
+    async handleFunctionCall(fc) {
+      const name = fc.name;
+      const args = fc.args || {};
+      const id = fc.id;
+
+      this.showMessage('tool-call', `Calling ${name}(${JSON.stringify(args)})`);
+
+      let result = { success: false, error: 'Unknown tool' };
+      try {
+        switch (name) {
+          case 'spawn_team':
+            result = await this.toolSpawnTeam(args);
+            break;
+          case 'get_office_status':
+            result = await this.toolGetStatus();
+            break;
+          case 'trigger_standup':
+            result = await this.toolTriggerStandup();
+            break;
+          case 'trigger_brainstorm':
+            result = await this.toolTriggerBrainstorm();
+            break;
+          case 'shutdown_team':
+            result = await this.toolShutdownTeam();
+            break;
+          default:
+            result = { success: false, error: 'Unknown tool: ' + name };
+        }
+      } catch (err) {
+        result = { success: false, error: err.message || String(err) };
+      }
+
+      // Send toolResponse back to Gemini so the model can narrate the result.
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(
+          JSON.stringify({
+            toolResponse: {
+              functionResponses: [
+                {
+                  id: id,
+                  name: name,
+                  response: { result: result },
+                },
+              ],
+            },
+          })
+        );
+      }
+    },
+
+    async toolSpawnTeam(args) {
+      await this.refreshCsrfToken();
+      const body = {
+        templateId: args.templateId,
+        mission: args.mission,
+        workingDir: args.workingDir || this.workingDir,
+        perpetual: args.perpetual !== false,
+      };
+      const res = await fetch('/api/concierge/spawn-team', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': this.csrfToken || '',
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, error: data.error || ('HTTP ' + res.status) };
+      }
+      return { success: true, templateUsed: data.templateUsed, spawned: data.spawned };
+    },
+
+    async toolGetStatus() {
+      const res = await fetch('/api/office/status');
+      if (!res.ok) return { success: false, error: 'HTTP ' + res.status };
+      const data = await res.json();
+      return {
+        success: true,
+        teamSpawned: data.teamSpawned,
+        memberCount: (data.members || []).length,
+        members: (data.members || []).map((m) => ({
+          name: m.name,
+          role: m.role,
+          status: m.status,
+        })),
+        standupActive: data.standupActive,
+        mission: data.teamMission,
+      };
+    },
+
+    async toolTriggerStandup() {
+      await this.refreshCsrfToken();
+      const res = await fetch('/api/office/standup', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': this.csrfToken || '' },
+      });
+      return { success: res.ok };
+    },
+
+    async toolTriggerBrainstorm() {
+      await this.refreshCsrfToken();
+      const res = await fetch('/api/office/brainstorm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': this.csrfToken || '',
+        },
+        body: JSON.stringify({}),
+      });
+      return { success: res.ok };
+    },
+
+    async toolShutdownTeam() {
+      await this.refreshCsrfToken();
+      const res = await fetch('/api/office/shutdown-team', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': this.csrfToken || '' },
+      });
+      return { success: res.ok };
+    },
+
+    async sendText() {
+      const input = document.getElementById('conciergeText');
+      if (!input) return;
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      this.showMessage('user', text);
+
+      try {
+        await this.ensureConnected();
+        this.ws.send(
+          JSON.stringify({
+            clientContent: {
+              turns: [{ role: 'user', parts: [{ text: text }] }],
+              turnComplete: true,
+            },
+          })
+        );
+        this.setStatus('Thinking...');
+      } catch (err) {
+        this.showSystem('Send failed: ' + err.message);
+      }
+    },
+
+    async toggleVoice() {
+      const micBtn = document.getElementById('conciergeMic');
+      if (this.voiceMode) {
+        // Stop voice mode
+        this.voiceMode = false;
+        micBtn && micBtn.classList.remove('active');
+        this.stopMic();
+        if (this.ws) {
+          try {
+            this.ws.close();
+          } catch {}
+          this.ws = null;
+        }
+        this.setStatus('Ready');
+        return;
+      }
+
+      // Start voice mode
+      this.voiceMode = true;
+      micBtn && micBtn.classList.add('active');
+      try {
+        await this.startMic();
+        await this.ensureConnected();
+        this.setStatus('Listening', 'listening');
+      } catch (err) {
+        this.showSystem('Voice mode failed: ' + err.message);
+        this.voiceMode = false;
+        micBtn && micBtn.classList.remove('active');
+        this.stopMic();
+      }
+    },
+
+    async startMic() {
+      if (!this.captureCtx) {
+        this.captureCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 16000,
+        });
+      }
+      if (this.captureCtx.state === 'suspended') {
+        await this.captureCtx.resume();
+      }
+
+      this.micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+
+      try {
+        await this.captureCtx.audioWorklet.addModule('/pcm-capture-worklet.js');
+      } catch (err) {
+        // Module may already be loaded
+      }
+
+      const source = this.captureCtx.createMediaStreamSource(this.micStream);
+      this.pcmNode = new AudioWorkletNode(this.captureCtx, 'pcm-capture');
+      this.pcmNode.port.onmessage = (e) => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        const int16 = e.data;
+        // Convert Int16Array to base64 (little-endian as Web Audio produces).
+        const bytes = new Uint8Array(int16.buffer);
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+        }
+        const base64 = btoa(binary);
+        this.ws.send(
+          JSON.stringify({
+            realtimeInput: {
+              mediaChunks: [{ mimeType: 'audio/pcm;rate=16000', data: base64 }],
+            },
+          })
+        );
+      };
+      source.connect(this.pcmNode);
+
+      if (!this.playbackCtx) {
+        this.playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 24000,
+        });
+      }
+      if (this.playbackCtx.state === 'suspended') {
+        await this.playbackCtx.resume();
+      }
+      this.nextPlaybackTime = this.playbackCtx.currentTime;
+    },
+
+    stopMic() {
+      if (this.pcmNode) {
+        try {
+          this.pcmNode.disconnect();
+        } catch {}
+        this.pcmNode = null;
+      }
+      if (this.micStream) {
+        this.micStream.getTracks().forEach((t) => t.stop());
+        this.micStream = null;
+      }
+    },
+
+    playAudioChunk(base64Pcm) {
+      if (!this.playbackCtx) return;
+      const binary = atob(base64Pcm);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) {
+        float32[i] = int16[i] / 32768;
+      }
+      const buffer = this.playbackCtx.createBuffer(1, float32.length, 24000);
+      buffer.copyToChannel(float32, 0);
+      const src = this.playbackCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(this.playbackCtx.destination);
+      const startAt = Math.max(this.nextPlaybackTime, this.playbackCtx.currentTime);
+      src.start(startAt);
+      this.nextPlaybackTime = startAt + buffer.duration;
+    },
+  };
+
+  window.Concierge = Concierge;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => Concierge.init());
+  } else {
+    Concierge.init();
+  }
+})();

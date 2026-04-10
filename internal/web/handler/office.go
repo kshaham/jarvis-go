@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -692,6 +694,105 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 
 	ctx.OfficeManager.SetTeamSpawned(false)
 	ok(w, nil)
+}
+
+// ---------------------------------------------------------------------------
+// Concierge handlers (Gemini Live voice assistant)
+// ---------------------------------------------------------------------------
+
+// ConciergeConfig returns the Gemini API key + model to the authenticated browser
+// so it can connect directly to the Gemini Live WebSocket API.
+func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
+	settings := ctx.StateStore.GetSettings()
+	apiKey, _ := settings["geminiApiKey"].(string)
+	if apiKey == "" {
+		request.WriteError(w, http.StatusPreconditionFailed, "Gemini API key not configured -- set it in Settings")
+		return
+	}
+	workingDir, _ := settings["defaultWorkingDir"].(string)
+	if workingDir == "" {
+		workingDir = "/app/workspace"
+	}
+	ok(w, map[string]interface{}{
+		"apiKey":     apiKey,
+		"model":      "gemini-live-2.5-flash-native-audio",
+		"workingDir": workingDir,
+	})
+}
+
+// ConciergeTemplates returns the template list formatted for Gemini function calling.
+func (ctx *Context) ConciergeTemplates(w http.ResponseWriter, r *http.Request) {
+	ok(w, map[string]interface{}{"templates": defaultTemplates})
+}
+
+// conciergeSpawnRequest is the simplified shape the Gemini tool call sends.
+type conciergeSpawnRequest struct {
+	TemplateID string `json:"templateId"`
+	Mission    string `json:"mission"`
+	WorkingDir string `json:"workingDir"`
+	Perpetual  *bool  `json:"perpetual"`
+}
+
+// ConciergeSpawnTeam is called by the Gemini concierge's function-call handler.
+// It validates the request, falls back to the default working directory, and
+// synthesizes a spawnTeamRequest that flows through the normal spawn logic.
+func (ctx *Context) ConciergeSpawnTeam(w http.ResponseWriter, r *http.Request) {
+	var req conciergeSpawnRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.TemplateID == "" {
+		request.WriteError(w, http.StatusBadRequest, "templateId is required")
+		return
+	}
+	if req.Mission == "" {
+		request.WriteError(w, http.StatusBadRequest, "mission is required")
+		return
+	}
+	// Validate template ID against known templates.
+	validTemplate := false
+	for _, tpl := range defaultTemplates {
+		if tpl.ID == req.TemplateID {
+			validTemplate = true
+			break
+		}
+	}
+	if !validTemplate {
+		request.WriteError(w, http.StatusBadRequest, "unknown templateId")
+		return
+	}
+
+	// Fall back to default working directory from settings if not provided.
+	if req.WorkingDir == "" {
+		settings := ctx.StateStore.GetSettings()
+		wd, _ := settings["defaultWorkingDir"].(string)
+		if wd == "" {
+			wd = "/app/workspace"
+		}
+		req.WorkingDir = wd
+	}
+
+	if ctx.OfficeManager.IsTeamSpawned() {
+		request.WriteError(w, http.StatusConflict, "Team has already been spawned")
+		return
+	}
+
+	// Synthesize a spawnTeamRequest and marshal it into r.Body so OfficeSpawnTeam
+	// can reuse the full validation + spawn flow.
+	spawnReq := spawnTeamRequest{
+		WorkingDir:    req.WorkingDir,
+		TemplateID:    req.TemplateID,
+		Mission:       req.Mission,
+		PerpetualMode: req.Perpetual,
+	}
+	body, err := json.Marshal(spawnReq)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, "failed to marshal spawn request")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	ctx.OfficeSpawnTeam(w, r)
 }
 
 // ---------------------------------------------------------------------------

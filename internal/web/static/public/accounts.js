@@ -147,6 +147,7 @@
       zaiModel: 'glm-5.1',
       zaiSonnetModel: 'glm-4.7',
       zaiHaikuModel: 'glm-4.5-air',
+      geminiApiKey: '',
       activeProfile: 'default',
       profile1Name: '',
       profile2Name: '',
@@ -178,6 +179,9 @@
 
     var zaiHaikuModel = getElement('appSettingsZaiHaikuModel');
     if (zaiHaikuModel) zaiHaikuModel.value = settings.zaiHaikuModel || 'glm-4.5-air';
+
+    var geminiApiKey = getElement('appSettingsGeminiApiKey');
+    if (geminiApiKey) geminiApiKey.value = settings.geminiApiKey || '';
 
     var activeProfile = getElement('appSettingsActiveProfile');
     if (activeProfile) activeProfile.value = settings.activeProfile || 'default';
@@ -212,6 +216,7 @@
       zaiModel: (getElement('appSettingsZaiModel') || {}).value || 'glm-5.1',
       zaiSonnetModel: (getElement('appSettingsZaiSonnetModel') || {}).value || 'glm-4.7',
       zaiHaikuModel: (getElement('appSettingsZaiHaikuModel') || {}).value || 'glm-4.5-air',
+      geminiApiKey: (getElement('appSettingsGeminiApiKey') || {}).value || '',
       activeProfile: (getElement('appSettingsActiveProfile') || {}).value || 'default',
       profile1Name: (getElement('appSettingsProfile1Name') || {}).value || '',
       profile2Name: (getElement('appSettingsProfile2Name') || {}).value || '',
