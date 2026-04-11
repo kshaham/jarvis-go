@@ -181,6 +181,13 @@ type agentMemoryAppendRequest struct {
 	Entry     string `json:"entry"`
 }
 
+type agentMemorySectionRequest struct {
+	SessionID string `json:"sessionId"`
+	Name      string `json:"name"`
+	Content   string `json:"content"`
+	Append    bool   `json:"append,omitempty"`
+}
+
 type brainstormRequest struct {
 	ParticipantIDs []string `json:"participantIds"`
 }
@@ -2066,6 +2073,88 @@ func (ctx *Context) OfficeAgentPostMemoryAppend(w http.ResponseWriter, r *http.R
 		return
 	}
 	ok(w, nil)
+}
+
+// OfficeAgentPostMemorySection writes (or appends to) a named memory
+// section. POST body: {sessionId, name, content, append?}.
+// When append=false (default) the section is overwritten; when true the
+// content is appended to the existing section.
+func (ctx *Context) OfficeAgentPostMemorySection(w http.ResponseWriter, r *http.Request) {
+	var req agentMemorySectionRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if !office.IsValidMemorySectionName(req.Name) {
+		request.WriteError(w, http.StatusBadRequest, "invalid section name")
+		return
+	}
+	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	if agent == nil {
+		request.WriteError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	workingDir := ctx.getSessionWorkingDir(req.SessionID)
+	var err error
+	if req.Append {
+		err = office.MemoryAppendSection(agent.ConfigID, workingDir, req.Name, req.Content)
+	} else {
+		err = office.MemoryWriteSection(agent.ConfigID, workingDir, req.Name, req.Content)
+	}
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, "failed to write section: "+err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{"section": req.Name, "append": req.Append})
+}
+
+// OfficeAgentGetMemorySection returns a named section's content.
+// GET /api/office/agent/memory/section?sessionId=<id>&name=<section>
+func (ctx *Context) OfficeAgentGetMemorySection(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("sessionId")
+	name := r.URL.Query().Get("name")
+	if !office.IsValidMemorySectionName(name) {
+		request.WriteError(w, http.StatusBadRequest, "invalid section name")
+		return
+	}
+	agent := ctx.OfficeManager.GetAgent(sessionID)
+	if agent == nil {
+		ok(w, map[string]interface{}{"section": name, "content": ""})
+		return
+	}
+	workingDir := ctx.getSessionWorkingDir(sessionID)
+	content, err := office.MemoryReadSection(agent.ConfigID, workingDir, name)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{"section": name, "content": content})
+}
+
+// OfficeAgentGetMemoryQuery searches the agent's memory file for a
+// case-insensitive substring and returns up to 20 line-level hits.
+// GET /api/office/agent/memory/query?sessionId=<id>&q=<keyword>
+func (ctx *Context) OfficeAgentGetMemoryQuery(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("sessionId")
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		request.WriteError(w, http.StatusBadRequest, "missing q parameter")
+		return
+	}
+	agent := ctx.OfficeManager.GetAgent(sessionID)
+	if agent == nil {
+		ok(w, map[string]interface{}{"hits": []interface{}{}})
+		return
+	}
+	workingDir := ctx.getSessionWorkingDir(sessionID)
+	hits, err := office.MemoryQuery(agent.ConfigID, workingDir, q)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if hits == nil {
+		hits = []office.MemoryHit{}
+	}
+	ok(w, map[string]interface{}{"hits": hits})
 }
 
 // OfficeBrainstorm initiates a brainstorm session.

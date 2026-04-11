@@ -336,25 +336,25 @@ func TestBuildKickstartPrompt_ContainsSections(t *testing.T) {
 
 	prompt := BuildKickstartPrompt(config, "/home/project", teammates, "", "", true)
 
-	// Check key sections exist.
+	// The kickstart was deliberately slimmed -- protocol bodies live in
+	// the office-protocols skill now and are read on demand. We assert
+	// the structural sections that survived plus the pointers to the
+	// extracted protocol skill.
 	sections := []string{
 		"# Vex - Frontend Engineer",
 		"## Identity",
-		"## Self-Improvement Mission",
 		"/home/project",
 		"## Personality",
 		"Creative and detail-oriented.",
-		"## Skills",
-		"- JavaScript",
-		"## Team Relationships",
+		"## Suggested Skills (read on demand)",
+		"## Team",
 		"Bolt (Backend Engineer)",
 		"Sage (Senior Architect)",
-		"## Communication Protocol",
-		"## Git Workflow",
-		"## Standup Protocol",
-		"## Brainstorm Protocol",
-		"## Task Protocols",
-		"## Core Directives",
+		"## Context Budget",
+		"## Team Protocols",
+		"office-protocols",
+		"## Headless Browser",
+		"## Work Mode: RALPH",
 		"## Your Role",
 		"Build beautiful UIs.",
 	}
@@ -379,8 +379,8 @@ func TestBuildKickstartPrompt_StrategicTierIncludesLeaderSection(t *testing.T) {
 
 	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true)
 
-	if !strings.Contains(prompt, "## Leader Task Assignment Protocol") {
-		t.Error("expected strategic tier to include Leader Task Assignment Protocol")
+	if !strings.Contains(prompt, "## Leader Task Assignment") {
+		t.Error("expected strategic tier to include Leader Task Assignment section")
 	}
 }
 
@@ -397,8 +397,8 @@ func TestBuildKickstartPrompt_WorkerTierExcludesLeaderSection(t *testing.T) {
 
 	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true)
 
-	if strings.Contains(prompt, "## Leader Task Assignment Protocol") {
-		t.Error("expected worker tier to NOT include Leader Task Assignment Protocol")
+	if strings.Contains(prompt, "## Leader Task Assignment") {
+		t.Error("expected worker tier to NOT include Leader Task Assignment section")
 	}
 }
 

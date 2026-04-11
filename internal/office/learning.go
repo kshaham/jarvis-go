@@ -410,6 +410,54 @@ func BuildCrossAgentContext(excludeConfigID string) string {
 	return sb.String()
 }
 
+// BuildCrossAgentContextCompact returns a compact one-line-per-peer
+// summary of teammates' most recent learning. Used by kickstart.go to
+// keep cross-agent context cheap. Returns "" if there's nothing to show.
+func BuildCrossAgentContextCompact(excludeConfigID string) string {
+	learningMu.Lock()
+	defer learningMu.Unlock()
+
+	dir := learningsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	hasContent := false
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		configID := strings.TrimSuffix(e.Name(), ".json")
+		if configID == excludeConfigID {
+			continue
+		}
+		ld := loadLearningDataUnsafe(configID)
+		if len(ld.Learnings) == 0 {
+			continue
+		}
+		// Take the single most recent learning.
+		recent := ld.Learnings[len(ld.Learnings)-1]
+		name := ld.Name
+		if name == "" {
+			name = configID
+		}
+		content := recent.Content
+		if len(content) > 100 {
+			content = content[:100] + "..."
+		}
+		if !hasContent {
+			sb.WriteString("Recent teammate findings (one per peer):\n")
+			hasContent = true
+		}
+		fmt.Fprintf(&sb, "- %s: %s\n", name, content)
+	}
+
+	return sb.String()
+}
+
 // ---------------------------------------------------------------------------
 // Legacy wrappers for backward compatibility
 // ---------------------------------------------------------------------------

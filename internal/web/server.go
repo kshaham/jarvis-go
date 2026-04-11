@@ -382,6 +382,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/skills/search", h.OfficeAgentSearchSkills)
 				r.Get("/skills/{name}", h.OfficeAgentGetSkillByName)
 				r.Get("/memory", h.OfficeAgentGetMemory)
+				r.Get("/memory/section", h.OfficeAgentGetMemorySection)
+				r.Get("/memory/query", h.OfficeAgentGetMemoryQuery)
 				// Mutating
 				r.Post("/standup/response", h.OfficeAgentStandupResponse)
 				r.Post("/message", h.OfficeAgentMessage)
@@ -400,6 +402,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Delete("/skills/{name}", h.OfficeAgentDeleteSkill)
 				r.Post("/memory", h.OfficeAgentPostMemory)
 				r.Post("/memory/append", h.OfficeAgentPostMemoryAppend)
+				r.Post("/memory/section", h.OfficeAgentPostMemorySection)
 				r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)
 			})
 		})

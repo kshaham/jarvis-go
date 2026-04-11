@@ -203,9 +203,37 @@ func handleTask(args []string) {
 		fmt.Printf("Task %s marked as in-progress.\n", subargs[0])
 
 	case "complete":
-		requireArgs(subargs, 1, "cm task complete <taskId>")
-		post("/api/office/agent/task-complete", map[string]interface{}{"sessionId": sessionID, "taskId": subargs[0]})
-		fmt.Printf("Task %s marked as complete.\n", subargs[0])
+		requireArgs(subargs, 1, "cm task complete <taskId> [--summary \"<2-3 sentence handoff>\"]")
+		// Parse optional --summary flag. Positional args are joined; the first
+		// positional token is the task ID, anything else is appended to the
+		// summary if --summary wasn't supplied.
+		positional, flags := parseArgsAndFlags(subargs)
+		fields := strings.Fields(positional)
+		if len(fields) == 0 {
+			fatal("cm task complete <taskId> [--summary \"...\"]")
+		}
+		taskID := fields[0]
+		summary := flags["summary"]
+		if summary == "" && len(fields) > 1 {
+			summary = strings.Join(fields[1:], " ")
+		}
+		// Append the summary to memory section task_history BEFORE marking
+		// the task complete, so a failure on the complete call still leaves
+		// the handoff durable.
+		if summary != "" {
+			ts := time.Now().UTC().Format("2006-01-02T15:04Z")
+			line := fmt.Sprintf("- [%s] task %s: %s", ts, taskID, summary)
+			post("/api/office/agent/memory/section", map[string]interface{}{
+				"sessionId": sessionID,
+				"name":      "task_history",
+				"content":   line,
+				"append":    true,
+			})
+		} else {
+			fmt.Fprintln(os.Stderr, "warning: cm task complete called without --summary; future-you will not know what you did. See `cm skill read office-task-handoff`.")
+		}
+		post("/api/office/agent/task-complete", map[string]interface{}{"sessionId": sessionID, "taskId": taskID})
+		fmt.Printf("Task %s marked as complete.\n", taskID)
 
 	case "ack":
 		requireArgs(subargs, 1, "cm task ack <taskId>")
@@ -282,7 +310,7 @@ func handleSkill(args []string) {
 
 func handleMemory(args []string) {
 	if len(args) < 1 {
-		fatal("Usage: cm memory <read|write|append> ...")
+		fatal("Usage: cm memory <read|write|append|section|query> ...")
 	}
 	switch args[0] {
 	case "read":
@@ -299,6 +327,42 @@ func handleMemory(args []string) {
 			"sessionId": sessionID, "entry": strings.Join(args[1:], " "),
 		})
 		fmt.Println("Memory appended.")
+	case "section":
+		// cm memory section <name>                  -> read the section
+		// cm memory section <name> <content>        -> overwrite the section
+		// cm memory section --append <name> <entry> -> append to the section
+		rest := args[1:]
+		appendMode := false
+		if len(rest) > 0 && rest[0] == "--append" {
+			appendMode = true
+			rest = rest[1:]
+		}
+		if len(rest) == 0 {
+			fatal("cm memory section <name> [content] | cm memory section --append <name> <entry>")
+		}
+		name := rest[0]
+		if len(rest) == 1 && !appendMode {
+			// Read mode.
+			printJSON(get(fmt.Sprintf("/api/office/agent/memory/section?sessionId=%s&name=%s",
+				url.QueryEscape(sessionID), url.QueryEscape(name))))
+			return
+		}
+		content := strings.Join(rest[1:], " ")
+		post("/api/office/agent/memory/section", map[string]interface{}{
+			"sessionId": sessionID,
+			"name":      name,
+			"content":   content,
+			"append":    appendMode,
+		})
+		if appendMode {
+			fmt.Printf("Memory section %q appended.\n", name)
+		} else {
+			fmt.Printf("Memory section %q written.\n", name)
+		}
+	case "query":
+		requireArgs(args[1:], 1, "cm memory query <keyword>")
+		printJSON(get(fmt.Sprintf("/api/office/agent/memory/query?sessionId=%s&q=%s",
+			url.QueryEscape(sessionID), url.QueryEscape(strings.Join(args[1:], " ")))))
 	default:
 		fatal("Unknown memory subcommand: " + args[0])
 	}
@@ -391,7 +455,9 @@ Commands:
   leader-tasks respond <content>      Submit leader task assignments
   reflect <learning> --category <cat> Submit post-task reflection
   discover <summary> --findings ...   Report curiosity findings
-  task start|complete|ack <taskId>    Manage task lifecycle
+  task start|ack <taskId>             Manage task lifecycle
+  task complete <taskId> --summary "<2-3 sentence handoff>"
+                                      Mark complete (summary appended to memory.task_history)
   task progress <taskId> <note>       Report task progress
   task blocked <taskId> <reason>      Report blocker
   task list                           List your task queue
@@ -403,7 +469,11 @@ Commands:
   roster                              Get team roster
   message <toSessionId> <content>     Send message to teammate
   skill list|read|create|search       Manage shared skills
-  memory read|write|append            Manage agent memory
+  memory read|write|append            Manage agent memory (flat)
+  memory section <name> [content]     Read or overwrite a memory section
+  memory section --append <name> <entry>
+                                      Append to a memory section
+  memory query <keyword>              Search across memory sections
   help                                Show this help
 
 Environment:

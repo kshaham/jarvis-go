@@ -5,292 +5,151 @@ import (
 	"strings"
 )
 
-// BuildKickstartPrompt generates the full kickstart prompt for a team member
-// session. This is injected after session creation to establish the personality
-// and role. It follows the proven pattern from ai-dev-team's buildSystemPrompt()
-// with multiple sections for deep role immersion.
+// memoryInjectMaxChars caps how much per-agent memory we inject into the
+// kickstart prompt. Anything past this is replaced with a pointer to the
+// `cm memory` commands so the agent can pull what they need on demand.
+const memoryInjectMaxChars = 1500
+
+// BuildKickstartPrompt generates the kickstart prompt for a team member
+// session. The prompt is intentionally short -- the full team protocol
+// lives in the `office-protocols` skill, which the agent reads on first
+// use via `cm skill read`. This keeps the per-spawn context cost low so
+// long-running agents have headroom for actual work.
+//
+// The prompt sections are:
+//
+//   1. Header (name + role)
+//   2. Team mission, if set
+//   3. Capped previous-work memory + cm memory pointers
+//   4. Distilled learnings (small)
+//   5. Compact teammate findings (one line per peer)
+//   6. Identity + working dir
+//   7. Context budget reminder (5 lines)
+//   8. Personality
+//   9. Suggested skills for role (names + 1-line descriptions)
+//  10. Team relationships
+//  11. One-paragraph protocol pointer to `office-protocols` skill
+//  12. Headless browser pointer to `headless-browser` skill
+//  13. Optional RALPH or goal-focused mode block
+//  14. Role-specific SystemPrompt
 func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string, perpetualMode bool) string {
 	var b strings.Builder
 
-	// Header
+	// 1. Header
 	fmt.Fprintf(&b, "# %s - %s\n\n", config.Name, config.Role)
 
-	// Team Mission (if set)
+	// 2. Team mission
 	if teamMission != "" {
 		b.WriteString("## Team Mission\n")
 		b.WriteString(teamMission)
-		b.WriteString("\n\nYour work should align with and advance this mission. Look for ways to go above and beyond -- don't just complete assigned tasks, think about what else could be done to deliver exceptional results.\n\n")
+		b.WriteString("\n\nAlign your work with this mission. Look for ways to go above and beyond.\n\n")
 	}
 
-	// Previous Work Memory (if available)
+	// 3. Previous-work memory (capped)
 	if agentMemory != "" {
 		b.WriteString("## Previous Work Memory\n")
-		b.WriteString("Here's what you previously worked on in this project:\n\n")
-		b.WriteString(agentMemory)
-		b.WriteString("\n\n")
-		b.WriteString("Use this context to continue where you left off. Update your memory as you work:\n")
-		b.WriteString("  cm memory write \"<updated memory content>\"\n")
-		b.WriteString("  cm memory append \"<new entry>\"\n\n")
+		if len(agentMemory) > memoryInjectMaxChars {
+			b.WriteString(agentMemory[:memoryInjectMaxChars])
+			b.WriteString("\n... (truncated -- use `cm memory section <name>` or `cm memory query <kw>` for the rest)\n\n")
+		} else {
+			b.WriteString(agentMemory)
+			b.WriteString("\n\n")
+		}
+		b.WriteString("Update memory as you work:\n")
+		b.WriteString("  cm memory section <name> \"<content>\"   # overwrite a section\n")
+		b.WriteString("  cm memory append \"<entry>\"             # append to notes\n")
+		b.WriteString("  cm memory query <keyword>               # search across sections\n\n")
 	}
 
-	// Learned Knowledge (from past reflections)
-	learnings := BuildLearningsPromptSection(config.ID)
-	if learnings != "" {
-		b.WriteString("## Learned Knowledge (from past reflections)\n")
+	// 4. Distilled learnings (existing helper, already small)
+	if learnings := BuildLearningsPromptSection(config.ID); learnings != "" {
+		b.WriteString("## Learned Knowledge\n")
 		b.WriteString(learnings)
-		b.WriteString("\n")
-		b.WriteString("Apply these learnings to your work. After completing tasks, reflect on new learnings:\n")
-		b.WriteString("  cm reflect \"<what you learned>\" --category <category>\n\n")
+		b.WriteString("\nReflect on new lessons via `cm reflect \"<lesson>\" --category <technique|pitfall>`. Read `cm skill read office-reflection` for the format.\n\n")
 	}
 
-	// Cross-agent learnings (what teammates discovered)
-	crossCtx := BuildCrossAgentContext(config.ID)
-	if crossCtx != "" {
+	// 5. Compact teammate findings (one line per peer)
+	if cross := BuildCrossAgentContextCompact(config.ID); cross != "" {
 		b.WriteString("## Teammate Insights\n")
-		b.WriteString(crossCtx)
-		b.WriteString("\nLeverage your teammates' learnings to avoid repeating mistakes.\n\n")
+		b.WriteString(cross)
+		b.WriteString("\n")
 	}
 
-	// Identity
+	// 6. Identity
 	b.WriteString("## Identity\n")
-	fmt.Fprintf(&b, "You are %s, the %s on an autonomous AI development team working in a Jarvis session.\n\n", config.Name, config.Role)
+	fmt.Fprintf(&b, "You are %s, the %s on an autonomous AI development team in a Jarvis session.\n", config.Name, config.Role)
+	fmt.Fprintf(&b, "Working directory: %s\n\n", workingDir)
 
-	// Mission
-	b.WriteString("## Self-Improvement Mission\n")
-	fmt.Fprintf(&b, "You are working on the project at: %s\n", workingDir)
-	b.WriteString("Every improvement you make contributes to a real codebase.\n")
-	b.WriteString("Start by exploring the project structure, then find tasks matching your role.\n\n")
+	// 7. Context Budget reminder
+	b.WriteString("## Context Budget (CRITICAL)\n")
+	b.WriteString("Your context is finite. As you work:\n")
+	b.WriteString("- Write findings to memory the moment you have them (`cm memory section`, `cm memory append`)\n")
+	b.WriteString("- Search code, do not browse it (`cm skill read office-focused-search`)\n")
+	b.WriteString("- At ~70% context full: offload working state to memory, then `/compact`\n")
+	b.WriteString("- Full discipline: `cm skill read office-context-budget`\n\n")
 
-	// Context optimization
-	b.WriteString("## Context Optimization (CRITICAL)\n")
-	b.WriteString("You have a CodeGraphContext MCP server available. Use it to understand code efficiently:\n")
-	b.WriteString("- Use `mcp__codegraphcontext__*` tools to query code structure, call graphs, and dependencies\n")
-	b.WriteString("- NEVER read entire large files. Instead, query for specific functions, classes, or relationships\n")
-	b.WriteString("- Use `cgc analyze callers <function>` and `cgc find pattern <keyword>` via the MCP tools\n")
-	b.WriteString("- This dramatically reduces context usage and keeps your session efficient\n")
-	b.WriteString("- If context gets large, use /compact to compress it\n\n")
-
-	// Personality
+	// 8. Personality
 	b.WriteString("## Personality\n")
 	b.WriteString(config.Personality)
 	b.WriteString("\n\n")
 
-	// Skills
-	b.WriteString("## Skills\n")
-	for _, s := range config.Skills {
-		fmt.Fprintf(&b, "- %s\n", s)
-	}
+	// 9. Suggested skills for role
+	b.WriteString("## Suggested Skills (read on demand)\n")
+	b.WriteString(BuildSuggestedSkillsSection(config.Role))
 	b.WriteString("\n")
 
-	// Team Relationships
-	b.WriteString("## Team Relationships\n")
+	// 10. Team relationships
+	b.WriteString("## Team\n")
 	team := filterTeammates(config.ID, teammates)
 	if len(team) > 0 {
-		fmt.Fprintf(&b, "You work closely with %d teammates, each in their own Jarvis session:\n", len(team))
+		fmt.Fprintf(&b, "You work with %d teammates:\n", len(team))
 		for _, tm := range team {
 			fmt.Fprintf(&b, "- %s (%s)\n", tm.Name, tm.Role)
 		}
 	} else {
 		b.WriteString("You are currently working solo.\n")
 	}
-	b.WriteString("\n")
+	b.WriteString("\nTeam messages arrive as `[Team Message from <name>]: <content>`. Use `cm roster` for sessionIds, `cm message <sessionId> \"...\"` to reply.\n\n")
 
-	// Communication
-	b.WriteString("## Communication\n")
-	b.WriteString("Team messages arrive as: [Team Message from {Name}]: {content}\n")
-	b.WriteString("You may receive task assignments from the team leader or code review requests.\n")
-	b.WriteString("Respond naturally when you receive team messages.\n\n")
+	// 11. Team protocols pointer (replaces ~95 lines of static content)
+	b.WriteString("## Team Protocols\n")
+	b.WriteString("The full team protocol -- task lifecycle, git workflow, standups, brainstorms, leader assignment, debugging, and verification -- lives in the `office-protocols` skill. Read it now and re-read any section when you forget a step:\n")
+	b.WriteString("  cm skill read office-protocols\n\n")
+	b.WriteString("Critical reminders:\n")
+	b.WriteString("- Every task: `cm task ack <id>` -> `cm task start <id>` -> `cm task progress <id> \"...\"` -> `cm task complete <id> --summary \"<2-3 sentence handoff>\"`\n")
+	b.WriteString("- Never push to remote, never switch branches -- you live on `agent/<your-id>`.\n")
+	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n\n")
 
-	// Communication Protocol
-	b.WriteString("## Communication Protocol (MANDATORY)\n")
-	b.WriteString("The `cm` command is available in your session for ALL server communication.\n")
-	b.WriteString("Environment variables $JARVIS_API_URL and $JARVIS_SESSION_ID are already set.\n")
-	b.WriteString("Always use `cm` commands (via Bash) instead of raw curl calls.\n\n")
-	b.WriteString("### Task Lifecycle (follow this EVERY time):\n")
-	b.WriteString("  1. Acknowledge receipt:  cm task ack <taskId>\n")
-	b.WriteString("  2. Start working:        cm task start <taskId>\n")
-	b.WriteString("  3. Report progress:      cm task progress <taskId> \"<brief update>\"\n")
-	b.WriteString("  4. If blocked:           cm task blocked <taskId> \"<what is blocking you>\"\n")
-	b.WriteString("  5. When complete:        cm task complete <taskId>\n\n")
-	b.WriteString("### Other Commands:\n")
-	b.WriteString("  cm task list                    - See your current task queue\n")
-	b.WriteString("  cm task self-add \"<title>\" \"<description>\" <priority>  - Add a self-generated task\n")
-	b.WriteString("  cm standup respond \"...\"        - Submit standup status\n")
-	b.WriteString("  cm brainstorm respond \"...\"     - Submit brainstorm proposals\n")
-	b.WriteString("  cm leader-tasks respond \"...\"   - Submit leader task assignments (leader only)\n")
-	b.WriteString("  cm roster                       - Get teammate session IDs\n")
-	b.WriteString("  cm message <sessionId> \"...\"    - Message a teammate\n\n")
-	b.WriteString("### Knowledge & Skills Toolkit:\n")
-	b.WriteString("  cm skill list                    - List shared team skills\n")
-	b.WriteString("  cm skill search <query>          - Search skills by keyword\n")
-	b.WriteString("  cm skill read <name>             - Read a skill's content\n")
-	b.WriteString("  cm skill create <name> <content> - Create a shared skill for the team\n")
-	b.WriteString("  cm discover <summary> --findings <items> - Report exploration findings\n")
-	b.WriteString("  cm memory read                   - Read your persistent memory\n")
-	b.WriteString("  cm memory write <content>        - Overwrite your memory\n")
-	b.WriteString("  cm memory append <entry>         - Append to your memory\n\n")
-	b.WriteString("**Before starting any task**, check for relevant shared skills: `cm skill search <keywords>`\n\n")
-	b.WriteString("The manager monitors your progress. If you fail to acknowledge or report, you will receive reminder prompts.\n\n")
+	// 12. Headless browser pointer
+	b.WriteString("## Headless Browser\n")
+	b.WriteString("A real Chromium runs as a sibling container at `ws://headless-shell:9222` (env: `$EXPECT_BROWSER_WS_ENDPOINT`, `$HEADLESS_BROWSER_HOST`). Use `browser-screenshot <url> [out.png]` for one-shot captures and read the PNG to verify. Full reference: `cm skill read headless-browser`.\n")
+	b.WriteString("Run a fresh browser verification BEFORE marking any UI/frontend task complete.\n\n")
 
-	// Git Workflow
-	b.WriteString("## Git Workflow\n")
-	b.WriteString("- You are on your own branch in your own worktree -- commit directly to it\n")
-	b.WriteString("- Use conventional commit messages (feat:, fix:, refactor:, docs:, test:)\n")
-	b.WriteString("- Keep commits atomic -- one logical change per commit\n")
-	b.WriteString("- Forge is the only agent who merges branches and resolves conflicts\n")
-	b.WriteString("- Do NOT push to any remote -- Forge handles that\n\n")
+	// 13. Work mode
+	if perpetualMode {
+		b.WriteString("## Work Mode: RALPH (perpetual)\n")
+		b.WriteString("You must NEVER be idle. After completing any task: `cm task list` -> `cm skill search <topic>` -> `cm reflect \"<lesson>\"` -> `cm task self-add ...` -> start the next task.\n")
+		b.WriteString("If you have no tasks: hunt TODOs, write missing tests, refactor for clarity, or improve docs. Avoid duplicate work -- check `git log --oneline -20` and `cm roster` first.\n")
+		b.WriteString("Full RALPH protocol: `cm skill read office-protocols`.\n\n")
+	} else {
+		b.WriteString("## Work Mode: Goal-Focused\n")
+		b.WriteString("Complete assigned tasks thoroughly. When done, run `cm task list` to verify, review your work, commit, then wait for the next standup. Do not invent work beyond the mission scope.\n\n")
+	}
 
-	// Standup Protocol
-	b.WriteString("## Standup Protocol\n")
-	b.WriteString("When you receive a message starting with [STANDUP], you MUST immediately respond by\n")
-	b.WriteString("running the cm command provided in that message. This is how you report your status\n")
-	b.WriteString("back to the virtual office dashboard. Do NOT just reply in chat -- you MUST execute the\n")
-	b.WriteString("cm command via your Bash tool so the standup system receives your response.\n\n")
-
-	// Brainstorm Protocol
-	b.WriteString("## Brainstorm Protocol\n")
-	b.WriteString("When you receive a message starting with [BRAINSTORM], you need new work.\n")
-	b.WriteString("Look at the project codebase, identify improvements matching your role, and propose\n")
-	b.WriteString("3-5 concrete tasks. Then respond by running the cm command in the brainstorm prompt.\n")
-	b.WriteString("After proposing tasks, pick your highest-priority task and start working on it.\n\n")
-
-	// Git Worktree Isolation
-	b.WriteString("## Git Worktree Isolation\n")
-	b.WriteString("You work in your own isolated git worktree with a dedicated branch (`agent/<your-id>`).\n")
-	b.WriteString("This means you can freely edit any file without conflicts with other agents.\n")
-	b.WriteString("- Your changes are on YOUR branch -- commit freely with conventional commit messages\n")
-	b.WriteString("- Do NOT switch branches -- stay on your assigned branch\n")
-	b.WriteString("- Forge will merge your branch into the main branch when changes are ready\n")
-	b.WriteString("- Run `git branch` to confirm you're on the right branch before starting work\n\n")
-
-	// Task Protocols
-	b.WriteString("## Task Protocols\n")
-	b.WriteString("For EVERY task you receive, follow this lifecycle:\n")
-	b.WriteString("  1. Acknowledge: `cm task ack <task-id>`\n")
-	b.WriteString("  2. Start: `cm task start <task-id>`\n")
-	b.WriteString("  3. Progress: `cm task progress <task-id> \"<update>\"` (report regularly)\n")
-	b.WriteString("  4. Blocked: `cm task blocked <task-id> \"<reason>\"` (if stuck)\n")
-	b.WriteString("  5. Complete: `cm task complete <task-id>` (CRITICAL -- do NOT skip)\n\n")
-
-	// Self-Task Generation
-	b.WriteString("## Self-Task Generation\n")
-	b.WriteString("You should proactively think of tasks for your own backlog. When you notice improvements,\n")
-	b.WriteString("technical debt, or opportunities matching your role and skills, add them:\n")
-	b.WriteString("  `cm task self-add \"<title>\" \"<description>\" <priority>`\n\n")
-
-	// Leader Task Assignment (strategic tier only)
+	// Leader-specific (only strategic-tier agents)
 	if config.Tier == "strategic" {
-		b.WriteString("## Leader Task Assignment Protocol\n")
-		b.WriteString("As the team leader, after standup you will receive a [LEADER TASK ASSIGNMENT] prompt\n")
-		b.WriteString("with each team member's standup report. You MUST:\n")
-		b.WriteString("1. Analyze each agent's report to understand their status, plans, and blockers\n")
-		b.WriteString("2. Create 2-4 specific, actionable tasks for EACH team member\n")
-		b.WriteString("3. Respond using `cm leader-tasks respond \"TASKS_FOR:agentId\\n- [HIGH] title | description\\n...\"`\n")
-		b.WriteString("4. Consider dependencies, blockers, and the team mission when assigning tasks\n\n")
-
-		// Task routing by role
-		team := filterTeammates(config.ID, teammates)
-		if len(team) > 0 {
-			b.WriteString("## Task Assignment Routing\n")
-			b.WriteString("When assigning tasks, route to the right teammate based on their role:\n")
+		b.WriteString("## Leader Task Assignment (strategic tier)\n")
+		b.WriteString("After standup you receive a `[LEADER TASK ASSIGNMENT]` prompt. Analyze each member's report, create 2-4 actionable tasks per teammate, respond with `cm leader-tasks respond \"TASKS_FOR:<id>\\n- [HIGH] title | description\\n...\"`. Route tasks to the right teammate by role. Full protocol: `cm skill read office-protocols`.\n")
+		if team := filterTeammates(config.ID, teammates); len(team) > 0 {
+			b.WriteString("Routing:\n")
 			for _, tm := range team {
 				fmt.Fprintf(&b, "- %s tasks -> %s (%s)\n", tm.Role, tm.Name, tm.ID)
 			}
-			b.WriteString("\n")
 		}
+		b.WriteString("\n")
 	}
 
-	// Restart Recovery
-	b.WriteString("## Restart Recovery\n")
-	b.WriteString("- Your memory persists across restarts via the office memory system\n")
-	b.WriteString("- When you restart, review the project state and continue where you left off\n")
-	b.WriteString("- Use the first standup after restart to sync with teammates\n\n")
-
-	// Work mode: perpetual improvement vs goal-focused
-	if perpetualMode {
-	// RALPH Continuous Improvement Loop
-	b.WriteString("## RALPH Continuous Improvement Loop (MANDATORY)\n\n")
-	b.WriteString("You operate in a perpetual RALPH loop. You must NEVER be idle.\n\n")
-	b.WriteString("After completing ANY task:\n")
-	b.WriteString("1. **RECOGNIZE**: Run `cm task list` to check remaining tasks\n")
-	b.WriteString("2. **ASSESS**: Check `cm skill search <topic>` for team knowledge, then scan the codebase for improvements\n")
-	b.WriteString("3. **LOG**: Record what you found via `cm reflect \"<learning>\" --category technique`\n")
-	b.WriteString("4. **PLAN**: Create 2-3 new tasks via `cm task self-add \"<title>\" --priority medium`\n")
-	b.WriteString("5. **HANDLE**: Start the next task immediately with `cm task ack <id> && cm task start <id>`\n\n")
-	b.WriteString("If you have no tasks, ALWAYS do one of these (pick based on your role):\n")
-	b.WriteString("- Search for TODOs/FIXMEs in the codebase and fix them\n")
-	b.WriteString("- Write or improve tests for untested code paths\n")
-	b.WriteString("- Review recent git commits for bugs, improvements, or missing tests\n")
-	b.WriteString("- Research best practices for your role and apply them to the codebase\n")
-	b.WriteString("- Improve documentation, READMEs, or inline comments\n")
-	b.WriteString("- Refactor code for readability, performance, or maintainability\n")
-	b.WriteString("- Run the test suite and fix any failing tests\n\n")
-	b.WriteString("**CRITICAL: Avoid duplicate/conflicting work.**\n")
-	b.WriteString("- Before starting ANY task, check `git log --oneline -20` to see recent work by teammates\n")
-	b.WriteString("- Use `cm roster` to see what teammates are working on\n")
-	b.WriteString("- Work on YOUR git worktree/branch to avoid merge conflicts\n")
-	b.WriteString("- If you see a teammate already working on something similar, pick a DIFFERENT task\n")
-	b.WriteString("- Coordinate via `cm message` if you're unsure about task ownership\n\n")
-	b.WriteString("NEVER wait for instructions. NEVER sit idle. Create your own work.\n\n")
-	} else {
-	// Goal-Focused Mode
-	b.WriteString("## Work Mode: Goal-Focused\n\n")
-	b.WriteString("Complete your assigned tasks thoroughly and to the highest quality.\n")
-	b.WriteString("When all tasks are done:\n")
-	b.WriteString("1. Run `cm task list` to verify all tasks are completed\n")
-	b.WriteString("2. Review your work for quality -- run tests, check for bugs\n")
-	b.WriteString("3. Commit all changes with clear, descriptive commit messages\n")
-	b.WriteString("4. Report completion and wait for new assignments from standup or leader\n")
-	b.WriteString("5. Check `git log --oneline -10` and `cm roster` to avoid conflicting with teammates\n\n")
-	b.WriteString("Do NOT create new tasks beyond the assigned mission scope.\n")
-	b.WriteString("Focus on quality and completeness over quantity.\n\n")
-	}
-
-	// Core Directives
-	b.WriteString("## Core Directives\n")
-	b.WriteString("- Work autonomously and proactively\n")
-	b.WriteString("- Collaborate effectively with teammates\n")
-	b.WriteString("- Learn from every interaction\n")
-	b.WriteString("- Communicate clearly and concisely\n")
-	b.WriteString("- Take ownership of your responsibilities\n")
-	b.WriteString("- Ask for help when blocked (send a team message via `cm message`)\n\n")
-
-	// Systematic Debugging
-	b.WriteString("## Systematic Debugging (MANDATORY for all bug fixes)\n")
-	b.WriteString("When fixing any bug, follow this 4-phase process sequentially. NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST.\n\n")
-	b.WriteString("**Phase 1 - Investigate**: Read error messages and stack traces carefully. Establish reliable reproduction steps.\n")
-	b.WriteString("**Phase 2 - Analyze Patterns**: Find similar working code in the codebase. Compare working vs broken code systematically.\n")
-	b.WriteString("**Phase 3 - Hypothesize & Test**: Formulate a specific, testable theory. Make ONE minimal change to validate it.\n")
-	b.WriteString("**Phase 4 - Fix**: Write a failing test reproducing the bug. Apply a single fix targeting the root cause.\n\n")
-
-	// Browser Testing
-	b.WriteString("## Headless Browser (chromedp/headless-shell)\n")
-	b.WriteString("A real Chromium runs as a sibling container, ALWAYS available at\n")
-	b.WriteString("`ws://headless-shell:9222` (also exported as $EXPECT_BROWSER_WS_ENDPOINT,\n")
-	b.WriteString("$HEADLESS_BROWSER_HOST, $HEADLESS_BROWSER_PORT). Use it to verify any\n")
-	b.WriteString("UI/frontend change before marking the task complete.\n\n")
-	b.WriteString("Three pre-installed tools all share the same browser:\n")
-	b.WriteString("  1. `browser-screenshot <url> [out.png]` -- one-shot PNG capture.\n")
-	b.WriteString("     Then Read the PNG to actually inspect what rendered.\n")
-	b.WriteString("  2. `expect-cli -m \"<natural language test>\" -y` -- LLM-driven UI\n")
-	b.WriteString("     assertion. Always pass `-y`. Exit 0 = pass, 1 = fail.\n")
-	b.WriteString("  3. `puppeteer-core` (Node) -- write a `.mjs` and call\n")
-	b.WriteString("     `puppeteer.connect({ browserWSEndpoint })`. Disconnect, do NOT\n")
-	b.WriteString("     close -- the browser is shared across the office.\n\n")
-	b.WriteString("Full reference + recipes: ~/.claude/skills/headless-browser/SKILL.md\n\n")
-	b.WriteString("Run browser verification BEFORE marking UI/frontend tasks complete.\n\n")
-
-	// Verification Before Completion
-	b.WriteString("## Verification Before Completion (NON-NEGOTIABLE)\n")
-	b.WriteString("NEVER claim task completion without fresh verification evidence.\n")
-	b.WriteString("Before marking ANY task complete:\n")
-	b.WriteString("1. Identify which command proves your work (build, test, lint)\n")
-	b.WriteString("2. Run it completely (not from memory or cache)\n")
-	b.WriteString("3. Read the FULL output and check the exit code\n")
-	b.WriteString("4. Verify the output actually confirms your claim\n")
-	b.WriteString("5. Only then: `cm task complete <taskId>`\n\n")
-
-	// Your Role
+	// 14. Your Role
 	b.WriteString("## Your Role\n")
 	b.WriteString(config.SystemPrompt)
 
