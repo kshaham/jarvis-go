@@ -81,27 +81,33 @@ func TestPickSkillsForRoleMatchesExpectedBuckets(t *testing.T) {
 		role     string
 		mustHave string
 	}{
-		// Core office-* skills that every bundle retains.
+		// Core office-* skills + round-3 self-improvement meta-skill.
 		{"Engineering Manager", "office-standup"},
 		{"Engineering Manager", "office-code-review"},
+		{"Engineering Manager", "office-self-improvement"},
+		// Architect needs implementation-plan + Go fundamentals + MCP tools.
 		{"Senior Architect", "implementation-plan"},
 		{"Senior Architect", "go-http-server"},
+		{"Senior Architect", "go-mcp-tools"},
+		// Frontend unchanged.
 		{"Frontend Engineer", "headless-browser"},
 		{"Frontend Engineer", "expect-testing"},
-		// Backend agents must know the Go fundamentals for this repo.
+		// Backend: Go fundamentals + jarvis-auth + atomic writes.
 		{"Backend Engineer", "go-concurrency"},
 		{"Backend Engineer", "go-http-server"},
 		{"Backend Engineer", "go-errors"},
-		{"Backend Engineer", "go-testing"},
-		// DevOps agents need git + shell discipline above everything else.
+		{"Backend Engineer", "jarvis-auth"},
+		{"Backend Engineer", "go-atomic-writes"},
+		// DevOps: git + shell + compose debug.
 		{"DevOps Engineer", "git-advanced"},
 		{"DevOps Engineer", "shell-scripting-safe"},
+		{"DevOps Engineer", "docker-compose-debug"},
 		{"DevOps Engineer", "release-prep"},
-		// QA still gets generate-tests + run-tests, plus Go testing patterns.
+		// QA unchanged.
 		{"QA Engineer", "generate-tests"},
 		{"QA Engineer", "go-testing"},
 		{"UI/UX Designer", "design-principles"},
-		// Unknown role -> default bundle, which now includes go-concurrency + git-advanced.
+		// Unknown role -> default bundle.
 		{"Some Unknown Role", "office-protocols"},
 		{"Some Unknown Role", "go-concurrency"},
 		{"Some Unknown Role", "git-advanced"},

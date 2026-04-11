@@ -32,7 +32,7 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-task-handoff",
 		"office-code-review",
 		"implementation-plan",
-		"office-reflection",
+		"office-self-improvement",
 	},
 	"architect": {
 		"office-protocols",
@@ -40,9 +40,9 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-context-budget",
 		"office-onboarding",
 		"implementation-plan",
-		"safe-refactor",
 		"go-concurrency",
 		"go-http-server",
+		"go-mcp-tools",
 	},
 	"frontend": {
 		"office-protocols",
@@ -61,8 +61,8 @@ var suggestedSkillsByRole = map[string][]string{
 		"go-concurrency",
 		"go-http-server",
 		"go-errors",
-		"go-testing",
-		"go-slog",
+		"jarvis-auth",
+		"go-atomic-writes",
 	},
 	"devops": {
 		"office-protocols",
@@ -70,9 +70,9 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-context-budget",
 		"git-advanced",
 		"shell-scripting-safe",
+		"docker-compose-debug",
 		"go-pprof",
 		"release-prep",
-		"performance-check",
 	},
 	"qa": {
 		"office-protocols",
