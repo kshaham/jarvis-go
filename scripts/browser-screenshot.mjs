@@ -22,10 +22,11 @@
  */
 
 import puppeteer from 'puppeteer-core';
+import { lookup } from 'node:dns/promises';
 
 const url = process.argv[2];
 const outputPath = process.argv[3] || '/tmp/headless-shell-screenshot.png';
-const host = process.env.HEADLESS_BROWSER_HOST || 'headless-shell';
+const hostname = process.env.HEADLESS_BROWSER_HOST || 'headless-shell';
 const port = process.env.HEADLESS_BROWSER_PORT || '9222';
 
 if (!url) {
@@ -39,14 +40,21 @@ const NAV_TIMEOUT_MS = 15000;
 async function takeScreenshot() {
   let browser;
   try {
-    // Resolve the actual webSocketDebuggerUrl from the CDP /json/version
-    // endpoint -- the value baked into our env may not include the path.
-    const versionRes = await fetch(`http://${host}:${port}/json/version`);
+    // chromedp/headless-shell rejects CDP requests whose Host header is
+    // not an IP or "localhost" (DNS rebinding protection). Resolve the
+    // service name once and address the container by IP from here on so
+    // every fetch + websocket carries an IP-based Host header.
+    const { address: ip } = await lookup(hostname);
+    const versionRes = await fetch(`http://${ip}:${port}/json/version`);
     if (!versionRes.ok) {
       throw new Error(`CDP /json/version returned HTTP ${versionRes.status}`);
     }
     const versionData = await versionRes.json();
-    const wsEndpoint = versionData.webSocketDebuggerUrl || `ws://${host}:${port}`;
+    let wsEndpoint = versionData.webSocketDebuggerUrl || `ws://${ip}:${port}`;
+    // Some chrome builds bake the hostname into webSocketDebuggerUrl --
+    // rewrite to the resolved IP so the puppeteer WS handshake also
+    // sends an IP Host header.
+    wsEndpoint = wsEndpoint.replace(`//${hostname}:`, `//${ip}:`);
 
     browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint });
 
@@ -63,7 +71,7 @@ async function takeScreenshot() {
     await page.close();
   } catch (error) {
     console.error(`Failed to take screenshot: ${error.message}`);
-    console.error(`Is headless-shell running? Check: curl http://${host}:${port}/json/version`);
+    console.error(`Diagnose: getent hosts ${hostname} && curl -s http://$(getent hosts ${hostname} | awk '{print $1}'):${port}/json/version`);
     process.exit(1);
   } finally {
     if (browser) {
