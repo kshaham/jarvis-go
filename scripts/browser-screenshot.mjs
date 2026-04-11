@@ -21,8 +21,15 @@
  * Requires: puppeteer-core (installed globally in the jarvis container).
  */
 
-import puppeteer from 'puppeteer-core';
+import { createRequire } from 'node:module';
 import { lookup } from 'node:dns/promises';
+
+// puppeteer-core is installed globally in the jarvis container, not in
+// any local node_modules near this script. ESM `import` does not search
+// global paths -- but createRequire() uses CommonJS resolution which
+// honors NODE_PATH (set by the bash wrapper to `npm root -g`).
+const require = createRequire(import.meta.url);
+const puppeteer = require('puppeteer-core');
 
 const url = process.argv[2];
 const outputPath = process.argv[3] || '/tmp/headless-shell-screenshot.png';
