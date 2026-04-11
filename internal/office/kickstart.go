@@ -264,12 +264,21 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("**Phase 4 - Fix**: Write a failing test reproducing the bug. Apply a single fix targeting the root cause.\n\n")
 
 	// Browser Testing
-	b.WriteString("## Browser Testing with expect-cli\n")
-	b.WriteString("Use `expect-cli` to validate UI changes in a real headless browser:\n")
-	b.WriteString("  expect-cli -m \"<natural language test instruction>\" -y\n")
-	b.WriteString("The headless Chrome browser at ws://headless-shell:9222 is available.\n")
-	b.WriteString("Always use `-y` flag for automated testing. Exit code 0 = pass, 1 = fail.\n")
-	b.WriteString("Run browser tests BEFORE marking UI/frontend tasks complete.\n\n")
+	b.WriteString("## Headless Browser (chromedp/headless-shell)\n")
+	b.WriteString("A real Chromium runs as a sibling container, ALWAYS available at\n")
+	b.WriteString("`ws://headless-shell:9222` (also exported as $EXPECT_BROWSER_WS_ENDPOINT,\n")
+	b.WriteString("$HEADLESS_BROWSER_HOST, $HEADLESS_BROWSER_PORT). Use it to verify any\n")
+	b.WriteString("UI/frontend change before marking the task complete.\n\n")
+	b.WriteString("Three pre-installed tools all share the same browser:\n")
+	b.WriteString("  1. `browser-screenshot <url> [out.png]` -- one-shot PNG capture.\n")
+	b.WriteString("     Then Read the PNG to actually inspect what rendered.\n")
+	b.WriteString("  2. `expect-cli -m \"<natural language test>\" -y` -- LLM-driven UI\n")
+	b.WriteString("     assertion. Always pass `-y`. Exit 0 = pass, 1 = fail.\n")
+	b.WriteString("  3. `puppeteer-core` (Node) -- write a `.mjs` and call\n")
+	b.WriteString("     `puppeteer.connect({ browserWSEndpoint })`. Disconnect, do NOT\n")
+	b.WriteString("     close -- the browser is shared across the office.\n\n")
+	b.WriteString("Full reference + recipes: ~/.claude/skills/headless-browser/SKILL.md\n\n")
+	b.WriteString("Run browser verification BEFORE marking UI/frontend tasks complete.\n\n")
 
 	// Verification Before Completion
 	b.WriteString("## Verification Before Completion (NON-NEGOTIABLE)\n")
