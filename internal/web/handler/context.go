@@ -15,6 +15,7 @@ import (
 	"github.com/claudeman/jarvis-go/internal/runsummary"
 	"github.com/claudeman/jarvis-go/internal/state"
 	"github.com/claudeman/jarvis-go/internal/subagent"
+	"github.com/claudeman/jarvis-go/internal/teamtemplates"
 	"github.com/claudeman/jarvis-go/internal/telegram"
 	"github.com/claudeman/jarvis-go/internal/templates"
 	"github.com/claudeman/jarvis-go/internal/web/auth"
@@ -36,6 +37,7 @@ type Context struct {
 	RespawnControllers map[string]*respawn.Controller // sessionID -> controller
 	RespawnMu          sync.RWMutex
 	TemplateStore      *templates.Store
+	TeamTemplateStore  *teamtemplates.Store
 	TelegramBot        *telegram.Bot
 	TelegramHandler    *telegram.Handler
 	IntegrationMonitor *integrations.Monitor

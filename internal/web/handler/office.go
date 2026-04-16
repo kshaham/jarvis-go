@@ -18,6 +18,7 @@ import (
 
 	"github.com/claudeman/jarvis-go/internal/office"
 	"github.com/claudeman/jarvis-go/internal/pty"
+	"github.com/claudeman/jarvis-go/internal/teamtemplates"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
 
@@ -34,9 +35,18 @@ func safeName(name string) bool {
 // ---------------------------------------------------------------------------
 
 type memberOverride struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	ID           string   `json:"id"`
+	Provider     string   `json:"provider"`
+	Model        string   `json:"model"`
+	Name         string   `json:"name,omitempty"`
+	Role         string   `json:"role,omitempty"`
+	Tier         string   `json:"tier,omitempty"`
+	Color        string   `json:"color,omitempty"`
+	Emoji        string   `json:"emoji,omitempty"`
+	Personality  string   `json:"personality,omitempty"`
+	SystemPrompt string   `json:"systemPrompt,omitempty"`
+	Skills       []string `json:"skills,omitempty"`
+	WorkingDir   string   `json:"workingDir,omitempty"`
 }
 
 type spawnTeamRequest struct {
@@ -226,86 +236,26 @@ func ok(w http.ResponseWriter, extra map[string]interface{}) {
 // Template data (static for now)
 // ---------------------------------------------------------------------------
 
-type templateMember struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Role  string `json:"role"`
-	Tier  string `json:"tier"`
-	Color string `json:"color"`
-	Emoji string `json:"emoji"`
+// allTeamTemplates returns built-in templates merged with custom templates from the store.
+func (ctx *Context) allTeamTemplates() []teamtemplates.TeamTemplate {
+	builtIn := teamtemplates.BuiltInTemplates()
+	custom := ctx.TeamTemplateStore.List()
+	result := make([]teamtemplates.TeamTemplate, 0, len(builtIn)+len(custom))
+	result = append(result, builtIn...)
+	for _, t := range custom {
+		result = append(result, *t)
+	}
+	return result
 }
 
-type officeTemplate struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Category    string           `json:"category"`
-	MemberCount int              `json:"memberCount"`
-	Members     []templateMember `json:"members"`
-}
-
-var office7Members = []templateMember{
-	{ID: "max", Name: "Max", Role: "Engineering Manager", Tier: "strategic", Color: "blue", Emoji: "\U0001F9E0"},
-	{ID: "sage", Name: "Sage", Role: "Senior Architect", Tier: "strategic", Color: "purple", Emoji: "\U0001F989"},
-	{ID: "nova", Name: "Nova", Role: "UI/UX Designer", Tier: "worker", Color: "pink", Emoji: "\U0001F3A8"},
-	{ID: "vex", Name: "Vex", Role: "Frontend Engineer", Tier: "worker", Color: "green", Emoji: "\u26A1"},
-	{ID: "bolt", Name: "Bolt", Role: "Backend Engineer", Tier: "worker", Color: "orange", Emoji: "\u2699\uFE0F"},
-	{ID: "forge", Name: "Forge", Role: "DevOps Engineer", Tier: "worker", Color: "yellow", Emoji: "\U0001F528"},
-	{ID: "lint", Name: "Lint", Role: "QA Engineer", Tier: "worker", Color: "red", Emoji: "\U0001F50D"},
-}
-
-var backendAIMembers = []templateMember{
-	{ID: "aria", Name: "Aria", Role: "AI Engineering Lead", Tier: "strategic", Color: "purple", Emoji: "\U0001F9E0"},
-	{ID: "tensor", Name: "Tensor", Role: "ML Engineer", Tier: "worker", Color: "blue", Emoji: "\U0001F916"},
-	{ID: "prompt", Name: "Prompt", Role: "Prompt Engineer", Tier: "worker", Color: "green", Emoji: "\u270D\uFE0F"},
-	{ID: "dataflow", Name: "Dataflow", Role: "Data Engineer", Tier: "worker", Color: "orange", Emoji: "\U0001F4CA"},
-	{ID: "nexus", Name: "Nexus", Role: "API Engineer", Tier: "worker", Color: "yellow", Emoji: "\U0001F310"},
-	{ID: "guardian", Name: "Guardian", Role: "AI QA / Evaluator", Tier: "worker", Color: "red", Emoji: "\U0001F6E1\uFE0F"},
-}
-
-var frontendStudioMembers = []templateMember{
-	{ID: "pixel", Name: "Pixel", Role: "Design Lead", Tier: "strategic", Color: "pink", Emoji: "\U0001F3A8"},
-	{ID: "react", Name: "React", Role: "Frontend Architect", Tier: "strategic", Color: "blue", Emoji: "\u269B\uFE0F"},
-	{ID: "craft", Name: "Craft", Role: "UI Engineer", Tier: "worker", Color: "green", Emoji: "\U0001F528"},
-	{ID: "flow", Name: "Flow", Role: "Interaction Engineer", Tier: "worker", Color: "orange", Emoji: "\U0001F3AE"},
-	{ID: "access", Name: "Access", Role: "Accessibility & Testing", Tier: "worker", Color: "purple", Emoji: "\u267F"},
-	{ID: "perf", Name: "Perf", Role: "Performance Engineer", Tier: "worker", Color: "yellow", Emoji: "\u26A1"},
-}
-
-var fullstackCompactMembers = []templateMember{
-	{ID: "captain", Name: "Captain", Role: "Tech Lead", Tier: "strategic", Color: "blue", Emoji: "\U0001F9ED"},
-	{ID: "dash", Name: "Dash", Role: "Frontend Developer", Tier: "worker", Color: "green", Emoji: "\U0001F3A8"},
-	{ID: "stack", Name: "Stack", Role: "Backend Developer", Tier: "worker", Color: "orange", Emoji: "\u2699\uFE0F"},
-	{ID: "shield", Name: "Shield", Role: "QA & Security", Tier: "worker", Color: "red", Emoji: "\U0001F6E1\uFE0F"},
-	{ID: "ops", Name: "Ops", Role: "DevOps", Tier: "worker", Color: "yellow", Emoji: "\U0001F680"},
-}
-
-var researchLabMembers = []templateMember{
-	{ID: "atlas", Name: "Atlas", Role: "Research Director", Tier: "strategic", Color: "blue", Emoji: "\U0001F9ED"},
-	{ID: "cipher", Name: "Cipher", Role: "Deep Researcher", Tier: "worker", Color: "purple", Emoji: "\U0001F4DA"},
-	{ID: "prism", Name: "Prism", Role: "Technical Analyst", Tier: "worker", Color: "green", Emoji: "\U0001F52C"},
-	{ID: "proto", Name: "Proto", Role: "POC Developer", Tier: "worker", Color: "orange", Emoji: "\U0001F6E0\uFE0F"},
-	{ID: "slide", Name: "Slide", Role: "Presentation Specialist", Tier: "worker", Color: "pink", Emoji: "\U0001F4CA"},
-	{ID: "muse", Name: "Muse", Role: "Brand Strategist", Tier: "worker", Color: "yellow", Emoji: "\u2728"},
-	{ID: "quill", Name: "Quill", Role: "Documentation Writer", Tier: "worker", Color: "red", Emoji: "\u270D\uFE0F"},
-}
-
-var innovationSprintMembers = []templateMember{
-	{ID: "spark", Name: "Spark", Role: "Innovation Lead", Tier: "strategic", Color: "blue", Emoji: "\U0001F4A1"},
-	{ID: "scout", Name: "Scout", Role: "Market Researcher", Tier: "worker", Color: "purple", Emoji: "\U0001F50E"},
-	{ID: "flux", Name: "Flux", Role: "Prototype Engineer", Tier: "worker", Color: "orange", Emoji: "\u26A1"},
-	{ID: "pitch", Name: "Pitch", Role: "Visual Storyteller", Tier: "worker", Color: "pink", Emoji: "\U0001F3AC"},
-	{ID: "brief", Name: "Brief", Role: "Technical Writer", Tier: "worker", Color: "green", Emoji: "\U0001F4DD"},
-	{ID: "verify", Name: "Verify", Role: "Validation Analyst", Tier: "worker", Color: "red", Emoji: "\u2705"},
-}
-
-var defaultTemplates = []officeTemplate{
-	{ID: "office-7", Name: "Office (Default)", Description: "The original 7-member dev team: manager, architect, designer, frontend, backend, devops, and QA.", Category: "fullstack", MemberCount: 7, Members: office7Members},
-	{ID: "backend-ai-6", Name: "Backend / AI", Description: "AI-focused team with ML engineers, prompt engineer, data engineer, API engineer, and AI QA.", Category: "backend", MemberCount: 6, Members: backendAIMembers},
-	{ID: "frontend-studio-6", Name: "Frontend Studio", Description: "Frontend-focused team with design lead, architect, UI engineer, interaction engineer, accessibility, and performance.", Category: "frontend", MemberCount: 6, Members: frontendStudioMembers},
-	{ID: "fullstack-compact-5", Name: "Full-stack Compact", Description: "Lean 5-person team: tech lead, frontend dev, backend dev, QA/security, and devops.", Category: "fullstack", MemberCount: 5, Members: fullstackCompactMembers},
-	{ID: "research-lab-7", Name: "Research Lab", Description: "Deep research team: director, researcher, analyst, POC developer, presentation specialist, brand strategist, and documentation writer. Biweekly sprint reviews.", Category: "research", MemberCount: 7, Members: researchLabMembers},
-	{ID: "innovation-sprint-6", Name: "Innovation Sprint", Description: "Lean innovation team: market research, rapid prototyping, visual storytelling, documentation, and validation. Built-in sprint review cadence.", Category: "research", MemberCount: 6, Members: innovationSprintMembers},
+// findTeamTemplate looks up a template by ID from both built-in and custom templates.
+func (ctx *Context) findTeamTemplate(id string) *teamtemplates.TeamTemplate {
+	for _, tpl := range teamtemplates.BuiltInTemplates() {
+		if tpl.ID == id {
+			return &tpl
+		}
+	}
+	return ctx.TeamTemplateStore.Get(id)
 }
 
 // ---------------------------------------------------------------------------
@@ -318,11 +268,147 @@ func (ctx *Context) OfficeStatus(w http.ResponseWriter, r *http.Request) {
 	ok(w, state)
 }
 
-// OfficeTemplates returns available team templates.
+// OfficeTemplates returns available team templates (built-in + custom).
 func (ctx *Context) OfficeTemplates(w http.ResponseWriter, r *http.Request) {
+	all := ctx.allTeamTemplates()
+	// Add memberCount for frontend compatibility
+	type tplJSON struct {
+		teamtemplates.TeamTemplate
+		MemberCount int `json:"memberCount"`
+	}
+	result := make([]tplJSON, len(all))
+	for i, t := range all {
+		result[i] = tplJSON{TeamTemplate: t, MemberCount: len(t.Members)}
+	}
 	ok(w, map[string]interface{}{
-		"templates": defaultTemplates,
+		"templates": result,
 	})
+}
+
+// OfficeCreateTeamTemplate creates a new custom team template.
+func (ctx *Context) OfficeCreateTeamTemplate(w http.ResponseWriter, r *http.Request) {
+	var tpl teamtemplates.TeamTemplate
+	if !decodeBody(w, r, &tpl) {
+		return
+	}
+	if tpl.Name == "" {
+		request.WriteError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if len(tpl.Members) == 0 {
+		request.WriteError(w, http.StatusBadRequest, "at least one member is required")
+		return
+	}
+	created := ctx.TeamTemplateStore.Create(tpl)
+	request.WriteJSON(w, http.StatusOK, created)
+}
+
+// OfficeUpdateTeamTemplate updates a custom team template.
+func (ctx *Context) OfficeUpdateTeamTemplate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	// Reject updates to built-in templates
+	for _, b := range teamtemplates.BuiltInTemplates() {
+		if b.ID == id {
+			request.WriteError(w, http.StatusForbidden, "cannot edit built-in templates")
+			return
+		}
+	}
+	var tpl teamtemplates.TeamTemplate
+	if !decodeBody(w, r, &tpl) {
+		return
+	}
+	updated := ctx.TeamTemplateStore.Update(id, tpl)
+	if updated == nil {
+		request.WriteError(w, http.StatusNotFound, "template not found")
+		return
+	}
+	request.WriteJSON(w, http.StatusOK, updated)
+}
+
+// OfficeDeleteTeamTemplate deletes a custom team template.
+func (ctx *Context) OfficeDeleteTeamTemplate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	// Reject deletion of built-in templates
+	for _, b := range teamtemplates.BuiltInTemplates() {
+		if b.ID == id {
+			request.WriteError(w, http.StatusForbidden, "cannot delete built-in templates")
+			return
+		}
+	}
+	if !ctx.TeamTemplateStore.Delete(id) {
+		request.WriteError(w, http.StatusNotFound, "template not found")
+		return
+	}
+	ok(w, map[string]interface{}{"deleted": true})
+}
+
+// OfficeDuplicateTeamTemplate duplicates any template (built-in or custom) as a new custom template.
+func (ctx *Context) OfficeDuplicateTeamTemplate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	// Check built-in first for the source
+	var builtIn *teamtemplates.TeamTemplate
+	for _, b := range teamtemplates.BuiltInTemplates() {
+		if b.ID == id {
+			builtIn = &b
+			break
+		}
+	}
+	dup := ctx.TeamTemplateStore.Duplicate(id, builtIn)
+	if dup == nil {
+		request.WriteError(w, http.StatusNotFound, "template not found")
+		return
+	}
+	request.WriteJSON(w, http.StatusOK, dup)
+}
+
+// OfficeTemplateFromTeam saves the currently running team as a new custom template.
+func (ctx *Context) OfficeTemplateFromTeam(w http.ResponseWriter, r *http.Request) {
+	if !ctx.OfficeManager.IsTeamSpawned() {
+		request.WriteError(w, http.StatusBadRequest, "no team is currently spawned")
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Category    string `json:"category"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Name == "" {
+		request.WriteError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	roster := ctx.OfficeManager.GetRoster()
+	members := make([]teamtemplates.TeamTemplateMember, 0, len(roster))
+	for _, agent := range roster {
+		cfg := agent.Config
+		m := teamtemplates.TeamTemplateMember{
+			ID:   cfg.ID,
+			Name: cfg.Name,
+			Role: cfg.Role,
+			Tier: cfg.Tier,
+			Color: cfg.Color,
+		}
+		if po := agent.GetPersonalityOverride(); po != nil {
+			m.Personality = po.Personality
+			m.SystemPrompt = po.SystemPrompt
+		} else {
+			m.Personality = cfg.Personality
+			m.SystemPrompt = cfg.SystemPrompt
+		}
+		m.Skills = cfg.Skills
+		members = append(members, m)
+	}
+
+	saved := ctx.TeamTemplateStore.Create(teamtemplates.TeamTemplate{
+		Name:        req.Name,
+		Description: req.Description,
+		Category:    req.Category,
+		Members:     members,
+	})
+	request.WriteJSON(w, http.StatusOK, saved)
 }
 
 // OfficeHealth returns office health info.
@@ -350,7 +436,7 @@ func (ctx *Context) OfficeHealth(w http.ResponseWriter, r *http.Request) {
 // office manager, and broadcasts session:created events.
 // spawnAgentSession creates either an SDK or PTY session for a team member.
 // Returns the sessionID and mode used, or empty string on failure.
-func spawnAgentSession(ctx *Context, member templateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool) (string, string) {
+func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool) (string, string) {
 	if trySDK {
 		agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
 		kickstart := office.BuildKickstartPrompt(
@@ -396,12 +482,12 @@ func spawnAgentSession(ctx *Context, member templateMember, req spawnTeamRequest
 		if err != nil {
 			slog.Error("Failed to create SDK session, falling back to PTY", "name", member.Name, "error", err)
 		} else {
-			// Broadcast session:created for SDK sessions too
+			// Start event forwarding before broadcast to avoid losing early events
+			go forwardSDKSessionEvents(sdkSession, ctx)
 			ctx.SSEBroker.Broadcast("session:created", map[string]interface{}{
 				"id": sdkSession.ID, "name": member.Name, "workingDir": req.WorkingDir,
 				"mode": "claude-sdk", "status": "idle", "createdAt": sdkSession.CreatedAt.UnixMilli(),
 			})
-			go forwardSDKSessionEvents(sdkSession, ctx)
 			return sdkSession.ID, "sdk"
 		}
 	}
@@ -420,8 +506,8 @@ func spawnAgentSession(ctx *Context, member templateMember, req spawnTeamRequest
 		slog.Error("Failed to create PTY session", "name", member.Name, "error", err)
 		return "", ""
 	}
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 	go forwardSessionEvents(session, ctx)
+	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 	return session.ID, "pty"
 }
 
@@ -446,18 +532,22 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		return
 	}
 
-	// Resolve template members
-	var members []templateMember
+	// Resolve template members from built-in or custom templates
+	var members []teamtemplates.TeamTemplateMember
 	templateUsed := "office-7"
-	for _, tpl := range defaultTemplates {
-		if tpl.ID == req.TemplateID || req.TemplateID == "" {
+	if req.TemplateID != "" {
+		if tpl := ctx.findTeamTemplate(req.TemplateID); tpl != nil {
 			members = tpl.Members
 			templateUsed = tpl.ID
-			break
 		}
 	}
 	if members == nil {
-		members = office7Members
+		// Default to office-7
+		if tpl := ctx.findTeamTemplate("office-7"); tpl != nil {
+			members = tpl.Members
+		} else {
+			members = teamtemplates.BuiltInTemplates()[0].Members
+		}
 	}
 
 	// Build default provider env vars
@@ -500,6 +590,43 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	spawned := make([]string, 0, len(members))
 	errors := make([]string, 0)
 
+	// Build member override lookup for name/role/personality/etc overrides
+	memberOverrideMap := make(map[string]memberOverride)
+	for _, ov := range req.MemberOverrides {
+		memberOverrideMap[ov.ID] = ov
+	}
+
+	// Apply name/role/tier/color/emoji overrides to template members before spawning
+	for i, m := range members {
+		if ov, has := memberOverrideMap[m.ID]; has {
+			if ov.Name != "" {
+				members[i].Name = ov.Name
+			}
+			if ov.Role != "" {
+				members[i].Role = ov.Role
+			}
+			if ov.Tier != "" {
+				members[i].Tier = ov.Tier
+			}
+			if ov.Color != "" {
+				members[i].Color = ov.Color
+			}
+			if ov.Emoji != "" {
+				members[i].Emoji = ov.Emoji
+			}
+			// Personality and skills are set on the template member for kickstart use
+			if ov.Personality != "" {
+				members[i].Personality = ov.Personality
+			}
+			if ov.SystemPrompt != "" {
+				members[i].SystemPrompt = ov.SystemPrompt
+			}
+			if len(ov.Skills) > 0 {
+				members[i].Skills = ov.Skills
+			}
+		}
+	}
+
 	slog.Info("Spawning office team", "template", templateUsed, "members", len(members), "workingDir", req.WorkingDir)
 
 	// Build kickstart prompts ahead of time for SDK mode
@@ -507,6 +634,7 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	for _, m := range members {
 		teamConfigs = append(teamConfigs, &office.TeamMemberConfig{
 			ID: m.ID, Name: m.Name, Role: m.Role, Tier: m.Tier, Color: m.Color,
+			Personality: m.Personality, SystemPrompt: m.SystemPrompt, Skills: m.Skills,
 		})
 	}
 
@@ -545,19 +673,28 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 			envVars = ctx.getProviderEnvVarsFor(provider, "", sonnetAlloc[member.ID])
 		}
 
-		sessionID, usedMode := spawnAgentSession(ctx, member, req, envVars, teamConfigs, perpetual, useSDK)
+		// Support per-agent working directory override
+		spawnReq := req
+		if ov, has := memberOverrideMap[member.ID]; has && ov.WorkingDir != "" {
+			spawnReq.WorkingDir = ov.WorkingDir
+		}
+
+		sessionID, usedMode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, useSDK)
 		if sessionID == "" {
 			errors = append(errors, fmt.Sprintf("Failed to create session for %s", member.Name))
 			continue
 		}
 
-		// Register agent with office manager
+		// Register agent with full config including personality and skills
 		ctx.OfficeManager.RegisterAgent(sessionID, member.ID, &office.TeamMemberConfig{
-			ID:    member.ID,
-			Name:  member.Name,
-			Role:  member.Role,
-			Tier:  member.Tier,
-			Color: member.Color,
+			ID:           member.ID,
+			Name:         member.Name,
+			Role:         member.Role,
+			Tier:         member.Tier,
+			Color:        member.Color,
+			Personality:  member.Personality,
+			SystemPrompt: member.SystemPrompt,
+			Skills:       member.Skills,
 		})
 
 		if ctx.TelegramHandler != nil {
@@ -745,7 +882,7 @@ func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 
 // ConciergeTemplates returns the template list formatted for Gemini function calling.
 func (ctx *Context) ConciergeTemplates(w http.ResponseWriter, r *http.Request) {
-	ok(w, map[string]interface{}{"templates": defaultTemplates})
+	ok(w, map[string]interface{}{"templates": ctx.allTeamTemplates()})
 }
 
 // conciergeSpawnRequest is the simplified shape the Gemini tool call sends.
@@ -772,15 +909,8 @@ func (ctx *Context) ConciergeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "mission is required")
 		return
 	}
-	// Validate template ID against known templates.
-	validTemplate := false
-	for _, tpl := range defaultTemplates {
-		if tpl.ID == req.TemplateID {
-			validTemplate = true
-			break
-		}
-	}
-	if !validTemplate {
+	// Validate template ID against known templates (built-in + custom).
+	if ctx.findTeamTemplate(req.TemplateID) == nil {
 		request.WriteError(w, http.StatusBadRequest, "unknown templateId")
 		return
 	}

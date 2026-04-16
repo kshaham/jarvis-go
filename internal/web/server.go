@@ -21,6 +21,7 @@ import (
 	"github.com/claudeman/jarvis-go/internal/runsummary"
 	"github.com/claudeman/jarvis-go/internal/state"
 	"github.com/claudeman/jarvis-go/internal/subagent"
+	"github.com/claudeman/jarvis-go/internal/teamtemplates"
 	"github.com/claudeman/jarvis-go/internal/telegram"
 	"github.com/claudeman/jarvis-go/internal/templates"
 	"github.com/claudeman/jarvis-go/internal/web/auth"
@@ -45,8 +46,9 @@ type Server struct {
 	screenManager   *pty.ScreenManager
 	subagentWatcher *subagent.Watcher
 	caseManager     *cases.CaseManager
-	templateStore   *templates.Store
-	telegramBot     *telegram.Bot
+	templateStore     *templates.Store
+	teamTemplateStore *teamtemplates.Store
+	telegramBot       *telegram.Bot
 	telegramHandler *telegram.Handler
 	handlerCtx      *handler.Context
 }
@@ -69,6 +71,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 	caseMgr := cases.NewCaseManager(casesDir)
 
 	tmplStore := templates.NewStore(filepath.Join(dataDir, "templates"))
+	teamTmplStore := teamtemplates.NewStore(filepath.Join(dataDir, "team-templates"))
 
 	// Create Telegram bot and handler.
 	tgBot := telegram.New()
@@ -198,8 +201,9 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 		screenManager:   screenMgr,
 		subagentWatcher: subagentW,
 		caseManager:     caseMgr,
-		templateStore:   tmplStore,
-		telegramBot:     tgBot,
+		templateStore:     tmplStore,
+		teamTemplateStore: teamTmplStore,
+		telegramBot:       tgBot,
 		telegramHandler: tgHandler,
 	}
 	// Set serverRef so the init data closure can access handlerCtx
@@ -334,6 +338,7 @@ func (s *Server) setupRouter() chi.Router {
 		CaseManager:        s.caseManager,
 		RespawnControllers: make(map[string]*respawn.Controller),
 		TemplateStore:      s.templateStore,
+		TeamTemplateStore:  s.teamTemplateStore,
 		TelegramBot:        s.telegramBot,
 		TelegramHandler:    s.telegramHandler,
 		IntegrationMonitor: intMon,
@@ -632,6 +637,12 @@ func (s *Server) setupRouter() chi.Router {
 				// Mutating office endpoints (CSRF required)
 				r.Group(func(r chi.Router) {
 					r.Use(mw.CSRF(s.csrfStore))
+					// Team template CRUD
+					r.Post("/templates", h.OfficeCreateTeamTemplate)
+					r.Put("/templates/{id}", h.OfficeUpdateTeamTemplate)
+					r.Delete("/templates/{id}", h.OfficeDeleteTeamTemplate)
+					r.Post("/templates/{id}/duplicate", h.OfficeDuplicateTeamTemplate)
+					r.Post("/templates/from-team", h.OfficeTemplateFromTeam)
 					r.Post("/spawn-team", h.OfficeSpawnTeam)
 					r.Post("/shutdown-team", h.OfficeShutdownTeam)
 					r.Put("/settings", h.OfficePutSettings)

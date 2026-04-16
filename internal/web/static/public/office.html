@@ -51,6 +51,7 @@
         <button class="hdr-btn hdr-btn-primary" id="btnSpawnTeam" onclick="office.spawnTeam()">Spawn Team</button>
         <button class="hdr-btn" id="btnStandup" onclick="office.startStandup()">Standup</button>
         <button class="hdr-btn" id="btnWrapUp" onclick="office.wrapUpAll()">Wrap Up</button>
+        <button class="hdr-btn" id="btnSaveAsTemplate" onclick="office.openSaveTeamAsTemplate()">Save as Template</button>
         <button class="hdr-btn hdr-btn-danger" id="btnShutdownTeam" onclick="office.shutdownTeam()">Shut Down</button>
         <a href="/" class="hdr-btn">Sessions</a>
       </div>
@@ -459,7 +460,18 @@
       <!-- Step 1: Template Selection -->
       <div id="spawnStep1">
         <h2 class="spawn-config-title" id="spawnConfigTitle">Choose a Team</h2>
-        <p class="spawn-config-subtitle">Select a pre-built team template to spawn</p>
+        <p class="spawn-config-subtitle">Select a pre-built team template or create your own</p>
+        <div class="template-filter-row">
+          <input type="text" id="templateSearch" class="spawn-config-input" placeholder="Search templates..." oninput="office.filterTemplates()" style="flex:1">
+          <select id="templateCategory" class="spawn-config-select" onchange="office.filterTemplates()" style="width:140px">
+            <option value="">All</option>
+            <option value="fullstack">Full-stack</option>
+            <option value="frontend">Frontend</option>
+            <option value="backend">Backend</option>
+            <option value="research">Research</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
         <div class="template-grid" id="templateGrid"></div>
       </div>
 
@@ -531,6 +543,61 @@
           <button class="panel-btn" onclick="office.closeSpawnConfigModal()">Cancel</button>
           <button class="panel-btn panel-btn-primary" id="btnSpawnConfirm" onclick="office.confirmSpawnTeam()">Spawn Team</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Template Editor Modal -->
+  <div class="member-modal-overlay hidden" id="templateEditorModal" role="dialog" aria-modal="true">
+    <div class="member-modal spawn-config-modal">
+      <button class="modal-close" onclick="office.closeTemplateEditor()" aria-label="Close">&times;</button>
+      <h2 class="spawn-config-title" id="templateEditorTitle">Create Custom Template</h2>
+      <div class="spawn-config-section">
+        <label class="spawn-config-label">Template Name</label>
+        <input type="text" class="spawn-config-input" id="tplEditorName" placeholder="My Custom Team">
+      </div>
+      <div class="spawn-config-section">
+        <label class="spawn-config-label">Description</label>
+        <textarea class="spawn-config-input" id="tplEditorDesc" rows="2" placeholder="Describe this team composition..."></textarea>
+      </div>
+      <div class="spawn-config-section">
+        <label class="spawn-config-label">Category</label>
+        <select class="spawn-config-select" id="tplEditorCategory">
+          <option value="custom">Custom</option>
+          <option value="fullstack">Full-stack</option>
+          <option value="frontend">Frontend</option>
+          <option value="backend">Backend</option>
+          <option value="research">Research</option>
+        </select>
+      </div>
+      <div class="spawn-config-section">
+        <label class="spawn-config-label">Members</label>
+        <div id="tplEditorMembers"></div>
+        <button class="panel-btn" onclick="office.addEditorMember()" style="margin-top:8px">+ Add Member</button>
+      </div>
+      <div class="spawn-config-actions">
+        <button class="panel-btn" onclick="office.closeTemplateEditor()">Cancel</button>
+        <button class="panel-btn panel-btn-primary" id="btnSaveTemplate" onclick="office.saveTemplate()">Save Template</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Team as Template Modal -->
+  <div class="member-modal-overlay hidden" id="saveTeamTemplateModal" role="dialog" aria-modal="true">
+    <div class="member-modal" style="max-width:480px">
+      <button class="modal-close" onclick="document.getElementById('saveTeamTemplateModal').classList.add('hidden')" aria-label="Close">&times;</button>
+      <h2 class="spawn-config-title">Save Team as Template</h2>
+      <div class="spawn-config-section">
+        <label class="spawn-config-label">Template Name</label>
+        <input type="text" class="spawn-config-input" id="saveTeamTplName" placeholder="My Saved Team">
+      </div>
+      <div class="spawn-config-section">
+        <label class="spawn-config-label">Description</label>
+        <textarea class="spawn-config-input" id="saveTeamTplDesc" rows="2" placeholder="Describe this team..."></textarea>
+      </div>
+      <div class="spawn-config-actions">
+        <button class="panel-btn" onclick="document.getElementById('saveTeamTemplateModal').classList.add('hidden')">Cancel</button>
+        <button class="panel-btn panel-btn-primary" onclick="office.saveTeamAsTemplate()">Save</button>
       </div>
     </div>
   </div>

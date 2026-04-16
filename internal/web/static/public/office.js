@@ -2031,6 +2031,15 @@ class OfficeApp {
     const grid = document.getElementById('templateGrid');
     if (!grid || !this._spawnTemplates) return;
 
+    // Apply search/filter
+    const searchTerm = (document.getElementById('templateSearch')?.value || '').toLowerCase();
+    const categoryFilter = document.getElementById('templateCategory')?.value || '';
+    const filtered = this._spawnTemplates.filter(tpl => {
+      if (searchTerm && !tpl.name.toLowerCase().includes(searchTerm) && !tpl.description.toLowerCase().includes(searchTerm)) return false;
+      if (categoryFilter && tpl.category !== categoryFilter) return false;
+      return true;
+    });
+
     const avatarColors = {
       blue: 'var(--session-blue, #3b82f6)',
       purple: 'var(--session-purple, #a855f7)',
@@ -2049,7 +2058,7 @@ class OfficeApp {
       custom: '\u{1F527}',
     };
 
-    grid.innerHTML = this._spawnTemplates.map(tpl => {
+    const cards = filtered.map(tpl => {
       const memberAvatars = tpl.members.map(m => {
         const bg = avatarColors[m.color] || 'var(--text-dim)';
         const tplIcon = AGENT_ICONS[m.id];
@@ -2069,21 +2078,44 @@ class OfficeApp {
       }).join('');
 
       const icon = categoryIcons[tpl.category] || '';
+      const isBuiltIn = tpl.isBuiltIn !== false;
+
+      // Action buttons: built-in gets Duplicate only, custom gets Edit/Duplicate/Delete
+      let actions = `<button class="tpl-action-btn" onclick="event.stopPropagation(); office.duplicateTemplate('${this.escapeAttr(tpl.id)}')">Duplicate</button>`;
+      if (!isBuiltIn) {
+        actions = `<button class="tpl-action-btn" onclick="event.stopPropagation(); office.openTemplateEditor('${this.escapeAttr(tpl.id)}')">Edit</button>` + actions +
+          `<button class="tpl-action-btn danger" onclick="event.stopPropagation(); office.deleteTemplate('${this.escapeAttr(tpl.id)}')">Delete</button>`;
+      }
 
       return `<div class="template-card" data-template-id="${this.escapeAttr(tpl.id)}" onclick="office.selectTemplate('${this.escapeAttr(tpl.id)}')">
         <div class="tpl-card-header">
           <span class="tpl-card-icon">${icon}</span>
           <div class="tpl-card-title-group">
             <h3 class="tpl-card-title">${this.escapeHtml(tpl.name)}</h3>
-            <span class="tpl-card-count">${tpl.memberCount} agents</span>
+            <span class="tpl-card-count">${tpl.memberCount || tpl.members.length} agents</span>
           </div>
         </div>
         <p class="tpl-card-desc">${this.escapeHtml(tpl.description)}</p>
         <div class="tpl-card-avatars">${memberAvatars}</div>
         <div class="tpl-card-roster">${memberList}</div>
+        <div class="tpl-card-actions">${actions}</div>
         <button class="btn-select-tpl" onclick="event.stopPropagation(); office.selectTemplate('${this.escapeAttr(tpl.id)}')">Select &amp; Configure</button>
       </div>`;
-    }).join('');
+    });
+
+    // Add "Create Custom Template" card at the end
+    cards.push(`<div class="template-card create-card" onclick="office.openTemplateEditor()">
+      <div class="create-card-content">
+        <div class="create-icon">+</div>
+        <div class="create-label">Create Custom Template</div>
+      </div>
+    </div>`);
+
+    grid.innerHTML = cards.join('');
+  }
+
+  filterTemplates() {
+    this.renderTemplateGrid();
   }
 
   selectTemplate(templateId) {
@@ -2214,9 +2246,16 @@ class OfficeApp {
       red: 'var(--session-red, #ef4444)',
     };
 
+    const colorOptions = Object.keys(avatarColors).map(c =>
+      `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`
+    ).join('');
+
+    const tierOptions = `<option value="strategic">Lead</option><option value="worker">Worker</option>`;
+
     container.innerHTML = membersInfo.map(member => {
       const bgColor = avatarColors[member.color] || 'var(--text-dim)';
       const initial = member.name[0];
+      const safeId = this.escapeAttr(member.id);
 
       const providers = [
         { value: 'claude-subscription', label: 'Claude Sub' },
@@ -2232,15 +2271,34 @@ class OfficeApp {
         `<option value="${m.value}"${m.value === defaultModel ? ' selected' : ''}>${m.label}</option>`
       ).join('');
 
-      return `<div class="spawn-member-row">
-        <div class="spawn-member-avatar" style="background: ${bgColor}">${initial}</div>
-        <div class="spawn-member-info">
-          <div class="spawn-member-name">${this.escapeHtml(member.name)}</div>
-          <div class="spawn-member-role">${this.escapeHtml(member.role)}</div>
+      return `<div class="spawn-member-card">
+        <div class="spawn-member-card-header">
+          <div class="spawn-member-avatar" style="background: ${bgColor}">${initial}</div>
+          <div class="spawn-member-info">
+            <div class="spawn-member-name">${this.escapeHtml(member.name)}</div>
+            <div class="spawn-member-role">${this.escapeHtml(member.role)}</div>
+          </div>
         </div>
-        <div class="spawn-member-selects">
-          <select class="spawn-config-select" id="spawn-provider-${this.escapeAttr(member.id)}" onchange="office.updateMemberProvider('${this.escapeAttr(member.id)}')">${providerOptions}</select>
-          <select class="spawn-config-select" id="spawn-model-${this.escapeAttr(member.id)}">${modelOptions}</select>
+        <div class="spawn-member-card-fields">
+          <input type="text" id="spawn-name-${safeId}" value="${this.escapeAttr(member.name)}" placeholder="Name">
+          <input type="text" id="spawn-role-${safeId}" value="${this.escapeAttr(member.role)}" placeholder="Role">
+          <select id="spawn-tier-${safeId}">${tierOptions.replace(`value="${member.tier}"`, `value="${member.tier}" selected`)}</select>
+          <select id="spawn-color-${safeId}">${colorOptions.replace(`value="${member.color}"`, `value="${member.color}" selected`)}</select>
+          <input type="text" id="spawn-emoji-${safeId}" value="${member.emoji || ''}" placeholder="Emoji" maxlength="4" style="width:60px">
+          <select class="spawn-config-select" id="spawn-provider-${safeId}" onchange="office.updateMemberProvider('${safeId}')">${providerOptions}</select>
+          <select class="spawn-config-select" id="spawn-model-${safeId}">${modelOptions}</select>
+        </div>
+        <div class="spawn-member-soul">
+          <details>
+            <summary>Soul / Personality</summary>
+            <textarea id="spawn-personality-${safeId}" rows="2" placeholder="Agent personality/character...">${this.escapeHtml(member.personality || '')}</textarea>
+            <textarea id="spawn-systemprompt-${safeId}" rows="2" placeholder="Role-specific system prompt...">${this.escapeHtml(member.systemPrompt || '')}</textarea>
+          </details>
+          <details>
+            <summary>Advanced</summary>
+            <input type="text" id="spawn-workdir-${safeId}" placeholder="Per-agent working directory (optional)" style="width:100%;margin-top:4px;background:#18181b;border:1px solid #27272a;border-radius:4px;color:#e4e4e7;padding:4px 6px;font-size:12px;box-sizing:border-box">
+            <input type="text" id="spawn-skills-${safeId}" value="${(member.skills || []).join(', ')}" placeholder="Skills (comma-separated)" style="width:100%;margin-top:4px;background:#18181b;border:1px solid #27272a;border-radius:4px;color:#e4e4e7;padding:4px 6px;font-size:12px;box-sizing:border-box">
+          </details>
         </div>
       </div>`;
     }).join('');
@@ -2270,7 +2328,27 @@ class OfficeApp {
     const memberOverrides = membersInfo.map(member => {
       const provider = document.getElementById(`spawn-provider-${member.id}`)?.value || 'claude-subscription';
       const model = document.getElementById(`spawn-model-${member.id}`)?.value || 'sonnet';
-      return { id: member.id, provider, model };
+      const override = { id: member.id, provider, model };
+      // Include editable fields if they differ from template defaults
+      const nameVal = document.getElementById(`spawn-name-${member.id}`)?.value || '';
+      const roleVal = document.getElementById(`spawn-role-${member.id}`)?.value || '';
+      const tierVal = document.getElementById(`spawn-tier-${member.id}`)?.value || '';
+      const colorVal = document.getElementById(`spawn-color-${member.id}`)?.value || '';
+      const emojiVal = document.getElementById(`spawn-emoji-${member.id}`)?.value || '';
+      const personalityVal = document.getElementById(`spawn-personality-${member.id}`)?.value || '';
+      const systemPromptVal = document.getElementById(`spawn-systemprompt-${member.id}`)?.value || '';
+      const skillsVal = document.getElementById(`spawn-skills-${member.id}`)?.value || '';
+      const workdirVal = document.getElementById(`spawn-workdir-${member.id}`)?.value || '';
+      if (nameVal) override.name = nameVal;
+      if (roleVal) override.role = roleVal;
+      if (tierVal) override.tier = tierVal;
+      if (colorVal) override.color = colorVal;
+      if (emojiVal) override.emoji = emojiVal;
+      if (personalityVal) override.personality = personalityVal;
+      if (systemPromptVal) override.systemPrompt = systemPromptVal;
+      if (skillsVal) override.skills = skillsVal.split(',').map(s => s.trim()).filter(Boolean);
+      if (workdirVal) override.workingDir = workdirVal;
+      return override;
     });
 
     const telegramEnabled = document.getElementById('spawnTelegramEnabled')?.checked || false;
@@ -2310,6 +2388,160 @@ class OfficeApp {
       this.showToast('Failed to spawn team', 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Spawn Team'; }
       if (spawnHeaderBtn) { spawnHeaderBtn.disabled = false; spawnHeaderBtn.textContent = 'Spawn Team'; }
+    }
+  }
+
+  // ========== Template Management ==========
+
+  _editorMembers = [];
+  _editingTemplateId = null;
+
+  openTemplateEditor(templateId) {
+    this._editingTemplateId = templateId || null;
+    if (templateId) {
+      const tpl = this._spawnTemplates?.find(t => t.id === templateId);
+      if (!tpl) return;
+      document.getElementById('templateEditorTitle').textContent = 'Edit Template';
+      document.getElementById('tplEditorName').value = tpl.name;
+      document.getElementById('tplEditorDesc').value = tpl.description || '';
+      document.getElementById('tplEditorCategory').value = tpl.category || 'custom';
+      this._editorMembers = tpl.members.map(m => ({...m}));
+    } else {
+      document.getElementById('templateEditorTitle').textContent = 'Create Custom Template';
+      document.getElementById('tplEditorName').value = '';
+      document.getElementById('tplEditorDesc').value = '';
+      document.getElementById('tplEditorCategory').value = 'custom';
+      this._editorMembers = [
+        { id: 'agent-1', name: 'Leader', role: 'Tech Lead', tier: 'strategic', color: 'blue', emoji: '' },
+        { id: 'agent-2', name: 'Worker', role: 'Developer', tier: 'worker', color: 'green', emoji: '' },
+      ];
+    }
+    this.renderEditorMembers();
+    document.getElementById('templateEditorModal').classList.remove('hidden');
+  }
+
+  closeTemplateEditor() {
+    document.getElementById('templateEditorModal').classList.add('hidden');
+  }
+
+  renderEditorMembers() {
+    const container = document.getElementById('tplEditorMembers');
+    const tierOpts = `<option value="strategic">Lead</option><option value="worker">Worker</option>`;
+    const colorOpts = ['blue','purple','pink','green','orange','yellow','red'].map(c =>
+      `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`
+    ).join('');
+
+    container.innerHTML = this._editorMembers.map((m, i) => {
+      return `<div class="tpl-editor-member">
+        <input type="text" value="${this.escapeAttr(m.id)}" onchange="office._editorMembers[${i}].id=this.value" placeholder="ID" style="grid-column:1/2">
+        <input type="text" value="${this.escapeAttr(m.name)}" onchange="office._editorMembers[${i}].name=this.value" placeholder="Name">
+        <button class="remove-btn" onclick="office.removeEditorMember(${i})" title="Remove">&times;</button>
+        <input type="text" value="${this.escapeAttr(m.role)}" onchange="office._editorMembers[${i}].role=this.value" placeholder="Role">
+        <select onchange="office._editorMembers[${i}].tier=this.value">${tierOpts.replace(`value="${m.tier}"`, `value="${m.tier}" selected`)}</select>
+        <select onchange="office._editorMembers[${i}].color=this.value">${colorOpts.replace(`value="${m.color}"`, `value="${m.color}" selected`)}</select>
+      </div>`;
+    }).join('');
+  }
+
+  addEditorMember() {
+    const idx = this._editorMembers.length + 1;
+    this._editorMembers.push({ id: `agent-${idx}`, name: `Agent ${idx}`, role: 'Developer', tier: 'worker', color: 'green', emoji: '' });
+    this.renderEditorMembers();
+  }
+
+  removeEditorMember(index) {
+    if (this._editorMembers.length <= 1) {
+      this.showNotification('Template must have at least one member', 'warning');
+      return;
+    }
+    this._editorMembers.splice(index, 1);
+    this.renderEditorMembers();
+  }
+
+  async saveTemplate() {
+    const name = document.getElementById('tplEditorName').value.trim();
+    if (!name) { this.showNotification('Template name is required', 'warning'); return; }
+    if (this._editorMembers.length === 0) { this.showNotification('Add at least one member', 'warning'); return; }
+
+    const payload = {
+      name,
+      description: document.getElementById('tplEditorDesc').value.trim(),
+      category: document.getElementById('tplEditorCategory').value,
+      members: this._editorMembers,
+    };
+
+    try {
+      if (this._editingTemplateId) {
+        const res = await fetch(`/api/office/templates/${this._editingTemplateId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken || '' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } else {
+        await this.postJson('/api/office/templates', payload);
+      }
+      this.closeTemplateEditor();
+      this.showToast('Template saved', 'success');
+      // Refresh templates
+      const res = await fetch('/api/office/templates');
+      const data = await res.json();
+      this._spawnTemplates = data.templates || [];
+      this.renderTemplateGrid();
+    } catch (err) {
+      this.showNotification('Failed to save template: ' + err.message, 'error');
+    }
+  }
+
+  async duplicateTemplate(id) {
+    try {
+      await this.postJson(`/api/office/templates/${id}/duplicate`, {});
+      this.showToast('Template duplicated', 'success');
+      const res = await fetch('/api/office/templates');
+      const data = await res.json();
+      this._spawnTemplates = data.templates || [];
+      this.renderTemplateGrid();
+    } catch (err) {
+      this.showNotification('Failed to duplicate template', 'error');
+    }
+  }
+
+  async deleteTemplate(id) {
+    if (!confirm('Delete this custom template?')) return;
+    try {
+      await fetch(`/api/office/templates/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': this.csrfToken },
+      });
+      this.showToast('Template deleted', 'success');
+      const res = await fetch('/api/office/templates');
+      const data = await res.json();
+      this._spawnTemplates = data.templates || [];
+      this.renderTemplateGrid();
+    } catch (err) {
+      this.showNotification('Failed to delete template', 'error');
+    }
+  }
+
+  openSaveTeamAsTemplate() {
+    document.getElementById('saveTeamTplName').value = '';
+    document.getElementById('saveTeamTplDesc').value = '';
+    document.getElementById('saveTeamTemplateModal').classList.remove('hidden');
+  }
+
+  async saveTeamAsTemplate() {
+    const name = document.getElementById('saveTeamTplName').value.trim();
+    if (!name) { this.showNotification('Template name is required', 'warning'); return; }
+    try {
+      await this.postJson('/api/office/templates/from-team', {
+        name,
+        description: document.getElementById('saveTeamTplDesc').value.trim(),
+        category: 'custom',
+      });
+      document.getElementById('saveTeamTemplateModal').classList.add('hidden');
+      this.showToast('Team saved as template', 'success');
+    } catch (err) {
+      this.showNotification('Failed to save team as template', 'error');
     }
   }
 
