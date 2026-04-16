@@ -549,6 +549,9 @@ func (ctx *Context) QuickStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start event forwarding before broadcast to avoid losing early events
+	go forwardSessionEvents(session, ctx)
+
 	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 
 	// Create Ralph tracker for quick-start session
@@ -562,9 +565,6 @@ func (ctx *Context) QuickStart(w http.ResponseWriter, r *http.Request) {
 	ctx.RunSummariesMu.Lock()
 	ctx.RunSummaries[session.ID] = qsRunTracker
 	ctx.RunSummariesMu.Unlock()
-
-	// Forward terminal events to SSE for real-time streaming
-	go forwardSessionEvents(session, ctx)
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1105,12 +1105,15 @@ func (ctx *Context) GeneratePlanDetailed(w http.ResponseWriter, r *http.Request)
 
 	go forwardSessionEvents(session, ctx)
 
-	// Send the plan prompt to the session (fire-and-forget)
+	// Send the plan prompt to the session after a short delay
 	go func() {
-		// Small delay to let the session start
-		time.Sleep(2 * time.Second)
-		prompt := fmt.Sprintf("Generate a detailed implementation plan for the following task:\n\n%s", req.TaskDescription)
-		session.WriteViaScreen(prompt + "\r")
+		select {
+		case <-time.After(2 * time.Second):
+			prompt := fmt.Sprintf("Generate a detailed implementation plan for the following task:\n\n%s", req.TaskDescription)
+			session.WriteViaScreen(prompt + "\r")
+		case <-session.Done():
+			return
+		}
 	}()
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{

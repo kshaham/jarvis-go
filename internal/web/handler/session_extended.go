@@ -1010,6 +1010,9 @@ func (ctx *Context) ImportSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start event forwarding before broadcast to avoid losing early events
+	go forwardSessionEvents(session, ctx)
+
 	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 
 	// Create Ralph tracker for imported session
@@ -1023,8 +1026,6 @@ func (ctx *Context) ImportSession(w http.ResponseWriter, r *http.Request) {
 	ctx.RunSummariesMu.Lock()
 	ctx.RunSummaries[session.ID] = importRunTracker
 	ctx.RunSummariesMu.Unlock()
-
-	go forwardSessionEvents(session, ctx)
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,

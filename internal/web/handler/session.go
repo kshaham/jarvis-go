@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -178,6 +179,10 @@ func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start event forwarding BEFORE broadcasting session:created to avoid
+	// losing events emitted between broadcast and goroutine start.
+	go forwardSessionEvents(session, ctx)
+
 	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 
 	// Notify Telegram
@@ -210,9 +215,6 @@ func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// Initialize respawn controller for this session with a session writer
 	rc := ctx.GetOrCreateRespawnController(session.ID)
 	rc.SetSessionWriter(&respawnSessionWriter{session: session})
-
-	// Forward terminal events to SSE for real-time streaming
-	go forwardSessionEvents(session, ctx)
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -265,17 +267,39 @@ func (ctx *Context) SessionInput(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSessionTerminal returns the terminal buffer as JSON.
-// Frontend calls res.json() and reads terminalBuffer field.
+// Supports both PTY and SDK sessions. Accepts optional ?tail=N query param
+// to return only the last N bytes (frontend sends ?tail=262144).
 func (ctx *Context) GetSessionTerminal(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	session, ok := ctx.SessionManager.GetSession(id)
-	if !ok {
+
+	// Parse optional tail parameter
+	tailBytes := 0
+	if t := r.URL.Query().Get("tail"); t != "" {
+		if n, err := strconv.Atoi(t); err == nil && n > 0 {
+			tailBytes = n
+		}
+	}
+
+	// Try PTY session first, then SDK session
+	var buf string
+	if session, ok := ctx.SessionManager.GetSession(id); ok {
+		buf = session.TerminalBuffer()
+	} else if sdkSession, ok := ctx.SessionManager.GetSDKSession(id); ok {
+		buf = sdkSession.GetTerminalBuffer()
+	} else {
 		request.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
+	truncated := false
+	if tailBytes > 0 && tailBytes < len(buf) {
+		buf = buf[len(buf)-tailBytes:]
+		truncated = true
+	}
+
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"terminalBuffer": session.TerminalBuffer(),
+		"terminalBuffer": buf,
+		"truncated":      truncated,
 	})
 }
 

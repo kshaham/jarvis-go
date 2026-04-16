@@ -3,6 +3,7 @@ package pty
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/google/uuid"
@@ -94,10 +95,14 @@ func (m *SessionManager) StopAllSessions(ctx context.Context) error {
 	m.mu.RUnlock()
 
 	for _, id := range ptyIDs {
-		_ = m.StopSession(ctx, id)
+		if err := m.StopSession(ctx, id); err != nil {
+			slog.Warn("Failed to stop PTY session during shutdown", "sessionId", id, "error", err)
+		}
 	}
 	for _, id := range sdkIDs {
-		_ = m.StopSDKSession(id)
+		if err := m.StopSDKSession(id); err != nil {
+			slog.Warn("Failed to stop SDK session during shutdown", "sessionId", id, "error", err)
+		}
 	}
 	return nil
 }

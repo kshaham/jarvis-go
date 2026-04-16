@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -283,6 +284,9 @@ func (m *Manager) SetTeamSpawned(v bool) {
 		m.teamSpawnedAt = time.Now()
 	} else {
 		m.teamSpawnedAt = time.Time{}
+		// Clear triage tracking maps to prevent unbounded growth
+		m.triageAttempts = make(map[string]int)
+		m.lastTriageAt = make(map[string]time.Time)
 	}
 	m.mu.Unlock()
 
@@ -377,7 +381,10 @@ func (m *Manager) persistMessages() {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return
 	}
-	os.Rename(tmp, target)
+	if err := os.Rename(tmp, target); err != nil {
+		slog.Warn("Failed to persist office messages", "error", err)
+		os.Remove(tmp)
+	}
 }
 
 // loadPersistedMessages restores messages from disk on startup.
@@ -1277,22 +1284,14 @@ func (m *Manager) SweepBugTasks() int {
 		}
 
 		// Sort resolved by CreatedAt ascending.
-		for i := 0; i < len(resolved); i++ {
-			for j := i + 1; j < len(resolved); j++ {
-				if resolved[j].task.CreatedAt.Before(resolved[i].task.CreatedAt) {
-					resolved[i], resolved[j] = resolved[j], resolved[i]
-				}
-			}
-		}
+		slices.SortFunc(resolved, func(a, b bugEntry) int {
+			return a.task.CreatedAt.Compare(b.task.CreatedAt)
+		})
 
 		// Sort open by CreatedAt ascending.
-		for i := 0; i < len(open); i++ {
-			for j := i + 1; j < len(open); j++ {
-				if open[j].task.CreatedAt.Before(open[i].task.CreatedAt) {
-					open[i], open[j] = open[j], open[i]
-				}
-			}
-		}
+		slices.SortFunc(open, func(a, b bugEntry) int {
+			return a.task.CreatedAt.Compare(b.task.CreatedAt)
+		})
 
 		// Remove oldest resolved first, then oldest open until within limit.
 		toRemove := len(m.bugTasks) - m.config.MaxBugTasks
@@ -1362,14 +1361,17 @@ func (m *Manager) LoadPersistedMetrics() {
 
 // sanitizeForTerminal strips control characters from input using rune-safe iteration.
 func sanitizeForTerminal(s string) string {
-	var result []rune
+	var b strings.Builder
+	b.Grow(len(s))
+	count := 0
 	for _, r := range s {
+		if count >= 2048 {
+			break
+		}
 		if r >= 32 || r == '\n' || r == '\t' {
-			result = append(result, r)
+			b.WriteRune(r)
+			count++
 		}
 	}
-	if len(result) > 2048 { // rune count limit
-		result = result[:2048]
-	}
-	return string(result)
+	return b.String()
 }

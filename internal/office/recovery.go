@@ -946,6 +946,7 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 				agent.UpdateTaskStatus(task.ID, TaskFailed)
 				m.mu.Lock()
 				delete(m.triageAttempts, task.ID)
+				delete(m.lastTriageAt, task.ID)
 				m.mu.Unlock()
 
 				slog.Warn("Auto-failed blocked task after max triage attempts",

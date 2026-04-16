@@ -88,13 +88,20 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("- At ~70% context full: offload working state to memory, then `/compact`\n")
 	b.WriteString("- Full discipline: `cm skill read office-context-budget`\n\n")
 
-	// 8. Personality
-	b.WriteString("## Personality\n")
-	b.WriteString(config.Personality)
-	b.WriteString("\n\n")
+	// 8. Personality (skip if empty)
+	if config.Personality != "" {
+		b.WriteString("## Personality\n")
+		b.WriteString(config.Personality)
+		b.WriteString("\n\n")
+	}
 
 	// 9. Suggested skills for role
 	b.WriteString("## Suggested Skills (read on demand)\n")
+	if len(config.Skills) > 0 {
+		b.WriteString("Custom skills: ")
+		b.WriteString(strings.Join(config.Skills, ", "))
+		b.WriteString("\n")
+	}
 	b.WriteString(BuildSuggestedSkillsSection(config.Role))
 	b.WriteString("\n")
 
