@@ -1237,7 +1237,17 @@ func (m *Manager) maybeTriggerWaterCoolerChat() {
 	lastChat := m.lastWaterCoolerAt
 	cooldown := m.config.WaterCoolerCooldown
 	sessions := m.sessions
+	// Don't start a water-cooler chat during an active standup: agents
+	// who haven't taken their turn yet would get the chat prompt
+	// queued in front of their standup prompt, delaying the whole
+	// round-robin. Observed 2026-04-17 23:25:34 firing Shield<>Dash
+	// while Captain (index 1) was still responding.
+	standupActive := m.standup != nil && m.standup.Active
 	m.mu.RUnlock()
+
+	if standupActive {
+		return
+	}
 
 	// Check cooldown.
 	if !lastChat.IsZero() && time.Since(lastChat) < cooldown {
@@ -1248,13 +1258,21 @@ func (m *Manager) maybeTriggerWaterCoolerChat() {
 		return
 	}
 
-	// Find idle agents (no active task, no pending tasks).
+	// Find idle agents (no active task, no pending tasks, NOT mid-turn).
+	// The IsSessionWorking guard matches the pattern used elsewhere
+	// (ack-nudge, replenishment, curiosity, reflection, brainstorm):
+	// a water-cooler prompt stacked behind a working turn just
+	// lingers in the SDK queue and interferes with real work.
 	roster := m.GetRoster()
 	var idle []*AgentState
 	for _, agent := range roster {
-		if agent.ActiveTask() == nil && agent.PendingTaskCount() == 0 {
-			idle = append(idle, agent)
+		if agent.ActiveTask() != nil || agent.PendingTaskCount() != 0 {
+			continue
 		}
+		if sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
+		idle = append(idle, agent)
 	}
 
 	if len(idle) < 2 {
