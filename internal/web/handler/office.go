@@ -1895,6 +1895,15 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			title := nextTask.Title
 			taskID := nextTask.ID
 			go func() {
+				// Background prompt injection -- a panic here (closed
+				// PTY fd, SDK writer race on session teardown) must not
+				// take down the whole jarvis process. Same pattern as
+				// the round-3 kickstart goroutine at office.go:798.
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("next-task prompt injection panic", "session", sid, "taskId", taskID, "err", r)
+					}
+				}()
 				sessions := ctx.OfficeManager.Sessions()
 				if sessions != nil {
 					prompt := fmt.Sprintf("[NEXT TASK] %s\nAcknowledge and start: cm task ack %s && cm task start %s", title, taskID, taskID)

@@ -1206,8 +1206,17 @@ func (ctx *Context) GeneratePlanDetailed(w http.ResponseWriter, r *http.Request)
 
 	go forwardSessionEvents(session, ctx)
 
-	// Send the plan prompt to the session after a short delay
+	// Send the plan prompt to the session after a short delay.
+	// A panic inside WriteViaScreen -- closed PTY fd, screen torn
+	// down during the 2s wait -- would otherwise kill the whole
+	// jarvis process. Match the panic-recovery pattern used in
+	// office.go for background prompt injections.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[plan-session] prompt injection panic session=%s err=%v", session.ID, r)
+			}
+		}()
 		select {
 		case <-time.After(2 * time.Second):
 			prompt := fmt.Sprintf("Generate a detailed implementation plan for the following task:\n\n%s", req.TaskDescription)

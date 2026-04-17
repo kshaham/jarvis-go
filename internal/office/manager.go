@@ -495,6 +495,11 @@ func (m *Manager) emitEvent(event OfficeEvent) {
 	select {
 	case m.events <- event:
 	default:
+		// Consumer (server.go fans to SSE) is lagging. Silently dropping
+		// used to leave the UI desynced with zero observability. Log so
+		// operators can spot pathological bursts -- don't grow the
+		// buffer, that just delays the symptom.
+		slog.Warn("office events channel full, dropping event", "type", fmt.Sprintf("%T", event))
 	}
 }
 

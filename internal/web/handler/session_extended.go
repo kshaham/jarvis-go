@@ -27,6 +27,21 @@ import (
 // accidental DoS of the state store on enormous requests.
 const maxBulkItems = 500
 
+// atomicWriteFile writes data to path via a temp-file + rename so a
+// crash mid-write can't leave a half-written plan file. The plan-file
+// family below (@fix_plan.md, initprompt.md, @fix_plan.vN.md) all
+// carry user-authored content; the append-task handler in particular
+// does a read-modify-write that would wipe the entire plan if the
+// direct WriteFile was interrupted. Same pattern round 4 applied to
+// the template + memory stores.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // BulkDeleteSessions stops and removes multiple sessions in one call.
 // POST /api/sessions/bulk-delete  { sessionIds: [...] }
 // Returns { deleted: [...], failed: [{id, error}] } so clients can show
@@ -1272,7 +1287,7 @@ func (ctx *Context) ImportSessionFixPlan(w http.ResponseWriter, r *http.Request)
 	}
 
 	planPath := filepath.Join(session.WorkingDir, "@fix_plan.md")
-	if err := os.WriteFile(planPath, []byte(req.Content), 0644); err != nil {
+	if err := atomicWriteFile(planPath, []byte(req.Content), 0644); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to write fix plan: "+err.Error())
 		return
 	}
@@ -1302,7 +1317,7 @@ func (ctx *Context) WriteSessionFixPlan(w http.ResponseWriter, r *http.Request) 
 	}
 
 	planPath := filepath.Join(session.WorkingDir, "@fix_plan.md")
-	if err := os.WriteFile(planPath, []byte(req.Content), 0644); err != nil {
+	if err := atomicWriteFile(planPath, []byte(req.Content), 0644); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to write fix plan: "+err.Error())
 		return
 	}
@@ -1358,7 +1373,7 @@ func (ctx *Context) WriteSessionRalphPrompt(w http.ResponseWriter, r *http.Reque
 	}
 
 	promptPath := filepath.Join(session.WorkingDir, "initprompt.md")
-	if err := os.WriteFile(promptPath, []byte(req.Prompt), 0644); err != nil {
+	if err := atomicWriteFile(promptPath, []byte(req.Prompt), 0644); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to write ralph prompt: "+err.Error())
 		return
 	}
@@ -1401,7 +1416,7 @@ func (ctx *Context) CheckpointSessionPlan(w http.ResponseWriter, r *http.Request
 	ctx.StateStore.UpdateSettings(map[string]interface{}{versionKey: float64(version)})
 
 	versionPath := filepath.Join(session.WorkingDir, fmt.Sprintf("@fix_plan.v%d.md", version))
-	if err := os.WriteFile(versionPath, data, 0644); err != nil {
+	if err := atomicWriteFile(versionPath, data, 0644); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to write checkpoint: "+err.Error())
 		return
 	}
@@ -1494,7 +1509,7 @@ func (ctx *Context) RollbackSessionPlan(w http.ResponseWriter, r *http.Request) 
 	}
 
 	planPath := filepath.Join(session.WorkingDir, "@fix_plan.md")
-	if err := os.WriteFile(planPath, data, 0644); err != nil {
+	if err := atomicWriteFile(planPath, data, 0644); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to write fix plan: "+err.Error())
 		return
 	}
@@ -1534,7 +1549,7 @@ func (ctx *Context) SessionPlanTask(w http.ResponseWriter, r *http.Request) {
 	}
 	content += "- [ ] " + req.Task + "\n"
 
-	if err := os.WriteFile(planPath, []byte(content), 0644); err != nil {
+	if err := atomicWriteFile(planPath, []byte(content), 0644); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to append task: "+err.Error())
 		return
 	}
@@ -1906,7 +1921,7 @@ func (ctx *Context) PatchSessionPlanTask(w http.ResponseWriter, r *http.Request)
 	}
 
 	newContent := strings.Join(lines, "\n")
-	if err := os.WriteFile(planPath, []byte(newContent), 0644); err != nil {
+	if err := atomicWriteFile(planPath, []byte(newContent), 0644); err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to write fix plan: "+err.Error())
 		return
 	}
