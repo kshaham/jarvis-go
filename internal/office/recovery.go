@@ -799,9 +799,22 @@ func (m *Manager) CheckForIdleAgents() {
 	if !m.IsPerpetualMode() {
 		return // Goal mode: don't force-replenish, agents stop when tasks are done
 	}
+	m.mu.RLock()
+	sessions := m.sessions
+	m.mu.RUnlock()
 	roster := m.GetRoster()
 	for _, agent := range roster {
 		if agent.Config == nil {
+			continue
+		}
+		// Skip if the agent is currently processing a turn. A
+		// replenishment prompt sent mid-turn just queues behind the
+		// active work, and before the agent reads it the next tick
+		// fires another one on top (observed 2026-04-17 22:08-22:09:
+		// Captain / Dash / Stack / Shield each got two replenishment
+		// prompts 45s apart without being able to respond to the
+		// first). Same class as the ack-nudge fix in 83c9377.
+		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
 			continue
 		}
 		// Skip if agent still has enough work queued (more than 2 remaining).
@@ -1143,6 +1156,11 @@ func (m *Manager) checkForCuriousAgents() {
 		if agent.PendingTaskCount() > 0 {
 			continue
 		}
+		// Don't poke a session that's actively in a turn -- the
+		// curiosity prompt would just queue behind the current work.
+		if sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
 
 		// Check curiosity cooldown.
 		agent.mu.Lock()
@@ -1333,6 +1351,12 @@ func (m *Manager) checkForReflectionOpportunity() {
 			continue
 		}
 		if agent.PendingTaskCount() > 0 {
+			continue
+		}
+		// Skip agents mid-turn: a reflection prompt stacked behind an
+		// in-flight turn just gets consumed as "another message" once
+		// the turn completes, losing the contemplative context.
+		if sessions.IsSessionWorking(agent.SessionID) {
 			continue
 		}
 
