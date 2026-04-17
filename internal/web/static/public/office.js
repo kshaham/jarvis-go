@@ -117,6 +117,11 @@ class OfficeApp {
     this._detailCacheTimeout = 5000;
     this._lastActivityRenderCount = 0;
     this._viewMode = localStorage.getItem('office-view-mode') || 'grid';
+    this._netNodes = null;
+    this._networkSelectedNode = null;
+    this._networkEdgePair = null;
+    // Install keyboard shortcut bindings (? for help, g+<key> chord for tab nav).
+    this._installShortcutBindings();
   }
 
   getAgentIcon(member) {
@@ -719,6 +724,17 @@ class OfficeApp {
       this._updateUnreadBadgeOnCard(message.toSessionId);
     }
     this.addActivityEntry('message', `${message.fromName} -> ${message.toName}: ${(message.content || '').slice(0, 60)}`);
+    // Live-pulse the Agent Network edge if that tab is open.
+    if (this.activeTab === 'network') {
+      this._pulseEdgeForMessage(message);
+      this._scheduleRender(() => this.renderAgentNetwork(), 'network', 500);
+      // If the conversation drawer is open and this message belongs to it,
+      // append it in place.
+      if (this._networkEdgePair &&
+          this._isPairMatch(this._networkEdgePair, message.fromSessionId, message.toSessionId)) {
+        this._openNetworkEdgeDrawer(this._networkEdgePair[0], this._networkEdgePair[1]);
+      }
+    }
   }
 
   /** Patch only the unread badge element on a single agent card without re-rendering it. */
@@ -1519,7 +1535,7 @@ class OfficeApp {
     });
 
     // Show/hide panels
-    const panels = ['agents', 'tasks', 'standup', 'messages', 'metrics', 'activity', 'reports', 'settings', 'timeline', 'insights', 'meetings'];
+    const panels = ['agents', 'tasks', 'standup', 'messages', 'metrics', 'activity', 'reports', 'settings', 'timeline', 'insights', 'meetings', 'network'];
     for (const panel of panels) {
       const el = document.getElementById(`panel-${panel}`);
       if (el) {
@@ -1536,6 +1552,7 @@ class OfficeApp {
     if (tab === 'timeline') this.renderTimeline();
     if (tab === 'insights') this.renderInsights();
     if (tab === 'meetings') this.renderMeetings();
+    if (tab === 'network') this.renderAgentNetwork();
   }
 
   // Refresh the timeline when it's the active tab. Throttled so a bursty
@@ -1670,7 +1687,32 @@ class OfficeApp {
         <div class="insight-card-title">Learning leaderboard</div>
         ${leaderboard || '<div class="insights-empty" style="padding:4px">No learnings yet.</div>'}
       </div>
+      <div class="insight-card" style="grid-column:1/-1">
+        <div class="insight-card-title">Active now</div>
+        <div class="active-now-grid" id="activeNowGrid"></div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-card-title">Team velocity (24h)</div>
+        <div id="teamVelocity"></div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-card-title">Stage timings</div>
+        <div id="stageTimings"></div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-card-title">Blocked tasks</div>
+        <div id="blockerLeaderboard"></div>
+      </div>
     `;
+    // Populate the dynamic panels. All safe to run in parallel.
+    const an = document.getElementById('activeNowGrid');
+    if (an) this._renderActiveNowFeed(an);
+    const tv = document.getElementById('teamVelocity');
+    if (tv) this._renderTeamVelocity(tv);
+    const st = document.getElementById('stageTimings');
+    if (st) this._renderStageTimings(st);
+    const bl = document.getElementById('blockerLeaderboard');
+    if (bl) this._renderBlockerLeaderboard(bl);
   }
 
   _renderCostBar(m, maxCost) {
@@ -4805,6 +4847,587 @@ class OfficeApp {
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
+  }
+
+  // ============================================================================
+  // Agent Network tab (force-directed knowledge graph)
+  //
+  // Nodes = agents, directed edges = messages between them. Runs a small
+  // mass-spring simulation in requestAnimationFrame, then idles once kinetic
+  // energy falls below a threshold. No external deps.
+  // ============================================================================
+
+  _pairKey(a, b) {
+    return a < b ? a + '|' + b : b + '|' + a;
+  }
+
+  _isPairMatch(pair, a, b) {
+    return (pair[0] === a && pair[1] === b) || (pair[0] === b && pair[1] === a);
+  }
+
+  renderAgentNetwork() {
+    const svg = document.getElementById('networkCanvas');
+    const wrap = document.getElementById('networkCanvasWrap');
+    const empty = document.getElementById('networkEmpty');
+    if (!svg || !wrap) return;
+
+    const members = (this.state.members || []).filter(m => m && m.sessionId);
+    const messages = this.state.recentMessages || [];
+
+    // Filter states
+    const hideIdle = document.getElementById('netHideIdle')?.checked;
+    const activeOnly = document.getElementById('netActiveOnly')?.checked;
+
+    // Build directed edge map: sender|recipient → {count, lastTs}
+    const edgeMap = new Map();
+    const tenMinAgo = Date.now() - 10 * 60 * 1000;
+    for (const msg of messages) {
+      if (!msg.fromSessionId || !msg.toSessionId) continue;
+      const ts = typeof msg.timestamp === 'number' ? msg.timestamp : new Date(msg.timestamp).getTime();
+      if (activeOnly && ts < tenMinAgo) continue;
+      const key = msg.fromSessionId + '>' + msg.toSessionId;
+      const prev = edgeMap.get(key) || { from: msg.fromSessionId, to: msg.toSessionId, count: 0, lastTs: 0 };
+      prev.count += 1;
+      if (ts > prev.lastTs) prev.lastTs = ts;
+      edgeMap.set(key, prev);
+    }
+
+    // Build node activity counts (messages sent + received).
+    const activity = new Map();
+    for (const m of members) activity.set(m.sessionId, 0);
+    for (const e of edgeMap.values()) {
+      activity.set(e.from, (activity.get(e.from) || 0) + e.count);
+      activity.set(e.to, (activity.get(e.to) || 0) + e.count);
+    }
+
+    // Visible nodes
+    const visible = members.filter(m => !(hideIdle && m.status === 'idle' && (activity.get(m.sessionId) || 0) === 0));
+
+    empty.classList.toggle('hidden', visible.length > 0 && edgeMap.size > 0);
+
+    // Initialize or reuse node positions. When a node is first seen we seed
+    // it on a ring around the canvas center; the simulation then settles it.
+    if (!this._netNodes) this._netNodes = new Map();
+    const rect = wrap.getBoundingClientRect();
+    const width = Math.max(400, rect.width);
+    const height = Math.max(320, rect.height);
+    const cx = width / 2, cy = height / 2;
+    const radius = Math.min(cx, cy) * 0.6;
+
+    visible.forEach((m, i) => {
+      let n = this._netNodes.get(m.sessionId);
+      if (!n) {
+        const angle = (2 * Math.PI * i) / Math.max(1, visible.length) - Math.PI / 2;
+        n = { id: m.sessionId, x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), vx: 0, vy: 0 };
+        this._netNodes.set(m.sessionId, n);
+      }
+      n.member = m;
+      n.activity = activity.get(m.sessionId) || 0;
+    });
+
+    // Keep only nodes that still exist (drop removed members).
+    const visibleIds = new Set(visible.map(m => m.sessionId));
+    for (const id of Array.from(this._netNodes.keys())) {
+      if (!visibleIds.has(id)) this._netNodes.delete(id);
+    }
+
+    const nodes = Array.from(this._netNodes.values());
+    const edges = Array.from(edgeMap.values())
+      .filter(e => visibleIds.has(e.from) && visibleIds.has(e.to));
+
+    // Run simulation.
+    this._runForceSimulation(nodes, edges, width, height);
+
+    // Paint.
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    const defs = `<defs>
+      <marker id="net-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 Z" fill="#52525b"/>
+      </marker>
+      <marker id="net-arrow-sel" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 Z" fill="#3b82f6"/>
+      </marker>
+    </defs>`;
+
+    const statusColor = {
+      working: '#3b82f6', idle: '#52525b', meeting: '#a855f7',
+      stuck: '#ef4444', offline: '#27272a',
+    };
+    const now = Date.now();
+    const selEdge = this._networkEdgePair;
+    const selNode = this._networkSelectedNode;
+
+    const edgeHtml = edges.map(e => {
+      const a = this._netNodes.get(e.from);
+      const b = this._netNodes.get(e.to);
+      if (!a || !b) return '';
+      // Shorten so arrowhead lands on node edge, not center.
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const rA = 12 + Math.min(8, Math.sqrt(a.activity));
+      const rB = 12 + Math.min(8, Math.sqrt(b.activity));
+      const ux = dx / dist, uy = dy / dist;
+      const x1 = a.x + ux * rA;
+      const y1 = a.y + uy * rA;
+      const x2 = b.x - ux * rB;
+      const y2 = b.y - uy * rB;
+      const width = Math.min(1 + Math.log(e.count + 1), 4).toFixed(1);
+      const ageMs = Math.max(0, now - e.lastTs);
+      const recency = Math.max(0.2, Math.min(1, 1 - ageMs / (60 * 60 * 1000))); // 1h decay
+      const isSel = selEdge && this._isPairMatch(selEdge, e.from, e.to);
+      const cls = ['network-edge'];
+      if (isSel) cls.push('selected');
+      else if (selEdge || selNode) cls.push('faded');
+      const marker = isSel ? 'net-arrow-sel' : 'net-arrow';
+      const lastStr = e.lastTs ? this.formatTimeAgo(e.lastTs) : 'never';
+      const title = `${a.member.name} → ${b.member.name} · ${e.count} msg${e.count === 1 ? '' : 's'} · last ${this._escapeHtml(lastStr)}`;
+      return `<line class="${cls.join(' ')}" data-from="${this._escapeAttr(e.from)}" data-to="${this._escapeAttr(e.to)}"
+        x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
+        stroke="#60a5fa" stroke-opacity="${recency.toFixed(2)}" stroke-width="${width}"
+        marker-end="url(#${marker})" onclick="office._openNetworkEdgeDrawer('${this._escapeAttr(e.from)}','${this._escapeAttr(e.to)}')"
+        tabindex="0" aria-label="Conversation between agents"><title>${title}</title></line>`;
+    }).join('');
+
+    const nodeHtml = nodes.map(n => {
+      const m = n.member;
+      const color = statusColor[m.status] || '#52525b';
+      const r = 12 + Math.min(8, Math.sqrt(n.activity));
+      const initial = m.avatarInitial || (m.name || '?')[0];
+      const faded = selEdge && !(selEdge[0] === m.sessionId || selEdge[1] === m.sessionId);
+      const isSel = selNode === m.sessionId;
+      const cls = ['network-node'];
+      if (isSel) cls.push('selected');
+      if (faded) cls.push('faded');
+      const task = m.currentTask && m.currentTask.title ? m.currentTask.title : '';
+      const title = task ? `${m.name} · ${task}` : `${m.name} · ${m.role}`;
+      return `<g class="${cls.join(' ')}" data-id="${this._escapeAttr(m.sessionId)}"
+        onclick="office._openNetworkNodeDrawer('${this._escapeAttr(m.sessionId)}')"
+        tabindex="0" aria-label="Agent ${this._escapeAttr(m.name)}">
+        <title>${this._escapeHtml(title)}</title>
+        <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r}" fill="${color}" stroke="#09090b" stroke-width="2"/>
+        <text x="${n.x.toFixed(1)}" y="${(n.y + 4).toFixed(1)}">${this._escapeHtml(initial)}</text>
+        <text x="${n.x.toFixed(1)}" y="${(n.y + r + 12).toFixed(1)}" style="font-size:10px;fill:#a1a1aa">${this._escapeHtml(m.name)}</text>
+      </g>`;
+    }).join('');
+
+    svg.innerHTML = defs + edgeHtml + nodeHtml;
+  }
+
+  // Simple force-directed simulation. Runs a fixed number of ticks synchronously;
+  // sufficient for teams under ~20 nodes without blocking the main thread.
+  _runForceSimulation(nodes, edges, width, height) {
+    const cx = width / 2, cy = height / 2;
+    const repulsion = 1800;
+    const spring = 0.04;
+    const springLen = 110;
+    const damping = 0.85;
+    const centeringPull = 0.004;
+    const ticks = 200;
+
+    for (let t = 0; t < ticks; t++) {
+      // Pairwise repulsion.
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const d2 = Math.max(400, dx * dx + dy * dy);
+          const f = repulsion / d2;
+          const d = Math.sqrt(d2);
+          const fx = (dx / d) * f;
+          const fy = (dy / d) * f;
+          a.vx += fx; a.vy += fy;
+          b.vx -= fx; b.vy -= fy;
+        }
+      }
+      // Spring attraction along edges.
+      const byId = new Map(nodes.map(n => [n.id, n]));
+      for (const e of edges) {
+        const a = byId.get(e.from), b = byId.get(e.to);
+        if (!a || !b) continue;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const f = spring * (dist - springLen);
+        const fx = (dx / dist) * f;
+        const fy = (dy / dist) * f;
+        a.vx += fx; a.vy += fy;
+        b.vx -= fx; b.vy -= fy;
+      }
+      // Weak centering + damping + integrate.
+      for (const n of nodes) {
+        n.vx += (cx - n.x) * centeringPull;
+        n.vy += (cy - n.y) * centeringPull;
+        n.vx *= damping; n.vy *= damping;
+        n.x += n.vx; n.y += n.vy;
+        // Keep inside canvas.
+        const pad = 28;
+        n.x = Math.max(pad, Math.min(width - pad, n.x));
+        n.y = Math.max(pad, Math.min(height - pad, n.y));
+      }
+    }
+  }
+
+  relayoutNetwork() {
+    // Drop cached positions so the next render re-seeds on the ring.
+    this._netNodes = null;
+    this.renderAgentNetwork();
+  }
+
+  _openNetworkNodeDrawer(sessionId) {
+    const m = (this.state.members || []).find(x => x.sessionId === sessionId);
+    if (!m) return;
+    this._networkSelectedNode = sessionId;
+    this._networkEdgePair = null;
+    document.getElementById('networkDrawer')?.classList.remove('hidden');
+    document.querySelector('.network-layout')?.classList.add('drawer-open');
+
+    const msgs = this.state.recentMessages || [];
+    const partnerCounts = new Map();
+    for (const msg of msgs) {
+      if (msg.fromSessionId === sessionId) {
+        partnerCounts.set(msg.toSessionId, (partnerCounts.get(msg.toSessionId) || 0) + 1);
+      } else if (msg.toSessionId === sessionId) {
+        partnerCounts.set(msg.fromSessionId, (partnerCounts.get(msg.fromSessionId) || 0) + 1);
+      }
+    }
+    const byId = new Map((this.state.members || []).map(x => [x.sessionId, x]));
+    const topPartners = Array.from(partnerCounts.entries())
+      .sort((a, b) => b[1] - a[1]).slice(0, 5)
+      .map(([id, n]) => ({ name: byId.get(id)?.name || id, id, count: n }));
+
+    const usage = m.usage || {};
+    const cost = (usage.totalCostUSD || m.totalCost || 0);
+    const turns = usage.turnCount || 0;
+    const task = m.currentTask && m.currentTask.title ? m.currentTask.title : '-';
+    const lastActive = m.lastActivityAt ? this.formatTimeAgo(m.lastActivityAt) : 'never';
+
+    const content = document.getElementById('networkDrawerContent');
+    if (!content) return;
+    content.innerHTML = `
+      <h3>${this._escapeHtml(m.name)}</h3>
+      <div class="drawer-sub">${this._escapeHtml(m.role)} · <span style="color:${{working:'#3b82f6',idle:'#52525b',stuck:'#ef4444',meeting:'#a855f7'}[m.status]||'#a1a1aa'}">${this._escapeHtml(m.status || 'unknown')}</span></div>
+      <div class="drawer-stats">
+        <div class="drawer-stat"><div class="drawer-stat-label">Cost</div><div class="drawer-stat-value">$${cost.toFixed(4)}</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">Turns</div><div class="drawer-stat-value">${turns}</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">Last active</div><div class="drawer-stat-value">${this._escapeHtml(lastActive)}</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">Active task</div><div class="drawer-stat-value" style="font-size:11px">${this._escapeHtml(task)}</div></div>
+      </div>
+      <div>
+        <div class="drawer-stat-label" style="margin-top:6px">Top message partners</div>
+        <div class="drawer-partners">${
+          topPartners.length
+            ? topPartners.map(p => `<div class="drawer-partner-row" onclick="office._openNetworkEdgeDrawer('${this._escapeAttr(sessionId)}','${this._escapeAttr(p.id)}')"><span>${this._escapeHtml(p.name)}</span><span>${p.count}</span></div>`).join('')
+            : '<div class="drawer-sub">No messages yet.</div>'
+        }</div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <button class="panel-btn" onclick="office.showDetail('${this._escapeAttr(sessionId)}')">Open full detail</button>
+      </div>
+    `;
+    this.renderAgentNetwork();
+  }
+
+  _openNetworkEdgeDrawer(fromId, toId) {
+    const byId = new Map((this.state.members || []).map(x => [x.sessionId, x]));
+    const a = byId.get(fromId), b = byId.get(toId);
+    if (!a || !b) return;
+    this._networkEdgePair = [fromId, toId];
+    this._networkSelectedNode = null;
+    document.getElementById('networkDrawer')?.classList.remove('hidden');
+    document.querySelector('.network-layout')?.classList.add('drawer-open');
+
+    const msgs = (this.state.recentMessages || [])
+      .filter(m => (m.fromSessionId === fromId && m.toSessionId === toId) ||
+                   (m.fromSessionId === toId && m.toSessionId === fromId))
+      .slice(-50)
+      .reverse();
+
+    const content = document.getElementById('networkDrawerContent');
+    if (!content) return;
+    const rowsHtml = msgs.length
+      ? msgs.map(m => {
+          const cls = m.fromSessionId === fromId ? '' : 'reverse';
+          const ts = typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime();
+          return `<div class="conversation-row ${cls}" onclick="office.showDetail('${this._escapeAttr(m.fromSessionId)}')">
+            <div class="conversation-row-meta"><span>${this._escapeHtml(m.fromName || m.fromSessionId)} → ${this._escapeHtml(m.toName || m.toSessionId)}</span><span>${this._escapeHtml(this.formatTimeAgo(ts))}</span></div>
+            <div class="conversation-row-body">${this._escapeHtml((m.content || '').slice(0, 600))}</div>
+          </div>`;
+        }).join('')
+      : '<div class="drawer-sub">No messages between these agents yet.</div>';
+
+    content.innerHTML = `
+      <h3>${this._escapeHtml(a.name)} ↔ ${this._escapeHtml(b.name)}</h3>
+      <div class="drawer-sub">${msgs.length} message${msgs.length === 1 ? '' : 's'}</div>
+      <div class="conversation-thread">${rowsHtml}</div>
+      <div class="conversation-composer">
+        <select id="convSender">
+          <option value="${this._escapeAttr(fromId)}">${this._escapeHtml(a.name)}</option>
+          <option value="${this._escapeAttr(toId)}">${this._escapeHtml(b.name)}</option>
+        </select>
+        <input type="text" id="convBody" placeholder="Type a message..." />
+        <button onclick="office._sendConversationMessage('${this._escapeAttr(fromId)}','${this._escapeAttr(toId)}')">Send</button>
+      </div>
+    `;
+    // Autofocus input for fast iteration.
+    setTimeout(() => document.getElementById('convBody')?.focus(), 30);
+    this.renderAgentNetwork();
+  }
+
+  async _sendConversationMessage(fromId, toId) {
+    const sender = document.getElementById('convSender')?.value || fromId;
+    const recipient = sender === fromId ? toId : fromId;
+    const body = document.getElementById('convBody');
+    const content = (body?.value || '').trim();
+    if (!content) return;
+    try {
+      await this.postJson('/api/office/agent/message', {
+        sessionId: sender, fromSessionId: sender, toSessionId: recipient, content,
+      });
+      if (body) body.value = '';
+    } catch (err) {
+      console.error('send message failed', err);
+      this.showNotification?.('Failed to send message', 'error');
+    }
+  }
+
+  closeNetworkDrawer() {
+    this._networkSelectedNode = null;
+    this._networkEdgePair = null;
+    document.getElementById('networkDrawer')?.classList.add('hidden');
+    document.querySelector('.network-layout')?.classList.remove('drawer-open');
+    this.renderAgentNetwork();
+  }
+
+  // Flash an edge when a message arrives over it. Uses a transient animated
+  // circle ("pulse") that travels from sender to recipient.
+  _pulseEdgeForMessage(message) {
+    if (!message.fromSessionId || !message.toSessionId) return;
+    const svg = document.getElementById('networkCanvas');
+    if (!svg || !this._netNodes) return;
+    const a = this._netNodes.get(message.fromSessionId);
+    const b = this._netNodes.get(message.toSessionId);
+    if (!a || !b) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const pulse = document.createElementNS(NS, 'circle');
+    pulse.setAttribute('class', 'network-pulse active');
+    pulse.setAttribute('cx', a.x.toFixed(1));
+    pulse.setAttribute('cy', a.y.toFixed(1));
+    pulse.setAttribute('r', '4');
+    svg.appendChild(pulse);
+    // Animate via SVG's SMIL: simpler than rAF, declarative.
+    const animX = document.createElementNS(NS, 'animate');
+    animX.setAttribute('attributeName', 'cx');
+    animX.setAttribute('from', a.x.toFixed(1));
+    animX.setAttribute('to', b.x.toFixed(1));
+    animX.setAttribute('dur', '0.9s');
+    animX.setAttribute('fill', 'freeze');
+    const animY = document.createElementNS(NS, 'animate');
+    animY.setAttribute('attributeName', 'cy');
+    animY.setAttribute('from', a.y.toFixed(1));
+    animY.setAttribute('to', b.y.toFixed(1));
+    animY.setAttribute('dur', '0.9s');
+    animY.setAttribute('fill', 'freeze');
+    pulse.appendChild(animX);
+    pulse.appendChild(animY);
+    setTimeout(() => pulse.remove(), 950);
+  }
+
+  // ============================================================================
+  // Insights tab additions: Active Now + velocity + stage timing + blockers
+  // ============================================================================
+
+  async _renderActiveNowFeed(container) {
+    const members = this.state.members || [];
+    if (!members.length) {
+      container.innerHTML = '<div style="color:#52525b;font-size:12px">No agents yet.</div>';
+      return;
+    }
+    container.innerHTML = members.map(m => {
+      const task = m.currentTask && m.currentTask.title ? m.currentTask.title : '-';
+      const phase = m.status === 'working' ? 'working'
+        : m.status === 'meeting' ? 'in meeting'
+        : m.status === 'stuck' ? 'stuck' : 'idle';
+      const tool = (m.activeTools && m.activeTools[0]) || '';
+      const elapsed = m.lastActivityAt ? this.formatTimeAgo(m.lastActivityAt) : '';
+      return `<div class="active-now-card status-${this._escapeAttr(m.status || 'idle')}" onclick="office.showDetail('${this._escapeAttr(m.sessionId)}')">
+        <div class="active-now-card-header">
+          <span class="active-now-name">${this._escapeHtml(m.name)}</span>
+          <span class="active-now-phase">${this._escapeHtml(phase)}</span>
+        </div>
+        ${tool ? `<div class="active-now-tool">${this._escapeHtml(tool)}</div>` : ''}
+        <div class="active-now-task" title="${this._escapeAttr(task)}">${this._escapeHtml(task)}</div>
+        <div class="active-now-elapsed">${this._escapeHtml(elapsed)}</div>
+      </div>`;
+    }).join('');
+  }
+
+  async _renderTeamVelocity(container) {
+    try {
+      const res = await fetch('/api/office/timeline?type=task&limit=500');
+      const data = res.ok ? await res.json() : { entries: [] };
+      const entries = (data.entries || []).filter(e => {
+        const tx = e.data && e.data.transition;
+        return tx === 'completed';
+      });
+      const bucketMs = 60 * 60 * 1000; // 1h
+      const now = Date.now();
+      const buckets = new Array(24).fill(0);
+      for (const e of entries) {
+        const ts = new Date(e.timestamp).getTime();
+        const age = now - ts;
+        if (age < 0 || age > 24 * bucketMs) continue;
+        const idx = 23 - Math.floor(age / bucketMs);
+        if (idx >= 0 && idx < 24) buckets[idx]++;
+      }
+      const maxV = Math.max(1, ...buckets);
+      const w = 260, h = 56, bw = w / 24;
+      const bars = buckets.map((v, i) => {
+        const bh = (v / maxV) * (h - 4);
+        return `<rect x="${(i * bw).toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${bh.toFixed(1)}"><title>${v} completed</title></rect>`;
+      }).join('');
+      const total = buckets.reduce((a, b) => a + b, 0);
+      container.innerHTML = `<svg class="velocity-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg>
+        <div class="velocity-caption">${total} task${total === 1 ? '' : 's'} completed in last 24h</div>`;
+    } catch (err) {
+      container.innerHTML = '<div style="color:#52525b;font-size:12px">Unable to load velocity.</div>';
+    }
+  }
+
+  async _renderStageTimings(container) {
+    try {
+      const res = await fetch('/api/office/task-queues');
+      const data = res.ok ? await res.json() : { queues: [] };
+      const tasks = [];
+      for (const q of (data.queues || [])) {
+        for (const t of (q.tasks || [])) tasks.push(t);
+      }
+      const now = Date.now();
+      const toMs = v => (typeof v === 'string' ? new Date(v).getTime() : (v || 0));
+      // Durations in each stage for completed tasks.
+      const waits = [], starts = [], runs = [];
+      for (const t of tasks) {
+        const a = toMs(t.assignedAt), s = toMs(t.startedAt), c = toMs(t.completedAt);
+        if (!a) continue;
+        if (s > a) waits.push(s - a);
+        if (c > s && s > 0) runs.push(c - s);
+      }
+      const median = arr => {
+        if (!arr.length) return null;
+        const sorted = arr.slice().sort((x, y) => x - y);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      };
+      const fmt = ms => ms == null ? '—' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60000)}m`;
+      container.innerHTML = `
+        <div class="stage-timing-row"><span class="stage-name">Assigned → Started (median wait)</span><span class="stage-value">${fmt(median(waits))} · n=${waits.length}</span></div>
+        <div class="stage-timing-row"><span class="stage-name">Started → Completed (median run)</span><span class="stage-value">${fmt(median(runs))} · n=${runs.length}</span></div>
+        <div class="stage-timing-row"><span class="stage-name">Open tasks</span><span class="stage-value">${tasks.filter(t => t.status !== 'completed' && t.status !== 'failed').length}</span></div>
+      `;
+    } catch (err) {
+      container.innerHTML = '<div style="color:#52525b;font-size:12px">Unable to load stage timings.</div>';
+    }
+  }
+
+  async _renderBlockerLeaderboard(container) {
+    try {
+      const res = await fetch('/api/office/task-queues');
+      const data = res.ok ? await res.json() : { queues: [] };
+      const blocked = [];
+      for (const q of (data.queues || [])) {
+        for (const t of (q.tasks || [])) {
+          if (t.status === 'blocked') blocked.push({ ...t, sessionId: q.sessionId, agentName: q.agentName });
+        }
+      }
+      // Sort by time in status (use assignedAt as a proxy if no explicit blockedAt).
+      blocked.sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
+      container.innerHTML = blocked.length
+        ? blocked.slice(0, 5).map(t => `<div class="blocker-row" onclick="office.openTaskDetail('${this._escapeAttr(t.sessionId)}','${this._escapeAttr(t.id)}')">
+            <span class="blocker-title">${this._escapeHtml((t.title || '').slice(0, 60))}</span>
+            <span class="blocker-meta">${this._escapeHtml(t.agentName || '')} · ${this.formatTimeAgo(new Date(t.assignedAt).getTime())}</span>
+          </div>`).join('')
+        : '<div style="color:#52525b;font-size:12px">No blocked tasks right now.</div>';
+    } catch (err) {
+      container.innerHTML = '<div style="color:#52525b;font-size:12px">Unable to load blockers.</div>';
+    }
+  }
+
+  // ============================================================================
+  // Keyboard shortcuts overlay
+  // ============================================================================
+
+  _installShortcutBindings() {
+    if (this._shortcutsInstalled) return;
+    this._shortcutsInstalled = true;
+    let lastKey = '';
+    let lastKeyAt = 0;
+    document.addEventListener('keydown', (e) => {
+      // Ignore when typing in inputs/textareas/contenteditable/modifier chords.
+      const t = e.target;
+      const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // Esc closes the overlay if open.
+      if (e.key === 'Escape' && !document.getElementById('shortcutsOverlay')?.classList.contains('hidden')) {
+        this.closeShortcutsOverlay();
+        return;
+      }
+      if (inField) return;
+
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        this.openShortcutsOverlay();
+        return;
+      }
+
+      // Chord: "g" then another letter jumps to a tab.
+      const now = Date.now();
+      if (lastKey === 'g' && now - lastKeyAt < 1200) {
+        const map = { n: 'network', i: 'insights', t: 'timeline', m: 'meetings', a: 'agents',
+                      k: 'tasks', s: 'standup', c: 'messages', r: 'reports', g: 'settings' };
+        if (map[e.key]) {
+          e.preventDefault();
+          this.switchTab(map[e.key]);
+          lastKey = '';
+          return;
+        }
+      }
+      if (e.key === 'g') {
+        lastKey = 'g';
+        lastKeyAt = now;
+      } else {
+        lastKey = '';
+      }
+    });
+  }
+
+  openShortcutsOverlay() {
+    const grid = document.getElementById('shortcutsGrid');
+    if (grid) {
+      const rows = [
+        ['Open command palette', 'Cmd/Ctrl + K'],
+        ['Open this help', '?'],
+        ['Close modal / overlay', 'Esc'],
+        ['Go to Agents', 'g then a'],
+        ['Go to Tasks', 'g then k'],
+        ['Go to Standup', 'g then s'],
+        ['Go to Chat', 'g then c'],
+        ['Go to Timeline', 'g then t'],
+        ['Go to Insights', 'g then i'],
+        ['Go to Meetings', 'g then m'],
+        ['Go to Agent Network', 'g then n'],
+        ['Go to Reports', 'g then r'],
+        ['Go to Settings', 'g then g'],
+      ];
+      grid.innerHTML = rows.map(([lbl, keys]) => {
+        const k = keys.split(/\s+/).map(p => /^(then|\+|\/)$/i.test(p) ? `<span style="color:#52525b">${p}</span>` : `<kbd>${this._escapeHtml(p)}</kbd>`).join(' ');
+        return `<div class="shortcut-row"><span class="shortcut-label">${this._escapeHtml(lbl)}</span><span class="shortcut-keys">${k}</span></div>`;
+      }).join('');
+    }
+    document.getElementById('shortcutsOverlay')?.classList.remove('hidden');
+  }
+
+  closeShortcutsOverlay() {
+    document.getElementById('shortcutsOverlay')?.classList.add('hidden');
   }
 
   escapeHtml(text) {
