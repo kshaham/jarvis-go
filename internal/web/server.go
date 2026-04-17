@@ -611,6 +611,18 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/task-gate/{sessionId}", h.GetTaskGate)
 			r.Get("/hook-config", h.GetHookConfig)
 
+			// Spending status + daily cap readout (header cost widget polls /status)
+			r.Get("/spending/status", h.GetSpendingStatus)
+
+			// Scheduler read-only (cron-style durable jobs)
+			r.Get("/scheduler/jobs", h.ListSchedulerJobs)
+			r.Get("/scheduler/jobs/{id}", h.GetSchedulerJob)
+			r.Get("/scheduler/jobs/{id}/history", h.GetSchedulerJobHistory)
+
+			// Notification routes (SSE event fan-out read views)
+			r.Get("/notifications/routes", h.ListNotificationRoutes)
+			r.Get("/notifications/routes/{id}", h.GetNotificationRoute)
+
 			// Mutating routes (CSRF required)
 			r.Group(func(r chi.Router) {
 				r.Use(mw.CSRF(s.csrfStore))
@@ -722,6 +734,30 @@ func (s *Server) setupRouter() chi.Router {
 				// Code printer
 				r.Post("/code-printer/estimate", h.CodePrinterPrint)
 				r.Post("/code-printer/save-images", h.CodePrinterPreview)
+
+				// Spending daily cap setter (PUT; GET status is in the read-only group).
+				r.Put("/spending/cap", h.SetSpendingCap)
+
+				// Scheduler mutations.
+				r.Post("/scheduler/jobs", h.CreateSchedulerJob)
+				r.Put("/scheduler/jobs/{id}", h.UpdateSchedulerJob)
+				r.Delete("/scheduler/jobs/{id}", h.DeleteSchedulerJob)
+				r.Post("/scheduler/jobs/{id}/run-now", h.RunSchedulerJobNow)
+
+				// Notification route mutations.
+				r.Post("/notifications/routes", h.CreateNotificationRoute)
+				r.Put("/notifications/routes/{id}", h.UpdateNotificationRoute)
+				r.Delete("/notifications/routes/{id}", h.DeleteNotificationRoute)
+				r.Post("/notifications/routes/{id}/test", h.TestNotificationRoute)
+
+				// Session one-shot + clone.
+				r.Post("/sessions/one-shot", h.OneShotSession)
+				r.Post("/sessions/{id}/clone", h.CloneSession)
+
+				// Bulk session ops.
+				r.Post("/sessions/bulk-delete", h.BulkDeleteSessions)
+				r.Post("/sessions/bulk-rename", h.BulkRenameSessions)
+				r.Post("/sessions/bulk-color", h.BulkUpdateSessionColors)
 			})
 
 			// Hook event (exempt from CSRF - called by Claude CLI)

@@ -445,14 +445,26 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		)
 		// Pre-generate session ID so we can inject it into MCP env and subprocess env.
 		sessionID := uuid.New().String()
+		// Agent token authorizes /api/office/agent/* calls from `cm` and jarvis-mcp.
+		// When per-member env comes from getProviderEnvVarsFor (Z.AI rate-limit
+		// allocation) the token is dropped, so we re-inject it here. Without
+		// this every `cm skill read`, `cm task list`, etc. gets 401.
+		agentToken := ""
+		if ctx.AgentTokenMgr != nil {
+			agentToken = ctx.AgentTokenMgr.Token()
+		}
+		mcpJarvisEnv := map[string]string{
+			"JARVIS_API_URL":    "http://localhost:3555",
+			"JARVIS_SESSION_ID": sessionID,
+		}
+		if agentToken != "" {
+			mcpJarvisEnv["JARVIS_AGENT_TOKEN"] = agentToken
+		}
 		mcpServers := map[string]any{
 			"jarvis": map[string]any{
 				"type":    "stdio",
 				"command": "jarvis-mcp",
-				"env": map[string]string{
-					"JARVIS_API_URL":    "http://localhost:3555",
-					"JARVIS_SESSION_ID": sessionID,
-				},
+				"env":     mcpJarvisEnv,
 			},
 			"codegraphcontext": map[string]any{
 				"type":    "stdio",
@@ -461,12 +473,15 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 			},
 		}
 		// Also inject Jarvis env into subprocess so `cm` bash commands work.
-		agentEnv := make(map[string]string, len(envVars)+2)
+		agentEnv := make(map[string]string, len(envVars)+3)
 		for k, v := range envVars {
 			agentEnv[k] = v
 		}
 		agentEnv["JARVIS_API_URL"] = "http://localhost:3555"
 		agentEnv["JARVIS_SESSION_ID"] = sessionID
+		if agentToken != "" {
+			agentEnv["JARVIS_AGENT_TOKEN"] = agentToken
+		}
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
 			pty.SessionConfig{
@@ -493,13 +508,24 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 	}
 
 	// PTY fallback
+	// Ensure agent token is present so `cm` calls from the shell can
+	// authenticate. See the SDK path for the full reasoning.
+	ptyEnv := make(map[string]string, len(envVars)+1)
+	for k, v := range envVars {
+		ptyEnv[k] = v
+	}
+	if ctx.AgentTokenMgr != nil {
+		if tok := ctx.AgentTokenMgr.Token(); tok != "" {
+			ptyEnv["JARVIS_AGENT_TOKEN"] = tok
+		}
+	}
 	session, err := ctx.SessionManager.CreateSession(
 		context.Background(),
 		pty.SessionConfig{
 			WorkingDir:  req.WorkingDir,
 			Mode:        pty.ModeClaude,
 			Name:        member.Name,
-			ProviderEnv: envVars,
+			ProviderEnv: ptyEnv,
 		},
 	)
 	if err != nil {
