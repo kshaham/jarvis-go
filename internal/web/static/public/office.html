@@ -186,37 +186,37 @@
             <h2 class="panel-title">Tasks</h2>
           </div>
           <div class="kanban-board" id="kanbanBoard">
-            <div class="kanban-col kanban-col-backlog">
+            <div class="kanban-col kanban-col-backlog" data-col="backlog">
               <div class="kanban-col-header">
-                <span class="kanban-col-title">Backlog</span>
+                <span class="kanban-col-title t-meta">Backlog</span>
                 <span class="kanban-col-count" id="kanbanBacklogCount">0</span>
               </div>
               <div class="kanban-cards" id="kanbanBacklog"></div>
             </div>
-            <div class="kanban-col kanban-col-todo">
+            <div class="kanban-col kanban-col-todo" data-col="todo">
               <div class="kanban-col-header">
-                <span class="kanban-col-title">To Do</span>
+                <span class="kanban-col-title t-meta">To Do</span>
                 <span class="kanban-col-count" id="kanbanTodoCount">0</span>
               </div>
               <div class="kanban-cards" id="kanbanTodo"></div>
             </div>
-            <div class="kanban-col kanban-col-wip">
+            <div class="kanban-col kanban-col-wip" data-col="doing">
               <div class="kanban-col-header">
-                <span class="kanban-col-title">In Progress</span>
+                <span class="kanban-col-title t-meta">In Progress</span>
                 <span class="kanban-col-count" id="kanbanWipCount">0</span>
               </div>
               <div class="kanban-cards" id="kanbanWip"></div>
             </div>
-            <div class="kanban-col kanban-col-review">
+            <div class="kanban-col kanban-col-review" data-col="review">
               <div class="kanban-col-header">
-                <span class="kanban-col-title">Review</span>
+                <span class="kanban-col-title t-meta">Review</span>
                 <span class="kanban-col-count" id="kanbanReviewCount">0</span>
               </div>
               <div class="kanban-cards" id="kanbanReview"></div>
             </div>
-            <div class="kanban-col kanban-col-done">
+            <div class="kanban-col kanban-col-done" data-col="done">
               <div class="kanban-col-header">
-                <span class="kanban-col-title">Done</span>
+                <span class="kanban-col-title t-meta">Done</span>
                 <span class="kanban-col-count" id="kanbanDoneCount">0</span>
               </div>
               <div class="kanban-cards" id="kanbanDone"></div>
@@ -350,8 +350,8 @@
           <div class="panel-header">
             <h2 class="panel-title">Agent Network</h2>
             <div class="network-toolbar">
-              <label class="network-toggle"><input type="checkbox" id="netHideIdle"> Hide idle</label>
-              <label class="network-toggle"><input type="checkbox" id="netActiveOnly"> Only active edges</label>
+              <label class="toggle-switch"><input type="checkbox" id="netHideIdle"><span>Hide idle</span></label>
+              <label class="toggle-switch"><input type="checkbox" id="netActiveOnly"><span>Only active edges</span></label>
               <button class="panel-btn" onclick="office.relayoutNetwork()">Re-lay out</button>
             </div>
           </div>
@@ -390,8 +390,12 @@
               <div class="settings-section-title">Team Mission</div>
               <textarea class="settings-textarea" id="settingTeamMission"
                         placeholder="Set a mission or goal for the team..."
-                        maxlength="1000" rows="3"></textarea>
-              <button class="panel-btn panel-btn-primary" onclick="office.updateSetting('teamMission')">Save Mission</button>
+                        maxlength="1000" rows="3"
+                        oninput="office._updateMissionCharCount()"></textarea>
+              <div class="settings-mission-row">
+                <button class="panel-btn panel-btn-primary" onclick="office.updateSetting('teamMission')">Save Mission</button>
+                <span class="char-count" id="missionCharCount">0 / 1000</span>
+              </div>
               <p class="settings-hint">Agents re-evaluate their work in real-time when you change this.</p>
             </div>
             <div class="settings-section">
@@ -536,9 +540,15 @@
   </div>
 
   <!-- Spawn Team Config Modal -->
-  <div class="member-modal-overlay hidden" id="spawnConfigModal" role="dialog" aria-modal="true" aria-labelledby="spawnConfigTitle">
+  <div class="member-modal-overlay hidden" id="spawnConfigModal" role="dialog" aria-modal="true" aria-labelledby="spawnConfigTitle" onclick="if(event.target===this)office.closeSpawnConfigModal()">
     <div class="member-modal spawn-config-modal">
       <button class="modal-close" onclick="office.closeSpawnConfigModal()" aria-label="Close">&times;</button>
+
+      <div class="spawn-progress" aria-hidden="true">
+        <span class="step active" id="spawnProgressStep1">1. Template</span>
+        <span class="step-arrow">&rarr;</span>
+        <span class="step" id="spawnProgressStep2">2. Configure</span>
+      </div>
 
       <!-- Step 1: Template Selection -->
       <div id="spawnStep1">

@@ -1662,10 +1662,38 @@ class OfficeApp {
         list.innerHTML = '<div class="timeline-empty">No events yet for this filter.</div>';
         return;
       }
-      list.innerHTML = entries.map(e => this._renderTimelineEntry(e)).join('');
+      // Group entries into chronological day labels (Today / Yesterday /
+      // Mon Apr 14) so long scrolls have clear breakpoints.
+      const today = this._dateKey(new Date());
+      const yDate = new Date(); yDate.setDate(yDate.getDate() - 1);
+      const yesterday = this._dateKey(yDate);
+      let lastKey = null;
+      const out = [];
+      for (const e of entries) {
+        const d = new Date(e.timestamp);
+        const k = this._dateKey(d);
+        if (k !== lastKey) {
+          let label;
+          if (k === today) label = 'Today';
+          else if (k === yesterday) label = 'Yesterday';
+          else label = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+          out.push(`<div class="timeline-day-label">${this._escapeHtml(label)}</div>`);
+          lastKey = k;
+        }
+        out.push(this._renderTimelineEntry(e));
+      }
+      list.innerHTML = out.join('');
     } catch (err) {
       list.innerHTML = '<div class="timeline-empty">Failed to load timeline.</div>';
     }
+  }
+
+  _dateKey(d) {
+    // YYYY-MM-DD in local time, suitable for day-boundary grouping.
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
 
   _renderTimelineEntry(e) {
@@ -1716,16 +1744,21 @@ class OfficeApp {
     const totalCost = roster.reduce((s, m) => s + ((m.usage && m.usage.totalCostUSD) || 0), 0);
     const totalTurns = roster.reduce((s, m) => s + ((m.usage && m.usage.turnCount) || 0), 0);
 
-    const bars = byCost.map(m => this._renderCostBar(m, maxCost)).join('');
-    const tokens = byTokens.map(m => this._renderTokenRow(m)).join('');
+    // Max of input + output tokens across agents so bar fill reflects
+    // relative share rather than being a flat 100% per row.
+    const maxTokens = Math.max(1, ...roster.map(m =>
+      ((m.usage && (m.usage.totalInputTokens + m.usage.totalOutputTokens)) || 0)));
+
+    const bars = byCost.map((m, i) => this._renderCostBar(m, maxCost, i + 1)).join('');
+    const tokens = byTokens.map((m, i) => this._renderTokenRow(m, maxTokens, i + 1)).join('');
     const leaderboard = byLearning.map((m, i) => `
       <div class="insight-leaderboard-row">
-        <span><span class="rank">#${i + 1}</span>${this._escapeHtml(m.name || '')}</span>
+        <span><span class="t-rank">#${i + 1}</span>${this._escapeHtml(m.name || '')}</span>
         <span class="count">${m.learningCount || 0}</span>
       </div>`).join('');
 
     grid.innerHTML = `
-      <div class="insight-card">
+      <div class="insight-card insight-card--kpi">
         <div class="insight-card-title">Team spend today</div>
         <div class="insight-big-number">$${totalCost.toFixed(4)}</div>
         <div style="font-size:11px;color:#71717a">${totalTurns} turns across ${roster.length} agents</div>
@@ -1770,25 +1803,28 @@ class OfficeApp {
     if (bl) this._renderBlockerLeaderboard(bl);
   }
 
-  _renderCostBar(m, maxCost) {
+  _renderCostBar(m, maxCost, rank) {
     const cost = (m.usage && m.usage.totalCostUSD) || 0;
     const pct = maxCost > 0 ? Math.round((cost / maxCost) * 100) : 0;
     return `<div class="insight-bar-row">
-      <span class="insight-bar-name">${this._escapeHtml(m.name || '')}</span>
-      <div class="insight-bar-track"><div class="insight-bar-fill" style="width:${pct}%"></div></div>
-      <span class="insight-bar-value">$${cost.toFixed(4)}</span>
+      <span class="insight-bar-name"><span class="t-rank">#${rank}</span>${this._escapeHtml(m.name || '')}</span>
+      <div class="insight-bar-track"><div class="insight-bar-fill animate-bar-fill" style="width:${pct}%"></div></div>
+      <span class="insight-bar-value t-mono">$${cost.toFixed(4)}</span>
     </div>`;
   }
 
-  _renderTokenRow(m) {
+  _renderTokenRow(m, maxTokens, rank) {
     const inTok = (m.usage && m.usage.totalInputTokens) || 0;
     const outTok = (m.usage && m.usage.totalOutputTokens) || 0;
     const total = inTok + outTok;
     if (total === 0) return '';
+    // Proportional scaling: bar width reflects this row's share of the
+    // team max. Previously every row was 100%, hiding relative usage.
+    const pct = maxTokens > 0 ? Math.round((total / maxTokens) * 100) : 0;
     return `<div class="insight-bar-row">
-      <span class="insight-bar-name">${this._escapeHtml(m.name || '')}</span>
-      <div class="insight-bar-track"><div class="insight-bar-fill" style="width:100%"></div></div>
-      <span class="insight-bar-value">${total.toLocaleString()}</span>
+      <span class="insight-bar-name"><span class="t-rank">#${rank}</span>${this._escapeHtml(m.name || '')}</span>
+      <div class="insight-bar-track"><div class="insight-bar-fill animate-bar-fill" style="width:${pct}%"></div></div>
+      <span class="insight-bar-value t-mono">${total.toLocaleString()}</span>
     </div>`;
   }
 
@@ -1810,7 +1846,11 @@ class OfficeApp {
       const standups = Array.isArray(data.standups) ? data.standups : [];
       standups.sort((a, b) => String(b.modified || '').localeCompare(String(a.modified || '')));
       if (standups.length === 0) {
-        listEl.innerHTML = '<div class="meetings-empty">No past standups. They appear here after each standup completes.</div>';
+        listEl.innerHTML = `<div class="meetings-empty">
+          <div class="empty-state-title">No past meetings</div>
+          <div class="empty-state-sub">Transcripts land here after each standup completes.</div>
+          <button class="panel-btn panel-btn-primary empty-state-cta" onclick="office.startStandup()">Start Standup</button>
+        </div>`;
         return;
       }
       listEl.innerHTML = standups.map(s => `
@@ -1856,12 +1896,36 @@ class OfficeApp {
         detail.innerHTML = '<div class="meetings-placeholder">No transcript for this meeting.</div>';
         return;
       }
-      detail.innerHTML = tr.map(line => `
-        <div class="meeting-transcript-line">
-          <div class="meeting-speaker">${this._escapeHtml(line.speaker || line.from || '')}</div>
+      // Enrich each line with speaker tier (for left-border color) and
+      // insert a day/time header whenever the gap between consecutive
+      // lines exceeds 5 minutes, so a long transcript has clear breaks.
+      const rosterByName = new Map();
+      for (const mem of (this.state.members || [])) {
+        if (mem.name) rosterByName.set(mem.name, mem);
+      }
+      const FIVE_MIN = 5 * 60 * 1000;
+      let lastTs = 0;
+      const parts = [];
+      for (const line of tr) {
+        const speaker = line.speaker || line.from || '';
+        const member = rosterByName.get(speaker);
+        const tier = member && member.tier
+          ? member.tier
+          : (speaker.toLowerCase() === 'system' ? 'system' : 'worker');
+        const ts = new Date(line.timestamp || 0).getTime();
+        if (ts && lastTs && ts - lastTs > FIVE_MIN) {
+          const d = new Date(ts);
+          const label = d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+          parts.push(`<div class="meeting-day-header">${this._escapeHtml(label)}</div>`);
+        }
+        lastTs = ts || lastTs;
+        parts.push(`<div class="meeting-transcript-line" data-tier="${this._escapeAttr(tier)}">
+          <span class="meeting-speaker">${this._escapeHtml(speaker)}</span>
           <div class="meeting-content">${this._escapeHtml(line.content || line.text || '')}</div>
-          <div class="meeting-timestamp">${this._escapeHtml(this._formatRelativeTime(new Date(line.timestamp || 0)))}</div>
-        </div>`).join('');
+          <div class="meeting-timestamp t-mono">${this._escapeHtml(this._formatRelativeTime(new Date(line.timestamp || 0)))}</div>
+        </div>`);
+      }
+      detail.innerHTML = parts.join('');
     } catch (err) {
       if (err && err.name === 'AbortError') return;
       detail.innerHTML = '<div class="meetings-placeholder">Failed to load meeting.</div>';
@@ -2843,6 +2907,11 @@ class OfficeApp {
 
     document.getElementById('spawnStep1').classList.add('hidden');
     document.getElementById('spawnStep2').classList.remove('hidden');
+    // Advance the breadcrumb visual state.
+    const progStep1 = document.getElementById('spawnProgressStep1');
+    const progStep2 = document.getElementById('spawnProgressStep2');
+    if (progStep1) progStep1.classList.remove('active');
+    if (progStep2) progStep2.classList.add('active');
 
     const missionInput = document.getElementById('spawnMission');
     if (missionInput) {
@@ -2870,6 +2939,10 @@ class OfficeApp {
   showTemplateStep() {
     document.getElementById('spawnStep1').classList.remove('hidden');
     document.getElementById('spawnStep2').classList.add('hidden');
+    const progStep1 = document.getElementById('spawnProgressStep1');
+    const progStep2 = document.getElementById('spawnProgressStep2');
+    if (progStep1) progStep1.classList.add('active');
+    if (progStep2) progStep2.classList.remove('active');
   }
 
   getDefaultModelForProvider(provider, settings) {
@@ -3538,7 +3611,10 @@ class OfficeApp {
     const fileLocks = this.state.fileLocks || [];
 
     if (bugTasks.length === 0 && taskQueues.length === 0 && fileLocks.length === 0) {
-      list.innerHTML = '<div class="tasks-empty">No tasks yet. Tasks appear after a standup or when Lint reports bugs.</div>';
+      list.innerHTML = `<div class="tasks-empty">
+        <div class="empty-state-title">No active tasks</div>
+        <div class="empty-state-sub">Run a standup to distribute work across the team, or trigger <span class="t-mono">/lint</span> to auto-populate bug tasks.</div>
+      </div>`;
       return;
     }
 
@@ -3689,7 +3765,7 @@ class OfficeApp {
           ? `office.openTaskDetail('${this.escapeAttr(t._sessionId)}','${this.escapeAttr(t.id)}')`
           : `office.switchTab('tasks')`;
         return `<div class="kanban-card ${cls}" title="${this.escapeAttr(t.title || '')}" onclick="${clickHandler}">
-          <div class="kanban-card-title">${this.escapeHtml((t.title || '').slice(0, 40))}</div>
+          <div class="kanban-card-title">${this.escapeHtml(t.title || '')}</div>
           ${priorityBadge}${failedBadge}${blockedBadge}
         </div>`;
       }).join('');
@@ -3701,17 +3777,25 @@ class OfficeApp {
     reviewEl.innerHTML = renderCards(review);
     doneEl.innerHTML = renderCards(done);
 
-    // Update counts
-    const backlogCount = document.getElementById('kanbanBacklogCount');
-    const todoCount = document.getElementById('kanbanTodoCount');
-    const wipCount = document.getElementById('kanbanWipCount');
-    const reviewCount = document.getElementById('kanbanReviewCount');
-    const doneCount = document.getElementById('kanbanDoneCount');
-    if (backlogCount) backlogCount.textContent = backlog.length;
-    if (todoCount) todoCount.textContent = todo.length;
-    if (wipCount) wipCount.textContent = inProgress.length;
-    if (reviewCount) reviewCount.textContent = review.length;
-    if (doneCount) doneCount.textContent = done.length;
+    // Update counts with a subtle pulse when the value changes; tracked
+    // per-element so a re-render with unchanged counts stays quiet.
+    const setCount = (el, next) => {
+      if (!el) return;
+      const prev = parseInt(el.dataset.prevCount || '0', 10);
+      el.textContent = String(next);
+      el.dataset.prevCount = String(next);
+      if (prev !== next) {
+        el.classList.remove('count-pulse');
+        // Force reflow so re-adding the class retriggers the animation.
+        void el.offsetWidth;
+        el.classList.add('count-pulse');
+      }
+    };
+    setCount(document.getElementById('kanbanBacklogCount'), backlog.length);
+    setCount(document.getElementById('kanbanTodoCount'), todo.length);
+    setCount(document.getElementById('kanbanWipCount'), inProgress.length);
+    setCount(document.getElementById('kanbanReviewCount'), review.length);
+    setCount(document.getElementById('kanbanDoneCount'), done.length);
   }
 
   // ========== Ad-Hoc Meetings ==========
@@ -3893,9 +3977,9 @@ class OfficeApp {
       brainstorm: '&#10038;',
     };
 
-    const buildEntryEl = (entry) => {
+    const buildEntryEl = (entry, isNew) => {
       const el = document.createElement('div');
-      el.className = `activity-entry type-${entry.type}`;
+      el.className = `activity-entry type-${entry.type}${isNew ? ' just-added' : ''}`;
       const time = new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const icon = iconMap[entry.type] || '&#9675;';
       el.innerHTML = `<span class="activity-time">${time}</span><span class="activity-icon">${icon}</span><span class="activity-text">${this.escapeHtml(entry.text)}</span>`;
@@ -3905,21 +3989,32 @@ class OfficeApp {
     const prevCount = this._lastActivityRenderCount;
     const currentCount = this.activityLog.length;
 
+    // Capture scroll position BEFORE mutation so auto-tail only fires
+    // when the operator was already watching the head of the feed.
+    const wasNearTop = feed.scrollTop < 40;
+
     if (prevCount === 0 || feed.children.length === 0 || feed.querySelector('.activity-empty')) {
       // Full rebuild using documentFragment
       const fragment = document.createDocumentFragment();
       for (let i = currentCount - 1; i >= 0; i--) {
-        fragment.appendChild(buildEntryEl(this.activityLog[i]));
+        fragment.appendChild(buildEntryEl(this.activityLog[i], false));
       }
       feed.innerHTML = '';
       feed.appendChild(fragment);
     } else if (currentCount > prevCount) {
-      // Incremental prepend: only add new entries at the top
+      // Incremental prepend: new entries animate in via .just-added.
       const fragment = document.createDocumentFragment();
       for (let i = currentCount - 1; i >= prevCount; i--) {
-        fragment.appendChild(buildEntryEl(this.activityLog[i]));
+        fragment.appendChild(buildEntryEl(this.activityLog[i], true));
       }
       feed.insertBefore(fragment, feed.firstChild);
+    }
+
+    // If the operator was already at the top, keep them there so new
+    // entries remain visible. If they had scrolled down to read history,
+    // preserve position -- don't yank them back.
+    if (wasNearTop) {
+      feed.scrollTop = 0;
     }
 
     this._lastActivityRenderCount = currentCount;
@@ -3962,8 +4057,20 @@ class OfficeApp {
     if (standupTimeout) standupTimeout.value = Math.round(settings.standupResponseTimeoutMs / 1000);
     if (fileLockExpiry) fileLockExpiry.value = Math.round(settings.fileLockExpiryMs / 60000);
     if (teamMission) teamMission.value = settings.teamMission || '';
+    this._updateMissionCharCount();
 
     this.updateMissionBanner(settings.teamMission);
+  }
+
+  _updateMissionCharCount() {
+    const ta = document.getElementById('settingTeamMission');
+    const out = document.getElementById('missionCharCount');
+    if (!ta || !out) return;
+    const len = ta.value.length;
+    const max = parseInt(ta.getAttribute('maxlength') || '1000', 10);
+    out.textContent = `${len} / ${max}`;
+    out.classList.toggle('near-limit', len >= max * 0.9 && len < max);
+    out.classList.toggle('at-limit', len >= max);
   }
 
   async updateSetting(key) {
@@ -4041,10 +4148,15 @@ class OfficeApp {
     if (!banner || !text) return;
 
     if (mission && mission.trim()) {
-      text.textContent = mission.trim();
+      const trimmed = mission.trim();
+      text.textContent = trimmed;
+      // Full mission in a native tooltip so operators can see the whole
+      // thing when the badge ellipsis truncates it.
+      banner.setAttribute('title', trimmed);
       banner.classList.remove('hidden');
     } else {
       banner.classList.add('hidden');
+      banner.removeAttribute('title');
       text.textContent = '';
     }
   }
@@ -4488,30 +4600,34 @@ class OfficeApp {
   }
 
   getCommands() {
+    // Category-tagged so renderCommandResults can group with headers.
+    // Shortcut hints mirror the actual keybindings set up in
+    // _installShortcutBindings.
     const tabs = [
-      { tab: 'agents', label: 'Go to Agents' },
-      { tab: 'tasks', label: 'Go to Tasks' },
-      { tab: 'standup', label: 'Go to Standup' },
-      { tab: 'messages', label: 'Go to Chat' },
-      { tab: 'timeline', label: 'Go to Timeline' },
-      { tab: 'insights', label: 'Go to Insights' },
-      { tab: 'meetings', label: 'Go to Meetings' },
-      { tab: 'metrics', label: 'Go to Metrics' },
-      { tab: 'activity', label: 'Go to Activity' },
-      { tab: 'reports', label: 'Go to Reports' },
-      { tab: 'settings', label: 'Go to Settings' },
+      { tab: 'agents',   label: 'Go to Agents',   shortcut: 'g a' },
+      { tab: 'tasks',    label: 'Go to Tasks',    shortcut: 'g k' },
+      { tab: 'standup',  label: 'Go to Standup',  shortcut: 'g s' },
+      { tab: 'messages', label: 'Go to Chat',     shortcut: 'g c' },
+      { tab: 'timeline', label: 'Go to Timeline', shortcut: 'g t' },
+      { tab: 'insights', label: 'Go to Insights', shortcut: 'g i' },
+      { tab: 'meetings', label: 'Go to Meetings', shortcut: 'g m' },
+      { tab: 'network',  label: 'Go to Network',  shortcut: 'g n' },
+      { tab: 'reports',  label: 'Go to Reports',  shortcut: 'g r' },
+      { tab: 'metrics',  label: 'Go to Metrics',  shortcut: '' },
+      { tab: 'activity', label: 'Go to Activity', shortcut: '' },
+      { tab: 'settings', label: 'Go to Settings', shortcut: 'g g' },
     ];
 
     const commands = [
-      { name: 'Spawn Team', icon: '+', shortcut: '', action: () => this.spawnTeam() },
-      { name: 'Start Standup', icon: '>', shortcut: 'S', action: () => { this.startStandup(); } },
-      { name: 'Trigger Brainstorm', icon: '*', shortcut: 'B', action: () => this.triggerBrainstorm() },
-      { name: 'Wrap Up All', icon: '~', shortcut: '', action: () => this.wrapUpAll() },
-      { name: 'Shutdown Team', icon: '!', shortcut: '', action: () => this.shutdownTeam() },
+      { category: 'Actions', name: 'Spawn Team',         icon: '+', shortcut: '', action: () => this.spawnTeam() },
+      { category: 'Actions', name: 'Start Standup',      icon: '>', shortcut: '', action: () => { this.startStandup(); } },
+      { category: 'Actions', name: 'Trigger Brainstorm', icon: '*', shortcut: '', action: () => this.triggerBrainstorm() },
+      { category: 'Actions', name: 'Wrap Up All',        icon: '~', shortcut: '', action: () => this.wrapUpAll() },
+      { category: 'Actions', name: 'Shutdown Team',      icon: '!', shortcut: '', action: () => this.shutdownTeam() },
     ];
 
     for (const t of tabs) {
-      commands.push({ name: t.label, icon: '#', shortcut: '', action: () => this.switchTab(t.tab) });
+      commands.push({ category: 'Navigation', name: t.label, icon: '#', shortcut: t.shortcut, action: () => this.switchTab(t.tab) });
     }
 
     // Per-agent open commands so fuzzy-search by name jumps straight to a profile.
@@ -4520,6 +4636,7 @@ class OfficeApp {
       if (!m || !m.sessionId) continue;
       const name = m.name || m.sessionId;
       commands.push({
+        category: 'Agents',
         name: `Open agent: ${name}`,
         icon: '@',
         shortcut: '',
@@ -4546,7 +4663,18 @@ class OfficeApp {
       return;
     }
 
-    resultsEl.innerHTML = filtered.map((cmd, idx) => {
+    // Group by category, preserving insertion order. When the user has
+    // typed a query, skip grouping so the most relevant matches appear
+    // flat at the top.
+    const groupOrder = [];
+    const byCat = new Map();
+    for (const cmd of filtered) {
+      const cat = cmd.category || 'Other';
+      if (!byCat.has(cat)) { byCat.set(cat, []); groupOrder.push(cat); }
+      byCat.get(cat).push(cmd);
+    }
+
+    const renderItem = (cmd, idx) => {
       const nameHtml = q
         ? cmd.name.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
           '<span class="cmd-result-match">$1</span>')
@@ -4560,7 +4688,25 @@ class OfficeApp {
         <span class="cmd-result-name">${nameHtml}</span>
         ${shortcutHtml}
       </div>`;
-    }).join('');
+    };
+
+    if (q) {
+      // Flat list while searching -- user wants the best match front and center.
+      resultsEl.innerHTML = filtered.map((cmd, idx) => renderItem(cmd, idx)).join('');
+    } else {
+      // Grouped with category headers. idx is the position in the
+      // flat `filtered` array so keyboard nav still works.
+      let idx = 0;
+      const chunks = [];
+      for (const cat of groupOrder) {
+        chunks.push(`<div class="cmd-group-title">${this.escapeHtml(cat)}</div>`);
+        for (const cmd of byCat.get(cat)) {
+          chunks.push(renderItem(cmd, idx));
+          idx++;
+        }
+      }
+      resultsEl.innerHTML = chunks.join('');
+    }
 
     this._cmdFilteredCommands = filtered;
   }
@@ -5224,13 +5370,22 @@ class OfficeApp {
       if (faded) cls.push('faded');
       const task = m.activeTask && m.activeTask.title ? m.activeTask.title : '';
       const title = task ? `${m.name} · ${task}` : `${m.name} · ${m.role}`;
+      // Concentric rings: outer status-colored stroke for status, middle
+      // neutral fill anchors the node against the canvas, inner circle
+      // holds the avatar initial. Gives the graph visual depth instead
+      // of flat dots.
+      const rOuter = r + 4;
+      const rMid = r;
+      const rInner = r - 3;
       return `<g class="${cls.join(' ')}" data-id="${this._escapeAttr(m.sessionId)}"
         onclick="office._openNetworkNodeDrawer('${this._escapeAttr(m.sessionId)}')"
         tabindex="0" aria-label="Agent ${this._escapeAttr(m.name)}">
         <title>${this._escapeHtml(title)}</title>
-        <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r}" fill="${color}" stroke="#09090b" stroke-width="2"/>
+        <circle class="node-ring-outer" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${rOuter.toFixed(1)}" fill="none" stroke="${color}" stroke-width="2.5" opacity="0.55"/>
+        <circle class="node-ring-mid" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${rMid.toFixed(1)}" fill="#18181b" stroke="#27272a" stroke-width="1"/>
+        <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${rInner.toFixed(1)}" fill="${color}"/>
         <text x="${n.x.toFixed(1)}" y="${(n.y + 4).toFixed(1)}">${this._escapeHtml(initial)}</text>
-        <text x="${n.x.toFixed(1)}" y="${(n.y + r + 12).toFixed(1)}" style="font-size:10px;fill:#a1a1aa">${this._escapeHtml(m.name)}</text>
+        <text x="${n.x.toFixed(1)}" y="${(n.y + rOuter + 12).toFixed(1)}" style="font-size:10px;fill:#a1a1aa">${this._escapeHtml(m.name)}</text>
       </g>`;
     }).join('');
 
@@ -5510,7 +5665,19 @@ class OfficeApp {
         return `<rect x="${(i * bw).toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${bh.toFixed(1)}"><title>${v} completed</title></rect>`;
       }).join('');
       const total = buckets.reduce((a, b) => a + b, 0);
-      container.innerHTML = `<svg class="velocity-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg>
+      // Give the chart x/y-axis context so raw bars are interpretable.
+      container.innerHTML = `
+        <div class="velocity-chart-wrap">
+          <div class="velocity-yticks">
+            <span class="t-mono">${maxV}</span>
+            <span class="t-mono">0</span>
+          </div>
+          <svg class="velocity-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg>
+        </div>
+        <div class="velocity-xticks">
+          <span class="t-meta">24h ago</span>
+          <span class="t-meta">Now</span>
+        </div>
         <div class="velocity-caption">${total} task${total === 1 ? '' : 's'} completed in last 24h</div>`;
     } catch (err) {
       if (err && err.name === 'AbortError') return;
@@ -5569,9 +5736,9 @@ class OfficeApp {
       // Sort by time in status (use assignedAt as a proxy if no explicit blockedAt).
       blocked.sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
       container.innerHTML = blocked.length
-        ? blocked.slice(0, 5).map(t => `<div class="blocker-row" onclick="office.openTaskDetail('${this._escapeAttr(t.sessionId)}','${this._escapeAttr(t.id)}')">
-            <span class="blocker-title">${this._escapeHtml((t.title || '').slice(0, 60))}</span>
-            <span class="blocker-meta">${this._escapeHtml(t.agentName || '')} · ${this.formatTimeAgo(new Date(t.assignedAt).getTime())}</span>
+        ? blocked.slice(0, 5).map((t, i) => `<div class="blocker-row" onclick="office.openTaskDetail('${this._escapeAttr(t.sessionId)}','${this._escapeAttr(t.id)}')">
+            <span class="blocker-title"><span class="t-rank">#${i + 1}</span>${this._escapeHtml((t.title || '').slice(0, 60))}</span>
+            <span class="blocker-meta t-mono">${this._escapeHtml(t.agentName || '')} · ${this.formatTimeAgo(new Date(t.assignedAt).getTime())}</span>
           </div>`).join('')
         : '<div style="color:#52525b;font-size:12px">No blocked tasks right now.</div>';
     } catch (err) {
