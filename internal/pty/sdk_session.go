@@ -529,13 +529,43 @@ func (s *SDKSession) WriteInkPrompt(prompt string) bool {
 }
 
 // WriteViaScreen sends a prompt via the persistent session.
+//
+// PTY sessions treat this as raw terminal input so callers pass
+// control sequences ("\x03" for Ctrl+C, "\r" for Enter) to interrupt
+// or submit a turn. Those bytes are meaningless on an SDK session --
+// the provider would just receive a 1-byte user message like "\x03"
+// and reply normally. Strip ASCII control chars (C0 block, DEL)
+// before dispatch; if nothing printable remains, no-op and return
+// false so the caller can see the interrupt didn't take. Preserves
+// \n and \t which are legitimate inside larger prompt text.
 func (s *SDKSession) WriteViaScreen(input string) bool {
-	input = strings.TrimRight(input, "\r\n")
-	if input == "" {
+	cleaned := stripControlChars(input)
+	cleaned = strings.TrimRight(cleaned, "\r\n")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
 		return false
 	}
-	s.SendPrompt(context.Background(), input)
+	s.SendPrompt(context.Background(), cleaned)
 	return true
+}
+
+// stripControlChars removes C0 control characters (0x00-0x1F except \n,
+// \t) and DEL (0x7F). Used to make WriteViaScreen safe on SDK sessions
+// where terminal-control sequences don't make sense as LLM input.
+func stripControlChars(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\n' || r == '\t' {
+			b.WriteRune(r)
+			continue
+		}
+		if r < 0x20 || r == 0x7F {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // AddOutputObserver registers a callback for output data.
