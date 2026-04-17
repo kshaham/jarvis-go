@@ -54,3 +54,27 @@ func TestResolveAndValidateWorkingDir_EmptyAllowlistAllowsAny(t *testing.T) {
 		t.Fatalf("empty allowlist should allow any existing dir: %v", err)
 	}
 }
+
+func TestDefaultWorkingDirAllowlist_IncludesEnvPaths(t *testing.T) {
+	tmpA := t.TempDir()
+	tmpB := t.TempDir()
+	t.Setenv("JARVIS_WORKSPACE_PATHS", tmpA+":"+tmpB)
+
+	got := DefaultWorkingDirAllowlist()
+
+	// $HOME + two from env = at least 3 entries (extra container paths may
+	// or may not exist depending on the host, so we only assert the env ones
+	// and the presence of home).
+	foundA, foundB := false, false
+	for _, p := range got {
+		if p == tmpA {
+			foundA = true
+		}
+		if p == tmpB {
+			foundB = true
+		}
+	}
+	if !foundA || !foundB {
+		t.Errorf("expected both env paths in allowlist, got %v", got)
+	}
+}

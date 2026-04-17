@@ -2883,8 +2883,24 @@ class OfficeApp {
       }
     } catch (err) {
       console.error('Failed to spawn team:', err);
-      this.showNotification('Failed to spawn team', 'error');
-      this.showToast('Failed to spawn team', 'error');
+      // parseJsonResponse throws "HTTP <code>: <body>" on non-2xx. Extract the
+      // server's error message so the user sees the actual reason (e.g.
+      // "invalid working directory: ...outside the configured allowlist")
+      // instead of a generic failure notice.
+      let detail = err && err.message ? err.message : '';
+      const bodyIdx = detail.indexOf(': ');
+      if (bodyIdx >= 0) {
+        const body = detail.slice(bodyIdx + 2);
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed && parsed.error) detail = parsed.error;
+        } catch (_) {
+          // leave detail as the raw "HTTP N: ..." string
+        }
+      }
+      const msg = 'Failed to spawn team: ' + (detail || 'unknown error');
+      this.showNotification(msg, 'error');
+      this.showToast(msg, 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Spawn Team'; }
       if (spawnHeaderBtn) { spawnHeaderBtn.disabled = false; spawnHeaderBtn.textContent = 'Spawn Team'; }
     }

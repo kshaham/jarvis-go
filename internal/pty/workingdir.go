@@ -81,12 +81,35 @@ func ResolveAndValidateWorkingDir(raw string, allowlist []string) (string, error
 }
 
 // DefaultWorkingDirAllowlist returns sensible defaults for the allowlist
-// when none has been configured: the user's home directory and common
-// project parents. These are permissive enough not to break existing setups.
+// when none has been configured. Includes:
+//
+//   - the user's $HOME
+//   - any paths listed in the JARVIS_WORKSPACE_PATHS env var (colon-separated)
+//   - common container workspace dirs if they exist on disk (/app/workspace,
+//     /workspace) -- added because Jarvis is routinely run inside containers
+//     where projects live outside the UNIX home dir
+//
+// Operators who need tighter control can still override this by setting the
+// workingDirAllowlist key in state-store settings, which takes precedence.
 func DefaultWorkingDirAllowlist() []string {
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		return nil
+	var out []string
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		out = append(out, home)
 	}
-	return []string{home}
+	if extra := os.Getenv("JARVIS_WORKSPACE_PATHS"); extra != "" {
+		for _, p := range strings.Split(extra, ":") {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	// Common container-friendly defaults -- only included if the directory
+	// actually exists, so localhost developers don't get a surprise allowlist
+	// entry pointing at a nonexistent /app/workspace.
+	for _, p := range []string{"/app/workspace", "/workspace"} {
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			out = append(out, p)
+		}
+	}
+	return out
 }
