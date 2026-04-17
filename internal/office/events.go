@@ -11,6 +11,12 @@ type SessionStore interface {
 	WriteInkPrompt(sessionID, prompt string) bool
 	GetSessionIDs() []string
 	IsSessionAlive(sessionID string) bool
+	// IsSessionWorking reports whether the session is currently executing
+	// a turn. Used to suppress ack-nudges while an agent is busy -- they
+	// can't read the nudge until the turn ends, so the nudge counter
+	// would run up to TaskAckMaxNudges and auto-fail every queued task
+	// long before the agent gets a chance to acknowledge anything.
+	IsSessionWorking(sessionID string) bool
 }
 
 // OfficeEvent is emitted by the manager for state changes.

@@ -305,6 +305,16 @@ func (a *sessionStoreAdapter) IsSessionAlive(sessionID string) bool {
 	return false
 }
 
+func (a *sessionStoreAdapter) IsSessionWorking(sessionID string) bool {
+	if s, ok := a.sm.GetSession(sessionID); ok {
+		return s.IsWorking()
+	}
+	if sdk, ok := a.sm.GetSDKSession(sessionID); ok {
+		return sdk.IsWorking()
+	}
+	return false
+}
+
 // Start begins listening for HTTP connections.
 //
 // When --https is enabled, Jarvis listens on BOTH:

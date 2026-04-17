@@ -251,6 +251,17 @@ func (m *Manager) checkUnacknowledgedTasks() {
 			agentName = agent.Config.Name
 		}
 
+		// If the agent is actively in a turn, skip this cycle entirely:
+		// the nudge prompt would just queue behind the current turn, and
+		// the count would keep advancing toward auto-fail before the
+		// agent ever saw it. Production logs observed 5 consecutive
+		// nudges during a single 20-minute tool-heavy turn, resulting
+		// in every queued task being auto-failed unfairly. We'll try
+		// again on the next tick.
+		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
+
 		// Separate tasks into nudge-able and auto-fail.
 		var nudgeTasks []*Task
 		var failTasks []*Task

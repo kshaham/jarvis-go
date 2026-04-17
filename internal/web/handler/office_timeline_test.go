@@ -20,6 +20,7 @@ func (stubSessions) WriteViaScreen(sessionID, input string) bool  { return true 
 func (stubSessions) WriteInkPrompt(sessionID, prompt string) bool { return true }
 func (stubSessions) GetSessionIDs() []string                      { return nil }
 func (stubSessions) IsSessionAlive(sessionID string) bool         { return true }
+func (stubSessions) IsSessionWorking(sessionID string) bool       { return false }
 
 func newTimelineContext(t *testing.T) *Context {
 	t.Helper()

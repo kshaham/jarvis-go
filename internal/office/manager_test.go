@@ -13,6 +13,7 @@ func (m *mockSessionStore) WriteViaScreen(sessionID, input string) bool  { retur
 func (m *mockSessionStore) WriteInkPrompt(sessionID, prompt string) bool { return true }
 func (m *mockSessionStore) GetSessionIDs() []string                      { return nil }
 func (m *mockSessionStore) IsSessionAlive(sessionID string) bool         { return true }
+func (m *mockSessionStore) IsSessionWorking(sessionID string) bool       { return false }
 
 func newTestManager() *Manager {
 	m := NewManager(&mockSessionStore{}, func(event string, data interface{}) {}, nil)
