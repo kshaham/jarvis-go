@@ -743,6 +743,11 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		slog.Info("Spawned team member", "name", member.Name, "sessionId", sessionID, "role", member.Role, "mode", usedMode)
 	}
 
+	// Record the spawn context so the UI can show a "current team" banner
+	// while the team is active. Must happen BEFORE SetTeamSpawned(true) so
+	// any consumer listening on that signal already sees the context.
+	ctx.OfficeManager.SetSpawnContext(templateUsed, req.WorkingDir)
+
 	// Mark team as spawned
 	ctx.OfficeManager.SetTeamSpawned(true)
 

@@ -857,8 +857,14 @@ class OfficeApp {
   updateSpawnButton() {
     const btn = document.getElementById('btnSpawnTeam');
     if (btn) {
-      btn.disabled = this.state.teamSpawned;
-      btn.textContent = this.state.teamSpawned ? 'Team Active' : 'Spawn Team';
+      // Keep clickable even when a team is active -- clicking opens the modal
+      // in view-mode so the operator can still inspect templates + the
+      // current team's configuration without wrapping up first.
+      btn.disabled = false;
+      btn.textContent = this.state.teamSpawned ? 'Team Config' : 'Spawn Team';
+      btn.title = this.state.teamSpawned
+        ? 'View templates and current team configuration'
+        : 'Spawn a new team';
     }
   }
 
@@ -2546,12 +2552,15 @@ class OfficeApp {
 
   async spawnTeam() {
     try {
-      const [templatesRes, settingsRes] = await Promise.all([
+      const [templatesRes, settingsRes, officeRes] = await Promise.all([
         fetch('/api/office/templates'),
         fetch('/api/settings/accounts'),
+        fetch('/api/office/settings'),
       ]);
       const templatesData = await templatesRes.json();
       const settings = await settingsRes.json();
+      const officeData = officeRes.ok ? await officeRes.json() : null;
+      if (officeData && officeData.success) this.officeSettings = officeData;
 
       this._spawnTemplates = templatesData.templates || [];
       this._spawnSettings = settings;
@@ -2560,11 +2569,97 @@ class OfficeApp {
       document.getElementById('spawnStep1').classList.remove('hidden');
       document.getElementById('spawnStep2').classList.add('hidden');
 
+      // If a team is already active, show the view-only banner + disable the
+      // spawn confirm button. Operator can still browse templates + see the
+      // current team's configuration.
+      this._applyTeamActiveViewMode();
+
       this.renderTemplateGrid();
       document.getElementById('spawnConfigModal').classList.remove('hidden');
     } catch (err) {
       console.error('Failed to open spawn config:', err);
       this.showNotification('Failed to load team templates', 'error');
+    }
+  }
+
+  /**
+   * When a team is already running, pin a "Current team" banner at the top
+   * of the spawn modal and disable the confirm button so the operator can
+   * browse templates + inspect the live configuration without accidentally
+   * kicking off a second spawn on top.
+   */
+  _applyTeamActiveViewMode() {
+    const step1 = document.getElementById('spawnStep1');
+    const step2 = document.getElementById('spawnStep2');
+    const confirm = document.getElementById('btnSpawnConfirm');
+    const existing = document.getElementById('spawnActiveBanner');
+    if (existing) existing.remove();
+
+    if (!this.state.teamSpawned) {
+      if (confirm) { confirm.disabled = false; confirm.textContent = 'Spawn Team'; }
+      return;
+    }
+
+    const officeSettings = this.officeSettings || {};
+    const roster = (this.state.members || []);
+    const templateId = officeSettings.teamTemplateId || '';
+    const workingDir = officeSettings.teamWorkingDir || '';
+    const mission = officeSettings.teamMission || this.state.teamMission || '';
+    const spawnedAt = officeSettings.teamSpawnedAt;
+    const uptime = spawnedAt ? this.formatTimeAgo(spawnedAt) : 'just now';
+    const template = (this._spawnTemplates || []).find(t => t.id === templateId);
+    const templateName = template ? template.name : (templateId || 'custom team');
+    const statusCounts = roster.reduce((acc, m) => {
+      acc[m.status || 'idle'] = (acc[m.status || 'idle'] || 0) + 1;
+      return acc;
+    }, {});
+    const statusSummary = Object.entries(statusCounts)
+      .map(([s, n]) => `${n} ${this._escapeHtml(s)}`).join(' · ');
+
+    const rosterHtml = roster.map(m => {
+      const provider = m.provider || 'claude-subscription';
+      const model = m.model || '';
+      return `<div class="active-team-member">
+        <span class="active-team-name">${this._escapeHtml(m.name || '')}</span>
+        <span class="active-team-role">${this._escapeHtml(m.role || '')}</span>
+        <span class="active-team-model">${this._escapeHtml(provider)}${model ? ' · ' + this._escapeHtml(model) : ''}</span>
+        <span class="active-team-status status-${this._escapeAttr(m.status || 'idle')}">${this._escapeHtml(m.status || 'idle')}</span>
+      </div>`;
+    }).join('');
+
+    const banner = document.createElement('div');
+    banner.id = 'spawnActiveBanner';
+    banner.className = 'spawn-active-banner';
+    banner.innerHTML = `
+      <div class="spawn-active-banner-head">
+        <div>
+          <div class="spawn-active-banner-title">Current team: ${this._escapeHtml(templateName)}</div>
+          <div class="spawn-active-banner-sub">
+            ${roster.length} member${roster.length === 1 ? '' : 's'} · running ${uptime}${workingDir ? ' · <code>' + this._escapeHtml(workingDir) + '</code>' : ''}
+            ${statusSummary ? ' · ' + statusSummary : ''}
+          </div>
+        </div>
+        <div class="spawn-active-banner-actions">
+          <button class="panel-btn" onclick="office.wrapUpAll(); office.closeSpawnConfigModal();">Wrap up team</button>
+        </div>
+      </div>
+      ${mission ? `<div class="spawn-active-banner-mission"><span class="label">Mission:</span> ${this._escapeHtml(mission)}</div>` : ''}
+      <div class="spawn-active-banner-members">${rosterHtml || '<div class="spawn-active-banner-sub">No agents registered.</div>'}</div>
+      <div class="spawn-active-banner-hint">Templates below are view-only while a team is active. Wrap up the current team to spawn a new one.</div>
+    `;
+
+    if (step1 && step1.firstChild) step1.insertBefore(banner, step1.firstChild);
+    // Duplicate the banner into step 2 too so it shows after a user picks a
+    // template in view-mode and "configures" (which will be disabled).
+    if (step2 && step2.firstChild) {
+      const clone = banner.cloneNode(true);
+      clone.id = 'spawnActiveBanner2';
+      step2.insertBefore(clone, step2.firstChild);
+    }
+    if (confirm) {
+      confirm.disabled = true;
+      confirm.textContent = 'Team already active';
+      confirm.title = 'Wrap up the current team before spawning a new one.';
     }
   }
 

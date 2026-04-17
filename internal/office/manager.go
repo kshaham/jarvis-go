@@ -43,6 +43,11 @@ type Manager struct {
 	autoStandupEnabled bool
 	curiosityEnabled   bool
 	teamMission        string
+	// Which template the current team was spawned from + its resolved
+	// working directory. Exposed in the status payload so the UI can show
+	// a "current team" banner while a team is running.
+	lastTemplateID   string
+	lastWorkingDir   string
 	lastBrainstormAt   time.Time
 	lastWaterCoolerAt  time.Time
 	triageAttempts     map[string]int       // taskID -> triage attempt count
@@ -294,6 +299,10 @@ func (m *Manager) SetTeamSpawned(v bool) {
 		m.teamSpawnedAt = time.Now()
 	} else {
 		m.teamSpawnedAt = time.Time{}
+		// Clear spawn context so a subsequent GetOfficeSettings doesn't
+		// keep pointing the UI at the now-torn-down team.
+		m.lastTemplateID = ""
+		m.lastWorkingDir = ""
 		// Clear triage tracking maps to prevent unbounded growth
 		m.triageAttempts = make(map[string]int)
 		m.lastTriageAt = make(map[string]time.Time)
@@ -668,6 +677,25 @@ func (m *Manager) GetTeamMission() string {
 	return m.teamMission
 }
 
+// SetSpawnContext records the template + working directory used to spawn
+// the current team. The UI reads these back to show a "current team"
+// banner while the team is active.
+func (m *Manager) SetSpawnContext(templateID, workingDir string) {
+	m.mu.Lock()
+	m.lastTemplateID = templateID
+	m.lastWorkingDir = workingDir
+	m.mu.Unlock()
+}
+
+// GetSpawnContext returns the (template ID, working directory) used to
+// spawn the current team. Either may be empty if unknown (e.g. pre-upgrade
+// teams spawned before this field existed).
+func (m *Manager) GetSpawnContext() (string, string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastTemplateID, m.lastWorkingDir
+}
+
 // SetTeamMission sets the team mission, persists it to disk, and broadcasts.
 func (m *Manager) SetTeamMission(s string) {
 	trimmed := strings.TrimSpace(s)
@@ -751,6 +779,8 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	autoStandupEnabled := m.autoStandupEnabled
 	curiosityEnabled := m.curiosityEnabled
 	teamMission := m.teamMission
+	lastTemplateID := m.lastTemplateID
+	lastWorkingDir := m.lastWorkingDir
 	var lastBrainstormAtMs int64
 	if !m.lastBrainstormAt.IsZero() {
 		lastBrainstormAtMs = m.lastBrainstormAt.UnixMilli()
@@ -790,6 +820,8 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 		"reflectionResponseTimeoutMs": reflectionTimeoutMs,
 		"teamSpawned":                 teamSpawned,
 		"teamSpawnedAt":               teamSpawnedAtMs,
+		"teamTemplateId":              lastTemplateID,
+		"teamWorkingDir":              lastWorkingDir,
 		"memberCount":                 memberCount,
 		"activeMeetingCount":          activeMeetingCount,
 		"activeLockCount":             activeLockCount,

@@ -4657,6 +4657,109 @@
 }
 
 /* =========================================================================
+   Spawn modal "current team" banner (shown when modal opens while a team
+   is already active, so operators can still browse templates + inspect
+   the live team configuration).
+   ========================================================================= */
+.spawn-active-banner {
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.02));
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.spawn-active-banner-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.spawn-active-banner-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #e4e4e7;
+}
+.spawn-active-banner-sub {
+  font-size: 11px;
+  color: #a1a1aa;
+  margin-top: 2px;
+}
+.spawn-active-banner-sub code {
+  font-family: ui-monospace, monospace;
+  background: #18181b;
+  border: 1px solid #27272a;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #e4e4e7;
+}
+.spawn-active-banner-actions {
+  display: flex;
+  gap: 6px;
+}
+.spawn-active-banner-mission {
+  font-size: 12px;
+  color: #d4d4d8;
+  background: #09090b;
+  border-left: 2px solid #3b82f6;
+  padding: 6px 10px;
+  border-radius: 0 4px 4px 0;
+}
+.spawn-active-banner-mission .label {
+  color: #71717a;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.spawn-active-banner-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px;
+}
+.active-team-member {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px;
+  background: #09090b;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.active-team-name {
+  color: #e4e4e7;
+  font-weight: 500;
+}
+.active-team-role {
+  color: #71717a;
+}
+.active-team-model {
+  color: #60a5fa;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+.active-team-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a1a1aa;
+}
+.active-team-status.status-working { color: #3b82f6; }
+.active-team-status.status-stuck { color: #ef4444; }
+.active-team-status.status-meeting { color: #a855f7; }
+.spawn-active-banner-hint {
+  font-size: 11px;
+  color: #71717a;
+  font-style: italic;
+}
+
+/* =========================================================================
    Agent Network tab (force-directed knowledge graph)
    ========================================================================= */
 .network-toolbar {
