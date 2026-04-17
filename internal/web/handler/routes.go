@@ -7,6 +7,7 @@ import "github.com/go-chi/chi/v5"
 func RegisterSessionRoutes(r chi.Router, h *Context) {
 	// --- Core session routes (session.go) ---
 	r.Get("/api/sessions", h.ListSessions)
+	r.Get("/api/sessions/query", h.QuerySessions)
 	r.Get("/api/sessions/{id}", h.GetSession)
 	r.Get("/api/sessions/{id}/terminal", h.GetSessionTerminal)
 	r.Post("/api/sessions", h.CreateSession)
@@ -19,6 +20,36 @@ func RegisterSessionRoutes(r chi.Router, h *Context) {
 	r.Put("/api/sessions/{id}/name", h.RenameSession)
 	r.Put("/api/sessions/{id}/color", h.UpdateSessionColor)
 	r.Delete("/api/sessions", h.DeleteAllSessions)
+
+	// Bulk operations
+	r.Post("/api/sessions/bulk-delete", h.BulkDeleteSessions)
+	r.Post("/api/sessions/bulk-rename", h.BulkRenameSessions)
+	r.Post("/api/sessions/bulk-color", h.BulkUpdateSessionColors)
+
+	// Session clone + one-shot prompt
+	r.Post("/api/sessions/one-shot", h.OneShotSession)
+	r.Post("/api/sessions/{id}/clone", h.CloneSession)
+
+	// Spending visibility + daily cap
+	r.Get("/api/spending/status", h.GetSpendingStatus)
+	r.Put("/api/spending/cap", h.SetSpendingCap)
+
+	// Scheduler (cron-style durable jobs)
+	r.Get("/api/scheduler/jobs", h.ListSchedulerJobs)
+	r.Post("/api/scheduler/jobs", h.CreateSchedulerJob)
+	r.Get("/api/scheduler/jobs/{id}", h.GetSchedulerJob)
+	r.Put("/api/scheduler/jobs/{id}", h.UpdateSchedulerJob)
+	r.Delete("/api/scheduler/jobs/{id}", h.DeleteSchedulerJob)
+	r.Post("/api/scheduler/jobs/{id}/run-now", h.RunSchedulerJobNow)
+	r.Get("/api/scheduler/jobs/{id}/history", h.GetSchedulerJobHistory)
+
+	// Notification routes (SSE event fan-out to Telegram / webhook / log)
+	r.Get("/api/notifications/routes", h.ListNotificationRoutes)
+	r.Post("/api/notifications/routes", h.CreateNotificationRoute)
+	r.Get("/api/notifications/routes/{id}", h.GetNotificationRoute)
+	r.Put("/api/notifications/routes/{id}", h.UpdateNotificationRoute)
+	r.Delete("/api/notifications/routes/{id}", h.DeleteNotificationRoute)
+	r.Post("/api/notifications/routes/{id}/test", h.TestNotificationRoute)
 
 	// Session data views
 	r.Get("/api/sessions/{id}/output", h.GetSessionOutput)
@@ -92,6 +123,7 @@ func RegisterSessionRoutes(r chi.Router, h *Context) {
 func RegisterMonitoringRoutes(r chi.Router, h *Context) {
 	// --- Core monitoring routes (monitoring.go) ---
 	r.Get("/api/health", h.Health)
+	r.Get("/api/ready", h.Ready)
 	r.Get("/api/status", h.Status)
 	r.Get("/api/csrf-token", h.CSRFToken)
 

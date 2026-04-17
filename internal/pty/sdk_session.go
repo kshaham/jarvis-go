@@ -40,6 +40,7 @@ type SDKSession struct {
 	totalInputTokens  int64
 	totalOutputTokens int64
 	totalCostUSD      float64
+	maxCostUSD        float64 // per-session spending cap; 0 = unlimited
 
 	// Buffers
 	terminalBuffer *BufferAccumulator
@@ -92,6 +93,7 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		providerEnv:    config.ProviderEnv,
 		systemPrompt:   config.SystemPrompt,
 		mcpServers:     config.McpServers,
+		maxCostUSD:     config.MaxCostUSD,
 		outputObservers: make(map[int]func(string)),
 		activeTools:     make(map[string]bool),
 	}
@@ -267,6 +269,20 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 				s.isWorking = false
 				s.status = StatusIdle
 				s.activeTools = make(map[string]bool)
+				currentCost := s.totalCostUSD
+				capUSD := s.maxCostUSD
+				// Best-effort model name: pick the key with the largest usage
+				// out of ModelUsages. Multi-model turns are rare; in the common
+				// single-model case this returns the only entry.
+				var model string
+				var bestTokens int64
+				for m, u := range event.Result.ModelUsages {
+					total := int64(u.InputTokens) + int64(u.OutputTokens)
+					if total >= bestTokens {
+						bestTokens = total
+						model = m
+					}
+				}
 				s.mu.Unlock()
 
 				s.appendOutput(fmt.Sprintf("\n[Turn Complete] Turns: %d | Cost: $%.4f | Tokens: in=%d out=%d\n",
@@ -277,8 +293,19 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 					Input:  int64(event.Result.Usage.InputTokens),
 					Output: int64(event.Result.Usage.OutputTokens),
 					Total:  int64(event.Result.Usage.InputTokens) + int64(event.Result.Usage.OutputTokens),
+					Cost:   event.Result.TotalCostUSD,
+					Model:  model,
 				})
 				s.emitEvent(EventIdle{})
+
+				// Per-session cost cap enforcement. Emits EventCostExceeded
+				// and stops the session asynchronously so we can finish
+				// emitting the current turn's events first.
+				if capUSD > 0 && currentCost >= capUSD {
+					s.emitEvent(EventCostExceeded{Cost: currentCost, CapUSD: capUSD})
+					slog.Warn("SDK session hit cost cap; stopping", "session", s.ID, "cost", currentCost, "cap", capUSD)
+					go s.Stop()
+				}
 
 				if event.Result.IsError {
 					slog.Error("SDK session turn error", "session", s.ID, "subtype", event.Result.Subtype)
@@ -394,6 +421,12 @@ func (s *SDKSession) Stop() {
 	case <-time.After(5 * time.Second):
 		slog.Warn("SDK session eventConsumer did not exit within 5s", "session", s.ID)
 	}
+
+	// Clear output observers as a backstop for callers that forgot to
+	// call the unsubscribe function returned from AddOutputObserver.
+	s.observerMu.Lock()
+	s.outputObservers = nil
+	s.observerMu.Unlock()
 
 	s.doneOnce.Do(func() { close(s.done) })
 	slog.Info("SDK session stopped", "session", s.ID)

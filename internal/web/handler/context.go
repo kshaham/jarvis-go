@@ -12,7 +12,9 @@ import (
 	"github.com/claudeman/jarvis-go/internal/pty"
 	"github.com/claudeman/jarvis-go/internal/ralph"
 	"github.com/claudeman/jarvis-go/internal/respawn"
+	"github.com/claudeman/jarvis-go/internal/notifications"
 	"github.com/claudeman/jarvis-go/internal/runsummary"
+	"github.com/claudeman/jarvis-go/internal/scheduler"
 	"github.com/claudeman/jarvis-go/internal/state"
 	"github.com/claudeman/jarvis-go/internal/subagent"
 	"github.com/claudeman/jarvis-go/internal/teamtemplates"
@@ -38,6 +40,11 @@ type Context struct {
 	RespawnMu          sync.RWMutex
 	TemplateStore      *templates.Store
 	TeamTemplateStore  *teamtemplates.Store
+	AgentTokenMgr      *auth.AgentTokenManager
+	Scheduler          *scheduler.Store
+	SchedulerRunner    *scheduler.Runner
+	Notifications       *notifications.Store
+	NotificationsRouter *notifications.Router
 	TelegramBot        *telegram.Bot
 	TelegramHandler    *telegram.Handler
 	IntegrationMonitor *integrations.Monitor
@@ -57,6 +64,12 @@ type Context struct {
 	// ActivePlanOrchestrators tracks active plan generation session IDs.
 	ActivePlanOrchestrators   map[string]string // orchestratorID -> sessionID
 	ActivePlanOrchestratorsMu sync.RWMutex
+
+	// Spending threshold tracking: remembers which daily-cost alert levels
+	// (50/75/90/100%) have been broadcast today so we don't spam SSE.
+	spendingMu              sync.Mutex
+	spendingDay             string       // YYYY-MM-DD
+	spendingThresholdsFired map[int]bool // threshold -> fired this day
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,
@@ -104,6 +117,38 @@ func (ctx *Context) cleanupSessionResources(sessionID string) {
 	ctx.SessionColorsMu.Lock()
 	delete(ctx.SessionColors, sessionID)
 	ctx.SessionColorsMu.Unlock()
+
+	ctx.ScheduledTasksMu.Lock()
+	delete(ctx.ScheduledTasks, sessionID)
+	ctx.ScheduledTasksMu.Unlock()
+
+	ctx.ActivePlanOrchestratorsMu.Lock()
+	for orchID, sid := range ctx.ActivePlanOrchestrators {
+		if sid == sessionID {
+			delete(ctx.ActivePlanOrchestrators, orchID)
+		}
+	}
+	ctx.ActivePlanOrchestratorsMu.Unlock()
+}
+
+// ResolveWorkingDir reads the configured allowlist from settings (or falls
+// back to $HOME only) and validates the user-supplied path against it via
+// pty.ResolveAndValidateWorkingDir. Returns the canonical path or an error
+// suitable for an HTTP 400.
+func (ctx *Context) ResolveWorkingDir(raw string) (string, error) {
+	settings := ctx.StateStore.GetSettings()
+	var allow []string
+	if v, ok := settings["workingDirAllowlist"].([]interface{}); ok {
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				allow = append(allow, s)
+			}
+		}
+	}
+	if len(allow) == 0 {
+		allow = pty.DefaultWorkingDirAllowlist()
+	}
+	return pty.ResolveAndValidateWorkingDir(raw, allow)
 }
 
 // getProviderEnvVars reads account settings and returns env vars for Claude CLI sessions.
@@ -111,6 +156,14 @@ func (ctx *Context) cleanupSessionResources(sessionID string) {
 // zai-glm (z.ai provider vars), and custom providers.
 func (ctx *Context) getProviderEnvVars() map[string]string {
 	env := make(map[string]string)
+	// Every spawned session receives the agent token so `cm` can authenticate
+	// to /api/office/agent/* endpoints. The token is regenerated only if the
+	// operator manually deletes the file on disk.
+	if ctx.AgentTokenMgr != nil {
+		if tok := ctx.AgentTokenMgr.Token(); tok != "" {
+			env["JARVIS_AGENT_TOKEN"] = tok
+		}
+	}
 	settings := ctx.StateStore.GetSettings()
 
 	provider, _ := settings["provider"].(string)

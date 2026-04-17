@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -132,6 +133,15 @@ func (m *Manager) loadOrCreateSecret() {
 		slog.Error("Failed to persist signing secret", "error", err)
 	}
 	slog.Info("Generated new auth signing secret")
+}
+
+// SigningKey returns the HMAC signing secret for use by other handlers that
+// need to verify signed payloads (e.g. the hook-event HMAC check). Never
+// log or return this over the API.
+func (m *Manager) SigningKey() []byte {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.signingSecret
 }
 
 // IsPasswordConfigured returns true if a password hash exists in auth.json.
@@ -495,23 +505,77 @@ func (m *Manager) CleanupExpiredRateLimits() {
 	}
 }
 
-// ClientIP extracts the client IP from the request.
-// Checks X-Forwarded-For and X-Real-IP headers, falls back to RemoteAddr.
-func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the chain
-		if idx := strings.Index(xff, ","); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
+// trustedProxyCIDRs lists CIDR ranges whose requests may set the
+// X-Forwarded-For / X-Real-IP headers we will trust. Populated via
+// SetTrustedProxyCIDRs at server startup from settings.
+var (
+	trustedProxyMu    sync.RWMutex
+	trustedProxyCIDRs []*net.IPNet
+)
+
+// SetTrustedProxyCIDRs configures which source IPs are trusted to set
+// X-Forwarded-For. Pass an empty slice (default) to ignore the header on
+// every request -- the safe choice when no reverse proxy is deployed.
+func SetTrustedProxyCIDRs(cidrs []string) {
+	parsed := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			parsed = append(parsed, n)
+		} else {
+			slog.Warn("Invalid trustedProxyCIDR; ignoring", "cidr", c, "error", err)
 		}
-		return strings.TrimSpace(xff)
 	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	// RemoteAddr is "ip:port"
+	trustedProxyMu.Lock()
+	trustedProxyCIDRs = parsed
+	trustedProxyMu.Unlock()
+}
+
+// remoteAddrIP returns just the IP portion of r.RemoteAddr (strips :port).
+func remoteAddrIP(r *http.Request) string {
 	addr := r.RemoteAddr
 	if idx := strings.LastIndex(addr, ":"); idx != -1 {
 		return addr[:idx]
 	}
 	return addr
+}
+
+// requestFromTrustedProxy reports whether r.RemoteAddr matches one of the
+// configured trusted-proxy CIDRs.
+func requestFromTrustedProxy(r *http.Request) bool {
+	trustedProxyMu.RLock()
+	defer trustedProxyMu.RUnlock()
+	if len(trustedProxyCIDRs) == 0 {
+		return false
+	}
+	ip := net.ParseIP(remoteAddrIP(r))
+	if ip == nil {
+		return false
+	}
+	for _, n := range trustedProxyCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClientIP extracts the client IP from the request.
+// X-Forwarded-For / X-Real-IP headers are honored only when the request
+// itself arrived from a trusted proxy CIDR. Without that gate, an external
+// client could trivially spoof a different source IP per request to bypass
+// rate limits.
+func ClientIP(r *http.Request) string {
+	if requestFromTrustedProxy(r) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// Take the first IP in the chain (the client the proxy saw).
+			if idx := strings.Index(xff, ","); idx != -1 {
+				return strings.TrimSpace(xff[:idx])
+			}
+			return strings.TrimSpace(xff)
+		}
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			return strings.TrimSpace(xri)
+		}
+	}
+	return remoteAddrIP(r)
 }

@@ -35,6 +35,7 @@ type Controller struct {
 	events     chan RespawnEvent
 	cancelFunc context.CancelFunc
 	writer     SessionWriter
+	wg         sync.WaitGroup // waits for stuckDetector on Stop
 }
 
 // NewController creates a new respawn controller for a session.
@@ -69,12 +70,18 @@ func (rc *Controller) Start(ctx context.Context) error {
 	}
 
 	// Start stuck detection
-	go rc.stuckDetector(childCtx)
+	rc.wg.Add(1)
+	go func() {
+		defer rc.wg.Done()
+		rc.stuckDetector(childCtx)
+	}()
 
 	return nil
 }
 
-// Stop halts the controller and cancels all timers.
+// Stop halts the controller and cancels all timers. Waits for the
+// stuckDetector goroutine to exit (bounded at 5s so a hung writer can't
+// block shutdown indefinitely).
 func (rc *Controller) Stop() {
 	rc.mu.Lock()
 	rc.enabled = false
@@ -86,6 +93,17 @@ func (rc *Controller) Stop() {
 	rc.timers.CancelAll()
 	if cancelFn != nil {
 		cancelFn()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		rc.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		slog.Warn("respawn controller stuckDetector did not exit in 5s", "session", rc.sessionID)
 	}
 }
 

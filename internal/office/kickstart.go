@@ -2,6 +2,7 @@ package office
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -45,14 +46,24 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 		b.WriteString("\n\nAlign your work with this mission. Look for ways to go above and beyond.\n\n")
 	}
 
-	// 3. Previous-work memory (capped)
+	// 2b. Project context (CLAUDE.md / README.md / ARCHITECTURE.md). Cached
+	// per-workingDir so a team spawn only pays the file I/O once.
+	if projectCtx := BuildProjectContext(workingDir); projectCtx != "" {
+		b.WriteString("## Project Context\n")
+		b.WriteString(projectCtx)
+		b.WriteString("\n\n")
+	}
+
+	// 3. Previous-work memory (capped + deduplicated to cut redundant
+	// learnings that accumulate across respawns).
 	if agentMemory != "" {
+		dedupedMemory := deduplicateMemory(agentMemory)
 		b.WriteString("## Previous Work Memory\n")
-		if len(agentMemory) > memoryInjectMaxChars {
-			b.WriteString(agentMemory[:memoryInjectMaxChars])
+		if len(dedupedMemory) > memoryInjectMaxChars {
+			b.WriteString(dedupedMemory[:memoryInjectMaxChars])
 			b.WriteString("\n... (truncated -- use `cm memory section <name>` or `cm memory query <kw>` for the rest)\n\n")
 		} else {
-			b.WriteString(agentMemory)
+			b.WriteString(dedupedMemory)
 			b.WriteString("\n\n")
 		}
 		b.WriteString("Update memory as you work:\n")
@@ -160,7 +171,59 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("## Your Role\n")
 	b.WriteString(config.SystemPrompt)
 
-	return b.String()
+	return prependBudgetWarning(b.String(), config.Name)
+}
+
+// estimatedTokens gives a rough token count for budget estimation. Claude's
+// tokenizer averages ~3.8 chars per token for English prose; /4 slightly
+// underestimates but is accurate enough for an advisory warning threshold.
+func estimatedTokens(s string) int {
+	return len(s) / 4
+}
+
+// budgetWarnThresholdTokens is the point at which we prepend a warning that
+// the kickstart is consuming a significant share of the context window.
+// Claude's window is ~200k tokens; 50k (25%) is aggressive territory.
+const budgetWarnThresholdTokens = 50_000
+
+// prependBudgetWarning adds an advisory header when the kickstart is large
+// enough to meaningfully eat into the agent's context window. Informational
+// only -- does not truncate.
+func prependBudgetWarning(prompt, agentName string) string {
+	tokens := estimatedTokens(prompt)
+	if tokens < budgetWarnThresholdTokens {
+		slog.Debug("kickstart built", "agent", agentName, "estTokens", tokens)
+		return prompt
+	}
+	pct := tokens * 100 / 200_000
+	slog.Warn("large kickstart prompt", "agent", agentName, "estTokens", tokens, "percentOfWindow", pct)
+	warning := fmt.Sprintf("[NOTICE] Your kickstart is ~%d tokens (~%d%% of Claude's 200k context). Plan to `/compact` earlier than the usual 70%% threshold.\n\n", tokens, pct)
+	return warning + prompt
+}
+
+// deduplicateMemory drops repeated bullet / line entries so a memory file
+// that accumulated "remember to run tests" five times only shows up once in
+// the kickstart. Normalizes whitespace + lowercases for comparison; preserves
+// original formatting for the lines it keeps. First occurrence wins.
+func deduplicateMemory(memory string) string {
+	lines := strings.Split(memory, "\n")
+	seen := make(map[string]struct{}, len(lines))
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		key := strings.ToLower(strings.Join(strings.Fields(line), " "))
+		// Keep blank lines + section headers verbatim; only dedupe substantive
+		// content lines (those with length > 8 after normalization).
+		if len(key) <= 8 || strings.HasPrefix(strings.TrimSpace(line), "##") {
+			out = append(out, line)
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 // filterTeammates returns teammates excluding the given config ID.

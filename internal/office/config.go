@@ -30,6 +30,11 @@ type Config struct {
 	WaterCoolerCooldown      time.Duration
 	BlockedTriageMaxAttempts int
 	ReflectionCooldown       time.Duration
+	// AutoKillAfterStuck controls whether agents that exhaust all recovery
+	// tiers are automatically stopped rather than left idle burning quota.
+	// Default true; ops users who want to inspect stuck agents post-mortem
+	// can disable via settings.
+	AutoKillAfterStuck bool
 }
 
 // DefaultConfig returns production defaults matching TypeScript.
@@ -61,5 +66,6 @@ func DefaultConfig() *Config {
 		WaterCoolerCooldown:      5 * time.Minute,
 		BlockedTriageMaxAttempts: 3,
 		ReflectionCooldown:       10 * time.Minute,
+		AutoKillAfterStuck:       true,
 	}
 }

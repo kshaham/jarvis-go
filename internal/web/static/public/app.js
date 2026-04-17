@@ -18,7 +18,7 @@ const THROTTLE_DELAY_MS = 100;              // General UI throttle delay
 const TERMINAL_CHUNK_SIZE = 64 * 1024;      // 64KB chunks for terminal data
 const TERMINAL_TAIL_SIZE = 256 * 1024;      // 256KB tail for initial load
 const SYNC_WAIT_TIMEOUT_MS = 50;            // Wait timeout for terminal sync
-const STATS_POLLING_INTERVAL_MS = 2000;     // System stats polling
+const STATS_POLLING_INTERVAL_MS = 10000;    // System stats polling
 
 // DEC mode 2026 - Synchronized Output
 // Wrap terminal writes with these markers to prevent partial-frame flicker.
@@ -77,6 +77,48 @@ const BUILTIN_RESPAWN_PRESETS = [
     createdAt: 0,
   },
 ];
+
+// ============================================================================
+// Multi-Terminal Registry
+// ============================================================================
+
+/**
+ * TerminalState - Per-session xterm Terminal + FitAddon + pane container +
+ * write-batching state. Each active session gets one of these, allowing all
+ * sessions to accumulate output in the background while only the active pane
+ * is visible. Switching tabs becomes an instant visibility swap.
+ */
+class TerminalState {
+  constructor(sessionId, container, terminal, fitAddon, searchAddon) {
+    this.sessionId = sessionId;
+    this.container = container;
+    this.terminal = terminal;
+    this.fitAddon = fitAddon;
+    this.searchAddon = searchAddon || null;
+    this.lastViewedAt = Date.now();
+    this.hydrated = false;
+    // Per-session write-batching state (mirrors the legacy global state).
+    this.pendingWrites = '';
+    this.writeFrameScheduled = false;
+    this.wasAtBottomBeforeWrite = true;
+    this.syncWaitTimeout = null;
+    this.flickerFilterBuffer = '';
+    this.flickerFilterActive = false;
+    this.flickerFilterTimeout = null;
+    this.lastResizeDims = null;
+  }
+
+  touch() { this.lastViewedAt = Date.now(); }
+
+  dispose() {
+    if (this.flickerFilterTimeout) clearTimeout(this.flickerFilterTimeout);
+    if (this.syncWaitTimeout) clearTimeout(this.syncWaitTimeout);
+    try { this.terminal.dispose(); } catch (_) { /* ignore */ }
+    if (this.container && this.container.parentNode) {
+      this.container.parentNode.removeChild(this.container);
+    }
+  }
+}
 
 // ============================================================================
 // Accessibility: Focus Trap for Modals
@@ -592,6 +634,29 @@ class NotificationManager {
 }
 
 class JarvisApp {
+  /**
+   * Active session's terminal instance. In multi-terminal mode this
+   * transparently routes to the xterm.js instance for the currently-selected
+   * session, so all existing `this.terminal.*` call sites keep working.
+   */
+  get terminal() {
+    if (this._multiTerminal) {
+      const state = this._sessionTerminals.get(this.activeSessionId);
+      return state ? state.terminal : null;
+    }
+    return this._legacyTerminal;
+  }
+  set terminal(v) { this._legacyTerminal = v; }
+
+  get fitAddon() {
+    if (this._multiTerminal) {
+      const state = this._sessionTerminals.get(this.activeSessionId);
+      return state ? state.fitAddon : null;
+    }
+    return this._legacyFitAddon;
+  }
+  set fitAddon(v) { this._legacyFitAddon = v; }
+
   constructor() {
     this.sessions = new Map();
     this.sessionOrder = []; // Track tab order for drag-and-drop reordering
@@ -602,9 +667,16 @@ class JarvisApp {
     this.totalCost = 0;
     this.globalStats = null; // Global token/cost stats across all sessions
     this.eventSource = null;
-    this.terminal = null;
-    this.fitAddon = null;
+    // _legacyTerminal / _legacyFitAddon back the getter below when multi-terminal is disabled.
+    this._legacyTerminal = null;
+    this._legacyFitAddon = null;
     this.activeSessionId = null;
+    // Multi-terminal: each session gets its own Terminal + pane. Feature flag
+    // lets users fall back to single-terminal mode if needed.
+    this._multiTerminal = localStorage.getItem('jarvis-multi-terminal') !== 'false';
+    this._sessionTerminals = new Map(); // sessionId -> TerminalState
+    this._terminalHost = null;          // DOM element that contains per-session panes
+    this._maxTerminals = 20;
     this.respawnStatus = {};
     this.respawnTimers = {}; // Track timed respawn timers
     this.respawnCountdownTimers = {}; // { sessionId: { timerName: { endsAt, totalMs, reason } } }
@@ -999,6 +1071,232 @@ class JarvisApp {
   }
 
   initTerminal() {
+    if (this._multiTerminal) {
+      this.initMultiTerminalHost();
+    } else {
+      this.initLegacyTerminal();
+    }
+  }
+
+  /**
+   * Multi-terminal mode: the #terminalContainer hosts per-session panes that
+   * are absolute-positioned children. Each session gets its own xterm.js
+   * instance that runs in the background even when hidden, so switching tabs
+   * is an instant visibility swap with no reload flash.
+   */
+  initMultiTerminalHost() {
+    const host = document.getElementById('terminalContainer');
+    this._terminalHost = host;
+    host.classList.add('terminal-host-multi');
+
+    // Welcome message still uses the shared overlay.
+    this.showWelcome();
+
+    // Throttled resize: fit every hydrated terminal on window/host resize.
+    // Only post a resize API call for the currently-visible session because
+    // the backend PTY serves the cols/rows of whichever terminal's typing.
+    this._resizeTimeout = null;
+    const throttledResize = () => {
+      if (this._resizeTimeout) return;
+      this._resizeTimeout = setTimeout(() => {
+        this._resizeTimeout = null;
+        for (const state of this._sessionTerminals.values()) {
+          try { state.fitAddon.fit(); } catch (_) { /* ignore */ }
+        }
+        const active = this._sessionTerminals.get(this.activeSessionId);
+        if (active) {
+          const dims = active.fitAddon.proposeDimensions();
+          if (dims && (!active.lastResizeDims ||
+              dims.cols !== active.lastResizeDims.cols ||
+              dims.rows !== active.lastResizeDims.rows)) {
+            active.lastResizeDims = { cols: dims.cols, rows: dims.rows };
+            this.postJson(`/api/sessions/${this.activeSessionId}/resize`, { cols: dims.cols, rows: dims.rows }).catch(() => {});
+          }
+        }
+        this.updateConnectionLines();
+      }, 100);
+    };
+    window.addEventListener('resize', throttledResize);
+    if (this._terminalResizeObserver) this._terminalResizeObserver.disconnect();
+    this._terminalResizeObserver = new ResizeObserver(throttledResize);
+    this._terminalResizeObserver.observe(host);
+  }
+
+  /**
+   * Create a per-session Terminal + FitAddon + pane container and register it
+   * in the registry. Lazily called when the first SSE event arrives for a
+   * session or when the user selects a tab.
+   */
+  ensureTerminalForSession(sessionId) {
+    if (!this._multiTerminal) return null;
+    let state = this._sessionTerminals.get(sessionId);
+    if (state) { state.touch(); return state; }
+
+    // Enforce max terminals; evict oldest inactive first.
+    if (this._sessionTerminals.size >= this._maxTerminals) {
+      this.evictLRUTerminal();
+    }
+
+    const scrollback = parseInt(localStorage.getItem('jarvis-scrollback')) || DEFAULT_SCROLLBACK;
+    const pane = document.createElement('div');
+    pane.className = 'terminal-pane';
+    pane.dataset.sessionId = sessionId;
+    pane.style.display = 'none';
+    this._terminalHost.appendChild(pane);
+
+    const terminal = new Terminal({
+      theme: {
+        background: '#0d0d0d', foreground: '#e0e0e0', cursor: '#e0e0e0',
+        cursorAccent: '#0d0d0d', selection: 'rgba(255, 255, 255, 0.3)',
+        black: '#0d0d0d', red: '#ff6b6b', green: '#51cf66', yellow: '#ffd43b',
+        blue: '#339af0', magenta: '#cc5de8', cyan: '#22b8cf', white: '#e0e0e0',
+        brightBlack: '#495057', brightRed: '#ff8787', brightGreen: '#69db7c',
+        brightYellow: '#ffe066', brightBlue: '#5c7cfa', brightMagenta: '#da77f2',
+        brightCyan: '#66d9e8', brightWhite: '#ffffff',
+      },
+      fontFamily: '"Fira Code", "Cascadia Code", "JetBrains Mono", "SF Mono", Monaco, monospace',
+      fontSize: 14, lineHeight: 1.2, cursorBlink: false, cursorStyle: 'block',
+      scrollback: scrollback, allowTransparency: true,
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    terminal.loadAddon(fitAddon);
+    // Load the search addon if available (falls back gracefully if CDN blocks).
+    let searchAddon = null;
+    if (typeof SearchAddon !== 'undefined' && SearchAddon.SearchAddon) {
+      try {
+        searchAddon = new SearchAddon.SearchAddon();
+        terminal.loadAddon(searchAddon);
+      } catch (_) { searchAddon = null; }
+    }
+    terminal.open(pane);
+
+    // Register link provider against this specific terminal.
+    this.registerFilePathLinkProviderFor(terminal);
+
+    // Wheel forwarding local to this pane.
+    pane.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      const lines = Math.round(ev.deltaY / 25) || (ev.deltaY > 0 ? 1 : -1);
+      terminal.scrollLines(lines);
+    }, { passive: false });
+
+    // Per-session input handler. Bound session ID (not activeSessionId) so
+    // keystrokes always go to the terminal that received them, even during
+    // a tab-switch focus race.
+    let pendingInput = '';
+    let inputFlushTimeout = null;
+    const flushInput = () => {
+      if (pendingInput) {
+        const input = pendingInput;
+        pendingInput = '';
+        this.postJson(`/api/sessions/${sessionId}/input`, { input }).catch(() => {});
+        this.clearPendingHooks(sessionId);
+      }
+      inputFlushTimeout = null;
+    };
+    terminal.onData((data) => {
+      pendingInput += data;
+      if (data.charCodeAt(0) < 32 || data.length > 1) {
+        if (inputFlushTimeout) { clearTimeout(inputFlushTimeout); inputFlushTimeout = null; }
+        flushInput();
+        return;
+      }
+      if (!inputFlushTimeout) inputFlushTimeout = setTimeout(flushInput, 16);
+    });
+
+    state = new TerminalState(sessionId, pane, terminal, fitAddon, searchAddon);
+    this._sessionTerminals.set(sessionId, state);
+    return state;
+  }
+
+  /**
+   * Make the given session's pane visible, hide others. Called from
+   * selectSession to swap the visible terminal with no reload flash.
+   */
+  showTerminalPane(sessionId) {
+    if (!this._multiTerminal) return;
+    for (const [id, state] of this._sessionTerminals) {
+      state.container.style.display = (id === sessionId) ? 'block' : 'none';
+    }
+    const target = this._sessionTerminals.get(sessionId);
+    if (target) {
+      target.touch();
+      queueMicrotask(() => {
+        try { target.fitAddon.fit(); } catch (_) { /* ignore */ }
+        target.terminal.focus();
+      });
+    }
+  }
+
+  /** Dispose a session's terminal and its pane. */
+  disposeTerminalForSession(sessionId) {
+    const state = this._sessionTerminals.get(sessionId);
+    if (!state) return;
+    state.dispose();
+    this._sessionTerminals.delete(sessionId);
+  }
+
+  /** Evict the oldest non-active hydrated terminal. */
+  evictLRUTerminal() {
+    let oldest = null, oldestAt = Infinity;
+    for (const [id, state] of this._sessionTerminals) {
+      if (id === this.activeSessionId) continue;
+      if (state.lastViewedAt < oldestAt) { oldestAt = state.lastViewedAt; oldest = id; }
+    }
+    if (oldest) this.disposeTerminalForSession(oldest);
+  }
+
+  /**
+   * Hydrate a terminal by loading its backend buffer once. Idempotent.
+   * The live SSE stream continues to append writes during hydration; those
+   * pending writes arrive via batchTerminalWrite and are safely appended
+   * after this call completes because xterm preserves ordering.
+   */
+  async hydrateTerminalForSession(sessionId) {
+    const state = this._sessionTerminals.get(sessionId);
+    if (!state || state.hydrated) return;
+    state.hydrated = true;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/terminal?tail=${256 * 1024}`);
+      const data = await res.json();
+      if (data.truncated) {
+        state.terminal.write('\x1b[90m... (earlier output truncated for performance) ...\x1b[0m\r\n\r\n');
+      }
+      if (data.terminalBuffer) {
+        await this.chunkedTerminalWriteTo(state, data.terminalBuffer);
+        state.terminal.scrollToBottom();
+      }
+    } catch (err) {
+      console.error('Failed to hydrate terminal buffer:', err);
+    }
+  }
+
+  /**
+   * Chunked write to a specific terminal state (for hydration).
+   */
+  chunkedTerminalWriteTo(state, buffer, chunkSize = 64 * 1024) {
+    return new Promise((resolve) => {
+      if (!buffer || buffer.length === 0) { resolve(); return; }
+      const clean = buffer
+        .replaceAll(DEC_SYNC_START, '')
+        .replaceAll(DEC_SYNC_END, '');
+      if (clean.length <= chunkSize) { state.terminal.write(clean); resolve(); return; }
+      let offset = 0;
+      const writeChunk = () => {
+        if (offset >= clean.length) { requestAnimationFrame(() => resolve()); return; }
+        const end = Math.min(offset + chunkSize, clean.length);
+        state.terminal.write(clean.slice(offset, end));
+        offset = end;
+        requestAnimationFrame(writeChunk);
+      };
+      writeChunk();
+    });
+  }
+
+  /**
+   * Legacy single-terminal init path (kept for fallback via feature flag).
+   */
+  initLegacyTerminal() {
     // Load scrollback setting from localStorage (default 5000)
     const scrollback = parseInt(localStorage.getItem('jarvis-scrollback')) || DEFAULT_SCROLLBACK;
 
@@ -1134,19 +1432,27 @@ class JarvisApp {
    * When clicked, opens a floating log viewer window with live streaming.
    */
   registerFilePathLinkProvider() {
+    this.registerFilePathLinkProviderFor(this.terminal);
+  }
+
+  /**
+   * Register the file-path link provider against a specific terminal instance.
+   * Used by both legacy single-terminal init and per-session multi-terminal init.
+   */
+  registerFilePathLinkProviderFor(terminal) {
     const self = this;
 
     // Debug: Track if provider is being invoked
     let lastInvokedLine = -1;
 
-    this.terminal.registerLinkProvider({
+    terminal.registerLinkProvider({
       provideLinks(bufferLineNumber, callback) {
         // Debug logging - only log if line changed to avoid spam
         if (bufferLineNumber !== lastInvokedLine) {
           lastInvokedLine = bufferLineNumber;
         }
 
-        const buffer = self.terminal.buffer.active;
+        const buffer = terminal.buffer.active;
         const line = buffer.getLine(bufferLineNumber);
 
         if (!line) {
@@ -1249,7 +1555,129 @@ class JarvisApp {
     return buffer.viewportY >= buffer.baseY - 2;
   }
 
-  batchTerminalWrite(data) {
+  /**
+   * Route terminal data to the correct session. If a sessionId is provided
+   * (multi-terminal mode), the write targets that session's terminal;
+   * otherwise it targets the legacy single terminal for backwards compat.
+   */
+  batchTerminalWrite(dataOrSessionId, maybeData) {
+    let sessionId, data;
+    if (maybeData === undefined) {
+      // Legacy single-arg call writing to the active session's terminal.
+      sessionId = this.activeSessionId;
+      data = dataOrSessionId;
+    } else {
+      sessionId = dataOrSessionId;
+      data = maybeData;
+    }
+
+    if (this._multiTerminal) {
+      const state = this.ensureTerminalForSession(sessionId);
+      if (!state) return;
+      this._batchTerminalWriteState(state, data);
+      return;
+    }
+    // Legacy path: uses global state on this.
+    this._batchTerminalWriteLegacy(data);
+  }
+
+  /**
+   * Multi-terminal batching path: operates on a TerminalState so each session
+   * has its own write queue, sticky-scroll tracking, flicker filter, and sync
+   * timers. Purely a functional copy of the legacy logic with state.* instead
+   * of this.*.
+   */
+  _batchTerminalWriteState(state, data) {
+    if (!state.writeFrameScheduled) {
+      state.wasAtBottomBeforeWrite = this._terminalStateAtBottom(state);
+    }
+
+    const session = this.sessions.get(state.sessionId);
+    const flickerFilterEnabled = session?.flickerFilterEnabled ?? false;
+
+    if (flickerFilterEnabled) {
+      const hasScreenClear = data.includes('\x1b[2J') ||
+                             data.includes('\x1b[H\x1b[J') ||
+                             (data.includes('\x1b[H') && data.includes('\x1b[?25l'));
+      if (hasScreenClear) {
+        state.flickerFilterActive = true;
+        state.flickerFilterBuffer += data;
+        if (state.flickerFilterTimeout) clearTimeout(state.flickerFilterTimeout);
+        state.flickerFilterTimeout = setTimeout(() => {
+          state.flickerFilterTimeout = null;
+          this._flushFlickerBufferState(state);
+        }, SYNC_WAIT_TIMEOUT_MS);
+        return;
+      }
+      if (state.flickerFilterActive) {
+        state.flickerFilterBuffer += data;
+        return;
+      }
+    }
+
+    state.pendingWrites += data;
+    if (!state.writeFrameScheduled) {
+      state.writeFrameScheduled = true;
+      requestAnimationFrame(() => {
+        if (state.pendingWrites) {
+          const hasStart = state.pendingWrites.includes(DEC_SYNC_START);
+          const hasEnd = state.pendingWrites.includes(DEC_SYNC_END);
+          if (hasStart && !hasEnd) {
+            if (!state.syncWaitTimeout) {
+              state.syncWaitTimeout = setTimeout(() => {
+                state.syncWaitTimeout = null;
+                this._flushPendingWritesState(state);
+              }, 50);
+            }
+            state.writeFrameScheduled = false;
+            return;
+          }
+          if (state.syncWaitTimeout) { clearTimeout(state.syncWaitTimeout); state.syncWaitTimeout = null; }
+          this._flushPendingWritesState(state);
+        }
+        state.writeFrameScheduled = false;
+      });
+    }
+  }
+
+  _flushFlickerBufferState(state) {
+    if (!state.flickerFilterBuffer) return;
+    state.pendingWrites += state.flickerFilterBuffer;
+    state.flickerFilterBuffer = '';
+    state.flickerFilterActive = false;
+    if (!state.writeFrameScheduled) {
+      state.writeFrameScheduled = true;
+      requestAnimationFrame(() => {
+        this._flushPendingWritesState(state);
+        state.writeFrameScheduled = false;
+      });
+    }
+  }
+
+  _flushPendingWritesState(state) {
+    if (!state.pendingWrites) return;
+    const segments = extractSyncSegments(state.pendingWrites);
+    state.pendingWrites = '';
+    for (const segment of segments) {
+      if (segment) {
+        const cleanSegment = segment
+          .replaceAll(DEC_SYNC_START, '')
+          .replaceAll(DEC_SYNC_END, '');
+        if (cleanSegment) state.terminal.write(cleanSegment);
+      }
+    }
+    if (state.wasAtBottomBeforeWrite) state.terminal.scrollToBottom();
+  }
+
+  _terminalStateAtBottom(state) {
+    try {
+      const buffer = state.terminal.buffer.active;
+      return buffer.viewportY >= buffer.baseY;
+    } catch (_) { return true; }
+  }
+
+  /** Legacy single-terminal batching path (feature-flag fallback). */
+  _batchTerminalWriteLegacy(data) {
     // Check if at bottom BEFORE adding data (captures user's scroll position)
     // Only update if not already scheduled (preserve the first check's result)
     if (!this.writeFrameScheduled) {
@@ -1468,10 +1896,37 @@ class JarvisApp {
         this.nextSession();
       }
 
-      // Ctrl/Cmd + K - kill all
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      // Ctrl/Cmd + K - open command palette (fallback-friendly: when focus is
+      // not already in an editable, otherwise the browser's normal behavior).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        const el = document.activeElement;
+        const editable = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+        if (!editable) {
+          e.preventDefault();
+          this.toggleCommandPalette();
+          return;
+        }
+      }
+
+      // Ctrl/Cmd + Shift + K - kill all (moved from Cmd+K which now opens palette)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'K') {
         e.preventDefault();
         this.killAllSessions();
+      }
+
+      // Ctrl/Cmd + F - in-terminal search (the active session's terminal).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+        const el = document.activeElement;
+        const editable = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+        // Only hijack Cmd+F when the command palette isn't already open and
+        // focus isn't in a text input (so browser native find still works in
+        // input fields).
+        const paletteOpen = document.getElementById('commandPalette')?.classList.contains('visible');
+        if (!editable && !paletteOpen) {
+          e.preventDefault();
+          this.openTerminalSearch();
+          return;
+        }
       }
 
       // Ctrl/Cmd + L - clear terminal
@@ -1560,6 +2015,201 @@ class JarvisApp {
 
   // ========== SSE Connection ==========
 
+  /**
+   * Update the SSE connection status pill in the header.
+   * State is one of: 'connected', 'reconnecting', 'offline'.
+   */
+  updateConnectionStatus(state) {
+    const el = document.getElementById('sseStatus');
+    if (!el) return;
+    el.dataset.state = state;
+    let label = 'Connected';
+    if (state === 'reconnecting') label = `Reconnecting (${this.reconnectAttempts})`;
+    else if (state === 'offline') label = 'Offline';
+    el.textContent = label;
+    el.title = `SSE: ${label}`;
+  }
+
+  /**
+   * Show a desktop notification for a session state transition. Only fires
+   * when the tab is hidden (user is elsewhere) and the Notification API is
+   * granted. Opt-in via the "desktopNotifications" setting.
+   */
+  notifySessionStateChange(sessionId, fromStatus, toStatus) {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission !== 'granted') return;
+    if (!document.hidden) return; // only notify when tab is hidden
+    if (!this.settings?.desktopNotifications) return;
+    // Only notify on busy->idle (work finished) transitions to avoid spam.
+    if (!(fromStatus === 'busy' && toStatus === 'idle')) return;
+    const session = this.sessions.get(sessionId);
+    const name = session ? this.getSessionName(session) : sessionId;
+    try {
+      new Notification('Jarvis — session idle', {
+        body: `${name} has finished working`,
+        tag: `jarvis-session-${sessionId}`,
+      });
+    } catch (_) { /* browser may block */ }
+  }
+
+  /**
+   * Toggle the Cmd+K command palette. Builds the command list on open from
+   * both static commands and the current session list.
+   */
+  toggleCommandPalette() {
+    const modal = document.getElementById('commandPalette');
+    if (!modal) return;
+    if (modal.classList.contains('visible')) {
+      this.closeCommandPalette();
+      return;
+    }
+    this._paletteCommands = this._buildCommandPaletteEntries();
+    this._paletteFiltered = this._paletteCommands.slice();
+    this._paletteSelected = 0;
+    this._renderPalette();
+    modal.classList.add('visible');
+    const input = document.getElementById('commandPaletteInput');
+    if (input) { input.value = ''; input.focus(); }
+  }
+
+  closeCommandPalette() {
+    const modal = document.getElementById('commandPalette');
+    if (modal) modal.classList.remove('visible');
+  }
+
+  _buildCommandPaletteEntries() {
+    const entries = [
+      { title: 'Run Claude', hint: 'Start a new Claude session', run: () => this.runClaude() },
+      { title: 'Start Ralph Loop Wizard', hint: 'Configure a Ralph loop', run: () => this.showRalphWizard() },
+      { title: 'Clear terminal', hint: 'Active session (Ctrl/Cmd+L)', run: () => this.clearTerminal() },
+      { title: 'Close active session', hint: 'Ctrl/Cmd+W', run: () => this.killActiveSession() },
+      { title: 'Close all stopped sessions', hint: 'Tidy up', run: () => this.closeStoppedSessions?.() },
+      { title: 'Kill all sessions', hint: 'Ctrl/Cmd+Shift+K', run: () => this.killAllSessions() },
+      { title: 'Open settings', hint: '', run: () => this.openAppSettings() },
+      { title: 'Open Office (team view)', hint: '', run: () => { window.location.href = '/office'; } },
+      { title: 'Toggle activity dashboard', hint: 'Ctrl/Cmd+D', run: () => this.toggleActivityDashboard() },
+      { title: 'Toggle notifications panel', hint: '', run: () => this.toggleNotifications?.() },
+      { title: 'Show help', hint: 'Ctrl/Cmd+?', run: () => this.showHelp() },
+    ];
+    // Dynamic: switch to each open session.
+    for (const id of this.sessionOrder) {
+      const session = this.sessions.get(id);
+      if (!session) continue;
+      const name = this.getSessionName(session);
+      entries.push({
+        title: `Switch to session: ${name}`,
+        hint: session.status || 'idle',
+        run: () => this.selectSession(id),
+      });
+    }
+    return entries;
+  }
+
+  _renderPalette() {
+    const list = document.getElementById('commandPaletteList');
+    if (!list) return;
+    list.innerHTML = this._paletteFiltered.map((entry, i) => `
+      <div class="palette-item ${i === this._paletteSelected ? 'selected' : ''}" data-idx="${i}">
+        <div class="palette-title">${this.escapeHtml(entry.title)}</div>
+        ${entry.hint ? `<div class="palette-hint">${this.escapeHtml(entry.hint)}</div>` : ''}
+      </div>
+    `).join('');
+    list.querySelectorAll('.palette-item').forEach((el) => {
+      el.addEventListener('click', () => {
+        const idx = parseInt(el.dataset.idx, 10);
+        this._executePaletteEntry(idx);
+      });
+    });
+  }
+
+  _filterPalette(query) {
+    const q = (query || '').toLowerCase().trim();
+    if (!q) {
+      this._paletteFiltered = this._paletteCommands.slice();
+    } else {
+      // Simple substring + rank by match position.
+      this._paletteFiltered = this._paletteCommands
+        .map((e) => ({ entry: e, idx: e.title.toLowerCase().indexOf(q) }))
+        .filter((r) => r.idx !== -1)
+        .sort((a, b) => a.idx - b.idx)
+        .map((r) => r.entry);
+    }
+    this._paletteSelected = 0;
+    this._renderPalette();
+  }
+
+  _executePaletteEntry(idx) {
+    const entry = this._paletteFiltered[idx];
+    if (!entry) return;
+    this.closeCommandPalette();
+    try { entry.run(); } catch (err) { console.error('palette command failed:', err); }
+  }
+
+  handleCommandPaletteKeydown(e) {
+    if (!this._paletteFiltered) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.closeCommandPalette();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this._paletteSelected = Math.min(this._paletteSelected + 1, this._paletteFiltered.length - 1);
+      this._renderPalette();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this._paletteSelected = Math.max(this._paletteSelected - 1, 0);
+      this._renderPalette();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      this._executePaletteEntry(this._paletteSelected);
+    }
+  }
+
+  /**
+   * Open the terminal search box for the active session. Uses xterm's
+   * SearchAddon if loaded, otherwise shows a tooltip that search is
+   * unavailable (CDN blocked).
+   */
+  openTerminalSearch() {
+    const state = this._multiTerminal ? this._sessionTerminals.get(this.activeSessionId) : null;
+    const box = document.getElementById('terminalSearchBox');
+    if (!box) return;
+    if (!state || !state.searchAddon) {
+      this.showNotification?.('Terminal search unavailable', 'warning');
+      return;
+    }
+    box.classList.add('visible');
+    const input = document.getElementById('terminalSearchInput');
+    if (input) { input.value = ''; input.focus(); }
+  }
+
+  closeTerminalSearch() {
+    const box = document.getElementById('terminalSearchBox');
+    if (box) box.classList.remove('visible');
+  }
+
+  runTerminalSearch(direction) {
+    const state = this._sessionTerminals.get(this.activeSessionId);
+    if (!state || !state.searchAddon) return;
+    const input = document.getElementById('terminalSearchInput');
+    const term = input?.value || '';
+    if (!term) return;
+    if (direction === 'prev') {
+      state.searchAddon.findPrevious(term, { regex: false, wholeWord: false, caseSensitive: false });
+    } else {
+      state.searchAddon.findNext(term, { regex: false, wholeWord: false, caseSensitive: false });
+    }
+  }
+
+  handleTerminalSearchKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.closeTerminalSearch();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      this.runTerminalSearch(e.shiftKey ? 'prev' : 'next');
+    }
+  }
+
   connectSSE() {
     // Check if browser is offline
     if (!navigator.onLine) {
@@ -1614,6 +2264,7 @@ class JarvisApp {
 
     this.eventSource.onopen = () => {
       this.reconnectAttempts = 0;
+      this.updateConnectionStatus('connected');
     };
     this.eventSource.onerror = () => {
       this.reconnectAttempts++;
@@ -1625,8 +2276,10 @@ class JarvisApp {
       // Stop reconnecting after max attempts (will resume on online event or manual reload)
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         console.warn(`[SSE] Max reconnect attempts (${this.maxReconnectAttempts}) reached, giving up`);
+        this.updateConnectionStatus('offline');
         return;
       }
+      this.updateConnectionStatus('reconnecting');
       // Clear any existing reconnect timeout before setting new one (prevents orphaned timeouts)
       if (this.sseReconnectTimeout) {
         clearTimeout(this.sseReconnectTimeout);
@@ -1658,6 +2311,10 @@ class JarvisApp {
       const session = data.session || data;
       const oldSession = this.sessions.get(session.id);
       const claudeSessionIdJustSet = session.claudeSessionId && (!oldSession || !oldSession.claudeSessionId);
+      // Desktop notification on status transitions (busy -> idle).
+      if (oldSession && oldSession.status !== session.status) {
+        this.notifySessionStateChange(session.id, oldSession.status, session.status);
+      }
       this.sessions.set(session.id, session);
       this.renderSessionTabs();
       this.updateCost();
@@ -1682,6 +2339,8 @@ class JarvisApp {
     addListener('session:deleted', (e) => {
       const data = JSON.parse(e.data);
       this.sessions.delete(data.id);
+      // Dispose the per-session terminal and remove its DOM pane.
+      if (this._multiTerminal) this.disposeTerminalForSession(data.id);
       // Remove from tab order
       const orderIndex = this.sessionOrder.indexOf(data.id);
       if (orderIndex !== -1) {
@@ -1719,6 +2378,27 @@ class JarvisApp {
 
     addListener('session:terminal', (e) => {
       const data = JSON.parse(e.data);
+      if (this._multiTerminal) {
+        // Mark a background activity alert if the output is for a non-active tab.
+        if (data.id !== this.activeSessionId && !this.tabAlerts.has(data.id)) {
+          this.tabAlerts.set(data.id, 'activity');
+          this.renderSessionTabs();
+        }
+        // Route to the correct session's terminal regardless of which is
+        // currently visible. Lazy-create and hydrate if this is the first
+        // time we're seeing output for this session.
+        const state = this.ensureTerminalForSession(data.id);
+        if (!state) return;
+        if (!state.hydrated) {
+          this.hydrateTerminalForSession(data.id).finally(() => {
+            this.batchTerminalWrite(data.id, data.data);
+          });
+        } else {
+          this.batchTerminalWrite(data.id, data.data);
+        }
+        return;
+      }
+      // Legacy: only active session's output is rendered.
       if (data.id === this.activeSessionId) {
         this.batchTerminalWrite(data.data);
       }
@@ -1779,6 +2459,23 @@ class JarvisApp {
         title: 'Session Error',
         message: data.error || 'Unknown error',
       });
+    });
+
+    addListener('spending:threshold', (e) => {
+      const data = JSON.parse(e.data);
+      const pct = Math.round(data.percentUsed);
+      const msg = data.frozen
+        ? `Daily spending cap reached ($${data.todayCost.toFixed(2)} / $${data.dailyCap.toFixed(2)}). New sessions are frozen.`
+        : `Spending at ${pct}% of daily cap ($${data.todayCost.toFixed(2)} / $${data.dailyCap.toFixed(2)}).`;
+      this.showNotification?.(msg, data.frozen ? 'error' : 'warning');
+      this.fetchSpendingStatus();
+    });
+
+    addListener('session:costExceeded', (e) => {
+      const data = JSON.parse(e.data);
+      const session = this.sessions.get(data.id);
+      const name = session ? this.getSessionName(session) : data.id;
+      this.showNotification?.(`${name} stopped: cost cap of $${data.cap.toFixed(2)} reached ($${data.cost.toFixed(4)})`, 'error');
     });
 
     addListener('session:exit', (e) => {
@@ -2743,9 +3440,17 @@ class JarvisApp {
       });
     }
 
-    // Auto-select first session if any (use sessionOrder for user's preferred order)
+    // Auto-select: prefer the session that was active before the last reload,
+    // falling back to the first tab in user's preferred order.
     if (this.sessionOrder.length > 0 && !this.activeSessionId) {
-      this.selectSession(this.sessionOrder[0]);
+      let target = null;
+      try {
+        const saved = localStorage.getItem('jarvis-last-active-session');
+        if (saved && this.sessions.has(saved) && this.sessionOrder.includes(saved)) {
+          target = saved;
+        }
+      } catch (_) { /* ignore */ }
+      this.selectSession(target || this.sessionOrder[0]);
     }
   }
 
@@ -2806,11 +3511,14 @@ class JarvisApp {
         const alertType = this.tabAlerts.get(id);
         const wantAction = alertType === 'action';
         const wantIdle = alertType === 'idle';
+        const wantActivity = alertType === 'activity';
         const hasAction = tab.classList.contains('tab-alert-action');
         const hasIdle = tab.classList.contains('tab-alert-idle');
-        if (wantAction && !hasAction) { tab.classList.add('tab-alert-action'); tab.classList.remove('tab-alert-idle'); }
-        else if (wantIdle && !hasIdle) { tab.classList.add('tab-alert-idle'); tab.classList.remove('tab-alert-action'); }
-        else if (!alertType && (hasAction || hasIdle)) { tab.classList.remove('tab-alert-action', 'tab-alert-idle'); }
+        const hasActivity = tab.classList.contains('tab-alert-activity');
+        if (wantAction && !hasAction) { tab.classList.add('tab-alert-action'); tab.classList.remove('tab-alert-idle', 'tab-alert-activity'); }
+        else if (wantIdle && !hasIdle) { tab.classList.add('tab-alert-idle'); tab.classList.remove('tab-alert-action', 'tab-alert-activity'); }
+        else if (wantActivity && !hasActivity) { tab.classList.add('tab-alert-activity'); tab.classList.remove('tab-alert-action', 'tab-alert-idle'); }
+        else if (!alertType && (hasAction || hasIdle || hasActivity)) { tab.classList.remove('tab-alert-action', 'tab-alert-idle', 'tab-alert-activity'); }
 
         // Update status indicator
         const statusEl = tab.querySelector('.tab-status');
@@ -2882,7 +3590,10 @@ class JarvisApp {
       const taskStats = session.taskStats || { running: 0, total: 0 };
       const hasRunningTasks = taskStats.running > 0;
       const alertType = this.tabAlerts.get(id);
-      const alertClass = alertType === 'action' ? ' tab-alert-action' : alertType === 'idle' ? ' tab-alert-idle' : '';
+      const alertClass = alertType === 'action' ? ' tab-alert-action'
+        : alertType === 'idle' ? ' tab-alert-idle'
+        : alertType === 'activity' ? ' tab-alert-activity'
+        : '';
 
       // Get minimized subagents for this session
       const minimizedAgents = this.minimizedSubagents.get(id);
@@ -3271,19 +3982,28 @@ class JarvisApp {
 
   async selectSession(sessionId) {
     if (this.activeSessionId === sessionId) return;
+    // Persist last-active session so we can restore it on reload.
+    try { localStorage.setItem('jarvis-last-active-session', sessionId); } catch (_) { /* ignore */ }
 
-    // Clean up flicker filter state when switching sessions
-    if (this.flickerFilterTimeout) {
-      clearTimeout(this.flickerFilterTimeout);
-      this.flickerFilterTimeout = null;
+    // Clean up legacy flicker filter state (multi-terminal mode has per-state
+    // timers that aren't reset on switch - each terminal keeps its own filter).
+    if (!this._multiTerminal) {
+      if (this.flickerFilterTimeout) {
+        clearTimeout(this.flickerFilterTimeout);
+        this.flickerFilterTimeout = null;
+      }
+      this.flickerFilterBuffer = '';
+      this.flickerFilterActive = false;
     }
-    this.flickerFilterBuffer = '';
-    this.flickerFilterActive = false;
 
     this.activeSessionId = sessionId;
     this.hideWelcome();
     // Clear idle hooks on view, but keep action hooks until user interacts
     this.clearPendingHooks(sessionId, 'idle_prompt');
+    // Clear the "activity" badge now that the user is viewing this tab.
+    if (this.tabAlerts.get(sessionId) === 'activity') {
+      this.tabAlerts.delete(sessionId);
+    }
     this.renderSessionTabs();
 
     // Check if this is a restored session that needs to be attached
@@ -3303,29 +4023,42 @@ class JarvisApp {
     }
 
     // Load terminal buffer for this session
-    // Use tail mode for faster initial load (256KB is enough for recent visible content)
     try {
-      const tailSize = 256 * 1024;
-      const res = await fetch(`/api/sessions/${sessionId}/terminal?tail=${tailSize}`);
-      const data = await res.json();
-
-      this.terminal.clear();
-      this.terminal.reset();
-      if (data.terminalBuffer) {
-        // Show truncation indicator if buffer was cut
-        if (data.truncated) {
-          this.terminal.write('\x1b[90m... (earlier output truncated for performance) ...\x1b[0m\r\n\r\n');
+      if (this._multiTerminal) {
+        // Instant tab switch: ensure the pane exists, make it visible, and
+        // hydrate from backend if this is the first view for this session.
+        const state = this.ensureTerminalForSession(sessionId);
+        this.showTerminalPane(sessionId);
+        if (!state.hydrated) {
+          await this.hydrateTerminalForSession(sessionId);
         }
-        // Use chunked write for large buffers to avoid UI jank
-        await this.chunkedTerminalWrite(data.terminalBuffer);
-        // Ensure terminal is scrolled to bottom after buffer load
-        this.terminal.scrollToBottom();
-      }
-
-      // Send resize and Ctrl+L to trigger Claude to redraw at correct size
-      const dims = this.fitAddon.proposeDimensions();
-      if (dims) {
-        await this.postJson(`/api/sessions/${sessionId}/resize`, { cols: dims.cols, rows: dims.rows });
+        // Resize the newly-visible terminal to match current container.
+        try { state.fitAddon.fit(); } catch (_) { /* ignore */ }
+        const dims = state.fitAddon.proposeDimensions();
+        if (dims && (!state.lastResizeDims ||
+            dims.cols !== state.lastResizeDims.cols ||
+            dims.rows !== state.lastResizeDims.rows)) {
+          state.lastResizeDims = { cols: dims.cols, rows: dims.rows };
+          await this.postJson(`/api/sessions/${sessionId}/resize`, { cols: dims.cols, rows: dims.rows });
+        }
+      } else {
+        // Legacy single-terminal: clear and reload from backend buffer.
+        const tailSize = 256 * 1024;
+        const res = await fetch(`/api/sessions/${sessionId}/terminal?tail=${tailSize}`);
+        const data = await res.json();
+        this.terminal.clear();
+        this.terminal.reset();
+        if (data.terminalBuffer) {
+          if (data.truncated) {
+            this.terminal.write('\x1b[90m... (earlier output truncated for performance) ...\x1b[0m\r\n\r\n');
+          }
+          await this.chunkedTerminalWrite(data.terminalBuffer);
+          this.terminal.scrollToBottom();
+        }
+        const dims = this.fitAddon.proposeDimensions();
+        if (dims) {
+          await this.postJson(`/api/sessions/${sessionId}/resize`, { cols: dims.cols, rows: dims.rows });
+        }
       }
 
       // Update respawn banner
@@ -14290,10 +15023,22 @@ class JarvisApp {
     // Initial fetch
     this.fetchSystemStats();
 
-    // Poll every 2 seconds
+    // Poll at configured interval (default 10s).
     this.systemStatsInterval = this.registerTimer(setInterval(() => {
       this.fetchSystemStats();
-    }, 2000));
+    }, STATS_POLLING_INTERVAL_MS));
+
+    // Pause polling when tab is hidden to save network + CPU.
+    if (!this._statsVisibilityBound) {
+      this._statsVisibilityBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          this.stopSystemStatsPolling();
+        } else {
+          this.startSystemStatsPolling();
+        }
+      });
+    }
   }
 
   stopSystemStatsPolling() {
@@ -14312,6 +15057,60 @@ class JarvisApp {
       this.updateSystemStatsDisplay(stats);
     } catch (err) {
       // Silently fail - system stats are not critical
+    }
+    // Also refresh today's spend so the cost widget stays current.
+    this.fetchSpendingStatus();
+  }
+
+  /**
+   * Poll the spending status endpoint and refresh the header cost widget.
+   * Light request; piggy-backed on the existing system stats poll.
+   */
+  async fetchSpendingStatus() {
+    try {
+      const res = await fetch('/api/spending/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      const el = document.getElementById('headerCost');
+      if (!el) return;
+      const cost = data.todayCostUSD || 0;
+      el.textContent = `$${cost.toFixed(2)}`;
+      let state = 'ok';
+      if (data.dailyCapUSD > 0) {
+        if (data.percentUsed >= 90) state = 'critical';
+        else if (data.percentUsed >= 75) state = 'warn';
+        el.title = `Today: $${cost.toFixed(4)} of $${data.dailyCapUSD.toFixed(2)} cap (${data.percentUsed.toFixed(0)}%)${data.frozen ? ' — FROZEN' : ''}`;
+      } else {
+        el.title = `Today's estimated spend: $${cost.toFixed(4)} (no cap set)`;
+      }
+      el.dataset.state = state;
+    } catch (_) { /* non-critical */ }
+  }
+
+  /**
+   * Open a small prompt to set the daily spending cap. Minimal UI --
+   * a dedicated settings pane could replace this later.
+   */
+  async openSpendingSettings() {
+    const cur = await fetch('/api/spending/status').then(r => r.json()).catch(() => ({}));
+    const answer = window.prompt(
+      `Daily spending cap (USD). Set 0 to disable.\nCurrent: $${(cur.dailyCapUSD || 0).toFixed(2)}, today: $${(cur.todayCostUSD || 0).toFixed(4)}`,
+      String(cur.dailyCapUSD || 0),
+    );
+    if (answer === null) return;
+    const value = parseFloat(answer);
+    if (isNaN(value) || value < 0) { this.showNotification?.('Invalid cap value', 'warning'); return; }
+    try {
+      const res = await fetch('/api/spending/cap', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken || '' },
+        body: JSON.stringify({ dailyCapUSD: value }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      this.showToast?.('Spending cap updated', 'success');
+      this.fetchSpendingStatus();
+    } catch (err) {
+      this.showNotification?.('Failed to update cap', 'error');
     }
   }
 

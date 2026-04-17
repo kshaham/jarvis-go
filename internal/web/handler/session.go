@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,6 +84,106 @@ func (ctx *Context) ListSessions(w http.ResponseWriter, r *http.Request) {
 	request.WriteJSON(w, http.StatusOK, result)
 }
 
+// QuerySessions returns sessions with pagination, filtering, and search.
+// GET /api/sessions/query?limit=N&offset=N&status=busy|idle|stopped&search=X&sort=createdAt|name&order=asc|desc
+// Response: { sessions: [...], total, hasMore }.
+// Unlike ListSessions (bare array), this endpoint is designed for UIs that
+// need to paginate through many sessions without loading them all at once.
+func (ctx *Context) QuerySessions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	limit := 50
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	statusFilter := q.Get("status")
+	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
+	sortBy := q.Get("sort")
+	if sortBy == "" {
+		sortBy = "createdAt"
+	}
+	order := q.Get("order")
+	if order == "" {
+		order = "desc"
+	}
+
+	// Gather all sessions (PTY + SDK) into one slice.
+	all := make([]sessionJSON, 0)
+	for _, s := range ctx.SessionManager.GetAllSessions() {
+		all = append(all, sessionToJSON(s))
+	}
+	ctx.SessionManager.ForEachSDKSession(func(id string, sdk *pty.SDKSession) {
+		all = append(all, sessionJSON{
+			ID:         sdk.ID,
+			Name:       sdk.GetName(),
+			Status:     string(sdk.GetStatus()),
+			Mode:       string(sdk.Mode),
+			WorkingDir: sdk.WorkingDir,
+			PID:        0,
+			CreatedAt:  sdk.CreatedAt.Format(time.RFC3339),
+			IsWorking:  sdk.IsWorking(),
+		})
+	})
+
+	// Filter.
+	filtered := make([]sessionJSON, 0, len(all))
+	for _, s := range all {
+		if statusFilter != "" && s.Status != statusFilter {
+			continue
+		}
+		if search != "" {
+			hay := strings.ToLower(s.Name + " " + s.WorkingDir)
+			if !strings.Contains(hay, search) {
+				continue
+			}
+		}
+		filtered = append(filtered, s)
+	}
+
+	// Sort.
+	lessFunc := func(a, b sessionJSON) bool {
+		switch sortBy {
+		case "name":
+			return a.Name < b.Name
+		default: // createdAt
+			return a.CreatedAt < b.CreatedAt
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if order == "asc" {
+			return lessFunc(filtered[i], filtered[j])
+		}
+		return lessFunc(filtered[j], filtered[i])
+	})
+
+	total := len(filtered)
+	if offset >= total {
+		filtered = nil
+	} else {
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		filtered = filtered[offset:end]
+	}
+
+	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"sessions": filtered,
+		"total":    total,
+		"hasMore":  offset+len(filtered) < total,
+		"offset":   offset,
+		"limit":    limit,
+	})
+}
+
 // GetSession returns a single session.
 func (ctx *Context) GetSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -107,6 +209,13 @@ func (ctx *Context) GetSession(w http.ResponseWriter, r *http.Request) {
 
 // CreateSession creates a new session.
 func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
+	// Refuse new work when today's spending cap is reached. Running sessions
+	// continue; the operator must raise the cap or wait for midnight.
+	if ctx.IsSpendingFrozen() {
+		request.WriteCodedError(w, http.StatusTooManyRequests, request.ErrCodeSpendingFrozen,
+			"daily spending cap reached; new sessions are frozen until the cap is raised or the day rolls over")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	var req request.CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -155,6 +264,15 @@ func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "workingDir is required")
 		return
 	}
+
+	// Resolve symlinks and enforce the allowlist. Prevents `/tmp/link-to-/etc`
+	// from starting a session at the filesystem root.
+	resolvedDir, err := ctx.ResolveWorkingDir(workingDir)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, "invalid working directory: "+err.Error())
+		return
+	}
+	workingDir = resolvedDir
 
 	mode := pty.ModeShell
 	if req.Mode == "claude" {
@@ -340,7 +458,13 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 	eventCount := 0
 	for event := range session.Events() {
 		eventCount++
-		switch e := event.(type) {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("panic in PTY forwarder", "sessionId", sessionID, "panic", r, "stack", string(debug.Stack()))
+				}
+			}()
+			switch e := event.(type) {
 		case pty.EventTerminal:
 			if eventCount <= 3 {
 				slog.Info("Terminal data", "sessionId", sessionID, "bytes", len(e.Data), "clients", broker.ClientCount())
@@ -435,11 +559,25 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 					"input": e.Input, "output": e.Output, "total": e.Total,
 				},
 			})
+			// Record dollar cost + token delta in daily stats so the
+			// spending widget and caps have accurate data.
+			ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
+			ctx.checkSpendingThresholds()
+			// Per-agent accumulation: if this session is attached to an
+			// office agent, record the turn so the agent card + insights
+			// panel can render cost/token totals without a new endpoint.
+			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+				agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
+				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+					broker.Broadcast("office:memberUpdated", payload)
+				}
+			}
 			// Feed run summary tracker with token data for milestone tracking
 			if rs := getRunSummary(); rs != nil {
 				rs.RecordTokens(e.Total)
 			}
-		}
+			}
+		}()
 	}
 }
 
@@ -451,12 +589,18 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 	slog.Info("Starting SDK event forwarding for session", "sessionId", sessionID)
 
 	for event := range session.Events() {
-		switch e := event.(type) {
-		case pty.EventTerminal:
-			broker.Broadcast("session:terminal", map[string]interface{}{
-				"id":   sessionID,
-				"data": e.Data,
-			})
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("panic in SDK forwarder", "sessionId", sessionID, "panic", r, "stack", string(debug.Stack()))
+				}
+			}()
+			switch e := event.(type) {
+			case pty.EventTerminal:
+				broker.Broadcast("session:terminal", map[string]interface{}{
+					"id":   sessionID,
+					"data": e.Data,
+				})
 		case pty.EventOutput:
 			broker.Broadcast("session:output", map[string]interface{}{
 				"id":   sessionID,
@@ -490,6 +634,23 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"tokens": map[string]int64{
 					"input": e.Input, "output": e.Output, "total": e.Total,
 				},
+				"cost": e.Cost,
+			})
+			ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
+			ctx.checkSpendingThresholds()
+			// Per-agent accumulation for office UI (cost bars, sparklines).
+			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+				agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
+				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+					broker.Broadcast("office:memberUpdated", payload)
+				}
+			}
+		case pty.EventCostExceeded:
+			broker.Broadcast("session:costExceeded", map[string]interface{}{
+				"id":      sessionID,
+				"cost":    e.Cost,
+				"cap":     e.CapUSD,
+				"message": "Session stopped: per-session cost cap reached",
 			})
 		case pty.EventExit:
 			broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
@@ -499,7 +660,8 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				ctx.OfficeManager.HandleAgentDeath(sessionID)
 			}
 			ctx.cleanupSessionResources(sessionID)
-		}
+			}
+		}()
 	}
 
 	// Channel closed -- final cleanup if EventExit wasn't received

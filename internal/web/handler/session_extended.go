@@ -23,6 +23,134 @@ import (
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
 
+// maxBulkItems caps the number of session IDs per bulk operation to prevent
+// accidental DoS of the state store on enormous requests.
+const maxBulkItems = 500
+
+// BulkDeleteSessions stops and removes multiple sessions in one call.
+// POST /api/sessions/bulk-delete  { sessionIds: [...] }
+// Returns { deleted: [...], failed: [{id, error}] } so clients can show
+// partial-success feedback.
+func (ctx *Context) BulkDeleteSessions(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SessionIDs []string `json:"sessionIds"`
+	}
+	if !request.DecodeAndValidate(w, r, &req) {
+		return
+	}
+	if len(req.SessionIDs) == 0 {
+		request.WriteError(w, http.StatusBadRequest, "sessionIds is required")
+		return
+	}
+	if len(req.SessionIDs) > maxBulkItems {
+		request.WriteError(w, http.StatusBadRequest, "too many sessionIds (max 500)")
+		return
+	}
+
+	deleted := make([]string, 0, len(req.SessionIDs))
+	failed := make([]map[string]string, 0)
+	for _, id := range req.SessionIDs {
+		if err := ctx.SessionManager.StopSession(r.Context(), id); err != nil {
+			failed = append(failed, map[string]string{"id": id, "error": err.Error()})
+			continue
+		}
+		ctx.SSEBroker.Broadcast("session:deleted", map[string]string{"id": id})
+		ctx.StateStore.RemoveSession(id)
+		ctx.cleanupSessionResources(id)
+		deleted = append(deleted, id)
+	}
+
+	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"deleted": deleted,
+		"failed":  failed,
+	})
+}
+
+// BulkRenameSessions renames multiple sessions in one call.
+// POST /api/sessions/bulk-rename  { renames: { "<id>": "<newName>", ... } }
+func (ctx *Context) BulkRenameSessions(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Renames map[string]string `json:"renames"`
+	}
+	if !request.DecodeAndValidate(w, r, &req) {
+		return
+	}
+	if len(req.Renames) == 0 {
+		request.WriteError(w, http.StatusBadRequest, "renames is required")
+		return
+	}
+	if len(req.Renames) > maxBulkItems {
+		request.WriteError(w, http.StatusBadRequest, "too many renames (max 500)")
+		return
+	}
+
+	renamed := make([]string, 0, len(req.Renames))
+	failed := make([]map[string]string, 0)
+	for id, newName := range req.Renames {
+		if strings.TrimSpace(newName) == "" {
+			failed = append(failed, map[string]string{"id": id, "error": "name cannot be empty"})
+			continue
+		}
+		session, ok := ctx.SessionManager.GetSession(id)
+		if !ok {
+			failed = append(failed, map[string]string{"id": id, "error": "session not found"})
+			continue
+		}
+		session.SetName(newName)
+		renamed = append(renamed, id)
+	}
+
+	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"renamed": renamed,
+		"failed":  failed,
+	})
+}
+
+// BulkUpdateSessionColors assigns colors to multiple sessions in one call.
+// POST /api/sessions/bulk-color  { colors: { "<id>": "<color>", ... } }
+func (ctx *Context) BulkUpdateSessionColors(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Colors map[string]string `json:"colors"`
+	}
+	if !request.DecodeAndValidate(w, r, &req) {
+		return
+	}
+	if len(req.Colors) == 0 {
+		request.WriteError(w, http.StatusBadRequest, "colors is required")
+		return
+	}
+	if len(req.Colors) > maxBulkItems {
+		request.WriteError(w, http.StatusBadRequest, "too many colors (max 500)")
+		return
+	}
+
+	updated := make([]string, 0, len(req.Colors))
+	failed := make([]map[string]string, 0)
+	ctx.SessionColorsMu.Lock()
+	for id, color := range req.Colors {
+		if _, ok := ctx.SessionManager.GetSession(id); !ok {
+			failed = append(failed, map[string]string{"id": id, "error": "session not found"})
+			continue
+		}
+		ctx.SessionColors[id] = color
+		updated = append(updated, id)
+	}
+	ctx.SessionColorsMu.Unlock()
+
+	// Broadcast color updates so any other open tabs reflect the change.
+	for _, id := range updated {
+		ctx.SSEBroker.Broadcast("session:color", map[string]string{
+			"id":    id,
+			"color": req.Colors[id],
+		})
+	}
+
+	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"updated": updated,
+		"failed":  failed,
+	})
+}
+
 // RenameSession updates a session's display name.
 // PUT /api/sessions/{id}/name
 func (ctx *Context) RenameSession(w http.ResponseWriter, r *http.Request) {

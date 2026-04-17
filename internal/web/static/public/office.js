@@ -470,6 +470,7 @@ class OfficeApp {
     this.eventSource.addEventListener('office:message', (e) => {
       const data = this.safeParseSSE(e);
       if (data) this.handleMessage(data);
+      this._refreshTimelineIfActive();
     });
 
     this.eventSource.addEventListener('office:wrapUpInitiated', () => {
@@ -1106,7 +1107,17 @@ class OfficeApp {
         <span class="agent-card-cost">${lastActiveHtml}${costStr}</span>
       </div>
       <div class="agent-card-badges">${autonomyBadgeHtml}${learningsBadgeHtml}</div>
+      ${this._renderCardSparkline(member)}
     `;
+  }
+
+  _renderCardSparkline(member) {
+    const recent = member && member.usage && Array.isArray(member.usage.recentTurnCosts)
+      ? member.usage.recentTurnCosts : [];
+    if (recent.length < 2) return '';
+    const svg = this._renderSparkline(recent, 60, 14);
+    if (!svg) return '';
+    return `<div class="agent-card-spark" title="Recent turn costs">${svg}</div>`;
   }
 
   updateAgentCard(card, member) {
@@ -1219,6 +1230,22 @@ class OfficeApp {
         <div class="detail-message-list">${msgItems}</div>
       </div>` : ''}
       <div class="detail-section">
+        <div class="detail-section-title">Whiteboard</div>
+        <textarea class="agent-detail-whiteboard-area" id="detailWhiteboardText" placeholder="Freeform notes about what this agent is working on...">Loading...</textarea>
+        <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+          <button class="panel-btn" onclick="office.saveWhiteboard('${this.escapeAttr(sessionId)}')">Save</button>
+          <span id="detailWhiteboardMeta" style="font-size:11px;color:#52525b"></span>
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="agent-detail-subtabs" role="tablist">
+          <button class="agent-detail-subtab active" data-subtab="activity" onclick="office.switchDetailSubtab('${this.escapeAttr(sessionId)}','activity')">Activity</button>
+          <button class="agent-detail-subtab" data-subtab="learnings" onclick="office.switchDetailSubtab('${this.escapeAttr(sessionId)}','learnings')">Learnings</button>
+          <button class="agent-detail-subtab" data-subtab="cost" onclick="office.switchDetailSubtab('${this.escapeAttr(sessionId)}','cost')">Cost &amp; Tokens</button>
+        </div>
+        <div class="agent-detail-subpanel" id="detailSubpanel">Loading...</div>
+      </div>
+      <div class="detail-section">
         <div class="detail-section-title">Terminal</div>
         <pre class="detail-terminal">Loading...</pre>
       </div>
@@ -1234,6 +1261,10 @@ class OfficeApp {
         <button class="review-btn" style="width:100%;margin-top:6px" onclick="office.showReview('${this.escapeAttr(sessionId)}')">Review Code Changes</button>
       </div>
     `;
+
+    // Load whiteboard + default sub-tab in parallel with terminal.
+    this._loadWhiteboard(sessionId);
+    this.switchDetailSubtab(sessionId, 'activity');
 
     // Feature 1: fetch terminal buffer with short-lived cache, then build session analysis timeline
     const detailContent = document.getElementById('detailPanelContent');
@@ -1320,6 +1351,163 @@ class OfficeApp {
     return events;
   }
 
+  // ========== Agent detail modal: whiteboard + sub-tabs ==========
+
+  async _loadWhiteboard(sessionId) {
+    const area = document.getElementById('detailWhiteboardText');
+    const meta = document.getElementById('detailWhiteboardMeta');
+    if (!area) return;
+    try {
+      const res = await fetch('/api/office/whiteboard');
+      if (!res.ok) { area.value = ''; return; }
+      const data = await res.json();
+      const notes = (data && (data.notes || data.data || data)) || {};
+      const note = notes[sessionId];
+      if (note) {
+        area.value = note.content || '';
+        if (meta && note.updatedAt) {
+          meta.textContent = 'Updated ' + this.formatTimeAgo(new Date(note.updatedAt).getTime());
+        }
+      } else {
+        area.value = '';
+        if (meta) meta.textContent = '';
+      }
+    } catch (err) {
+      area.value = '';
+    }
+  }
+
+  async saveWhiteboard(sessionId) {
+    const area = document.getElementById('detailWhiteboardText');
+    if (!area) return;
+    try {
+      await this.postJson('/api/office/whiteboard', {
+        sessionId,
+        text: area.value || '',
+      });
+      const meta = document.getElementById('detailWhiteboardMeta');
+      if (meta) meta.textContent = 'Saved just now';
+    } catch (err) {
+      console.error('Failed to save whiteboard:', err);
+    }
+  }
+
+  switchDetailSubtab(sessionId, subtab) {
+    document.querySelectorAll('.agent-detail-subtab').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-subtab') === subtab);
+    });
+    const panel = document.getElementById('detailSubpanel');
+    if (!panel) return;
+    panel.innerHTML = '<div style="color:#52525b;font-size:12px">Loading...</div>';
+    if (subtab === 'activity') this._renderDetailActivity(sessionId, panel);
+    else if (subtab === 'learnings') this._renderDetailLearnings(sessionId, panel);
+    else if (subtab === 'cost') this._renderDetailCost(sessionId, panel);
+  }
+
+  async _renderDetailActivity(sessionId, panel) {
+    try {
+      const res = await fetch(`/api/office/timeline?agent=${encodeURIComponent(sessionId)}&limit=10`);
+      if (!res.ok) { panel.innerHTML = '<div style="color:#52525b;font-size:12px">No recent activity.</div>'; return; }
+      const data = await res.json();
+      const entries = data.entries || [];
+      if (entries.length === 0) {
+        panel.innerHTML = '<div style="color:#52525b;font-size:12px">No recent activity.</div>';
+        return;
+      }
+      panel.innerHTML = entries.map(e => `
+        <div class="timeline-entry">
+          <div class="timeline-entry-dot kind-${this._escapeAttr(e.kind)}"></div>
+          <div class="timeline-entry-body">
+            <div class="timeline-entry-title">${this._escapeHtml(e.title || '')}</div>
+            ${e.summary ? `<div class="timeline-entry-summary">${this._escapeHtml(e.summary)}</div>` : ''}
+            <div class="timeline-entry-time">${this.formatTimeAgo(new Date(e.timestamp).getTime())}</div>
+          </div>
+        </div>
+      `).join('');
+    } catch (err) {
+      panel.innerHTML = '<div style="color:#52525b;font-size:12px">Failed to load activity.</div>';
+    }
+  }
+
+  async _renderDetailLearnings(sessionId, panel) {
+    const member = this.state.members.find(m => m.sessionId === sessionId);
+    const configId = member && member.configId;
+    if (!configId) {
+      panel.innerHTML = '<div style="color:#52525b;font-size:12px">No agent profile associated.</div>';
+      return;
+    }
+    try {
+      const res = await fetch(`/api/office/learnings/${encodeURIComponent(configId)}`);
+      if (!res.ok) { panel.innerHTML = '<div style="color:#52525b;font-size:12px">No learnings available.</div>'; return; }
+      const data = await res.json();
+      const items = data.learnings || data.entries || [];
+      if (items.length === 0) {
+        panel.innerHTML = '<div style="color:#52525b;font-size:12px">No learnings yet.</div>';
+        return;
+      }
+      panel.innerHTML = items.slice(0, 30).map(l => `
+        <div class="agent-detail-learning-item">
+          <div class="agent-detail-learning-head">
+            <span class="agent-detail-learning-cat">${this._escapeHtml(l.category || 'general')}</span>
+            <span class="agent-detail-learning-time">${l.learnedAt ? this.formatTimeAgo(new Date(l.learnedAt).getTime()) : ''}</span>
+          </div>
+          <div class="agent-detail-learning-body">${this._escapeHtml(l.content || l.text || '')}</div>
+        </div>
+      `).join('');
+    } catch (err) {
+      panel.innerHTML = '<div style="color:#52525b;font-size:12px">Failed to load learnings.</div>';
+    }
+  }
+
+  _renderDetailCost(sessionId, panel) {
+    const member = this.state.members.find(m => m.sessionId === sessionId);
+    if (!member) { panel.innerHTML = '<div style="color:#52525b;font-size:12px">No member data.</div>'; return; }
+    const u = member.usage || {};
+    const total = u.totalCostUSD || member.totalCost || 0;
+    const input = u.totalInputTokens || 0;
+    const output = u.totalOutputTokens || 0;
+    const turns = u.turnCount || 0;
+    const recent = Array.isArray(u.recentTurnCosts) ? u.recentTurnCosts : [];
+    const spark = recent.length > 1 ? this._renderSparkline(recent, 180, 36) : '';
+    panel.innerHTML = `
+      <div class="agent-detail-cost-grid">
+        <div class="agent-detail-cost-cell">
+          <div class="agent-detail-cost-label">Total spend</div>
+          <div class="agent-detail-cost-value">$${total.toFixed(4)}</div>
+        </div>
+        <div class="agent-detail-cost-cell">
+          <div class="agent-detail-cost-label">Turns</div>
+          <div class="agent-detail-cost-value">${turns}</div>
+        </div>
+        <div class="agent-detail-cost-cell">
+          <div class="agent-detail-cost-label">Input tokens</div>
+          <div class="agent-detail-cost-value">${input.toLocaleString()}</div>
+        </div>
+        <div class="agent-detail-cost-cell">
+          <div class="agent-detail-cost-label">Output tokens</div>
+          <div class="agent-detail-cost-value">${output.toLocaleString()}</div>
+        </div>
+      </div>
+      ${spark ? `<div style="margin-top:8px"><div style="font-size:11px;color:#52525b;margin-bottom:4px">Recent turn costs</div>${spark}</div>` : ''}
+    `;
+  }
+
+  _renderSparkline(values, width, height) {
+    if (!values || values.length < 2) return '';
+    const max = Math.max(...values, 0.0001);
+    const min = Math.min(...values, 0);
+    const range = max - min || 1;
+    const stepX = width / (values.length - 1);
+    const points = values.map((v, i) => {
+      const x = (i * stepX).toFixed(1);
+      const y = (height - ((v - min) / range) * (height - 2) - 1).toFixed(1);
+      return `${x},${y}`;
+    }).join(' ');
+    return `<svg class="agent-detail-spark-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+      <polyline points="${points}" fill="none" stroke="#60a5fa" stroke-width="1.5" />
+    </svg>`;
+  }
+
   // ========== Tab Navigation ==========
 
   switchTab(tab) {
@@ -1331,7 +1519,7 @@ class OfficeApp {
     });
 
     // Show/hide panels
-    const panels = ['agents', 'tasks', 'standup', 'messages', 'metrics', 'activity', 'reports', 'settings'];
+    const panels = ['agents', 'tasks', 'standup', 'messages', 'metrics', 'activity', 'reports', 'settings', 'timeline', 'insights', 'meetings'];
     for (const panel of panels) {
       const el = document.getElementById(`panel-${panel}`);
       if (el) {
@@ -1345,6 +1533,317 @@ class OfficeApp {
     if (tab === 'metrics') this.fetchAndRenderMetrics();
     if (tab === 'settings') this.fetchOfficeSettings();
     if (tab === 'reports') this.renderReportDashboard();
+    if (tab === 'timeline') this.renderTimeline();
+    if (tab === 'insights') this.renderInsights();
+    if (tab === 'meetings') this.renderMeetings();
+  }
+
+  // Refresh the timeline when it's the active tab. Throttled so a bursty
+  // series of SSE events doesn't produce a stampede of fetches.
+  _refreshTimelineIfActive() {
+    const panel = document.getElementById('panel-timeline');
+    if (!panel || panel.classList.contains('hidden')) return;
+    if (this._timelineRefreshTimer) return;
+    this._timelineRefreshTimer = setTimeout(() => {
+      this._timelineRefreshTimer = null;
+      this.renderTimeline();
+    }, 500);
+  }
+
+  // ========== Timeline tab (unified event stream) ==========
+
+  setTimelineKind(kind) {
+    this._timelineKind = kind;
+    // Reflect active chip state
+    const chips = document.querySelectorAll('.timeline-filter-chip');
+    chips.forEach(c => c.classList.toggle('active', (c.getAttribute('data-timeline-kind') || '') === kind));
+    this.renderTimeline();
+  }
+
+  setTimelineAgent(sessionId) {
+    this._timelineAgent = sessionId || '';
+    this.renderTimeline();
+  }
+
+  // Populate the agent filter dropdown from the current roster. Idempotent;
+  // re-called on render so new members appear without reload.
+  _populateTimelineAgentFilter() {
+    const sel = document.getElementById('timelineAgentFilter');
+    if (!sel) return;
+    const currentValue = sel.value || '';
+    const roster = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    const opts = ['<option value="">All agents</option>'];
+    for (const m of roster) {
+      const id = this._escapeHtml(m.sessionId || '');
+      const name = this._escapeHtml(m.name || m.sessionId || '');
+      opts.push(`<option value="${id}">${name}</option>`);
+    }
+    sel.innerHTML = opts.join('');
+    sel.value = currentValue;
+  }
+
+  async renderTimeline() {
+    this._populateTimelineAgentFilter();
+    const list = document.getElementById('timelineList');
+    if (!list) return;
+    const params = new URLSearchParams({ limit: '150' });
+    if (this._timelineKind) params.set('type', this._timelineKind);
+    if (this._timelineAgent) params.set('agent', this._timelineAgent);
+    try {
+      const res = await fetch('/api/office/timeline?' + params.toString());
+      const data = await res.json();
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      if (entries.length === 0) {
+        list.innerHTML = '<div class="timeline-empty">No events yet for this filter.</div>';
+        return;
+      }
+      list.innerHTML = entries.map(e => this._renderTimelineEntry(e)).join('');
+    } catch (err) {
+      list.innerHTML = '<div class="timeline-empty">Failed to load timeline.</div>';
+    }
+  }
+
+  _renderTimelineEntry(e) {
+    const time = this._formatRelativeTime(new Date(e.timestamp));
+    const title = this._escapeHtml(e.title || e.kind);
+    const agent = e.agentName ? `<span class="timeline-agent">${this._escapeHtml(e.agentName)}</span> · ` : '';
+    const summary = e.summary
+      ? `<div class="timeline-summary">${this._escapeHtml(e.summary)}</div>`
+      : '';
+    return `<div class="timeline-entry" data-kind="${this._escapeHtml(e.kind)}">
+      <div class="timeline-dot"></div>
+      <div class="timeline-body">
+        <div class="timeline-title">${title}</div>
+        <div class="timeline-meta">${agent}${this._escapeHtml(e.kind)}</div>
+        ${summary}
+      </div>
+      <div class="timeline-time">${this._escapeHtml(time)}</div>
+    </div>`;
+  }
+
+  // ========== Insights tab ==========
+
+  async renderInsights() {
+    const grid = document.getElementById('insightsGrid');
+    if (!grid) return;
+    const roster = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    if (roster.length === 0) {
+      grid.innerHTML = '<div class="insights-empty">Spawn a team to see insights.</div>';
+      return;
+    }
+    // Sort by cost desc for the leaderboard bars.
+    const byCost = [...roster].sort((a, b) =>
+      ((b.usage && b.usage.totalCostUSD) || 0) - ((a.usage && a.usage.totalCostUSD) || 0));
+    const maxCost = Math.max(0.0001, ...roster.map(m => (m.usage && m.usage.totalCostUSD) || 0));
+    const byLearning = [...roster]
+      .sort((a, b) => (b.learningCount || 0) - (a.learningCount || 0))
+      .slice(0, 5);
+    const byTokens = [...roster].sort((a, b) =>
+      ((b.usage && (b.usage.totalInputTokens + b.usage.totalOutputTokens)) || 0) -
+      ((a.usage && (a.usage.totalInputTokens + a.usage.totalOutputTokens)) || 0));
+    const totalCost = roster.reduce((s, m) => s + ((m.usage && m.usage.totalCostUSD) || 0), 0);
+    const totalTurns = roster.reduce((s, m) => s + ((m.usage && m.usage.turnCount) || 0), 0);
+
+    const bars = byCost.map(m => this._renderCostBar(m, maxCost)).join('');
+    const tokens = byTokens.map(m => this._renderTokenRow(m)).join('');
+    const leaderboard = byLearning.map((m, i) => `
+      <div class="insight-leaderboard-row">
+        <span><span class="rank">#${i + 1}</span>${this._escapeHtml(m.name || '')}</span>
+        <span class="count">${m.learningCount || 0}</span>
+      </div>`).join('');
+
+    grid.innerHTML = `
+      <div class="insight-card">
+        <div class="insight-card-title">Team spend today</div>
+        <div class="insight-big-number">$${totalCost.toFixed(4)}</div>
+        <div style="font-size:11px;color:#71717a">${totalTurns} turns across ${roster.length} agents</div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-card-title">Cost per agent</div>
+        ${bars || '<div class="insights-empty" style="padding:4px">No cost data yet.</div>'}
+      </div>
+      <div class="insight-card">
+        <div class="insight-card-title">Token usage</div>
+        ${tokens || '<div class="insights-empty" style="padding:4px">No token data yet.</div>'}
+      </div>
+      <div class="insight-card">
+        <div class="insight-card-title">Learning leaderboard</div>
+        ${leaderboard || '<div class="insights-empty" style="padding:4px">No learnings yet.</div>'}
+      </div>
+    `;
+  }
+
+  _renderCostBar(m, maxCost) {
+    const cost = (m.usage && m.usage.totalCostUSD) || 0;
+    const pct = maxCost > 0 ? Math.round((cost / maxCost) * 100) : 0;
+    return `<div class="insight-bar-row">
+      <span class="insight-bar-name">${this._escapeHtml(m.name || '')}</span>
+      <div class="insight-bar-track"><div class="insight-bar-fill" style="width:${pct}%"></div></div>
+      <span class="insight-bar-value">$${cost.toFixed(4)}</span>
+    </div>`;
+  }
+
+  _renderTokenRow(m) {
+    const inTok = (m.usage && m.usage.totalInputTokens) || 0;
+    const outTok = (m.usage && m.usage.totalOutputTokens) || 0;
+    const total = inTok + outTok;
+    if (total === 0) return '';
+    return `<div class="insight-bar-row">
+      <span class="insight-bar-name">${this._escapeHtml(m.name || '')}</span>
+      <div class="insight-bar-track"><div class="insight-bar-fill" style="width:100%"></div></div>
+      <span class="insight-bar-value">${total.toLocaleString()}</span>
+    </div>`;
+  }
+
+  // ========== Meetings tab ==========
+
+  async renderMeetings() {
+    const listEl = document.getElementById('meetingsList');
+    if (!listEl) return;
+    try {
+      const res = await fetch('/api/office/standup/history');
+      const data = await res.json();
+      const standups = Array.isArray(data.standups) ? data.standups : [];
+      standups.sort((a, b) => String(b.modified || '').localeCompare(String(a.modified || '')));
+      if (standups.length === 0) {
+        listEl.innerHTML = '<div class="meetings-empty">No past standups. They appear here after each standup completes.</div>';
+        return;
+      }
+      listEl.innerHTML = standups.map(s => `
+        <div class="meeting-item" onclick="office.openMeeting('${this._escapeAttr(s.id)}')">
+          <div class="meeting-title">${this._escapeHtml(this._humanizeStandupID(s.id))}</div>
+          <div class="meeting-meta">${this._escapeHtml(s.modified || '')}</div>
+        </div>`).join('');
+    } catch (err) {
+      listEl.innerHTML = '<div class="meetings-empty">Failed to load meetings.</div>';
+    }
+  }
+
+  _humanizeStandupID(id) {
+    // Standup IDs typically look like "standup-2026-04-16T10-30-00Z"; try to
+    // pull out the date portion for readability, fall back to raw ID.
+    const m = String(id || '').match(/(\d{4}-\d{2}-\d{2})[T_-](\d{2})[_-]?(\d{2})/);
+    if (m) return `Standup · ${m[1]} ${m[2]}:${m[3]}`;
+    return id || 'Standup';
+  }
+
+  async openMeeting(id) {
+    const detail = document.getElementById('meetingsDetail');
+    if (!detail) return;
+    document.querySelectorAll('.meeting-item').forEach(el => el.classList.remove('active'));
+    const clicked = Array.from(document.querySelectorAll('.meeting-item')).find(el =>
+      (el.getAttribute('onclick') || '').includes("'" + id + "'"));
+    if (clicked) clicked.classList.add('active');
+    detail.innerHTML = '<div class="meetings-placeholder">Loading transcript…</div>';
+    try {
+      const res = await fetch('/api/office/standup/' + encodeURIComponent(id));
+      const data = await res.json();
+      const tr = (data && (data.transcript || (data.standup && data.standup.transcript))) || [];
+      if (!Array.isArray(tr) || tr.length === 0) {
+        detail.innerHTML = '<div class="meetings-placeholder">No transcript for this meeting.</div>';
+        return;
+      }
+      detail.innerHTML = tr.map(line => `
+        <div class="meeting-transcript-line">
+          <div class="meeting-speaker">${this._escapeHtml(line.speaker || line.from || '')}</div>
+          <div class="meeting-content">${this._escapeHtml(line.content || line.text || '')}</div>
+          <div class="meeting-timestamp">${this._escapeHtml(this._formatRelativeTime(new Date(line.timestamp || 0)))}</div>
+        </div>`).join('');
+    } catch (err) {
+      detail.innerHTML = '<div class="meetings-placeholder">Failed to load meeting.</div>';
+    }
+  }
+
+  // ========== Task detail modal ==========
+
+  async openTaskDetail(sessionId, taskId) {
+    const modal = document.getElementById('taskDetailModal');
+    const body = document.getElementById('taskModalBody');
+    const title = document.getElementById('taskModalTitle');
+    if (!modal || !body) return;
+    modal.classList.remove('hidden');
+    body.innerHTML = '<div class="task-modal-loading">Loading…</div>';
+    if (title) title.textContent = 'Task';
+    try {
+      const res = await fetch('/api/office/task-queues/' + encodeURIComponent(sessionId));
+      const data = await res.json();
+      const tasks = (data && Array.isArray(data.tasks)) ? data.tasks : [];
+      const t = tasks.find(x => x.id === taskId);
+      if (!t) {
+        body.innerHTML = '<div class="task-modal-loading">Task not found.</div>';
+        return;
+      }
+      if (title) title.textContent = t.title || 'Task';
+      const member = this._findMemberBySession(sessionId);
+      const agentLine = member
+        ? `<div class="task-modal-field"><strong>Agent:</strong> <a href="#" onclick="office.showDetail('${this._escapeAttr(sessionId)}');office.closeTaskDetail();return false;">${this._escapeHtml(member.name || sessionId)}</a></div>`
+        : '';
+      const ts = this._taskTimestamps(t);
+      const blocker = (t.status === 'blocked' && t.blockerDescription)
+        ? `<div class="task-modal-field"><strong>Blocker:</strong> ${this._escapeHtml(t.blockerDescription)}</div>`
+        : '';
+      const progress = Array.isArray(t.progressLog) && t.progressLog.length > 0
+        ? `<div class="task-modal-progress">
+             <strong style="color:#e4e4e7">Progress log</strong>
+             ${t.progressLog.slice().reverse().map(p => `
+               <div class="task-modal-progress-item">
+                 <div class="task-modal-progress-ts">${this._escapeHtml(this._formatRelativeTime(new Date(p.timestamp)))}</div>
+                 <div class="task-modal-progress-note">${this._escapeHtml(p.note || '')}</div>
+               </div>`).join('')}
+           </div>`
+        : '';
+      body.innerHTML = `
+        <div class="task-modal-field"><strong>Status:</strong> ${this._escapeHtml(t.status)}</div>
+        <div class="task-modal-field"><strong>Priority:</strong> ${this._escapeHtml(t.priority || 'normal')}</div>
+        ${agentLine}
+        ${ts}
+        ${blocker}
+        <div class="task-modal-field" style="margin-top:10px;color:#a1a1aa">${this._escapeHtml(t.description || '')}</div>
+        ${progress}
+      `;
+    } catch (err) {
+      body.innerHTML = '<div class="task-modal-loading">Failed to load task.</div>';
+    }
+  }
+
+  closeTaskDetail() {
+    const modal = document.getElementById('taskDetailModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  _taskTimestamps(t) {
+    const rows = [];
+    if (t.assignedAt) rows.push(['Assigned', t.assignedAt]);
+    if (t.startedAt && !t.startedAt.startsWith('0001')) rows.push(['Started', t.startedAt]);
+    if (t.completedAt && !t.completedAt.startsWith('0001')) rows.push(['Completed', t.completedAt]);
+    return rows.map(([label, ts]) => `<div class="task-modal-field"><strong>${label}:</strong> ${this._escapeHtml(this._formatRelativeTime(new Date(ts)))}</div>`).join('');
+  }
+
+  _findMemberBySession(sessionId) {
+    const roster = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    return roster.find(m => m.sessionId === sessionId);
+  }
+
+  _escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  _escapeAttr(s) { return this._escapeHtml(s).replace(/'/g, '&#39;'); }
+
+  _formatRelativeTime(date) {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+    const diff = Date.now() - date.getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    const d = Math.floor(h / 24);
+    return d + 'd ago';
   }
 
   // ========== Standup ==========
@@ -2815,7 +3314,7 @@ class OfficeApp {
         if (queue.tasks.length === 0) continue;
         html += `<div class="task-queue-agent">${this.escapeHtml(queue.agentName)}</div>`;
         html += queue.tasks.map(t => `
-          <div class="task-card priority-${t.priority}">
+          <div class="task-card priority-${t.priority} task-card-clickable" onclick="office.openTaskDetail('${this.escapeAttr(queue.sessionId)}','${this.escapeAttr(t.id)}')">
             <div class="task-card-header">
               <span class="task-priority">${t.priority.toUpperCase()}</span>
               <span class="task-status task-status-${t.status}">${t.status}</span>
@@ -2891,7 +3390,7 @@ class OfficeApp {
     if (!backlogEl || !todoEl || !wipEl || !reviewEl || !doneEl) return;
 
     const queues = this.taskQueues || [];
-    const allTasks = queues.flatMap(q => q.tasks || []);
+    const allTasks = queues.flatMap(q => (q.tasks || []).map(t => ({ ...t, _sessionId: q.sessionId })));
 
     // 5-column status mapping:
     // pending        -> Backlog
@@ -2923,7 +3422,10 @@ class OfficeApp {
         const blockedBadge = (t.blockedBy && t.blockedBy.length > 0)
           ? `<span class="kanban-blocked-badge">blocked by ${t.blockedBy.length}</span>`
           : '';
-        return `<div class="kanban-card ${cls}" title="${this.escapeAttr(t.title || '')}" onclick="office.switchTab('tasks')">
+        const clickHandler = t._sessionId
+          ? `office.openTaskDetail('${this.escapeAttr(t._sessionId)}','${this.escapeAttr(t.id)}')`
+          : `office.switchTab('tasks')`;
+        return `<div class="kanban-card ${cls}" title="${this.escapeAttr(t.title || '')}" onclick="${clickHandler}">
           <div class="kanban-card-title">${this.escapeHtml((t.title || '').slice(0, 40))}</div>
           ${priorityBadge}${failedBadge}${blockedBadge}
         </div>`;
@@ -3710,8 +4212,12 @@ class OfficeApp {
       { tab: 'tasks', label: 'Go to Tasks' },
       { tab: 'standup', label: 'Go to Standup' },
       { tab: 'messages', label: 'Go to Chat' },
+      { tab: 'timeline', label: 'Go to Timeline' },
+      { tab: 'insights', label: 'Go to Insights' },
+      { tab: 'meetings', label: 'Go to Meetings' },
       { tab: 'metrics', label: 'Go to Metrics' },
       { tab: 'activity', label: 'Go to Activity' },
+      { tab: 'reports', label: 'Go to Reports' },
       { tab: 'settings', label: 'Go to Settings' },
     ];
 
@@ -3725,6 +4231,19 @@ class OfficeApp {
 
     for (const t of tabs) {
       commands.push({ name: t.label, icon: '#', shortcut: '', action: () => this.switchTab(t.tab) });
+    }
+
+    // Per-agent open commands so fuzzy-search by name jumps straight to a profile.
+    const members = this.state && this.state.members ? this.state.members : [];
+    for (const m of members) {
+      if (!m || !m.sessionId) continue;
+      const name = m.name || m.sessionId;
+      commands.push({
+        name: `Open agent: ${name}`,
+        icon: '@',
+        shortcut: '',
+        action: () => this.showDetail(m.sessionId),
+      });
     }
 
     return commands;
@@ -3990,14 +4509,18 @@ class OfficeApp {
       };
     });
 
-    // Build edges from recent messages
+    // Build edges from recent messages, tracking count + last timestamp per pair.
     const edgeMap = new Map();
     for (const msg of (this.state.recentMessages || [])) {
       const fromPos = positions.find(p => p.id === msg.fromSessionId);
       const toPos = positions.find(p => p.id === msg.toSessionId);
       if (!fromPos || !toPos) continue;
       const key = [fromPos.id, toPos.id].sort().join('::');
-      edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
+      const prev = edgeMap.get(key) || { count: 0, last: 0 };
+      prev.count += 1;
+      const ts = typeof msg.timestamp === 'number' ? msg.timestamp : new Date(msg.timestamp || 0).getTime();
+      if (ts > prev.last) prev.last = ts;
+      edgeMap.set(key, prev);
     }
 
     const statusColors = {
@@ -4008,13 +4531,17 @@ class OfficeApp {
       offline: '#27272a',
     };
 
-    const edges = Array.from(edgeMap.entries()).map(([key, count]) => {
+    const edges = Array.from(edgeMap.entries()).map(([key, info]) => {
       const [id1, id2] = key.split('::');
       const p1 = positions.find(p => p.id === id1);
       const p2 = positions.find(p => p.id === id2);
       if (!p1 || !p2) return '';
+      const count = info.count;
+      if (count < 1) return '';
       const strokeWidth = Math.min(1 + Math.log(count + 1), 4).toFixed(1);
-      return `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="#3f3f46" stroke-width="${strokeWidth}" opacity="0.6"/>`;
+      const last = info.last ? this.formatTimeAgo(info.last) : 'never';
+      const title = `${count} message${count === 1 ? '' : 's'} · last ${last}`;
+      return `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="#3f3f46" stroke-width="${strokeWidth}" opacity="0.6"><title>${this.escapeHtml(title)}</title></line>`;
     }).join('');
 
     const nodes = positions.map(p => {
@@ -4022,8 +4549,10 @@ class OfficeApp {
       const labelX = p.x.toFixed(1);
       const labelY = (p.y + p.r + 12).toFixed(1);
       return `
-        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r}" fill="${color}" opacity="0.9" stroke="#09090b" stroke-width="2"/>
-        <text x="${labelX}" y="${labelY}" text-anchor="middle" fill="#a1a1aa" font-size="10" font-family="-apple-system, sans-serif">${this.escapeHtml(p.name.slice(0, 8))}</text>
+        <g style="cursor:pointer" onclick="office.showDetail('${this.escapeAttr(p.id)}')">
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r}" fill="${color}" opacity="0.9" stroke="#09090b" stroke-width="2"><title>${this.escapeHtml(p.name)}</title></circle>
+          <text x="${labelX}" y="${labelY}" text-anchor="middle" fill="#a1a1aa" font-size="10" font-family="-apple-system, sans-serif">${this.escapeHtml(p.name.slice(0, 8))}</text>
+        </g>
       `;
     }).join('');
 

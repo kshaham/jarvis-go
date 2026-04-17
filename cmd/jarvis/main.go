@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/claudeman/jarvis-go/internal/pty"
@@ -14,7 +15,35 @@ import (
 
 var version = "dev"
 
+// configureLogging sets the default slog handler from environment variables.
+// JARVIS_LOG_LEVEL: debug|info|warn|error (default info)
+// JARVIS_LOG_FORMAT: text|json (default text)
+func configureLogging() {
+	var level slog.Level
+	switch strings.ToLower(os.Getenv("JARVIS_LOG_LEVEL")) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if strings.ToLower(os.Getenv("JARVIS_LOG_FORMAT")) == "json" {
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(handler))
+}
+
 func main() {
+	configureLogging()
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(0)

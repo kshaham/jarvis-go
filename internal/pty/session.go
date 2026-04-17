@@ -224,6 +224,12 @@ func (s *Session) Stop() error {
 	case <-time.After(5 * time.Second):
 	}
 
+	// Clear output observers as a backstop for callers that forgot to
+	// call the unsubscribe function returned from AddOutputObserver.
+	s.observerMu.Lock()
+	s.outputObservers = nil
+	s.observerMu.Unlock()
+
 	return nil
 }
 

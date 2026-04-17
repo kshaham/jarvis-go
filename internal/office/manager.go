@@ -47,6 +47,7 @@ type Manager struct {
 	lastWaterCoolerAt  time.Time
 	triageAttempts     map[string]int       // taskID -> triage attempt count
 	lastTriageAt       map[string]time.Time // taskID -> last triage prompt time
+	lastRecoveryAt     map[string]time.Time // sessionID -> last recovery prompt time (backoff)
 
 	idleTicker   *time.Ticker
 	monitorDone  chan struct{}
@@ -61,6 +62,8 @@ type Manager struct {
 	updateInterval     time.Duration
 	updateTicker       *time.Ticker
 	updateStopCh       chan struct{}
+	updateStopOnce     *sync.Once
+	updateWg           sync.WaitGroup
 	lastTelegramUpdate time.Time
 	pendingLeaderQuery *PendingLeaderQuery
 }
@@ -131,6 +134,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		curiosityEnabled:   true,
 		triageAttempts:     make(map[string]int),
 		lastTriageAt:       make(map[string]time.Time),
+		lastRecoveryAt:     make(map[string]time.Time),
 		events:             make(chan OfficeEvent, 64),
 	}
 	mgr.loadPersistedMission()
@@ -287,6 +291,7 @@ func (m *Manager) SetTeamSpawned(v bool) {
 		// Clear triage tracking maps to prevent unbounded growth
 		m.triageAttempts = make(map[string]int)
 		m.lastTriageAt = make(map[string]time.Time)
+		m.lastRecoveryAt = make(map[string]time.Time)
 	}
 	m.mu.Unlock()
 
@@ -929,6 +934,7 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	}
 	score := CalculateAgentScoreWithData(a, learningData)
 
+	usage := a.Usage()
 	return map[string]interface{}{
 		"sessionId":      a.SessionID,
 		"configId":       a.ConfigID,
@@ -946,7 +952,10 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 		"avatarColor":    a.Config.Color,
 		"avatarInitial":  avatarInitial,
 		"avatarEmoji":    emoji,
-		"totalCost":      0,
+		// totalCost kept for frontend back-compat; usage carries the same
+		// value in a structured shape alongside per-agent token counts.
+		"totalCost":      usage.TotalCostUSD,
+		"usage":          usage,
 		"lastActivityAt": time.Now().Format(time.RFC3339),
 		"workingDir":     "",
 		"activeTool":     nil,
@@ -1246,6 +1255,23 @@ func (m *Manager) GetTeamSpawnedAt() time.Time {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.teamSpawnedAt
+}
+
+// SweepMeetings removes inactive meetings older than 6 hours so the meetings
+// map doesn't grow unbounded across many brainstorms/standups. Returns swept count.
+func (m *Manager) SweepMeetings() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	swept := 0
+	for id, mtg := range m.meetings {
+		if !mtg.Active && now.Sub(mtg.StartedAt) > 6*time.Hour {
+			delete(m.meetings, id)
+			swept++
+		}
+	}
+	return swept
 }
 
 // SweepBugTasks removes resolved bugs older than 24h and caps at MaxBugTasks.

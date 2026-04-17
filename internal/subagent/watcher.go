@@ -34,6 +34,8 @@ type Watcher struct {
 
 	// Pending tool calls: agentID -> toolUseID -> toolName
 	pendingTools map[string]map[string]string
+	// Creation timestamps for pending tools so orphaned entries can be swept.
+	pendingToolTimes map[string]map[string]time.Time
 
 	// LRU tracking: agentID -> last access time
 	accessOrder map[string]time.Time
@@ -43,14 +45,15 @@ type Watcher struct {
 func NewWatcher(ctx context.Context, projectsDir string) *Watcher {
 	childCtx, cancel := context.WithCancel(ctx)
 	return &Watcher{
-		agents:       make(map[string]*SubagentInfo),
-		filePos:      make(map[string]int64),
-		projectsDir:  projectsDir,
-		events:       make(chan SubagentEvent, 64),
-		ctx:          childCtx,
-		cancel:       cancel,
-		pendingTools: make(map[string]map[string]string),
-		accessOrder:  make(map[string]time.Time),
+		agents:           make(map[string]*SubagentInfo),
+		filePos:          make(map[string]int64),
+		projectsDir:      projectsDir,
+		events:           make(chan SubagentEvent, 64),
+		ctx:              childCtx,
+		cancel:           cancel,
+		pendingTools:     make(map[string]map[string]string),
+		pendingToolTimes: make(map[string]map[string]time.Time),
+		accessOrder:      make(map[string]time.Time),
 	}
 }
 
@@ -138,7 +141,8 @@ func (w *Watcher) scanLoop() {
 	}
 }
 
-// cleanupLoop periodically removes stale agents.
+// cleanupLoop periodically removes stale agents and sweeps orphaned pending
+// tool calls.
 func (w *Watcher) cleanupLoop() {
 	ticker := time.NewTicker(staleCleanupInterval)
 	defer ticker.Stop()
@@ -149,6 +153,27 @@ func (w *Watcher) cleanupLoop() {
 			return
 		case <-ticker.C:
 			w.cleanupStaleAgents()
+			w.sweepPendingTools()
+		}
+	}
+}
+
+// sweepPendingTools removes tool-use entries that never received a matching
+// result within 1 hour. Protects against unbounded growth when agents crash
+// mid-tool.
+func (w *Watcher) sweepPendingTools() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	cutoff := time.Now().Add(-1 * time.Hour)
+	for agentID, times := range w.pendingToolTimes {
+		for toolUseID, createdAt := range times {
+			if createdAt.Before(cutoff) {
+				delete(times, toolUseID)
+				if pending, ok := w.pendingTools[agentID]; ok {
+					delete(pending, toolUseID)
+				}
+			}
 		}
 	}
 }
@@ -243,6 +268,7 @@ func (w *Watcher) cleanupStaleAgents() {
 		delete(w.filePos, agent.FilePath)
 		delete(w.agents, agentID)
 		delete(w.pendingTools, agentID)
+		delete(w.pendingToolTimes, agentID)
 		delete(w.accessOrder, agentID)
 		slog.Debug("cleaned up stale agent", "agentId", agentID, "status", agent.Status)
 	}
@@ -394,8 +420,10 @@ func (w *Watcher) processEntry(agentID string, entry *Entry) {
 		if entry.ToolUseID != "" {
 			if w.pendingTools[agentID] == nil {
 				w.pendingTools[agentID] = make(map[string]string)
+				w.pendingToolTimes[agentID] = make(map[string]time.Time)
 			}
 			w.pendingTools[agentID][entry.ToolUseID] = entry.ToolName
+			w.pendingToolTimes[agentID][entry.ToolUseID] = time.Now()
 		}
 
 		w.emit(SubagentTool{
@@ -413,6 +441,9 @@ func (w *Watcher) processEntry(agentID string, entry *Entry) {
 			if pending, ok := w.pendingTools[agentID]; ok {
 				toolName = pending[entry.ToolUseID]
 				delete(pending, entry.ToolUseID)
+			}
+			if times, ok := w.pendingToolTimes[agentID]; ok {
+				delete(times, entry.ToolUseID)
 			}
 		}
 
@@ -523,6 +554,7 @@ func (w *Watcher) ForceCleanup() int {
 		delete(w.filePos, agent.FilePath)
 		delete(w.agents, agentID)
 		delete(w.pendingTools, agentID)
+		delete(w.pendingToolTimes, agentID)
 		delete(w.accessOrder, agentID)
 		slog.Debug("force-cleaned stale agent", "agentId", agentID, "status", agent.Status)
 	}

@@ -3,8 +3,12 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -23,20 +27,62 @@ import (
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
 
-var allowedCommands = []string{"git", "npm", "go", "ls", "cat", "head", "tail", "grep", "find", "wc", "sort", "diff", "echo", "pwd", "which", "env", "node", "npx", "tsc"}
+// allowedCommands is the set of command names permitted by /api/run.
+// `env` is deliberately NOT included -- it would leak ANTHROPIC_API_KEY and
+// other provider credentials to any authenticated caller.
+var allowedCommands = []string{"git", "npm", "go", "ls", "cat", "head", "tail", "grep", "find", "wc", "sort", "diff", "echo", "pwd", "which", "node", "npx", "tsc"}
 
-func isCommandAllowed(cmd string) bool {
+// allowedBinaryPrefixes constrains where the resolved binary may live. A
+// matching base name alone is insufficient because any directory on PATH
+// can shadow the real binary; we resolve to an absolute path and require
+// it live inside one of these prefixes.
+var allowedBinaryPrefixes = []string{
+	"/usr/bin/",
+	"/usr/local/bin/",
+	"/opt/homebrew/bin/",
+	"/bin/",
+	"/sbin/",
+	"/usr/sbin/",
+	// Common Go toolchain installs
+	"/usr/local/go/bin/",
+	"/opt/homebrew/opt/go/bin/",
+}
+
+// resolveAllowedCommand looks up the command name via exec.LookPath, verifies
+// the base name is in the allowlist, and confirms the resolved absolute path
+// lives under one of the allowed system-binary prefixes. Returns the absolute
+// path on success so the caller executes the verified binary directly.
+func resolveAllowedCommand(cmd string) (string, []string, bool) {
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
-		return false
+		return "", nil, false
 	}
 	base := filepath.Base(parts[0])
-	for _, allowed := range allowedCommands {
-		if base == allowed {
-			return true
+	allowed := false
+	for _, a := range allowedCommands {
+		if base == a {
+			allowed = true
+			break
 		}
 	}
-	return false
+	if !allowed {
+		return "", nil, false
+	}
+	abs, err := exec.LookPath(base)
+	if err != nil {
+		return "", nil, false
+	}
+	prefixOK := false
+	for _, p := range allowedBinaryPrefixes {
+		if strings.HasPrefix(abs, p) {
+			prefixOK = true
+			break
+		}
+	}
+	if !prefixOK {
+		return "", nil, false
+	}
+	return abs, parts[1:], true
 }
 
 // shellMetachars matches dangerous shell metacharacters that could enable injection.
@@ -312,13 +358,61 @@ func (ctx *Context) DisconnectTelegram(w http.ResponseWriter, r *http.Request) {
 
 // --- Hooks ---
 
+// allowedHookEvents gates which event types the hook endpoint will process.
+// Arbitrary event names could be used to inject data into the SSE stream
+// or trigger unintended signals in the respawn controller.
+var allowedHookEvents = map[string]bool{
+	"stop":               true,
+	"idle_prompt":        true,
+	"permission_prompt":  true,
+	"elicitation_dialog": true,
+	"subagent_started":   true,
+	"subagent_completed": true,
+	"subagent_tool":      true,
+}
+
+// verifyHookSignature validates the HMAC-SHA256 signature sent in the
+// X-Hook-Signature header (format: "sha256=<hex>") against the raw body
+// and the server's signing key. Used to authenticate the local Claude CLI
+// hook caller without requiring a session cookie.
+func (ctx *Context) verifyHookSignature(body []byte, header string) bool {
+	const prefix = "sha256="
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	presented, err := hex.DecodeString(header[len(prefix):])
+	if err != nil {
+		return false
+	}
+	key := ctx.AuthManager.SigningKey()
+	if len(key) == 0 {
+		return false
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write(body)
+	expected := mac.Sum(nil)
+	return hmac.Equal(expected, presented)
+}
+
 // HandleHookEvent processes an incoming hook event and forwards signals
-// to the session's RespawnController when applicable.
+// to the session's RespawnController when applicable. The caller must
+// attach an X-Hook-Signature header that HMAC-signs the raw body with the
+// server's signing key; unsigned or mis-signed requests are rejected.
 // POST /api/hook-event
 func (ctx *Context) HandleHookEvent(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, "failed to read body")
+		return
+	}
+	if !ctx.verifyHookSignature(rawBody, r.Header.Get("X-Hook-Signature")) {
+		request.WriteError(w, http.StatusUnauthorized, "invalid hook signature")
+		return
+	}
+
 	var body map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(rawBody, &body); err != nil {
 		request.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
@@ -326,6 +420,10 @@ func (ctx *Context) HandleHookEvent(w http.ResponseWriter, r *http.Request) {
 	eventType, _ := body["event"].(string)
 	if eventType == "" {
 		eventType = "hook:received"
+	}
+	if !allowedHookEvents[eventType] {
+		request.WriteError(w, http.StatusBadRequest, "unknown event type")
+		return
 	}
 	sessionID, _ := body["sessionId"].(string)
 
@@ -700,26 +798,29 @@ func (ctx *Context) Run(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "command is required")
 		return
 	}
-	// Validate command against whitelist and reject shell metacharacters.
-	if !isCommandAllowed(body.Command) || shellMetachars.MatchString(body.Command) {
+	// Reject shell metacharacters before any other parsing.
+	if shellMetachars.MatchString(body.Command) {
 		request.WriteError(w, http.StatusBadRequest, "command not allowed")
 		return
 	}
-	// Validate working directory exists.
-	if body.WorkingDir != "" {
-		info, err := os.Stat(body.WorkingDir)
-		if err != nil || !info.IsDir() {
-			request.WriteError(w, http.StatusBadRequest, "workingDir does not exist or is not a directory")
-			return
-		}
-	}
-	// Split command into args to avoid shell injection (no sh -c).
-	parts := strings.Fields(body.Command)
-	if len(parts) == 0 {
-		request.WriteError(w, http.StatusBadRequest, "empty command")
+	// Resolve to an absolute path and confirm the base name is in the
+	// allowlist AND the resolved path is inside an approved prefix. This
+	// blocks the `PATH=/tmp:...` shim attack on the allowlisted names.
+	absPath, args, ok := resolveAllowedCommand(body.Command)
+	if !ok {
+		request.WriteError(w, http.StatusBadRequest, "command not allowed")
 		return
 	}
-	cmd := exec.Command(parts[0], parts[1:]...)
+	// Validate working directory via the standard resolver (symlink + allowlist).
+	if body.WorkingDir != "" {
+		resolved, err := ctx.ResolveWorkingDir(body.WorkingDir)
+		if err != nil {
+			request.WriteError(w, http.StatusBadRequest, "invalid working directory: "+err.Error())
+			return
+		}
+		body.WorkingDir = resolved
+	}
+	cmd := exec.Command(absPath, args...)
 	if body.WorkingDir != "" {
 		cmd.Dir = body.WorkingDir
 	}

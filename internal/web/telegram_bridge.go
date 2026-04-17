@@ -113,3 +113,18 @@ func (a *officeTelegramAdapter) SendOfficeUpdate(text string) {
 func (a *officeTelegramAdapter) IsConnected() bool {
 	return a.handler != nil && a.handler.IsConnected()
 }
+
+// telegramNotifyAdapter bridges notifications.TelegramSender to the existing
+// *telegram.Handler. Per-route chat IDs are configured on the ChannelSpec,
+// not the adapter, so one telegram handler services any number of routes
+// targeting different chats.
+type telegramNotifyAdapter struct {
+	handler *telegram.Handler
+}
+
+func (a *telegramNotifyAdapter) SendFormattedMessage(chatID, text string, _ interface{}) {
+	if a.handler == nil {
+		return
+	}
+	a.handler.SendFormattedMessage(chatID, text, nil)
+}

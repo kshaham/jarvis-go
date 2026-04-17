@@ -3,6 +3,7 @@ package office
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // mockSessionStore implements SessionStore for testing.
@@ -354,3 +355,50 @@ func TestHandleAgentDeath_NoStrategicAgent(t *testing.T) {
 		t.Errorf("expected 0 agents, got %d", m.AgentCount())
 	}
 }
+
+
+// TestSweepMeetings_RemovesStaleInactive verifies meetings that are inactive
+// and older than 6 hours are removed, while active or recent inactive meetings
+// are preserved.
+func TestSweepMeetings_RemovesStaleInactive(t *testing.T) {
+	m := newTestManager()
+
+	// Helper: inject a meeting directly.
+	now := time.Now()
+	m.mu.Lock()
+	m.meetings["old-inactive"] = &Meeting{
+		ID: "old-inactive", Type: "brainstorm", Active: false,
+		StartedAt: now.Add(-7 * time.Hour),
+	}
+	m.meetings["recent-inactive"] = &Meeting{
+		ID: "recent-inactive", Type: "brainstorm", Active: false,
+		StartedAt: now.Add(-1 * time.Hour),
+	}
+	m.meetings["old-active"] = &Meeting{
+		ID: "old-active", Type: "standup", Active: true,
+		StartedAt: now.Add(-10 * time.Hour),
+	}
+	m.mu.Unlock()
+
+	swept := m.SweepMeetings()
+	if swept != 1 {
+		t.Errorf("expected 1 swept meeting, got %d", swept)
+	}
+
+	m.mu.RLock()
+	_, oldInactiveExists := m.meetings["old-inactive"]
+	_, recentInactiveExists := m.meetings["recent-inactive"]
+	_, oldActiveExists := m.meetings["old-active"]
+	m.mu.RUnlock()
+
+	if oldInactiveExists {
+		t.Error("expected old-inactive meeting to be swept")
+	}
+	if !recentInactiveExists {
+		t.Error("expected recent-inactive meeting to be preserved")
+	}
+	if !oldActiveExists {
+		t.Error("expected old-active meeting to be preserved (active meetings are never swept)")
+	}
+}
+

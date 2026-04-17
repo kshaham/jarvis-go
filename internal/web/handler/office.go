@@ -523,10 +523,22 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 // spawnTeamRequest. Extracted from OfficeSpawnTeam so ConciergeSpawnTeam can
 // call it directly without re-marshalling and rewriting r.Body.
 func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamRequest) {
+	// Refuse new team spawns when today's spending cap is reached.
+	if ctx.IsSpendingFrozen() {
+		request.WriteCodedError(w, http.StatusTooManyRequests, request.ErrCodeSpendingFrozen,
+			"daily spending cap reached; new team spawns are frozen until the cap is raised or the day rolls over")
+		return
+	}
 	if req.WorkingDir == "" {
 		request.WriteError(w, http.StatusBadRequest, "workingDir is required")
 		return
 	}
+	resolvedDir, err := ctx.ResolveWorkingDir(req.WorkingDir)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, "invalid working directory: "+err.Error())
+		return
+	}
+	req.WorkingDir = resolvedDir
 	if ctx.OfficeManager.IsTeamSpawned() {
 		request.WriteError(w, http.StatusConflict, "Team has already been spawned")
 		return
@@ -851,6 +863,11 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 
 // ConciergeConfig returns the Gemini API key + model + voice to the authenticated
 // browser so it can connect directly to the Gemini Live WebSocket API.
+//
+// SECURITY NOTE: returning the raw key to the browser is the path-of-least-
+// resistance for the Gemini Live handshake but means a stolen session cookie
+// or XSS yields the key. The safer fix is a server-side WebSocket proxy so
+// the key never leaves the Jarvis process. Tracked as a follow-up.
 func (ctx *Context) ConciergeConfig(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
 	apiKey, _ := settings["geminiApiKey"].(string)

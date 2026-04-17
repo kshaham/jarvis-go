@@ -23,14 +23,35 @@ type ScreenManager struct {
 	screensFile string
 }
 
-// NewScreenManager creates a new screen manager.
+// NewScreenManager creates a new screen manager. After loading persisted
+// screens, verifies each entry's PID is still alive and prunes stale entries
+// so subsequent SendInput / KillScreen calls don't block on dead processes.
 func NewScreenManager(dataDir string) *ScreenManager {
 	sm := &ScreenManager{
 		screens:     make(map[string]*ScreenSession),
 		screensFile: filepath.Join(dataDir, "screens.json"),
 	}
 	sm.loadScreens()
+	sm.purgeOrphans()
 	return sm
+}
+
+// purgeOrphans removes any loaded screen entries whose PID is no longer alive.
+// Runs once on startup after loadScreens. Persists the pruned map back to disk.
+func (sm *ScreenManager) purgeOrphans() {
+	sm.mu.Lock()
+	removed := 0
+	for id, s := range sm.screens {
+		if s.PID > 0 && !isProcessAlive(s.PID) {
+			delete(sm.screens, id)
+			removed++
+		}
+	}
+	sm.mu.Unlock()
+	if removed > 0 {
+		slog.Info("Purged stale screen sessions on startup", "removed", removed)
+		sm.saveScreens()
+	}
 }
 
 // CreateScreen creates a new GNU Screen session for a Jarvis session.

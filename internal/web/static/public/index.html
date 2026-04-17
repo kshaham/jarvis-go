@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.min.js"></script>
   <script src="code-printer.js" defer></script>
 </head>
 <body>
@@ -28,6 +29,7 @@
       </div>
 
       <div class="header-right">
+        <span class="sse-status" id="sseStatus" data-state="connected" title="SSE: Connected">Connected</span>
         <div class="header-font-controls">
           <button class="btn-icon-header btn-sm" onclick="app.decreaseFontSize()" title="Decrease font (Ctrl+-)" aria-label="Decrease font size">A-</button>
           <span class="font-size-display" id="fontSizeDisplay" aria-label="Current font size">14</span>
@@ -62,6 +64,7 @@
         </button>
         <button class="btn-icon-header btn-settings" onclick="app.openAppSettings()" title="App Settings" aria-label="Open app settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <div class="header-tokens" id="headerTokens" title="Total tokens across all sessions">0 tokens</div>
+        <div class="header-cost" id="headerCost" data-state="ok" title="Today's estimated spend" onclick="app.openSpendingSettings()">$0.00</div>
         <button class="btn-icon-header btn-logout" onclick="app.logout()" title="Log out" aria-label="Log out">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
@@ -207,6 +210,16 @@
     <!-- Main Terminal Area -->
     <main class="main">
       <div class="terminal-container" id="terminalContainer"></div>
+
+      <!-- In-terminal search box (Ctrl/Cmd+F) -->
+      <div class="terminal-search-box" id="terminalSearchBox" role="search">
+        <input type="text" id="terminalSearchInput" class="terminal-search-input" placeholder="Search terminal..." aria-label="Search in terminal"
+          oninput="app.runTerminalSearch('next')"
+          onkeydown="app.handleTerminalSearchKeydown(event)">
+        <button class="terminal-search-btn" onclick="app.runTerminalSearch('prev')" title="Previous (Shift+Enter)" aria-label="Previous match">&uarr;</button>
+        <button class="terminal-search-btn" onclick="app.runTerminalSearch('next')" title="Next (Enter)" aria-label="Next match">&darr;</button>
+        <button class="terminal-search-btn" onclick="app.closeTerminalSearch()" title="Close (Escape)" aria-label="Close search">&times;</button>
+      </div>
 
       <!-- Welcome Overlay (shown when no session active) -->
       <div class="welcome-overlay" id="welcomeOverlay">
@@ -1990,6 +2003,18 @@
   <script src="app.js"></script>
   <script src="telegram.js"></script>
   <script src="debounce.js"></script>
+  <!-- Command Palette (Cmd/Ctrl+K) -->
+  <div class="command-palette-overlay" id="commandPalette" role="dialog" aria-modal="true" aria-label="Command palette"
+    onclick="if (event.target === this) app.closeCommandPalette()">
+    <div class="command-palette">
+      <input type="text" id="commandPaletteInput" class="command-palette-input"
+        placeholder="Type a command or session name..." aria-label="Command search"
+        oninput="app._filterPalette(this.value)"
+        onkeydown="app.handleCommandPaletteKeydown(event)">
+      <div class="command-palette-list" id="commandPaletteList"></div>
+    </div>
+  </div>
+
   <script src="logger-client.js"></script>
   <script src="accounts.js"></script>
   <script src="expand.js"></script>

@@ -77,3 +77,144 @@ func TestBroker_Subscribe_MaxClients(t *testing.T) {
 		t.Errorf("expected 503, got %d", recorder2.Code)
 	}
 }
+
+// TestReplay_DeliversMissedEvents verifies that a client reconnecting with
+// Last-Event-ID receives the events it missed.
+func TestReplay_DeliversMissedEvents(t *testing.T) {
+	b := NewBroker(10, 5)
+	// Broadcast 5 events while no client is connected.
+	for i := 0; i < 5; i++ {
+		b.Broadcast("test:event", map[string]int{"n": i})
+	}
+
+	// Collect events > ID 2.
+	b.mu.RLock()
+	replay := b.collectReplayEvents(2)
+	b.mu.RUnlock()
+
+	if len(replay) != 3 {
+		t.Errorf("expected 3 replayed events (IDs 3,4,5), got %d", len(replay))
+	}
+	for i, msg := range replay {
+		expectedID := uint64(3 + i)
+		if msg.ID != expectedID {
+			t.Errorf("replay[%d] expected ID %d, got %d", i, expectedID, msg.ID)
+		}
+	}
+}
+
+// TestReplay_IgnoresOlderIDs verifies that requesting ID 0 replays all events.
+func TestReplay_IgnoresOlderIDs(t *testing.T) {
+	b := NewBroker(10, 5)
+	for i := 0; i < 3; i++ {
+		b.Broadcast("test:event", map[string]int{"n": i})
+	}
+
+	b.mu.RLock()
+	replay := b.collectReplayEvents(0)
+	b.mu.RUnlock()
+
+	if len(replay) != 3 {
+		t.Errorf("expected 3 events when lastSeenID=0, got %d", len(replay))
+	}
+}
+
+// TestReplay_WrapsAroundBuffer verifies the circular buffer wraps correctly
+// when more than replayBufferSize events are broadcast.
+func TestReplay_WrapsAroundBuffer(t *testing.T) {
+	b := NewBroker(10, 5)
+	// Broadcast 250 events (more than the 200 buffer size).
+	for i := 0; i < 250; i++ {
+		b.Broadcast("test:event", map[string]int{"n": i})
+	}
+
+	b.mu.RLock()
+	// Request everything after ID 240 -- should get 10 events (241-250).
+	replay := b.collectReplayEvents(240)
+	b.mu.RUnlock()
+
+	if len(replay) != 10 {
+		t.Errorf("expected 10 events after ID 240, got %d", len(replay))
+	}
+	if replay[0].ID != 241 || replay[9].ID != 250 {
+		t.Errorf("expected IDs 241..250, got %d..%d", replay[0].ID, replay[9].ID)
+	}
+}
+
+// TestSubscriptionIndex_DirectMatch confirms exact subscription entries route
+// events to the right clients via the index.
+func TestSubscriptionIndex_DirectMatch(t *testing.T) {
+	b := NewBroker(10, 10)
+	// Two clients with exact subscription, one with wildcard, one with no match.
+	c1 := &Client{subscriptions: []string{"session:created"}}
+	c2 := &Client{subscriptions: []string{"session:created"}}
+	c3 := &Client{subscriptions: nil} // wildcard
+	c4 := &Client{subscriptions: []string{"office:standup"}}
+	b.indexClient(c1)
+	b.indexClient(c2)
+	b.indexClient(c3)
+	b.indexClient(c4)
+
+	got := b.matchingClients("session:created")
+	if len(got) != 3 {
+		t.Errorf("expected 3 matches (2 exact + wildcard), got %d", len(got))
+	}
+	// c4 must not appear.
+	for _, c := range got {
+		if c == c4 {
+			t.Errorf("c4 subscribed only to office:standup; should not match session:created")
+		}
+	}
+}
+
+// TestSubscriptionIndex_PrefixMatch confirms wildcard subscriptions
+// ("session:*") route correctly.
+func TestSubscriptionIndex_PrefixMatch(t *testing.T) {
+	b := NewBroker(10, 10)
+	prefixClient := &Client{subscriptions: []string{"session:*"}}
+	otherClient := &Client{subscriptions: []string{"office:*"}}
+	b.indexClient(prefixClient)
+	b.indexClient(otherClient)
+
+	got := b.matchingClients("session:terminal")
+	if len(got) != 1 || got[0] != prefixClient {
+		t.Errorf("expected only prefix client to match, got %v", got)
+	}
+}
+
+// TestSubscriptionIndex_UnindexRemovesClient verifies disconnect cleanup.
+func TestSubscriptionIndex_UnindexRemovesClient(t *testing.T) {
+	b := NewBroker(10, 10)
+	c := &Client{subscriptions: []string{"session:*", "office:standup"}}
+	b.indexClient(c)
+	b.unindexClient(c)
+
+	got := b.matchingClients("session:created")
+	if len(got) != 0 {
+		t.Errorf("unindexed client should not appear in matches, got %d", len(got))
+	}
+	got = b.matchingClients("office:standup")
+	if len(got) != 0 {
+		t.Errorf("unindexed client should not appear in matches, got %d", len(got))
+	}
+}
+
+// TestPostBroadcastHook_FiresOncePerBroadcast confirms a registered hook
+// runs exactly once per broadcast with the same event it was called with.
+func TestPostBroadcastHook_FiresOncePerBroadcast(t *testing.T) {
+	b := NewBroker(10, 5)
+	var received []string
+	b.AddPostBroadcastHook(func(msg EventMessage) {
+		received = append(received, msg.Event)
+	})
+
+	b.Broadcast("test:one", map[string]int{"n": 1})
+	b.Broadcast("test:two", map[string]int{"n": 2})
+
+	if len(received) != 2 {
+		t.Fatalf("expected hook to fire 2 times, got %d", len(received))
+	}
+	if received[0] != "test:one" || received[1] != "test:two" {
+		t.Errorf("unexpected event order: %v", received)
+	}
+}

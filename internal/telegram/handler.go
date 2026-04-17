@@ -470,10 +470,13 @@ func (h *Handler) WebhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the update.
+	// Parse the update. Cap body at 64KB -- legitimate Telegram updates are
+	// well under this; anything larger is abuse (this endpoint is
+	// auth-exempt, so unbounded io.ReadAll would be a trivial DoS).
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "failed to read body", http.StatusRequestEntityTooLarge)
 		return
 	}
 

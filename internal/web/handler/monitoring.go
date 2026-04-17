@@ -10,11 +10,45 @@ import (
 
 var startTime = time.Now()
 
-// Health returns a simple health check.
+// Health returns a simple liveness check.
 func (ctx *Context) Health(w http.ResponseWriter, r *http.Request) {
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"uptime": time.Since(startTime).String(),
+	})
+}
+
+// Ready returns a readiness check. Unlike Health (liveness), this verifies
+// that critical dependencies are alive. Returns 503 if degraded so
+// orchestrators (k8s, systemd) can stop routing traffic.
+func (ctx *Context) Ready(w http.ResponseWriter, r *http.Request) {
+	failing := make([]string, 0)
+	if ctx.StateStore == nil {
+		failing = append(failing, "stateStore")
+	}
+	if ctx.SSEBroker == nil {
+		failing = append(failing, "sseBroker")
+	}
+	if ctx.SessionManager == nil {
+		failing = append(failing, "sessionManager")
+	}
+	goroutines := runtime.NumGoroutine()
+	if goroutines > 5000 {
+		failing = append(failing, "goroutineCount")
+	}
+
+	status := http.StatusOK
+	ready := true
+	if len(failing) > 0 {
+		status = http.StatusServiceUnavailable
+		ready = false
+	}
+
+	request.WriteJSON(w, status, map[string]interface{}{
+		"ready":      ready,
+		"failing":    failing,
+		"goroutines": goroutines,
+		"uptime":     time.Since(startTime).String(),
 	})
 }
 

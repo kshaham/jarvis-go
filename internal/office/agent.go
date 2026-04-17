@@ -29,19 +29,33 @@ const (
 	TaskBlocked      TaskStatus = "blocked"
 )
 
+// TaskProgressEntry is a single timestamped progress update on a task.
+// The ProgressLog ring-buffer on Task preserves a short history so the
+// office UI can show "how we got here" instead of only the latest note.
+type TaskProgressEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Note      string    `json:"note"`
+}
+
+// taskProgressLogCap bounds how many progress entries we keep per task.
+// Older entries are dropped from the front when exceeded -- the latest
+// is always preserved and mirrored onto Task.Description for back-compat.
+const taskProgressLogCap = 20
+
 // Task is a work item assigned to an agent.
 type Task struct {
-	ID                 string     `json:"id"`
-	Title              string     `json:"title"`
-	Description        string     `json:"description"`
-	Status             TaskStatus `json:"status"`
-	Priority           string     `json:"priority"` // "high", "medium", "low"
-	AssignedAt         time.Time  `json:"assignedAt"`
-	StartedAt          time.Time  `json:"startedAt,omitempty"`
-	CompletedAt        time.Time  `json:"completedAt,omitempty"`
-	Source             string     `json:"source"` // "leader", "self", "bug"
-	BlockedBy          []string   `json:"blockedBy,omitempty"`
-	BlockerDescription string     `json:"blockerDescription,omitempty"`
+	ID                 string              `json:"id"`
+	Title              string              `json:"title"`
+	Description        string              `json:"description"`
+	Status             TaskStatus          `json:"status"`
+	Priority           string              `json:"priority"` // "high", "medium", "low"
+	AssignedAt         time.Time           `json:"assignedAt"`
+	StartedAt          time.Time           `json:"startedAt,omitempty"`
+	CompletedAt        time.Time           `json:"completedAt,omitempty"`
+	Source             string              `json:"source"` // "leader", "self", "bug"
+	BlockedBy          []string            `json:"blockedBy,omitempty"`
+	BlockerDescription string              `json:"blockerDescription,omitempty"`
+	ProgressLog        []TaskProgressEntry `json:"progressLog,omitempty"`
 }
 
 // TaskQueue holds a list of tasks for an agent.
@@ -120,7 +134,22 @@ type AgentState struct {
 
 	// Personality override
 	PersonalityOverride *PersonalityOverride
+
+	// Cost + token aggregation, fed by the SSE event forwarder on every
+	// pty.EventTokens. Enables per-agent spend and token displays in the
+	// office UI without a new endpoint -- exposed via BuildMemberPayload.
+	TotalCostUSD      float64
+	TotalInputTokens  int64
+	TotalOutputTokens int64
+	TurnCount         int64
+	LastTurnAt        time.Time
+	// Last ~20 per-turn cost values (newest last). Powers the per-card
+	// sparkline and agent-detail cost chart. Bounded at recentTurnCostsCap.
+	RecentTurnCosts []float64
 }
+
+// recentTurnCostsCap bounds the per-agent recent-turn cost history.
+const recentTurnCostsCap = 20
 
 // NewAgentState creates a new agent state.
 func NewAgentState(sessionID, configID string, config *TeamMemberConfig) *AgentState {
@@ -207,18 +236,72 @@ func (a *AgentState) UpdateTaskStatus(taskID string, status TaskStatus) bool {
 	return false
 }
 
-// SetTaskProgress updates the description of a task to reflect progress.
-// Returns true if found.
+// SetTaskProgress appends a progress note to the task's ProgressLog and
+// mirrors it onto Description for backward compat with readers that only
+// look at the current state. Log is ring-buffered at taskProgressLogCap.
+// Returns true if the task was found.
 func (a *AgentState) SetTaskProgress(taskID string, progress string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, t := range a.taskQueue.Tasks {
 		if t.ID == taskID {
 			t.Description = progress
+			t.ProgressLog = append(t.ProgressLog, TaskProgressEntry{
+				Timestamp: time.Now(),
+				Note:      progress,
+			})
+			if len(t.ProgressLog) > taskProgressLogCap {
+				t.ProgressLog = t.ProgressLog[len(t.ProgressLog)-taskProgressLogCap:]
+			}
 			return true
 		}
 	}
 	return false
+}
+
+// RecordTurnUsage accumulates token + cost from a single turn. Called from
+// the SSE event forwarder on every pty.EventTokens. Thread-safe; appends to
+// the bounded RecentTurnCosts ring so sparklines can render without a
+// separate tracker.
+func (a *AgentState) RecordTurnUsage(input, output int64, cost float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.TotalInputTokens += input
+	a.TotalOutputTokens += output
+	a.TotalCostUSD += cost
+	a.TurnCount++
+	a.LastTurnAt = time.Now()
+	a.RecentTurnCosts = append(a.RecentTurnCosts, cost)
+	if len(a.RecentTurnCosts) > recentTurnCostsCap {
+		a.RecentTurnCosts = a.RecentTurnCosts[len(a.RecentTurnCosts)-recentTurnCostsCap:]
+	}
+}
+
+// UsageSnapshot returns a copy-safe view of aggregated usage for use in
+// member payloads + dashboards.
+type UsageSnapshot struct {
+	TotalCostUSD      float64   `json:"totalCostUSD"`
+	TotalInputTokens  int64     `json:"totalInputTokens"`
+	TotalOutputTokens int64     `json:"totalOutputTokens"`
+	TurnCount         int64     `json:"turnCount"`
+	LastTurnAt        time.Time `json:"lastTurnAt,omitempty"`
+	RecentTurnCosts   []float64 `json:"recentTurnCosts,omitempty"`
+}
+
+// Usage returns a snapshot of the agent's cumulative cost + token counts.
+func (a *AgentState) Usage() UsageSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	recent := make([]float64, len(a.RecentTurnCosts))
+	copy(recent, a.RecentTurnCosts)
+	return UsageSnapshot{
+		TotalCostUSD:      a.TotalCostUSD,
+		TotalInputTokens:  a.TotalInputTokens,
+		TotalOutputTokens: a.TotalOutputTokens,
+		TurnCount:         a.TurnCount,
+		LastTurnAt:        a.LastTurnAt,
+		RecentTurnCosts:   recent,
+	}
 }
 
 // SetSDKWorking sets the SDK working flag under the mutex.

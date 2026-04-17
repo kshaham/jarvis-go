@@ -370,10 +370,24 @@ func handleMemory(args []string) {
 
 // --- Helpers ---
 
+// addAgentAuth attaches the agent token header (when set via env) so the
+// request passes the AgentTokenAuth middleware on /api/office/agent/*.
+func addAgentAuth(req *http.Request) {
+	if tok := os.Getenv("JARVIS_AGENT_TOKEN"); tok != "" {
+		req.Header.Set("X-Jarvis-Agent-Token", tok)
+	}
+}
+
 func post(path string, body map[string]interface{}) {
 	requireEnv()
 	data, _ := json.Marshal(body)
-	resp, err := client.Post(apiURL+path, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequest("POST", apiURL+path, bytes.NewReader(data))
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	req.Header.Set("Content-Type", "application/json")
+	addAgentAuth(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		fatal("HTTP error: " + err.Error())
 	}
@@ -386,7 +400,12 @@ func post(path string, body map[string]interface{}) {
 
 func get(path string) interface{} {
 	requireEnv()
-	resp, err := client.Get(apiURL + path)
+	req, err := http.NewRequest("GET", apiURL+path, nil)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	addAgentAuth(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		fatal("HTTP error: " + err.Error())
 	}

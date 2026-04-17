@@ -29,6 +29,11 @@ type SessionConfig struct {
 	NiceConfig    NiceConfig
 	ProviderEnv   map[string]string
 
+	// MaxCostUSD is an optional per-session spending cap. When > 0, the
+	// session emits EventCostExceeded and stops once totalCostUSD >= cap.
+	// Zero means unlimited.
+	MaxCostUSD float64
+
 	// SDK mode fields (only used when Mode == ModeClaudeSDK)
 	SystemPrompt string            // Initial system prompt (kickstart)
 	McpServers   map[string]any    // MCP server configurations
@@ -87,8 +92,22 @@ type EventTokens struct {
 	Input  int64
 	Output int64
 	Total  int64
+	// Cost is the USD cost for this turn. SDK sessions populate from the
+	// provider's TotalCostUSD; PTY sessions leave 0 (unknown).
+	Cost float64
+	// Model identifies which model served the turn. Empty for PTY sessions.
+	Model string
 }
 func (EventTokens) eventType() string { return "tokens" }
+
+// EventCostExceeded fires when a session's cumulative cost hits its
+// per-session MaxCostUSD cap. The session is stopped after this event.
+type EventCostExceeded struct {
+	Cost   float64
+	CapUSD float64
+}
+
+func (EventCostExceeded) eventType() string { return "costExceeded" }
 
 type EventError struct{ Err error }
 func (EventError) eventType() string { return "error" }

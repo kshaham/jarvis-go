@@ -112,16 +112,36 @@ func (ctx *Context) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maskSecret returns a display form of an API key that preserves enough of
+// the original for operators to verify which key is configured without
+// exposing enough to impersonate. Short values (less than 12 chars) are
+// fully replaced; the rest show first 6 + last 4 with asterisks in between.
+// Returns empty string for empty input so the field reads as "unconfigured"
+// rather than "masked empty".
+func maskSecret(v interface{}) string {
+	s, ok := v.(string)
+	if !ok || s == "" {
+		return ""
+	}
+	if len(s) < 12 {
+		return "****"
+	}
+	return s[:6] + "****" + s[len(s)-4:]
+}
+
 // GetSettingsAccounts returns account settings as a flat object.
 // The frontend (accounts.js) expects provider, zaiApiKey, etc. at the top level.
+// API keys are returned masked so a leaked response can't be used to
+// impersonate the configured account. The frontend shows the masked form
+// as a placeholder; writing a new value still accepts the raw key via PUT.
 // GET /api/settings/accounts
 func (ctx *Context) GetSettingsAccounts(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
 	result := map[string]interface{}{
 		"success":          true,
 		"provider":         settings["provider"],
-		"claudeApiKey":     settings["claudeApiKey"],
-		"zaiApiKey":        settings["zaiApiKey"],
+		"claudeApiKey":     maskSecret(settings["claudeApiKey"]),
+		"zaiApiKey":        maskSecret(settings["zaiApiKey"]),
 		"zaiModel":         settings["zaiModel"],
 		"zaiSonnetModel":   settings["zaiSonnetModel"],
 		"zaiHaikuModel":    settings["zaiHaikuModel"],
@@ -149,8 +169,21 @@ func (ctx *Context) CreateSettingsAccount(w http.ResponseWriter, r *http.Request
 
 	// Save ALL account settings to the state store
 	// This includes: provider, API keys, defaultWorkingDir, claudeMode, allowedTools, etc.
+	// Drop masked API key values ("sk-ant****abcd") so a user re-saving the
+	// settings page without editing the key field doesn't clobber the real
+	// stored key with its display mask. The frontend shows masked values as
+	// placeholders but submits them back unchanged.
+	secretFields := map[string]bool{
+		"claudeApiKey": true,
+		"zaiApiKey":    true,
+	}
 	updates := make(map[string]interface{})
 	for key, value := range body {
+		if secretFields[key] {
+			if s, ok := value.(string); ok && strings.Contains(s, "****") {
+				continue
+			}
+		}
 		updates[key] = value
 	}
 

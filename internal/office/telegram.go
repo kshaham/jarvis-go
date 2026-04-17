@@ -3,7 +3,9 @@ package office
 import (
 	"fmt"
 	"html"
+	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -66,15 +68,31 @@ func (m *Manager) GetTelegramConfig() (enabled bool, intervalMinutes int, lastUp
 }
 
 // StopTelegramUpdates stops the periodic update goroutine if running.
+// Waits up to 5 seconds for the goroutine to exit so we don't leak it across
+// spawn/dismiss cycles. If a Telegram HTTP call is stuck, we bail after 5s
+// and log; the worst case is one orphaned goroutine until its send returns.
 func (m *Manager) StopTelegramUpdates() {
 	m.mu.Lock()
 	stopCh := m.updateStopCh
+	once := m.updateStopOnce
 	m.updateStopCh = nil
 	m.updateTicker = nil
+	m.updateStopOnce = nil
 	m.mu.Unlock()
 
-	if stopCh != nil {
-		close(stopCh)
+	if stopCh != nil && once != nil {
+		once.Do(func() { close(stopCh) })
+	}
+
+	done := make(chan struct{})
+	go func() {
+		m.updateWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		slog.Warn("telegram update goroutine did not exit in 5s")
 	}
 }
 
@@ -88,11 +106,14 @@ func (m *Manager) startPeriodicUpdates() {
 	}
 	m.updateTicker = time.NewTicker(m.updateInterval)
 	m.updateStopCh = make(chan struct{})
+	m.updateStopOnce = &sync.Once{}
 	ticker := m.updateTicker
 	stopCh := m.updateStopCh
+	m.updateWg.Add(1)
 	m.mu.Unlock()
 
 	go func() {
+		defer m.updateWg.Done()
 		for {
 			select {
 			case <-ticker.C:

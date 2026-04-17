@@ -102,7 +102,16 @@ func (c *Client) writePump() {
 			if !ok {
 				return
 			}
-			if _, err := fmt.Fprintf(c.w, "event: %s\ndata: %s\n\n", msg.Event, msg.Data); err != nil {
+			// Include id: line so browsers track Last-Event-ID automatically
+			// on reconnect. Events broadcast before ID assignment (init)
+			// have ID=0 and omit the id line.
+			var err error
+			if msg.ID > 0 {
+				_, err = fmt.Fprintf(c.w, "id: %d\nevent: %s\ndata: %s\n\n", msg.ID, msg.Event, msg.Data)
+			} else {
+				_, err = fmt.Fprintf(c.w, "event: %s\ndata: %s\n\n", msg.Event, msg.Data)
+			}
+			if err != nil {
 				return
 			}
 			c.flusher.Flush()

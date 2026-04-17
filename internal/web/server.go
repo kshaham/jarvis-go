@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -14,11 +16,14 @@ import (
 
 	"github.com/claudeman/jarvis-go/internal/cases"
 	"github.com/claudeman/jarvis-go/internal/integrations"
+	"github.com/claudeman/jarvis-go/internal/metrics"
+	"github.com/claudeman/jarvis-go/internal/notifications"
 	"github.com/claudeman/jarvis-go/internal/office"
 	"github.com/claudeman/jarvis-go/internal/pty"
 	"github.com/claudeman/jarvis-go/internal/ralph"
 	"github.com/claudeman/jarvis-go/internal/respawn"
 	"github.com/claudeman/jarvis-go/internal/runsummary"
+	"github.com/claudeman/jarvis-go/internal/scheduler"
 	"github.com/claudeman/jarvis-go/internal/state"
 	"github.com/claudeman/jarvis-go/internal/subagent"
 	"github.com/claudeman/jarvis-go/internal/teamtemplates"
@@ -41,6 +46,7 @@ type Server struct {
 	sseBroker       *sse.Broker
 	csrfStore       *mw.CSRFStore
 	authManager     *auth.Manager
+	agentTokenMgr   *auth.AgentTokenManager
 	officeManager   *office.Manager
 	stateStore      *state.AppState
 	screenManager   *pty.ScreenManager
@@ -48,6 +54,10 @@ type Server struct {
 	caseManager     *cases.CaseManager
 	templateStore     *templates.Store
 	teamTemplateStore *teamtemplates.Store
+	schedulerStore   *scheduler.Store
+	schedulerRunner  *scheduler.Runner
+	notificationsStore  *notifications.Store
+	notificationsRouter *notifications.Router
 	telegramBot       *telegram.Bot
 	telegramHandler *telegram.Handler
 	handlerCtx      *handler.Context
@@ -72,6 +82,8 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 
 	tmplStore := templates.NewStore(filepath.Join(dataDir, "templates"))
 	teamTmplStore := teamtemplates.NewStore(filepath.Join(dataDir, "team-templates"))
+	schedulerStore := scheduler.NewStore(filepath.Join(dataDir, "scheduler.json"))
+	notificationsStore := notifications.NewStore(filepath.Join(dataDir, "notification-routes.json"))
 
 	// Create Telegram bot and handler.
 	tgBot := telegram.New()
@@ -91,45 +103,59 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 	subagentW := subagent.NewWatcher(ctx, projectsDir)
 	subagentW.Start()
 
-	// Forward subagent events to SSE
+	// Forward subagent events to SSE (panic-safe per-event loop body).
 	go func() {
 		for event := range subagentW.Events() {
-			switch e := event.(type) {
-			case subagent.SubagentDiscovered:
-				broker.Broadcast("subagent:discovered", e.Info)
-			case subagent.SubagentUpdated:
-				broker.Broadcast("subagent:updated", e.Info)
-			case subagent.SubagentCompleted:
-				broker.Broadcast("subagent:completed", e.Info)
-			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("panic in subagent forwarder", "panic", r, "stack", string(debug.Stack()))
+					}
+				}()
+				switch e := event.(type) {
+				case subagent.SubagentDiscovered:
+					broker.Broadcast("subagent:discovered", e.Info)
+				case subagent.SubagentUpdated:
+					broker.Broadcast("subagent:updated", e.Info)
+				case subagent.SubagentCompleted:
+					broker.Broadcast("subagent:completed", e.Info)
+				}
+			}()
 		}
 	}()
 
-	// Forward office events to SSE
+	// Forward office events to SSE (panic-safe per-event loop body).
 	go func() {
 		for event := range officeMgr.Events() {
-			switch e := event.(type) {
-			case office.MemberJoinedEvent:
-				broker.Broadcast("office:memberJoined", map[string]interface{}{
-					"configId": e.ConfigID, "sessionId": e.SessionID, "name": e.Name,
-				})
-			case office.MemberLeftEvent:
-				broker.Broadcast("office:memberLeft", map[string]interface{}{
-					"configId": e.ConfigID, "sessionId": e.SessionID,
-				})
-			case office.StandupStartedEvent:
-				broker.Broadcast("office:standupStarted", map[string]interface{}{
-					"participants": e.Participants,
-				})
-			case office.StandupEndedEvent:
-				broker.Broadcast("office:standupEnded", map[string]interface{}{
-					"summary": e.Summary,
-				})
-			case office.TaskAssignedEvent:
-				broker.Broadcast("office:taskAssigned", map[string]interface{}{
-					"sessionId": e.SessionID, "taskId": e.TaskID, "title": e.Title,
-				})
-			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("panic in office forwarder", "panic", r, "stack", string(debug.Stack()))
+					}
+				}()
+				switch e := event.(type) {
+				case office.MemberJoinedEvent:
+					broker.Broadcast("office:memberJoined", map[string]interface{}{
+						"configId": e.ConfigID, "sessionId": e.SessionID, "name": e.Name,
+					})
+				case office.MemberLeftEvent:
+					broker.Broadcast("office:memberLeft", map[string]interface{}{
+						"configId": e.ConfigID, "sessionId": e.SessionID,
+					})
+				case office.StandupStartedEvent:
+					broker.Broadcast("office:standupStarted", map[string]interface{}{
+						"participants": e.Participants,
+					})
+				case office.StandupEndedEvent:
+					broker.Broadcast("office:standupEnded", map[string]interface{}{
+						"summary": e.Summary,
+					})
+				case office.TaskAssignedEvent:
+					broker.Broadcast("office:taskAssigned", map[string]interface{}{
+						"sessionId": e.SessionID, "taskId": e.TaskID, "title": e.Title,
+					})
+				}
+			}()
 		}
 	}()
 
@@ -187,6 +213,30 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 	})
 
 	authMgr := auth.NewManager(dataDir, isHTTPS)
+	agentTokenMgr := auth.NewAgentTokenManager(dataDir)
+
+	// Configure trusted-proxy CIDRs for X-Forwarded-For handling. Reads the
+	// `trustedProxyCIDRs` setting (string or []string); default empty means
+	// the X-Forwarded-For header is ignored on every request -- safe when
+	// no reverse proxy is deployed.
+	{
+		settings := stateStore.GetSettings()
+		var cidrs []string
+		if v, ok := settings["trustedProxyCIDRs"].([]interface{}); ok {
+			for _, item := range v {
+				if s, ok := item.(string); ok && s != "" {
+					cidrs = append(cidrs, s)
+				}
+			}
+		} else if s, ok := settings["trustedProxyCIDRs"].(string); ok && s != "" {
+			for _, piece := range strings.Split(s, ",") {
+				if piece = strings.TrimSpace(piece); piece != "" {
+					cidrs = append(cidrs, piece)
+				}
+			}
+		}
+		auth.SetTrustedProxyCIDRs(cidrs)
+	}
 
 	srv := &Server{
 		port:            port,
@@ -196,6 +246,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 		sseBroker:       broker,
 		csrfStore:       mw.NewCSRFStore(ctx),
 		authManager:     authMgr,
+		agentTokenMgr:   agentTokenMgr,
 		officeManager:   officeMgr,
 		stateStore:      stateStore,
 		screenManager:   screenMgr,
@@ -203,6 +254,8 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 		caseManager:     caseMgr,
 		templateStore:     tmplStore,
 		teamTemplateStore: teamTmplStore,
+		schedulerStore:    schedulerStore,
+		notificationsStore: notificationsStore,
 		telegramBot:       tgBot,
 		telegramHandler: tgHandler,
 	}
@@ -275,6 +328,19 @@ func (s *Server) Start() error {
 	// Start Telegram handler (polling/webhook)
 	s.telegramHandler.Start()
 
+	// Start the scheduler runner: loads persisted jobs, schedules them, and
+	// fires any that were due while the server was offline.
+	if s.schedulerRunner != nil {
+		s.schedulerRunner.Start(context.Background())
+	}
+
+	// Start the notifications router worker pool. Pre-hook registration in
+	// setupRouter has already wired it into the SSE broker, so once workers
+	// start they immediately begin draining any queued work.
+	if s.notificationsRouter != nil {
+		s.notificationsRouter.Start(context.Background())
+	}
+
 	slog.Info("Starting Jarvis Go server", "port", s.port, "https", s.isHTTPS)
 
 	// Optionally start a second HTTPS listener alongside HTTP.
@@ -306,6 +372,12 @@ func (s *Server) Start() error {
 // Stop gracefully shuts down the server.
 func (s *Server) Stop(ctx context.Context) error {
 	slog.Info("Shutting down server...")
+	if s.schedulerRunner != nil {
+		s.schedulerRunner.Stop()
+	}
+	if s.notificationsRouter != nil {
+		s.notificationsRouter.Stop()
+	}
 	s.telegramHandler.Stop()
 	return s.httpServer.Shutdown(ctx)
 }
@@ -318,8 +390,10 @@ func (s *Server) SSEBroker() *sse.Broker {
 func (s *Server) setupRouter() chi.Router {
 	r := chi.NewRouter()
 
-	// Global middleware
+	// Global middleware. RequestID runs first so every subsequent log line
+	// and the response header carry a correlation ID.
 	r.Use(mw.Recovery)
+	r.Use(mw.RequestID)
 	r.Use(mw.RequestLogger)
 	r.Use(mw.SecurityHeaders(s.isHTTPS))
 
@@ -339,6 +413,7 @@ func (s *Server) setupRouter() chi.Router {
 		RespawnControllers: make(map[string]*respawn.Controller),
 		TemplateStore:      s.templateStore,
 		TeamTemplateStore:  s.teamTemplateStore,
+		AgentTokenMgr:      s.agentTokenMgr,
 		TelegramBot:        s.telegramBot,
 		TelegramHandler:    s.telegramHandler,
 		IntegrationMonitor: intMon,
@@ -349,6 +424,27 @@ func (s *Server) setupRouter() chi.Router {
 		TailFileStreams:         make(map[string]func()),
 		ActivePlanOrchestrators: make(map[string]string),
 	}
+	// Spending threshold tracking is private to the handler package; the
+	// map must be initialized before any RecordDailyStats call.
+	h.InitSpendingTracker()
+	// Build the scheduler runner with an executor closure that has access
+	// to the fully-initialized handler context (spawn flow, spending checks,
+	// workingDir resolver).
+	s.schedulerRunner = scheduler.NewRunner(s.schedulerStore, handler.BuildSchedulerExecutor(h))
+	h.Scheduler = s.schedulerStore
+	h.SchedulerRunner = s.schedulerRunner
+
+	// Notifications: build the router with the existing telegram handler as
+	// its Telegram sender (via a thin adapter that matches our interface
+	// without leaking the telegram package's InlineKeyboardMarkup type),
+	// then hook it into the SSE broker so every broadcast is evaluated
+	// against persisted routes.
+	s.notificationsRouter = notifications.NewRouter(s.notificationsStore, &telegramNotifyAdapter{s.telegramHandler})
+	s.sseBroker.AddPostBroadcastHook(func(msg sse.EventMessage) {
+		s.notificationsRouter.OnEvent(msg.Event, msg.Data)
+	})
+	h.Notifications = s.notificationsStore
+	h.NotificationsRouter = s.notificationsRouter
 	s.handlerCtx = h
 
 	// Wire office <-> telegram integration
@@ -360,6 +456,30 @@ func (s *Server) setupRouter() chi.Router {
 			chatID:  tgSettings.ChatID,
 		})
 	}
+
+	// Prometheus metrics at the standard /metrics path (outside /api so
+	// scrape configs don't need a custom path). No auth: firewall / reverse
+	// proxy is expected to restrict access to internal networks.
+	r.Handle("/metrics", metrics.Handler())
+
+	// pprof mounted inside an authenticated subtree so heap/goroutine
+	// profiles only flow to logged-in operators. Idle endpoints are
+	// zero-cost; profiling only spins up when actually collecting.
+	r.Route("/debug/pprof", func(r chi.Router) {
+		r.Use(mw.Auth(s.authManager))
+		r.Get("/", pprof.Index)
+		r.Get("/cmdline", pprof.Cmdline)
+		r.Get("/profile", pprof.Profile)
+		r.Post("/symbol", pprof.Symbol)
+		r.Get("/symbol", pprof.Symbol)
+		r.Get("/trace", pprof.Trace)
+		r.Get("/allocs", pprof.Handler("allocs").ServeHTTP)
+		r.Get("/block", pprof.Handler("block").ServeHTTP)
+		r.Get("/goroutine", pprof.Handler("goroutine").ServeHTTP)
+		r.Get("/heap", pprof.Handler("heap").ServeHTTP)
+		r.Get("/mutex", pprof.Handler("mutex").ServeHTTP)
+		r.Get("/threadcreate", pprof.Handler("threadcreate").ServeHTTP)
+	})
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
@@ -375,9 +495,12 @@ func (s *Server) setupRouter() chi.Router {
 			// Telegram webhook (auth via secret in URL path)
 			r.Post("/telegram/webhook/{secret}", s.telegramHandler.WebhookHandler)
 
-			// Agent endpoints (auth-exempt -- called by cm CLI and jarvis-mcp from agent sessions).
-			// Auth is implicit: callers must know a valid sessionId.
+			// Agent endpoints called by the `cm` CLI and jarvis-mcp inside
+			// spawned sessions. Protected by an HMAC-grade process token
+			// piped into sessions via JARVIS_AGENT_TOKEN. External callers
+			// without the token get 401 even when they know a session ID.
 			r.Route("/office/agent", func(r chi.Router) {
+				r.Use(mw.AgentTokenAuth(s.agentTokenMgr))
 				// Read-only
 				r.Get("/team-roster", h.OfficeAgentTeamRoster)
 				r.Get("/tasks", h.OfficeAgentGetTasks)
@@ -623,6 +746,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/scores", h.OfficeGetScores)
 				r.Get("/audit-log", h.OfficeGetAuditLog)
 				r.Get("/meetings", h.OfficeGetMeetings)
+				r.Get("/timeline", h.OfficeTimeline)
 				r.Get("/learnings", h.OfficeGetLearnings)
 				r.Get("/learnings/{configId}", h.OfficeGetLearningsByConfig)
 				r.Get("/code-graph", h.OfficeGetCodeGraph)

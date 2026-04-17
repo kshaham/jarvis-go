@@ -1,0 +1,50 @@
+# docker-compose.yml for local jarvis-go deployment.
+#
+# Quick start:
+#   docker compose up -d
+#   open http://127.0.0.1:3555
+#
+# State persists to ./jarvis-data (bind mount). Back this directory up for
+# disaster recovery -- it holds state.json, scheduler.json, team-templates,
+# agent memory, etc.
+
+services:
+  jarvis:
+    build:
+      context: .
+      target: runtime
+    image: jarvis:local
+    container_name: jarvis
+    restart: unless-stopped
+    # Bind to loopback only by default. Expose publicly only behind a
+    # reverse proxy with TLS + auth (see DEPLOYMENT.md).
+    ports:
+      - "127.0.0.1:3555:3555"
+    volumes:
+      - ./jarvis-data:/home/jarvis/.jarvis
+      # Optional: mount your project roots so sessions can work in them.
+      # Match the workingDirAllowlist setting inside jarvis to these paths.
+      # - ~/Code:/home/jarvis/Code
+    environment:
+      JARVIS_LOG_LEVEL: info
+      JARVIS_LOG_FORMAT: json
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/jarvis", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Uncomment to scrape jarvis metrics into a local Prometheus.
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: jarvis-prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:9090:9090"
+  #   volumes:
+  #     - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus-data:/prometheus
+
+# volumes:
+#   prometheus-data:

@@ -293,6 +293,114 @@ body {
   animation: tab-blink-yellow 3.5s ease-in-out infinite;
 }
 
+/* Command palette (Cmd/Ctrl+K) */
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+  z-index: 10000;
+  backdrop-filter: blur(2px);
+}
+.command-palette-overlay.visible { display: flex; }
+.command-palette {
+  width: 100%;
+  max-width: 600px;
+  background: #1a1a1f;
+  border: 1px solid #2d2d34;
+  border-radius: 10px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.command-palette-input {
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #27272a;
+  color: #e4e4e7;
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+.command-palette-input::placeholder { color: #52525b; }
+.command-palette-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.palette-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid #1f1f23;
+}
+.palette-item:last-child { border-bottom: none; }
+.palette-item:hover { background: #22222a; }
+.palette-item.selected { background: #2a2a35; }
+.palette-title { font-size: 13px; color: #e4e4e7; }
+.palette-hint { font-size: 11px; color: #71717a; margin-top: 2px; }
+
+/* In-terminal search box (Cmd/Ctrl+F) */
+.terminal-search-box {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: #1a1a1f;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+.terminal-search-box.visible { display: flex; }
+.terminal-search-input {
+  width: 180px;
+  padding: 4px 8px;
+  background: #0d0d12;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  color: #e4e4e7;
+  font-size: 12px;
+  outline: none;
+}
+.terminal-search-btn {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  color: #a1a1aa;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.terminal-search-btn:hover { background: #27272a; color: #e4e4e7; }
+
+/* Background activity: subtle blue dot to indicate new output in an
+   inactive tab. Non-animated so it's not distracting when many tabs
+   are running in parallel. */
+.session-tab.tab-alert-activity::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.6);
+  pointer-events: none;
+}
+
 @keyframes tab-blink-red {
   0%, 100% { background: transparent; border-color: transparent; }
   50% { background: rgba(239, 68, 68, 0.12); border-color: var(--red); }
@@ -335,6 +443,56 @@ body {
   padding-left: 0.75rem;
   border-left: 1px solid var(--border);
 }
+
+/* SSE connection status pill. Color driven by data-state. */
+.sse-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  user-select: none;
+  line-height: 1.4;
+}
+.sse-status[data-state="connected"] {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+.sse-status[data-state="reconnecting"] {
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+  animation: sse-pulse 1.5s ease-in-out infinite;
+}
+.sse-status[data-state="offline"] {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+@keyframes sse-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.header-cost {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  cursor: pointer;
+  user-select: none;
+}
+.header-cost[data-state="warn"] {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+.header-cost[data-state="critical"] {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+  animation: sse-pulse 2s ease-in-out infinite;
+}
+.header-cost:hover { opacity: 0.8; }
 
 .header-tokens {
   font-size: 0.75rem;
@@ -1644,6 +1802,30 @@ body {
   /* Performance: isolate layout and paint operations */
   contain: strict;
   will-change: contents;
+}
+
+/* Multi-terminal mode: host contains absolute-positioned per-session panes,
+   so switching tabs is an instant display:none/display:block swap. */
+.terminal-host-multi {
+  position: relative;
+}
+
+.terminal-pane {
+  position: absolute;
+  inset: 0;
+  background: #0d0d0d;
+  overflow: hidden;
+  contain: strict;
+  will-change: contents;
+}
+
+.terminal-pane .xterm {
+  height: 100%;
+  padding: 0;
+}
+
+.terminal-pane .xterm-viewport {
+  background: transparent !important;
 }
 
 .terminal-container .xterm {

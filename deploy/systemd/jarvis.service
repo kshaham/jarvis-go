@@ -1,0 +1,65 @@
+# systemd unit for jarvis-go.
+#
+# Install:
+#   sudo useradd --system --home /home/jarvis --create-home --shell /usr/sbin/nologin jarvis
+#   sudo install -m 755 ./jarvis /usr/local/bin/jarvis
+#   sudo install -m 644 deploy/systemd/jarvis.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now jarvis
+#
+# Logs:    journalctl -u jarvis -f
+# Status:  systemctl status jarvis
+# Reload:  systemctl restart jarvis
+
+[Unit]
+Description=Jarvis autonomous agent orchestration server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis
+Group=jarvis
+
+# Adjust port via --port flag if you need something other than 3555.
+ExecStart=/usr/local/bin/jarvis web
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+Environment="JARVIS_LOG_LEVEL=info"
+Environment="JARVIS_LOG_FORMAT=json"
+
+# --- Security hardening ------------------------------------------------------
+# jarvis only needs to read/write its own data directory. Everything else on
+# the filesystem is read-only or hidden. These flags can be tightened further
+# once operators verify their particular workflows are covered.
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/jarvis/.jarvis
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# MemoryDenyWriteExecute=yes -- DO NOT enable for Go binaries; Go's runtime
+# uses W+X pages during GC. Only re-enable if a future build proves compatible.
+
+# Capability bounding: jarvis listens on an unprivileged port, spawns child
+# processes for sessions, and reads/writes under /home/jarvis. No extras.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

@@ -86,6 +86,7 @@ func (m *Manager) StartIdleMonitoring() {
 				m.checkSessionHealth()
 				m.CleanupExpiredLocks()
 				m.SweepBugTasks()
+				m.SweepMeetings()
 				m.autoCompleteIdleAgentTasks()
 				m.checkUnacknowledgedTasks()
 				m.checkStaleInProgressTasks()
@@ -579,6 +580,26 @@ func (m *Manager) checkForStuckAgents() {
 		}
 
 		tier := getRecoveryTier(attemptCount)
+
+		// Backoff: suppress recovery if we already sent one recently for this
+		// agent. Tier 2 requires 30s since last recovery; Tier 3 requires 60s.
+		// Prevents spamming a persistently stuck agent on every idle tick.
+		m.mu.RLock()
+		lastRecovery := m.lastRecoveryAt[agent.SessionID]
+		m.mu.RUnlock()
+		if !lastRecovery.IsZero() {
+			var backoff time.Duration
+			switch tier {
+			case RecoveryTier2:
+				backoff = 30 * time.Second
+			case RecoveryTier3:
+				backoff = 60 * time.Second
+			}
+			if backoff > 0 && time.Since(lastRecovery) < backoff {
+				continue
+			}
+		}
+
 		slog.Warn("Stuck agent recovery",
 			"tier", tier,
 			"attempt", attemptCount,
@@ -587,6 +608,9 @@ func (m *Manager) checkForStuckAgents() {
 			"inactive", inactiveDuration)
 
 		m.executeRecoveryTier(sessions, agent.SessionID, tier)
+		m.mu.Lock()
+		m.lastRecoveryAt[agent.SessionID] = time.Now()
+		m.mu.Unlock()
 
 		if tier == RecoveryTier3 {
 			m.broadcast("office:agentRestarted", map[string]interface{}{
@@ -639,10 +663,15 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 		sessions.WriteViaScreen(sessionID, "\r")
 
 	case RecoveryTier2:
-		// Tier 2: Ctrl+C, wait 3s, send recovery prompt.
+		// Tier 2: Ctrl+C, wait 3s, send recovery prompt. Exit early if monitor stops.
 		sessions.WriteViaScreen(sessionID, "\x03")
+		monitorDone := m.monitorDone
 		go func() {
-			time.Sleep(3 * time.Second)
+			select {
+			case <-time.After(3 * time.Second):
+			case <-monitorDone:
+				return
+			}
 			if sessions == nil || !sessions.IsSessionAlive(sessionID) {
 				return
 			}
@@ -656,10 +685,15 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 		}()
 
 	case RecoveryTier3:
-		// Tier 3: Ctrl+C, wait 3s, send diagnostic prompt.
+		// Tier 3: Ctrl+C, wait 3s, send diagnostic prompt. Exit early if monitor stops.
 		sessions.WriteViaScreen(sessionID, "\x03")
+		monitorDone := m.monitorDone
 		go func() {
-			time.Sleep(3 * time.Second)
+			select {
+			case <-time.After(3 * time.Second):
+			case <-monitorDone:
+				return
+			}
 			if sessions == nil || !sessions.IsSessionAlive(sessionID) {
 				return
 			}
@@ -677,6 +711,8 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 }
 
 // broadcastStuckAlert emits a stuck alert after all recovery tiers exhausted.
+// If AutoKillAfterStuck is enabled (default), the session is also stopped so
+// it doesn't sit idle burning quota while the operator is away.
 func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDuration time.Duration) {
 	m.broadcast("office:agentStuck", map[string]interface{}{
 		"sessionId":          sessionID,
@@ -698,6 +734,21 @@ func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDurat
 			m.config.RecoveryMaxAttempts))
 
 	slog.Warn("All recovery tiers exhausted", "agent", agentName)
+
+	// Auto-kill to stop burning tokens. Honors the config toggle so ops
+	// users can opt out when they need to post-mortem a stuck agent.
+	if m.config.AutoKillAfterStuck {
+		m.broadcast("office:agentKilled", map[string]interface{}{
+			"sessionId": sessionID,
+			"agentName": agentName,
+			"reason":    "stuck after all recovery tiers",
+		})
+		// HandleAgentDeath cleans up the agent state and reassigns its tasks.
+		// The pty session itself is stopped through its normal exit path when
+		// the respawn controller stops driving it.
+		m.HandleAgentDeath(sessionID)
+		slog.Warn("Auto-killed stuck agent", "agent", agentName, "session", sessionID)
+	}
 }
 
 // CheckForIdleAgents looks for agents with empty task queues and no active work,
