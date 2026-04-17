@@ -308,7 +308,26 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 				}
 
 				if event.Result.IsError {
-					slog.Error("SDK session turn error", "session", s.ID, "subtype", event.Result.Subtype)
+					// Include errors slice + result text so rate-limit /
+					// quota / 529 / credit failures are diagnosable from
+					// the log alone. Subtype can be misleading ("success"
+					// despite IsError=true) on some provider errors.
+					stopReason := ""
+					if event.Result.StopReason != nil {
+						stopReason = *event.Result.StopReason
+					}
+					resultText := event.Result.Result
+					if len(resultText) > 500 {
+						resultText = resultText[:500] + "..."
+					}
+					slog.Error("SDK session turn error",
+						"session", s.ID,
+						"subtype", event.Result.Subtype,
+						"stopReason", stopReason,
+						"errors", event.Result.Errors,
+						"numTurns", event.Result.NumTurns,
+						"durationMS", event.Result.DurationMS,
+						"result", resultText)
 				} else {
 					slog.Info("SDK session turn complete", "session", s.ID,
 						"turns", event.Result.NumTurns,

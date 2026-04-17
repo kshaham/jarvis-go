@@ -281,6 +281,12 @@ func (m *Manager) IsTeamSpawned() bool {
 // SetTeamSpawned marks the team as spawned and records the timestamp.
 // When setting to false, it stops periodic Telegram updates and clears
 // any pending leader query.
+//
+// It also starts/stops the idle-monitoring goroutine that drives stuck-agent
+// detection, idle replenishment, auto-standups, and brainstorm recovery.
+// Without this, agents that finish a turn with an error (e.g., Z.AI rate
+// limit) sit idle forever because nothing nudges them back to work --
+// production outage observed 2026-04-17.
 func (m *Manager) SetTeamSpawned(v bool) {
 	m.mu.Lock()
 	m.teamSpawned = v
@@ -295,7 +301,10 @@ func (m *Manager) SetTeamSpawned(v bool) {
 	}
 	m.mu.Unlock()
 
-	if !v {
+	if v {
+		m.StartIdleMonitoring()
+	} else {
+		m.StopIdleMonitoring()
 		m.StopTelegramUpdates()
 		m.mu.Lock()
 		m.pendingLeaderQuery = nil
