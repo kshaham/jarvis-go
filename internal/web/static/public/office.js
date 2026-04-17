@@ -124,6 +124,13 @@ class OfficeApp {
     // operator toggles tabs rapidly. Initialized null; renderInsights
     // aborts-then-recreates before each render cycle.
     this._insightsAbortController = null;
+    // Same pattern for Tasks tab (3 parallel fetches), Meetings list,
+    // and individual meeting open (last-click-wins when user clicks
+    // meetings quickly). Each surface gets its own controller so
+    // aborting one doesn't stomp the others.
+    this._tasksAbortController = null;
+    this._meetingsAbortController = null;
+    this._openMeetingAbortController = null;
     // Install keyboard shortcut bindings (? for help, g+<key> chord for tab nav).
     this._installShortcutBindings();
   }
@@ -1790,8 +1797,15 @@ class OfficeApp {
   async renderMeetings() {
     const listEl = document.getElementById('meetingsList');
     if (!listEl) return;
+    // Cancel any in-flight meetings-list fetch so rapid tab toggles
+    // don't stomp each other's rendered list.
+    if (this._meetingsAbortController) {
+      try { this._meetingsAbortController.abort(); } catch (_) { /* already aborted */ }
+    }
+    this._meetingsAbortController = new AbortController();
+    const signal = this._meetingsAbortController.signal;
     try {
-      const res = await fetch('/api/office/standup/history');
+      const res = await fetch('/api/office/standup/history', { signal });
       const data = await res.json();
       const standups = Array.isArray(data.standups) ? data.standups : [];
       standups.sort((a, b) => String(b.modified || '').localeCompare(String(a.modified || '')));
@@ -1805,6 +1819,7 @@ class OfficeApp {
           <div class="meeting-meta">${this._escapeHtml(s.modified || '')}</div>
         </div>`).join('');
     } catch (err) {
+      if (err && err.name === 'AbortError') return;
       listEl.innerHTML = '<div class="meetings-empty">Failed to load meetings.</div>';
     }
   }
@@ -1825,8 +1840,16 @@ class OfficeApp {
       (el.getAttribute('onclick') || '').includes("'" + id + "'"));
     if (clicked) clicked.classList.add('active');
     detail.innerHTML = '<div class="meetings-placeholder">Loading transcript…</div>';
+    // If the operator clicks meeting A then meeting B quickly, A's
+    // fetch might resolve after B's and overwrite B's transcript.
+    // Abort any previous open so the last click wins deterministically.
+    if (this._openMeetingAbortController) {
+      try { this._openMeetingAbortController.abort(); } catch (_) { /* already aborted */ }
+    }
+    this._openMeetingAbortController = new AbortController();
+    const signal = this._openMeetingAbortController.signal;
     try {
-      const res = await fetch('/api/office/standup/' + encodeURIComponent(id));
+      const res = await fetch('/api/office/standup/' + encodeURIComponent(id), { signal });
       const data = await res.json();
       const tr = (data && (data.transcript || (data.standup && data.standup.transcript))) || [];
       if (!Array.isArray(tr) || tr.length === 0) {
@@ -1840,6 +1863,7 @@ class OfficeApp {
           <div class="meeting-timestamp">${this._escapeHtml(this._formatRelativeTime(new Date(line.timestamp || 0)))}</div>
         </div>`).join('');
     } catch (err) {
+      if (err && err.name === 'AbortError') return;
       detail.innerHTML = '<div class="meetings-placeholder">Failed to load meeting.</div>';
     }
   }
@@ -3476,11 +3500,19 @@ class OfficeApp {
   // ========== Tasks ==========
 
   async fetchAndRenderTasks() {
+    // Cancel any in-flight Tasks-tab fetches; rapid tab toggling would
+    // otherwise stack three-way races whose out-of-order responses
+    // stomp the task/queue/lock state.
+    if (this._tasksAbortController) {
+      try { this._tasksAbortController.abort(); } catch (_) { /* already aborted */ }
+    }
+    this._tasksAbortController = new AbortController();
+    const signal = this._tasksAbortController.signal;
     try {
       const [bugRes, queueRes, lockRes] = await Promise.all([
-        fetch('/api/office/bug-tasks'),
-        fetch('/api/office/task-queues'),
-        fetch('/api/office/file-locks'),
+        fetch('/api/office/bug-tasks', { signal }),
+        fetch('/api/office/task-queues', { signal }),
+        fetch('/api/office/file-locks', { signal }),
       ]);
       const bugData = bugRes.ok ? await bugRes.json() : { success: false };
       const queueData = queueRes.ok ? await queueRes.json() : { success: false };
@@ -3492,6 +3524,7 @@ class OfficeApp {
       this.renderTasks();
       this.renderKanbanBoard();
     } catch (err) {
+      if (err && err.name === 'AbortError') return;
       console.error('Failed to fetch tasks:', err);
     }
   }

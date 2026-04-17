@@ -249,10 +249,12 @@ func (m *Manager) waitForBrainstormResponse(sessionID, speakerName string) strin
 		return fmt.Sprintf("%s was unreachable during brainstorm.", speakerName)
 	}
 
+	// Always create a fresh channel. If a prior brainstorm timed out
+	// and the facilitator's late response landed in the old buffer,
+	// reusing that channel would replay the previous round's message
+	// into this one. Matches the pattern in standup.go:281.
 	agent.mu.Lock()
-	if agent.BrainstormCh == nil {
-		agent.BrainstormCh = make(chan string, 1)
-	}
+	agent.BrainstormCh = make(chan string, 1)
 	ch := agent.BrainstormCh
 	agent.mu.Unlock()
 

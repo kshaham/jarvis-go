@@ -288,6 +288,31 @@ func (m *Manager) IsTeamSpawned() bool {
 	return m.teamSpawned
 }
 
+// TrySetTeamSpawning atomically claims the spawning slot. Returns true
+// if this caller won the race (teamSpawned flipped false -> true),
+// false if a team is already spawned/spawning.
+//
+// The plain IsTeamSpawned check in the spawn handler was racy: the
+// actual mark happens ~200 lines of spawn work later, so two
+// concurrent POSTs could both clear the check and both run the spawn
+// loop, producing duplicate RegisterAgent calls that overwrite the
+// configIndex map and orphan the first session's entry forever.
+//
+// Callers MUST pair this with SetTeamSpawned(false) on any rollback
+// path (e.g., zero agents actually registered) so the claim is
+// released instead of leaving the team in "spawned with 0 agents"
+// limbo.
+func (m *Manager) TrySetTeamSpawning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.teamSpawned {
+		return false
+	}
+	m.teamSpawned = true
+	m.teamSpawnedAt = time.Now()
+	return true
+}
+
 // SetTeamSpawned marks the team as spawned and records the timestamp.
 // When setting to false, it stops periodic Telegram updates and clears
 // any pending leader query.

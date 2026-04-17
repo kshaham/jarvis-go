@@ -565,7 +565,12 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		return
 	}
 	req.WorkingDir = resolvedDir
-	if ctx.OfficeManager.IsTeamSpawned() {
+	// Atomically claim the spawn slot. A plain IsTeamSpawned check is
+	// racy: two rapid POSTs would both pass, both run the spawn loop,
+	// and RegisterAgent would overwrite configIndex entries, orphaning
+	// the first-spawned session. Rollback happens below if zero agents
+	// successfully register.
+	if !ctx.OfficeManager.TrySetTeamSpawning() {
 		request.WriteError(w, http.StatusConflict, "Team has already been spawned")
 		return
 	}
@@ -775,12 +780,23 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		slog.Info("Spawned team member", "name", member.Name, "sessionId", sessionID, "role", member.Role, "mode", usedMode)
 	}
 
+	// Release the atomic claim if nothing actually spawned -- otherwise
+	// the team sits in "spawned with 0 agents" limbo and the operator
+	// can't retry without restarting jarvis.
+	if len(spawned) == 0 {
+		ctx.OfficeManager.SetTeamSpawned(false)
+		request.WriteError(w, http.StatusInternalServerError, "Failed to spawn any agents: "+strings.Join(errors, "; "))
+		return
+	}
+
 	// Record the spawn context so the UI can show a "current team" banner
 	// while the team is active. Must happen BEFORE SetTeamSpawned(true) so
 	// any consumer listening on that signal already sees the context.
 	ctx.OfficeManager.SetSpawnContext(templateUsed, req.WorkingDir)
 
-	// Mark team as spawned
+	// Mark team as spawned (also triggers StartIdleMonitoring). The flag
+	// itself is already true from TrySetTeamSpawning above; this call is
+	// what starts the monitoring goroutines.
 	ctx.OfficeManager.SetTeamSpawned(true)
 
 	// Set team mission if provided
@@ -796,6 +812,15 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	roster := ctx.OfficeManager.GetRoster()
 	for _, agent := range roster {
 		go func(a *office.AgentState) {
+			// A panic here (malformed memory file, nil deref in
+			// BuildKickstartPrompt, PTY write on a closed fd, etc.)
+			// would otherwise take down the whole jarvis process and
+			// all running agents with it.
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("kickstart injection panic", "agent", a.ConfigID, "err", r)
+				}
+			}()
 			agentMemory := office.LoadAgentMemory(a.ConfigID, req.WorkingDir)
 			prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual)
 			if prompt == "" {
@@ -2438,7 +2463,16 @@ func (ctx *Context) OfficePutMemberPersonality(w http.ResponseWriter, r *http.Re
 			Personality:  req.Personality,
 			SystemPrompt: req.SystemPrompt,
 		})
-		ctx.SSEBroker.Broadcast("office:personalityUpdated", map[string]interface{}{"sessionId": sessionID})
+		// Include the fields the Personality modal binds to so an open
+		// modal on another client reflects the update instead of
+		// blanking the inputs (undefined -> '') and logging
+		// "Personality updated for undefined" in the activity feed.
+		ctx.SSEBroker.Broadcast("office:personalityUpdated", map[string]interface{}{
+			"sessionId":    sessionID,
+			"configId":     agent.ConfigID,
+			"personality":  req.Personality,
+			"systemPrompt": req.SystemPrompt,
+		})
 	}
 	ok(w, nil)
 }
