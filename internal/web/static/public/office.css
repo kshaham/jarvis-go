@@ -3991,6 +3991,10 @@
   border-radius: 7px;
   margin-bottom: 6px;
   overflow: hidden;
+  /* flex-shrink: 0 prevents the parent's max-height from squishing cards
+     down to just their header -- without this, 5+ cards collapse each to
+     ~40px and overflow:hidden hides the fields + provider/model selects. */
+  flex-shrink: 0;
 }
 .spawn-member-card-header {
   display: flex;
