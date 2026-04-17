@@ -109,6 +109,20 @@ type EventCostExceeded struct {
 
 func (EventCostExceeded) eventType() string { return "costExceeded" }
 
+// EventTurnError fires when an SDK turn completes with IsError=true
+// (e.g. provider rate-limit, 4xx/5xx, "Network error" code from a
+// Z.AI-style gateway). Previously we only logged; this event lets
+// the web layer surface the failure to the operator via SSE so the
+// dashboard can flag the agent instead of silently falling idle.
+type EventTurnError struct {
+	Subtype    string
+	StopReason string
+	Result     string
+	NumTurns   int
+}
+
+func (EventTurnError) eventType() string { return "turnError" }
+
 type EventError struct{ Err error }
 func (EventError) eventType() string { return "error" }
 

@@ -650,6 +650,18 @@ class OfficeApp {
       }
     });
 
+    // Provider-side turn errors (rate-limit, 4xx/5xx, gateway "Network
+    // error"). Surface in both the activity feed and as a dismissible
+    // toast so the operator can see the failure and retry.
+    this.eventSource.addEventListener('office:agentTurnError', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || data.sessionId || 'Agent';
+      const reason = (data.subtype || 'error').toString();
+      this.addActivityEntry('system', `${who} turn failed (${reason})`);
+      this.showNotification(`${who} hit a provider error -- may need a retry`, 'error');
+    });
+
     this.eventSource.onopen = () => {
       const wasReconnecting = this.sseReconnecting;
       this.sseReconnectDelay = 1000;

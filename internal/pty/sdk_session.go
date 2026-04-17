@@ -328,6 +328,15 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 						"numTurns", event.Result.NumTurns,
 						"durationMS", event.Result.DurationMS,
 						"result", resultText)
+					// Surface to the web layer so the operator sees the
+					// failure in the dashboard instead of the agent
+					// silently falling idle after an expensive botched run.
+					s.emitEvent(EventTurnError{
+						Subtype:    event.Result.Subtype,
+						StopReason: stopReason,
+						Result:     resultText,
+						NumTurns:   event.Result.NumTurns,
+					})
 				} else {
 					slog.Info("SDK session turn complete", "session", s.ID,
 						"turns", event.Result.NumTurns,

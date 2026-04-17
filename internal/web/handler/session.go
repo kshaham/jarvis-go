@@ -652,6 +652,23 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"cap":     e.CapUSD,
 				"message": "Session stopped: per-session cost cap reached",
 			})
+		case pty.EventTurnError:
+			// Bridge SDK turn errors (provider 4xx/5xx, rate limits,
+			// "Network error" from the Z.AI gateway) into an office
+			// SSE event so the dashboard can flag the agent instead
+			// of letting them silently fall idle after a failed run.
+			agentName := sessionID
+			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil && agent.Config != nil {
+				agentName = agent.Config.Name
+			}
+			broker.Broadcast("office:agentTurnError", map[string]interface{}{
+				"sessionId":  sessionID,
+				"agentName":  agentName,
+				"subtype":    e.Subtype,
+				"stopReason": e.StopReason,
+				"result":     e.Result,
+				"numTurns":   e.NumTurns,
+			})
 		case pty.EventExit:
 			broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
 			broker.Broadcast("session:exit", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})

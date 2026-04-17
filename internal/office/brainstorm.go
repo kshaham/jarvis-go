@@ -128,15 +128,49 @@ func (m *Manager) StartBrainstorm(participantIDs []string) *Meeting {
 func (m *Manager) runBrainstormFlow(meeting *Meeting, participants []string) {
 	defer m.endMeeting(meeting.ID)
 
-	// Pick facilitator: first strategic-tier agent, or first participant.
+	// Need sessions early so we can consider "is this agent currently
+	// in a turn" when choosing a facilitator -- routing to a working
+	// agent just parks the brainstorm prompt in their SDK queue behind
+	// the active turn, and waitForBrainstormResponse hits its timeout
+	// long before the agent can read it (observed Captain case on
+	// 2026-04-17).
+	m.mu.RLock()
+	sessions := m.sessions
+	m.mu.RUnlock()
+
+	// Facilitator preference order:
+	//   1. strategic-tier agent that is idle
+	//   2. any idle agent
+	//   3. first strategic-tier agent (even if working)
+	//   4. first participant (existing fallback)
+	isIdle := func(id string) bool {
+		if sessions == nil {
+			return true // no session info -> assume OK
+		}
+		return !sessions.IsSessionWorking(id)
+	}
 	facilitatorID := participants[0]
+	for _, id := range participants {
+		agent := m.GetAgent(id)
+		if agent != nil && agent.Config != nil && agent.Config.Tier == "strategic" && isIdle(id) {
+			facilitatorID = id
+			goto facilitatorPicked
+		}
+	}
+	for _, id := range participants {
+		if isIdle(id) {
+			facilitatorID = id
+			goto facilitatorPicked
+		}
+	}
 	for _, id := range participants {
 		agent := m.GetAgent(id)
 		if agent != nil && agent.Config != nil && agent.Config.Tier == "strategic" {
 			facilitatorID = id
-			break
+			goto facilitatorPicked
 		}
 	}
+facilitatorPicked:
 
 	facilitatorAgent := m.GetAgent(facilitatorID)
 	facilitatorName := facilitatorID
@@ -167,11 +201,8 @@ func (m *Manager) runBrainstormFlow(meeting *Meeting, participants []string) {
 		`cm brainstorm respond "<your task proposals>"`,
 	}, "\n")
 
-	// Send to facilitator.
-	m.mu.RLock()
-	sessions := m.sessions
-	m.mu.RUnlock()
-
+	// Send to facilitator. `sessions` was fetched above when picking
+	// the facilitator.
 	if sessions == nil {
 		slog.Warn("Brainstorm: sessions unavailable", "agent", facilitatorName)
 		return
