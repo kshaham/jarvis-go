@@ -52,6 +52,11 @@ type Manager struct {
 	lastWaterCoolerAt  time.Time
 	triageAttempts     map[string]int       // taskID -> triage attempt count
 	lastTriageAt       map[string]time.Time // taskID -> last triage prompt time
+	// Entries in the maps above are pruned when a task moves out of Blocked
+	// state via pruneTriage (called from AgentState.UpdateTaskStatus through
+	// the Manager), and swept against live-task IDs in
+	// checkBlockedTasksForLeaderTriage so orphaned entries from deleted
+	// agents don't linger forever.
 	lastRecoveryAt     map[string]time.Time // sessionID -> last recovery prompt time (backoff)
 
 	idleTicker   *time.Ticker
@@ -325,6 +330,34 @@ func (m *Manager) SetTeamSpawned(v bool) {
 // Events returns the event channel.
 func (m *Manager) Events() <-chan OfficeEvent {
 	return m.events
+}
+
+// PruneTriage drops any triage tracking entries for the given taskID. Called
+// from AgentState.UpdateTaskStatus whenever a task transitions out of Blocked
+// (completion, failure, or just back to in-progress) so the triage maps don't
+// grow without bound across long-running teams.
+func (m *Manager) PruneTriage(taskID string) {
+	if taskID == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.triageAttempts, taskID)
+	delete(m.lastTriageAt, taskID)
+	m.mu.Unlock()
+}
+
+// SweepTriageMaps drops triage-map entries whose taskIDs are no longer in the
+// live set. Called periodically from the monitor so entries for agents or
+// tasks that vanished (agent killed, task queue wiped) are reclaimed.
+func (m *Manager) SweepTriageMaps(liveTaskIDs map[string]struct{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id := range m.triageAttempts {
+		if _, alive := liveTaskIDs[id]; !alive {
+			delete(m.triageAttempts, id)
+			delete(m.lastTriageAt, id)
+		}
+	}
 }
 
 // SendMessage adds a message to the office message log and delivers it to the
@@ -976,6 +1009,23 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	score := CalculateAgentScoreWithData(a, learningData)
 
 	usage := a.Usage()
+	// Snapshot provider / model / active-tool under the agent lock so we don't
+	// race with SetProvider / SetActiveTool on concurrent SSE events.
+	a.mu.Lock()
+	provider := a.Provider
+	model := a.Model
+	activeTool := a.ActiveTool
+	a.mu.Unlock()
+
+	// lastActivityAt is the most recent of "last turn" or "right now" (if
+	// we're in the middle of a turn). Emitted as Unix milliseconds so every
+	// timestamp across the payload is the same type -- frontend used to hedge
+	// between "number" and "RFC3339 string"; it no longer needs to.
+	lastActivityMs := time.Now().UnixMilli()
+	if !usage.LastTurnAt.IsZero() {
+		lastActivityMs = usage.LastTurnAt.UnixMilli()
+	}
+
 	return map[string]interface{}{
 		"sessionId":      a.SessionID,
 		"configId":       a.ConfigID,
@@ -997,9 +1047,11 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 		// value in a structured shape alongside per-agent token counts.
 		"totalCost":      usage.TotalCostUSD,
 		"usage":          usage,
-		"lastActivityAt": time.Now().Format(time.RFC3339),
+		"provider":       provider,
+		"model":          model,
+		"lastActivityAt": lastActivityMs,
 		"workingDir":     "",
-		"activeTool":     nil,
+		"activeTool":     activeTool,
 	}
 }
 

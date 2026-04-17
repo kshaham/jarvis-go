@@ -1001,6 +1001,23 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 		return
 	}
 
+	// Collect the set of live task IDs across every agent so we can reclaim
+	// triage-map entries for tasks that no longer exist (completed, failed,
+	// or owned by a deleted agent). This is a defense in depth -- the
+	// direct path in UpdateTaskStatus only fires when a known task changes
+	// status, but drifts from agent deletions still happen.
+	liveTaskIDs := make(map[string]struct{}, 32)
+	for _, agent := range roster {
+		for _, t := range agent.GetTasks() {
+			// Only blocked tasks participate in triage; prune anything that
+			// moved on.
+			if t.Status == TaskBlocked {
+				liveTaskIDs[t.ID] = struct{}{}
+			}
+		}
+	}
+	m.SweepTriageMaps(liveTaskIDs)
+
 	for _, agent := range roster {
 		if agent.Config == nil {
 			continue

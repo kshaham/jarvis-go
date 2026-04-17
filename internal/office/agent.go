@@ -99,6 +99,17 @@ type AgentState struct {
 	Config       *TeamMemberConfig
 	WorktreePath string
 
+	// Provider + model the agent was spawned with. Set once by the spawn
+	// handler and read back by BuildMemberPayload so the UI can show which
+	// LLM each agent is running on (Active Now cards + current-team banner).
+	Provider string
+	Model    string
+
+	// ActiveTool is the name of the Claude tool the agent is currently
+	// invoking (e.g. "Bash", "Read", "Edit"), or "" when idle / thinking.
+	// Written by the SDK event forwarder on every tool_use event.
+	ActiveTool string
+
 	// Response channels (replaces pending*Responses Maps)
 	StandupCh    chan string
 	BrainstormCh chan string
@@ -308,6 +319,23 @@ func (a *AgentState) Usage() UsageSnapshot {
 func (a *AgentState) SetSDKWorking(working bool) {
 	a.mu.Lock()
 	a.SDKWorking = working
+	a.mu.Unlock()
+}
+
+// SetProvider records the LLM provider + model string the agent was spawned
+// with. Safe to call from the spawn handler; read back by BuildMemberPayload.
+func (a *AgentState) SetProvider(provider, model string) {
+	a.mu.Lock()
+	a.Provider = provider
+	a.Model = model
+	a.mu.Unlock()
+}
+
+// SetActiveTool records the name of the tool the agent is currently invoking.
+// Pass "" to clear. Used by the SDK event forwarder.
+func (a *AgentState) SetActiveTool(name string) {
+	a.mu.Lock()
+	a.ActiveTool = name
 	a.mu.Unlock()
 }
 

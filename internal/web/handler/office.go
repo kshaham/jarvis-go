@@ -735,6 +735,28 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 			Skills:       member.Skills,
 		})
 
+		// Record the resolved provider + model so BuildMemberPayload can
+		// surface them to the UI (Active Now cards, current-team banner).
+		// Prefer a per-member override; fall back to the team-wide default.
+		resolvedProvider := provider
+		resolvedModel := ""
+		if ov, has := memberOverrideMap[member.ID]; has {
+			if ov.Provider != "" {
+				resolvedProvider = ov.Provider
+			}
+			if ov.Model != "" {
+				resolvedModel = ov.Model
+			}
+		}
+		if resolvedModel == "" && isZAI && sonnetAlloc != nil {
+			if m, ok := sonnetAlloc[member.ID]; ok {
+				resolvedModel = m
+			}
+		}
+		if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+			agent.SetProvider(resolvedProvider, resolvedModel)
+		}
+
 		if ctx.TelegramHandler != nil {
 			ctx.TelegramHandler.NotifySessionStart(sessionID, member.Name, req.WorkingDir)
 		}
@@ -1159,7 +1181,7 @@ func (ctx *Context) OfficeGetTaskQueueBySession(w http.ResponseWriter, r *http.R
 	sessionID := chi.URLParam(r, "sessionId")
 	agent := ctx.OfficeManager.GetAgent(sessionID)
 	if agent == nil || agent.Config == nil {
-		ok(w, map[string]interface{}{"queue": nil})
+		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 	ok(w, map[string]interface{}{"queue": map[string]interface{}{

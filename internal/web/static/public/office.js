@@ -729,12 +729,43 @@ class OfficeApp {
       this._pulseEdgeForMessage(message);
       this._scheduleRender(() => this.renderAgentNetwork(), 'network', 500);
       // If the conversation drawer is open and this message belongs to it,
-      // append it in place.
+      // append the new message row in place -- DON'T re-render the whole
+      // drawer. Re-rendering blows away the composer input and steals focus
+      // so the operator can't fire off two messages in a row. Fall back to
+      // the full re-render only if the targeted row insertion fails.
       if (this._networkEdgePair &&
           this._isPairMatch(this._networkEdgePair, message.fromSessionId, message.toSessionId)) {
-        this._openNetworkEdgeDrawer(this._networkEdgePair[0], this._networkEdgePair[1]);
+        if (!this._appendConversationRow(message)) {
+          this._openNetworkEdgeDrawer(this._networkEdgePair[0], this._networkEdgePair[1]);
+        }
       }
     }
+  }
+
+  /**
+   * Insert a single new message row into the currently-open conversation
+   * thread without re-rendering the drawer. Returns true on success, false
+   * if the DOM isn't in the expected shape (caller should fall back to a
+   * full render).
+   */
+  _appendConversationRow(message) {
+    const thread = document.querySelector('#networkDrawerContent .conversation-thread');
+    if (!thread || !this._networkEdgePair) return false;
+    const fromId = this._networkEdgePair[0];
+    const cls = message.fromSessionId === fromId ? '' : 'reverse';
+    const ts = typeof message.timestamp === 'number'
+      ? message.timestamp
+      : new Date(message.timestamp).getTime();
+    const row = document.createElement('div');
+    row.className = `conversation-row ${cls}`.trim();
+    row.setAttribute('onclick', `office.showDetail('${this._escapeAttr(message.fromSessionId)}')`);
+    row.innerHTML = `
+      <div class="conversation-row-meta"><span>${this._escapeHtml(message.fromName || message.fromSessionId)} → ${this._escapeHtml(message.toName || message.toSessionId)}</span><span>${this._escapeHtml(this.formatTimeAgo(ts))}</span></div>
+      <div class="conversation-row-body">${this._escapeHtml((message.content || '').slice(0, 600))}</div>
+    `;
+    // Newest-first ordering matches _openNetworkEdgeDrawer's render.
+    thread.insertBefore(row, thread.firstChild);
+    return true;
   }
 
   /** Patch only the unread badge element on a single agent card without re-rendering it. */
@@ -5094,7 +5125,7 @@ class OfficeApp {
       const cls = ['network-node'];
       if (isSel) cls.push('selected');
       if (faded) cls.push('faded');
-      const task = m.currentTask && m.currentTask.title ? m.currentTask.title : '';
+      const task = m.activeTask && m.activeTask.title ? m.activeTask.title : '';
       const title = task ? `${m.name} · ${task}` : `${m.name} · ${m.role}`;
       return `<g class="${cls.join(' ')}" data-id="${this._escapeAttr(m.sessionId)}"
         onclick="office._openNetworkNodeDrawer('${this._escapeAttr(m.sessionId)}')"
@@ -5193,7 +5224,7 @@ class OfficeApp {
     const usage = m.usage || {};
     const cost = (usage.totalCostUSD || m.totalCost || 0);
     const turns = usage.turnCount || 0;
-    const task = m.currentTask && m.currentTask.title ? m.currentTask.title : '-';
+    const task = m.activeTask && m.activeTask.title ? m.activeTask.title : '-';
     const lastActive = m.lastActivityAt ? this.formatTimeAgo(m.lastActivityAt) : 'never';
 
     const content = document.getElementById('networkDrawerContent');
@@ -5338,11 +5369,11 @@ class OfficeApp {
       return;
     }
     container.innerHTML = members.map(m => {
-      const task = m.currentTask && m.currentTask.title ? m.currentTask.title : '-';
+      const task = m.activeTask && m.activeTask.title ? m.activeTask.title : '-';
       const phase = m.status === 'working' ? 'working'
         : m.status === 'meeting' ? 'in meeting'
         : m.status === 'stuck' ? 'stuck' : 'idle';
-      const tool = (m.activeTools && m.activeTools[0]) || '';
+      const tool = m.activeTool || '';
       const elapsed = m.lastActivityAt ? this.formatTimeAgo(m.lastActivityAt) : '';
       return `<div class="active-now-card status-${this._escapeAttr(m.status || 'idle')}" onclick="office.showDetail('${this._escapeAttr(m.sessionId)}')">
         <div class="active-now-card-header">
