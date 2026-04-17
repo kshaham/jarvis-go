@@ -1594,20 +1594,66 @@ func (ctx *Context) OfficePostWrapUp(w http.ResponseWriter, r *http.Request) {
 
 This is a graceful shutdown. Take the time to finish cleanly, but do not begin anything new.`
 
+	// Fan out the wrap-up prompt AND cancel queued work that hasn't
+	// started yet. The prompt tells agents "DO NOT start new tasks" but
+	// marking pending/acknowledged tasks as failed is the backstop: an
+	// agent that ignores the prompt still can't pull a fresh task
+	// because there are none left in TaskPending state.
 	roster := mgr.GetRoster()
+	notifiedSessionIDs := make([]string, 0, len(roster))
+	missedAgents := make([]string, 0)
+	cancelledTasks := 0
+
 	for _, agent := range roster {
+		delivered := false
 		if s, found := ctx.SessionManager.GetSession(agent.SessionID); found {
-			s.WriteInkPrompt(wrapUpPrompt)
+			if s.WriteInkPrompt(wrapUpPrompt) {
+				delivered = true
+			}
 		} else if sdk, found := ctx.SessionManager.GetSDKSession(agent.SessionID); found {
-			sdk.WriteInkPrompt(wrapUpPrompt)
+			if sdk.WriteInkPrompt(wrapUpPrompt) {
+				delivered = true
+			}
+		}
+
+		if delivered {
+			notifiedSessionIDs = append(notifiedSessionIDs, agent.SessionID)
+		} else {
+			name := agent.SessionID
+			if agent.Config != nil {
+				name = agent.Config.Name
+			}
+			missedAgents = append(missedAgents, name)
+		}
+
+		// Cancel all queued (but not yet started) tasks. TaskInProgress
+		// is deliberately left alone so agents can FINISH current work
+		// -- that's step 1 of the wrap-up prompt.
+		for _, t := range agent.GetTasks() {
+			if t.Status == office.TaskPending || t.Status == office.TaskAcknowledged {
+				if agent.UpdateTaskStatus(t.ID, office.TaskFailed) {
+					cancelledTasks++
+				}
+			}
 		}
 	}
 
+	if len(missedAgents) > 0 {
+		slog.Warn("Wrap-up prompt undelivered for some agents",
+			"missed", missedAgents, "notified", len(notifiedSessionIDs))
+	}
+	slog.Info("Wrap-up initiated",
+		"notified", len(notifiedSessionIDs),
+		"missed", len(missedAgents),
+		"tasksCancelled", cancelledTasks)
+
 	status := mgr.GetWrapUpStatus()
 	ok(w, map[string]interface{}{
-		"active":      status.Active,
-		"startedAt":   status.StartedAt,
-		"agentStatus": status.AgentStatus,
+		"active":         status.Active,
+		"startedAt":      status.StartedAt,
+		"agentStatus":    status.AgentStatus,
+		"sessionIds":     notifiedSessionIDs,
+		"cancelledTasks": cancelledTasks,
 	})
 }
 
