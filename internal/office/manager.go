@@ -267,6 +267,19 @@ func (m *Manager) GetRoster() []*AgentState {
 	return result
 }
 
+// GetAgentAndTouch returns the agent for sessionID and records that
+// we just received an API call from them. Used by /api/office/agent/*
+// handlers so the stuck-detector has a "heard from agent recently"
+// signal even while a long tool-heavy turn hasn't emitted a
+// turn-complete event that would otherwise update LastTurnAt.
+func (m *Manager) GetAgentAndTouch(sessionID string) *AgentState {
+	agent := m.GetAgent(sessionID)
+	if agent != nil {
+		agent.TouchAgentAPI()
+	}
+	return agent
+}
+
 // Sessions returns the session store for direct PTY writes.
 func (m *Manager) Sessions() SessionStore {
 	m.mu.RLock()

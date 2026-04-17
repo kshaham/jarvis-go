@@ -571,18 +571,27 @@ func (m *Manager) checkForStuckAgents() {
 		agent.mu.Lock()
 		lastPromptAt := agent.LastPromptSentAt
 		lastTurnAt := agent.LastTurnAt
+		lastAPIAt := agent.LastAgentAPIAt
 		agent.mu.Unlock()
 
-		// "Last activity" is the most recent of: last prompt we sent OR
-		// last turn the agent produced. The old code only considered
-		// LastPromptSentAt, which is only updated by standup + brainstorm
-		// -- so a stream of self-replenishment / curiosity / ack-nudge
-		// prompts would NOT keep the counter fresh, and after 5 minutes
-		// the monitor would mistakenly flag an actively-running agent as
-		// stuck.
+		// "Last activity" is the most recent of:
+		//   - LastPromptSentAt: last prompt WE sent to the agent
+		//   - LastTurnAt: last turn the agent completed (EventTokens)
+		//   - LastAgentAPIAt: last API call FROM the agent (task-ack,
+		//     task-start, task-complete, task-progress, self-add, etc.)
+		//
+		// LastTurnAt alone was insufficient: a multi-step tool-heavy
+		// turn doesn't emit EventTokens until it finishes, so an agent
+		// making dozens of successful task-progress + task-complete
+		// calls inside one long turn looked "inactive=5m0s" to the
+		// stuck detector. Observed 2026-04-17 23:37:54: all 5 agents
+		// flagged stuck seconds after POSTing task-complete.
 		lastActive := lastPromptAt
 		if lastTurnAt.After(lastActive) {
 			lastActive = lastTurnAt
+		}
+		if lastAPIAt.After(lastActive) {
+			lastActive = lastAPIAt
 		}
 
 		if lastActive.IsZero() {

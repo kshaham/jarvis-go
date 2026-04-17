@@ -129,6 +129,14 @@ type AgentState struct {
 	LastReplenishmentAt time.Time
 	LastLateStandupAt   time.Time
 	LastReflectionAt    time.Time
+	// LastAgentAPIAt is "we heard FROM this agent most recently" -- any
+	// incoming API call from the agent (task-ack, task-start,
+	// task-complete, task-progress, self-add, memory-write, etc.)
+	// touches it. Used by checkForStuckAgents to avoid falsely flagging
+	// an agent as stuck just because their SDK turn is still running
+	// (multi-step tool-heavy turns can take 5+ minutes without emitting
+	// an EventTokens that would update LastTurnAt).
+	LastAgentAPIAt time.Time
 
 	// Recovery tracking
 	RecoveryAttempts    int
@@ -172,6 +180,16 @@ func NewAgentState(sessionID, configID string, config *TeamMemberConfig) *AgentS
 		AckNudges:      make(map[string]*AckNudgeState),
 		ProgressChecks: make(map[string]time.Time),
 	}
+}
+
+// TouchAgentAPI records that we just received a call from this agent.
+// Called by every /api/office/agent/* handler so the stuck-detector
+// can tell a truly-frozen agent from one that's in a long tool-heavy
+// turn and thus quiet on EventTokens.
+func (a *AgentState) TouchAgentAPI() {
+	a.mu.Lock()
+	a.LastAgentAPIAt = time.Now()
+	a.mu.Unlock()
 }
 
 // ActiveTask returns the first in_progress task, or nil.

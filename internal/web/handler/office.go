@@ -1892,7 +1892,7 @@ func (ctx *Context) OfficeAgentTaskStart(w http.ResponseWriter, r *http.Request)
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent != nil {
 		agent.UpdateTaskStatus(req.TaskID, office.TaskInProgress)
 		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
@@ -1916,7 +1916,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent != nil {
 		agent.UpdateTaskStatus(req.TaskID, office.TaskCompleted)
 		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
@@ -1969,7 +1969,7 @@ func (ctx *Context) OfficeAgentTaskAck(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent != nil {
 		agent.UpdateTaskStatus(req.TaskID, office.TaskAcknowledged)
 		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
@@ -1990,7 +1990,7 @@ func (ctx *Context) OfficeAgentTaskProgress(w http.ResponseWriter, r *http.Reque
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent != nil {
 		progress := req.Progress
 		if req.IsBlocked {
@@ -2023,7 +2023,7 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent != nil {
 		task := &office.Task{
 			ID:          uuid.New().String(),
@@ -2059,7 +2059,7 @@ func (ctx *Context) OfficeAgentTaskTriage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	source := ctx.OfficeManager.GetAgent(req.SessionID)
+	source := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if source == nil {
 		request.WriteError(w, http.StatusNotFound, "source agent not found")
 		return
@@ -2333,7 +2333,7 @@ func (ctx *Context) OfficeAgentPostMemory(w http.ResponseWriter, r *http.Request
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent == nil {
 		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
@@ -2352,7 +2352,7 @@ func (ctx *Context) OfficeAgentPostMemoryAppend(w http.ResponseWriter, r *http.R
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent == nil {
 		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
@@ -2378,7 +2378,7 @@ func (ctx *Context) OfficeAgentPostMemorySection(w http.ResponseWriter, r *http.
 		request.WriteError(w, http.StatusBadRequest, "invalid section name")
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent == nil {
 		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
