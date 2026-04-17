@@ -15,6 +15,11 @@ type Config struct {
 	RecoveryMaxAttempts    int
 	RecoveryWindowDuration time.Duration
 	StuckThreshold         time.Duration
+	// StuckGracePeriod suppresses stuck-agent recovery for the first N
+	// seconds after a team spawns. Protects agents that are still
+	// processing their initial kickstart from being auto-killed before
+	// they get to emit their first event.
+	StuckGracePeriod       time.Duration
 	TaskAckTimeout         time.Duration
 	TaskAckMaxNudges       int
 	ReplenishCooldown      time.Duration
@@ -32,8 +37,10 @@ type Config struct {
 	ReflectionCooldown       time.Duration
 	// AutoKillAfterStuck controls whether agents that exhaust all recovery
 	// tiers are automatically stopped rather than left idle burning quota.
-	// Default true; ops users who want to inspect stuck agents post-mortem
-	// can disable via settings.
+	// Default FALSE because "stuck" often means "waiting on slow provider
+	// API" (e.g. Z.AI rate-limit) -- killing a healthy agent for that
+	// reason is worse than leaving it idle. Operators who want to clean
+	// up truly dead agents can flip this on in settings.
 	AutoKillAfterStuck bool
 }
 
@@ -51,6 +58,7 @@ func DefaultConfig() *Config {
 		RecoveryMaxAttempts:    3,
 		RecoveryWindowDuration: 30 * time.Minute,
 		StuckThreshold:         300 * time.Second,
+		StuckGracePeriod:       3 * time.Minute,
 		TaskAckTimeout:         2 * time.Minute,
 		TaskAckMaxNudges:       5,
 		ReplenishCooldown:      45 * time.Second,
@@ -66,6 +74,6 @@ func DefaultConfig() *Config {
 		WaterCoolerCooldown:      5 * time.Minute,
 		BlockedTriageMaxAttempts: 3,
 		ReflectionCooldown:       10 * time.Minute,
-		AutoKillAfterStuck:       true,
+		AutoKillAfterStuck:       false,
 	}
 }

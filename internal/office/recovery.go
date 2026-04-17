@@ -283,6 +283,11 @@ func (m *Manager) checkUnacknowledgedTasks() {
 			lines = append(lines, "Then start working: cm task start <taskId>")
 			nudgePrompt := strings.Join(lines, "\n")
 			sessions.WriteInkPrompt(agent.SessionID, nudgePrompt)
+			// Mark a prompt as sent so the stuck-detector knows we've been
+			// actively talking to this agent.
+			agent.mu.Lock()
+			agent.LastPromptSentAt = time.Now()
+			agent.mu.Unlock()
 
 			slog.Info("Sent task ack nudge", "agent", agentName, "taskCount", len(nudgeTasks))
 		}
@@ -536,7 +541,17 @@ func (m *Manager) checkForStuckAgents() {
 	}
 	sessions := m.sessions
 	cfg := m.config
+	teamSpawnedAt := m.teamSpawnedAt
 	m.mu.RUnlock()
+
+	// Grace period: don't run stuck-detection for the first 3 minutes after
+	// a team spawn. Agents are still processing their initial kickstart
+	// and may take a minute or two of silent "thinking" before they emit
+	// their first events. Firing recovery during that window was auto-
+	// killing otherwise-healthy agents (observed 2026-04-17).
+	if !teamSpawnedAt.IsZero() && now.Sub(teamSpawnedAt) < cfg.StuckGracePeriod {
+		return
+	}
 
 	for _, agent := range agents {
 		if agent.Config == nil {
@@ -544,14 +559,27 @@ func (m *Manager) checkForStuckAgents() {
 		}
 		agent.mu.Lock()
 		lastPromptAt := agent.LastPromptSentAt
+		lastTurnAt := agent.LastTurnAt
 		agent.mu.Unlock()
 
-		if lastPromptAt.IsZero() {
+		// "Last activity" is the most recent of: last prompt we sent OR
+		// last turn the agent produced. The old code only considered
+		// LastPromptSentAt, which is only updated by standup + brainstorm
+		// -- so a stream of self-replenishment / curiosity / ack-nudge
+		// prompts would NOT keep the counter fresh, and after 5 minutes
+		// the monitor would mistakenly flag an actively-running agent as
+		// stuck.
+		lastActive := lastPromptAt
+		if lastTurnAt.After(lastActive) {
+			lastActive = lastTurnAt
+		}
+
+		if lastActive.IsZero() {
 			continue
 		}
 
 		// Check inactivity duration against threshold.
-		inactiveDuration := now.Sub(lastPromptAt)
+		inactiveDuration := now.Sub(lastActive)
 		if inactiveDuration < cfg.StuckThreshold {
 			continue
 		}
@@ -930,6 +958,9 @@ DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, roleName)
 
 	if sessions != nil {
 		sessions.WriteInkPrompt(agent.SessionID, prompt)
+		agent.mu.Lock()
+		agent.LastPromptSentAt = time.Now()
+		agent.mu.Unlock()
 	}
 
 	agentName := agent.SessionID
@@ -1115,6 +1146,7 @@ func (m *Manager) checkForCuriousAgents() {
 
 		agent.mu.Lock()
 		agent.LastCuriosityAt = time.Now()
+		agent.LastPromptSentAt = time.Now()
 		agent.mu.Unlock()
 
 		m.metrics.TotalCuriosity.Add(1)
@@ -1210,6 +1242,12 @@ func (m *Manager) maybeTriggerWaterCoolerChat() {
 
 	sessions.WriteInkPrompt(agentA.SessionID, promptA)
 	sessions.WriteInkPrompt(agentB.SessionID, promptB)
+	agentA.mu.Lock()
+	agentA.LastPromptSentAt = time.Now()
+	agentA.mu.Unlock()
+	agentB.mu.Lock()
+	agentB.LastPromptSentAt = time.Now()
+	agentB.mu.Unlock()
 
 	m.mu.Lock()
 	m.lastWaterCoolerAt = time.Now()
