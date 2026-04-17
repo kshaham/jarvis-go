@@ -1794,10 +1794,24 @@ class OfficeApp {
         <span class="count">${m.learningCount || 0}</span>
       </div>`).join('');
 
+    // Fetch task-queues once so both the narrative and the blocker
+    // leaderboard can render from the same data instead of racing two
+    // identical requests. AbortError is swallowed -- if the tab was
+    // switched mid-fetch, the narrative simply falls back to the
+    // no-blocker path.
+    let queuesData = null;
+    try {
+      const signal = this._insightsAbortController ? this._insightsAbortController.signal : undefined;
+      const res = await fetch('/api/office/task-queues', { signal });
+      queuesData = res.ok ? await res.json() : { queues: [] };
+    } catch (err) {
+      if (err && err.name !== 'AbortError') queuesData = { queues: [] };
+    }
+
     // Narrative summary: 2-3 sentences derived from roster + blocker
     // data, so the top of Insights tells a story instead of just
     // showing tables.
-    const narrative = await this._buildInsightsNarrative(roster, byCost, byLearning, totalCost);
+    const narrative = this._buildInsightsNarrative(roster, byCost, byLearning, totalCost, queuesData);
 
     grid.innerHTML = `
       ${narrative}
@@ -1843,13 +1857,14 @@ class OfficeApp {
     const st = document.getElementById('stageTimings');
     if (st) this._renderStageTimings(st);
     const bl = document.getElementById('blockerLeaderboard');
-    if (bl) this._renderBlockerLeaderboard(bl);
+    if (bl) this._renderBlockerLeaderboard(bl, queuesData);
   }
 
   // Build a 2-3 sentence narrative summary for the top of Insights.
-  // Derived purely from client-side state already available on the
-  // roster + from a lightweight blocker fetch, so no new endpoint.
-  async _buildInsightsNarrative(roster, byCost, byLearning, totalCost) {
+  // Pure function: receives pre-fetched task-queue data so we don't
+  // race a duplicate /api/office/task-queues request against the
+  // blocker leaderboard renderer.
+  _buildInsightsNarrative(roster, byCost, byLearning, totalCost, queuesData) {
     const sentences = [];
     const top = byCost[0];
     const avg = roster.length > 0 ? totalCost / roster.length : 0;
@@ -1871,30 +1886,28 @@ class OfficeApp {
       sentences.push(`<span class="hl">${this._escapeHtml(topLearner.name)}</span> is the most prolific learner with <span class="hl">${topLearner.learningCount}</span> recorded insight${topLearner.learningCount === 1 ? '' : 's'}.`);
     }
 
-    // Try to pull the oldest blocker for a "stuck on X for Y min" line.
-    try {
-      const res = await fetch('/api/office/task-queues', { signal: this._insightsAbortController ? this._insightsAbortController.signal : undefined });
-      if (res.ok) {
-        const data = await res.json();
-        const blocked = [];
-        for (const q of (data.queues || [])) {
-          for (const t of (q.tasks || [])) {
-            if (t.status === 'blocked') {
-              blocked.push({ title: t.title, assignedAt: t.assignedAt, agentName: q.agentName });
-            }
+    // Pull the oldest blocker for a "stuck on X for Y min" line. The
+    // data is whatever renderInsights prefetched; if it's null the
+    // narrative silently drops the blocker sentence.
+    if (queuesData && Array.isArray(queuesData.queues)) {
+      const blocked = [];
+      for (const q of queuesData.queues) {
+        for (const t of (q.tasks || [])) {
+          if (t.status === 'blocked') {
+            blocked.push({ title: t.title, assignedAt: t.assignedAt, agentName: q.agentName });
           }
         }
-        blocked.sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
-        if (blocked[0]) {
-          const b = blocked[0];
-          const mins = Math.max(0, Math.round((Date.now() - new Date(b.assignedAt).getTime()) / 60000));
-          const stuckCls = mins > 60 ? 'hl-alert' : mins > 15 ? 'hl-warn' : 'hl';
-          sentences.push(`<span class="${stuckCls}">${this._escapeHtml(b.agentName || 'An agent')}</span> has been blocked on "${this._escapeHtml((b.title || '').slice(0, 60))}" for <span class="${stuckCls}">${mins} min</span>.`);
-        } else {
-          sentences.push(`<span class="hl">No tasks blocked</span> right now — team is flowing.`);
-        }
       }
-    } catch { /* narrative is best-effort */ }
+      blocked.sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
+      if (blocked[0]) {
+        const b = blocked[0];
+        const mins = Math.max(0, Math.round((Date.now() - new Date(b.assignedAt).getTime()) / 60000));
+        const stuckCls = mins > 60 ? 'hl-alert' : mins > 15 ? 'hl-warn' : 'hl';
+        sentences.push(`<span class="${stuckCls}">${this._escapeHtml(b.agentName || 'An agent')}</span> has been blocked on "${this._escapeHtml((b.title || '').slice(0, 60))}" for <span class="${stuckCls}">${mins} min</span>.`);
+      } else {
+        sentences.push(`<span class="hl">No tasks blocked</span> right now — team is flowing.`);
+      }
+    }
 
     return `<div class="insight-card insight-narrative">
       <div class="insight-card-title">Team snapshot</div>
@@ -5951,29 +5964,28 @@ class OfficeApp {
     }
   }
 
-  async _renderBlockerLeaderboard(container) {
-    const signal = this._insightsAbortController ? this._insightsAbortController.signal : undefined;
-    try {
-      const res = await fetch('/api/office/task-queues', { signal });
-      const data = res.ok ? await res.json() : { queues: [] };
-      const blocked = [];
-      for (const q of (data.queues || [])) {
-        for (const t of (q.tasks || [])) {
-          if (t.status === 'blocked') blocked.push({ ...t, sessionId: q.sessionId, agentName: q.agentName });
-        }
-      }
-      // Sort by time in status (use assignedAt as a proxy if no explicit blockedAt).
-      blocked.sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
-      container.innerHTML = blocked.length
-        ? blocked.slice(0, 5).map((t, i) => `<div class="blocker-row" onclick="office.openTaskDetail('${this._escapeAttr(t.sessionId)}','${this._escapeAttr(t.id)}')">
-            <span class="blocker-title"><span class="t-rank">#${i + 1}</span>${this._escapeHtml((t.title || '').slice(0, 60))}</span>
-            <span class="blocker-meta t-mono">${this._escapeHtml(t.agentName || '')} · ${this.formatTimeAgo(new Date(t.assignedAt).getTime())}</span>
-          </div>`).join('')
-        : '<div style="color:#52525b;font-size:12px">No blocked tasks right now.</div>';
-    } catch (err) {
-      if (err && err.name === 'AbortError') return;
+  // Pure render: receives task-queue data already fetched by
+  // renderInsights so we don't race a duplicate request against
+  // _buildInsightsNarrative.
+  _renderBlockerLeaderboard(container, queuesData) {
+    if (!queuesData) {
       container.innerHTML = '<div style="color:#52525b;font-size:12px">Unable to load blockers.</div>';
+      return;
     }
+    const blocked = [];
+    for (const q of (queuesData.queues || [])) {
+      for (const t of (q.tasks || [])) {
+        if (t.status === 'blocked') blocked.push({ ...t, sessionId: q.sessionId, agentName: q.agentName });
+      }
+    }
+    // Sort by time in status (use assignedAt as a proxy if no explicit blockedAt).
+    blocked.sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
+    container.innerHTML = blocked.length
+      ? blocked.slice(0, 5).map((t, i) => `<div class="blocker-row" onclick="office.openTaskDetail('${this._escapeAttr(t.sessionId)}','${this._escapeAttr(t.id)}')">
+          <span class="blocker-title"><span class="t-rank">#${i + 1}</span>${this._escapeHtml((t.title || '').slice(0, 60))}</span>
+          <span class="blocker-meta t-mono">${this._escapeHtml(t.agentName || '')} · ${this.formatTimeAgo(new Date(t.assignedAt).getTime())}</span>
+        </div>`).join('')
+      : '<div style="color:#52525b;font-size:12px">No blocked tasks right now.</div>';
   }
 
   // ============================================================================

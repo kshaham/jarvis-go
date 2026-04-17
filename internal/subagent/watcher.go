@@ -571,6 +571,11 @@ func (w *Watcher) ClearAll() int {
 	w.agents = make(map[string]*SubagentInfo)
 	w.filePos = make(map[string]int64)
 	w.pendingTools = make(map[string]map[string]string)
+	// Mirror the per-agent force-cleanup path a few lines up which
+	// explicitly wipes pendingToolTimes. Omitting it here leaked
+	// pending-tool-time entries for every historical agent across
+	// team wrap-ups.
+	w.pendingToolTimes = make(map[string]map[string]time.Time)
 	w.accessOrder = make(map[string]time.Time)
 
 	slog.Info("cleared all tracked subagents", "count", count)

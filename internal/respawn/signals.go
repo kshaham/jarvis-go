@@ -99,6 +99,7 @@ type TokenStabilityDetector struct {
 	onStable       func()
 	stopped        bool
 	done           chan struct{}
+	stopOnce       sync.Once
 }
 
 // NewTokenStabilityDetector creates a detector that calls onStable when the
@@ -159,17 +160,23 @@ func (d *TokenStabilityDetector) Start() {
 }
 
 // Stop halts the periodic checks.
+//
+// Previously used a non-blocking send on d.done, which silently
+// dropped when the goroutine was mid-tick-handler. The goroutine
+// would then loop back to select with a stopped ticker and no
+// pending done signal, leaking forever. Closing the channel
+// (guarded by sync.Once for idempotent double-Stop) reliably
+// wakes the receiver on the next select iteration.
 func (d *TokenStabilityDetector) Stop() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.stopped = true
 	if d.ticker != nil {
 		d.ticker.Stop()
 	}
-	select {
-	case d.done <- struct{}{}:
-	default:
-	}
+	d.mu.Unlock()
+	d.stopOnce.Do(func() {
+		close(d.done)
+	})
 }
 
 // Reset clears stability state.

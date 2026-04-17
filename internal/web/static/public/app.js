@@ -7844,10 +7844,15 @@ class JarvisApp {
       const isCommand = action.type === 'command';
       const extraClass = isCommand ? ' action-command' : '';
       // Compact format: time [type] detail
+      // action.detail is populated from logAction() calls which can
+      // include truncated prompt text (internal/respawn/actions.go:73,
+      // 166). An agent or operator prompt containing HTML would
+      // otherwise execute in the terminal UI via innerHTML. Escape
+      // both interpolations defensively.
       html += `<div class="respawn-action-entry${extraClass}">
         <span class="action-time">${time}</span>
-        <span class="action-type">[${action.type}]</span>
-        <span class="action-detail">${action.detail}</span>
+        <span class="action-type">[${this.escapeHtml(action.type || '')}]</span>
+        <span class="action-detail">${this.escapeHtml(action.detail || '')}</span>
       </div>`;
     }
 
