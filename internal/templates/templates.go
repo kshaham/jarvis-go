@@ -2,6 +2,7 @@ package templates
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -127,19 +128,43 @@ func (s *Store) Duplicate(id string) *Template {
 }
 
 func (s *Store) load() {
-	data, err := os.ReadFile(filepath.Join(s.dir, "templates.json"))
+	path := filepath.Join(s.dir, "templates.json")
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
 	var list []*Template
-	json.Unmarshal(data, &list)
+	// A corrupted templates file (crash mid-write, hand-edit mistake,
+	// upstream struct change) should surface -- otherwise the operator
+	// sees an empty template list with no hint why.
+	if err := json.Unmarshal(data, &list); err != nil {
+		slog.Warn("templates store: failed to unmarshal on load", "path", path, "err", err)
+		return
+	}
 	for _, t := range list {
 		s.templates[t.ID] = t
 	}
 }
 
 // save persists templates to disk. Called from within locked methods; no additional lock needed.
+// Uses temp-file + rename so a crash mid-write can't corrupt the file.
+// Errors are logged rather than returned -- the public API doesn't
+// surface errors and threading them through every caller is out of
+// scope; logging is enough for the operator to see a disk-full /
+// permission failure instead of silent data loss.
 func (s *Store) save() {
-	data, _ := json.MarshalIndent(s.listLocked(), "", "  ")
-	os.WriteFile(filepath.Join(s.dir, "templates.json"), data, 0644)
+	path := filepath.Join(s.dir, "templates.json")
+	data, err := json.MarshalIndent(s.listLocked(), "", "  ")
+	if err != nil {
+		slog.Error("templates store: failed to marshal", "err", err)
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		slog.Error("templates store: failed to write tmp file", "path", tmp, "err", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		slog.Error("templates store: failed to rename tmp into place", "path", path, "err", err)
+	}
 }

@@ -4403,7 +4403,7 @@ class OfficeApp {
       }
 
       if (e.key === 'Escape') {
-        // Close command palette first if open
+        // Close command palette first if open (top of z-stack)
         const palette = document.getElementById('commandPalette');
         if (palette && !palette.classList.contains('hidden')) {
           this.closeCommandPalette();
@@ -4417,6 +4417,24 @@ class OfficeApp {
         const modal = document.getElementById('memberModal');
         if (modal && !modal.classList.contains('hidden')) {
           this.closeMemberModal();
+          return;
+        }
+        // Spawn / template-editor / task-detail modals also deserve
+        // Escape handling -- previously the user had to click the X
+        // or click outside, inconsistent with the three modals above.
+        const spawnModal = document.getElementById('spawnConfigModal');
+        if (spawnModal && !spawnModal.classList.contains('hidden')) {
+          this.closeSpawnConfigModal();
+          return;
+        }
+        const tplEditor = document.getElementById('templateEditorModal');
+        if (tplEditor && !tplEditor.classList.contains('hidden')) {
+          this.closeTemplateEditor();
+          return;
+        }
+        const taskModal = document.getElementById('taskDetailModal');
+        if (taskModal && !taskModal.classList.contains('hidden')) {
+          this.closeTaskDetail();
           return;
         }
         this.closeDetail();

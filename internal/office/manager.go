@@ -1322,10 +1322,18 @@ func LoadAgentMemory(configID, workingDir string) string {
 }
 
 // SaveAgentMemory writes an agent's project-scoped memory file.
+// Uses temp-file + rename so a crash or concurrent write can't leave
+// the file half-written. Memory files can hold a full session of
+// accumulated notes -- losing them silently to a truncation race
+// isn't acceptable. Same pattern as AppendMissionInsight below.
 func SaveAgentMemory(configID, workingDir, content string) error {
 	path := GetAgentMemoryPath(configID, workingDir)
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	return os.WriteFile(path, []byte(content), 0o644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // AppendAgentMemory appends to an agent's project-scoped memory file.

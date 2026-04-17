@@ -2,6 +2,7 @@ package teamtemplates
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -163,18 +164,40 @@ func (s *Store) Duplicate(id string, builtIn *TeamTemplate) *TeamTemplate {
 }
 
 func (s *Store) load() {
-	data, err := os.ReadFile(filepath.Join(s.dir, "team-templates.json"))
+	path := filepath.Join(s.dir, "team-templates.json")
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
 	var list []*TeamTemplate
-	json.Unmarshal(data, &list)
+	// Surface unmarshal errors so a corrupted file (truncated prior
+	// save, hand-edit mistake, struct-change incompatibility) doesn't
+	// silently come back as "zero custom templates".
+	if err := json.Unmarshal(data, &list); err != nil {
+		slog.Warn("team-templates store: failed to unmarshal on load", "path", path, "err", err)
+		return
+	}
 	for _, t := range list {
 		s.templates[t.ID] = t
 	}
 }
 
+// save persists templates to disk with temp-file + rename so a
+// crash mid-write can't corrupt the file. Errors are logged rather
+// than returned -- see the matching note on templates.Store.save.
 func (s *Store) save() {
-	data, _ := json.MarshalIndent(s.listLocked(), "", "  ")
-	os.WriteFile(filepath.Join(s.dir, "team-templates.json"), data, 0644)
+	path := filepath.Join(s.dir, "team-templates.json")
+	data, err := json.MarshalIndent(s.listLocked(), "", "  ")
+	if err != nil {
+		slog.Error("team-templates store: failed to marshal", "err", err)
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		slog.Error("team-templates store: failed to write tmp file", "path", tmp, "err", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		slog.Error("team-templates store: failed to rename tmp into place", "path", path, "err", err)
+	}
 }
