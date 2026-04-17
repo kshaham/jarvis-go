@@ -120,6 +120,10 @@ class OfficeApp {
     this._netNodes = null;
     this._networkSelectedNode = null;
     this._networkEdgePair = null;
+    // AbortController used to cancel stale Insights-tab fetches when the
+    // operator toggles tabs rapidly. Initialized null; renderInsights
+    // aborts-then-recreates before each render cycle.
+    this._insightsAbortController = null;
     // Install keyboard shortcut bindings (? for help, g+<key> chord for tab nav).
     this._installShortcutBindings();
   }
@@ -1680,6 +1684,13 @@ class OfficeApp {
   async renderInsights() {
     const grid = document.getElementById('insightsGrid');
     if (!grid) return;
+    // Abort any previous in-flight Insights fetches so rapid tab-toggling
+    // doesn't pile up overlapping network requests whose late responses
+    // would stomp each other's DOM.
+    if (this._insightsAbortController) {
+      try { this._insightsAbortController.abort(); } catch (_) { /* already aborted */ }
+    }
+    this._insightsAbortController = new AbortController();
     const roster = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
     if (roster.length === 0) {
       grid.innerHTML = '<div class="insights-empty">Spawn a team to see insights.</div>';
@@ -3095,8 +3106,8 @@ class OfficeApp {
       document.getElementById('tplEditorDesc').value = '';
       document.getElementById('tplEditorCategory').value = 'custom';
       this._editorMembers = [
-        { id: 'agent-1', name: 'Leader', role: 'Tech Lead', tier: 'strategic', color: 'blue', emoji: '' },
-        { id: 'agent-2', name: 'Worker', role: 'Developer', tier: 'worker', color: 'green', emoji: '' },
+        { id: 'agent-1', name: 'Leader', role: 'Tech Lead', tier: 'strategic', color: 'blue', emoji: '', provider: '', model: '' },
+        { id: 'agent-2', name: 'Worker', role: 'Developer', tier: 'worker', color: 'green', emoji: '', provider: '', model: '' },
       ];
     }
     this.renderEditorMembers();
@@ -3113,8 +3124,21 @@ class OfficeApp {
     const colorOpts = ['blue','purple','pink','green','orange','yellow','red'].map(c =>
       `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`
     ).join('');
+    // Provider + model selects let operators pin a specific LLM per
+    // template member. An empty value means "inherit from team default at
+    // spawn time" -- matches how saved templates used to behave silently.
+    const providerOpts = [
+      ['', 'Inherit'],
+      ['claude-subscription', 'Claude Sub'],
+      ['claude-api', 'Claude API'],
+      ['zai-glm', 'Z.AI GLM'],
+    ].map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
 
     container.innerHTML = this._editorMembers.map((m, i) => {
+      // The model options depend on the provider currently selected for
+      // THIS member; include every provider's options, then the onchange
+      // swap repopulates on demand.
+      const modelOpts = this._templateEditorModelOptions(m.provider || '');
       return `<div class="tpl-editor-member">
         <input type="text" value="${this.escapeAttr(m.id)}" onchange="office._editorMembers[${i}].id=this.value" placeholder="ID" style="grid-column:1/2">
         <input type="text" value="${this.escapeAttr(m.name)}" onchange="office._editorMembers[${i}].name=this.value" placeholder="Name">
@@ -3122,13 +3146,35 @@ class OfficeApp {
         <input type="text" value="${this.escapeAttr(m.role)}" onchange="office._editorMembers[${i}].role=this.value" placeholder="Role">
         <select onchange="office._editorMembers[${i}].tier=this.value">${tierOpts.replace(`value="${m.tier}"`, `value="${m.tier}" selected`)}</select>
         <select onchange="office._editorMembers[${i}].color=this.value">${colorOpts.replace(`value="${m.color}"`, `value="${m.color}" selected`)}</select>
+        <select onchange="office._onEditorProviderChange(${i}, this.value)">${providerOpts.replace(`value="${m.provider || ''}"`, `value="${m.provider || ''}" selected`)}</select>
+        <select onchange="office._editorMembers[${i}].model=this.value">${modelOpts.replace(`value="${this.escapeAttr(m.model || '')}"`, `value="${this.escapeAttr(m.model || '')}" selected`)}</select>
       </div>`;
     }).join('');
   }
 
+  /**
+   * Builds the model <option> list for the given provider. Empty provider
+   * ("Inherit") gets only a placeholder. Shared by the template editor and
+   * the spawn-member grid so the two stay consistent.
+   */
+  _templateEditorModelOptions(provider) {
+    const opts = [['', 'Inherit']];
+    const models = OfficeApp.PROVIDER_MODELS[provider] || [];
+    for (const m of models) opts.push([m.value, m.label]);
+    return opts.map(([v, l]) => `<option value="${this.escapeAttr(v)}">${this.escapeHtml(l)}</option>`).join('');
+  }
+
+  _onEditorProviderChange(index, provider) {
+    if (!this._editorMembers[index]) return;
+    this._editorMembers[index].provider = provider;
+    // Changing provider invalidates the previously-selected model.
+    this._editorMembers[index].model = '';
+    this.renderEditorMembers();
+  }
+
   addEditorMember() {
     const idx = this._editorMembers.length + 1;
-    this._editorMembers.push({ id: `agent-${idx}`, name: `Agent ${idx}`, role: 'Developer', tier: 'worker', color: 'green', emoji: '' });
+    this._editorMembers.push({ id: `agent-${idx}`, name: `Agent ${idx}`, role: 'Developer', tier: 'worker', color: 'green', emoji: '', provider: '', model: '' });
     this.renderEditorMembers();
   }
 
@@ -5290,7 +5336,7 @@ class OfficeApp {
           <option value="${this._escapeAttr(fromId)}">${this._escapeHtml(a.name)}</option>
           <option value="${this._escapeAttr(toId)}">${this._escapeHtml(b.name)}</option>
         </select>
-        <input type="text" id="convBody" placeholder="Type a message..." />
+        <input type="text" id="convBody" placeholder="Type a message..." onkeydown="if(event.key==='Enter')office._sendConversationMessage('${this._escapeAttr(fromId)}','${this._escapeAttr(toId)}')" />
         <button onclick="office._sendConversationMessage('${this._escapeAttr(fromId)}','${this._escapeAttr(toId)}')">Send</button>
       </div>
     `;
@@ -5388,8 +5434,9 @@ class OfficeApp {
   }
 
   async _renderTeamVelocity(container) {
+    const signal = this._insightsAbortController ? this._insightsAbortController.signal : undefined;
     try {
-      const res = await fetch('/api/office/timeline?type=task&limit=500');
+      const res = await fetch('/api/office/timeline?type=task&limit=500', { signal });
       const data = res.ok ? await res.json() : { entries: [] };
       const entries = (data.entries || []).filter(e => {
         const tx = e.data && e.data.transition;
@@ -5415,13 +5462,15 @@ class OfficeApp {
       container.innerHTML = `<svg class="velocity-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg>
         <div class="velocity-caption">${total} task${total === 1 ? '' : 's'} completed in last 24h</div>`;
     } catch (err) {
+      if (err && err.name === 'AbortError') return;
       container.innerHTML = '<div style="color:#52525b;font-size:12px">Unable to load velocity.</div>';
     }
   }
 
   async _renderStageTimings(container) {
+    const signal = this._insightsAbortController ? this._insightsAbortController.signal : undefined;
     try {
-      const res = await fetch('/api/office/task-queues');
+      const res = await fetch('/api/office/task-queues', { signal });
       const data = res.ok ? await res.json() : { queues: [] };
       const tasks = [];
       for (const q of (data.queues || [])) {
@@ -5450,13 +5499,15 @@ class OfficeApp {
         <div class="stage-timing-row"><span class="stage-name">Open tasks</span><span class="stage-value">${tasks.filter(t => t.status !== 'completed' && t.status !== 'failed').length}</span></div>
       `;
     } catch (err) {
+      if (err && err.name === 'AbortError') return;
       container.innerHTML = '<div style="color:#52525b;font-size:12px">Unable to load stage timings.</div>';
     }
   }
 
   async _renderBlockerLeaderboard(container) {
+    const signal = this._insightsAbortController ? this._insightsAbortController.signal : undefined;
     try {
-      const res = await fetch('/api/office/task-queues');
+      const res = await fetch('/api/office/task-queues', { signal });
       const data = res.ok ? await res.json() : { queues: [] };
       const blocked = [];
       for (const q of (data.queues || [])) {
@@ -5473,6 +5524,7 @@ class OfficeApp {
           </div>`).join('')
         : '<div style="color:#52525b;font-size:12px">No blocked tasks right now.</div>';
     } catch (err) {
+      if (err && err.name === 'AbortError') return;
       container.innerHTML = '<div style="color:#52525b;font-size:12px">Unable to load blockers.</div>';
     }
   }

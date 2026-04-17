@@ -35,6 +35,12 @@ type TeamTemplateMember struct {
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 	WorkingDir   string   `json:"workingDir,omitempty"`
+	// Provider + Model let custom templates pin a specific LLM per
+	// member. Empty values mean "inherit from the team-level default
+	// at spawn time" -- previously the only possible behavior, so
+	// existing persisted templates still load correctly (omitempty).
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // Store manages custom team template persistence on disk.

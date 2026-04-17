@@ -737,9 +737,19 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 
 		// Record the resolved provider + model so BuildMemberPayload can
 		// surface them to the UI (Active Now cards, current-team banner).
-		// Prefer a per-member override; fall back to the team-wide default.
+		// Priority (highest first):
+		//   1. per-spawn memberOverride from the modal
+		//   2. per-template member.Provider / member.Model (custom
+		//      templates can pin a specific LLM per member)
+		//   3. team-wide default provider, plus Z.AI sonnet allocation
 		resolvedProvider := provider
 		resolvedModel := ""
+		if member.Provider != "" {
+			resolvedProvider = member.Provider
+		}
+		if member.Model != "" {
+			resolvedModel = member.Model
+		}
 		if ov, has := memberOverrideMap[member.ID]; has {
 			if ov.Provider != "" {
 				resolvedProvider = ov.Provider

@@ -241,6 +241,14 @@ func (a *AgentState) UpdateTaskStatus(taskID string, status TaskStatus) bool {
 			if status == TaskCompleted || status == TaskFailed {
 				t.CompletedAt = now
 			}
+			// Reclaim per-task side-channel state whenever the task leaves
+			// TaskInProgress. Previously only the auto-complete path in
+			// recovery.go cleared ProgressChecks; normal completions, fails,
+			// and blocks left entries stranded -- a slow per-agent leak.
+			if status != TaskInProgress {
+				delete(a.ProgressChecks, taskID)
+				delete(a.AckNudges, taskID)
+			}
 			return true
 		}
 	}
