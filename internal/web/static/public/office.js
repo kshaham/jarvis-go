@@ -131,6 +131,13 @@ class OfficeApp {
     this._tasksAbortController = null;
     this._meetingsAbortController = null;
     this._openMeetingAbortController = null;
+    // Round 7 filter state -- in-memory, survives re-renders within a
+    // session. Tasks filter supports a text query plus multi-value
+    // priority / status chips (OR within category, AND across).
+    this._taskFilter = { q: '', priority: new Set(), status: new Set() };
+    this._activityFilter = 'all';
+    // Full meetings list, kept so _filterMeetings can re-filter without refetching.
+    this._meetingsAll = [];
     // Install keyboard shortcut bindings (? for help, g+<key> chord for tab nav).
     this._installShortcutBindings();
   }
@@ -1016,6 +1023,18 @@ class OfficeApp {
     return card;
   }
 
+  // Human-friendly cost formatter. Cents for sub-dollar values so the
+  // card doesn't advertise "$0.0341" clutter; K/M abbreviation above
+  // $1000 / $1M so ambitious teams don't blow the layout.
+  _formatCost(n) {
+    const v = Number(n) || 0;
+    if (v < 0.005)        return '0c';
+    if (v < 1)            return Math.round(v * 100) + 'c';
+    if (v < 1000)         return '$' + v.toFixed(2);
+    if (v < 1_000_000)    return '$' + (v / 1000).toFixed(1) + 'K';
+    return '$' + (v / 1_000_000).toFixed(1) + 'M';
+  }
+
   fillAgentCard(card, member) {
     // Defensive defaults -- prevent "undefined" rendering
     if (!member.name) member.name = member.configId || 'Agent';
@@ -1029,12 +1048,29 @@ class OfficeApp {
     const completed = tasks.filter(t => t.status === 'completed' || t.status === 'failed').length;
     const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
     const currentTask = tasks.find(t => t.status === 'in_progress') || tasks.find(t => t.status === 'pending');
-    const costStr = (member.totalCost || 0) >= 1
-      ? '$' + (member.totalCost || 0).toFixed(2)
-      : (((member.totalCost || 0) * 100).toFixed(0)) + 'c';
+    const rawCost = Number(member.totalCost) || 0;
+    const costFmt = this._formatCost(rawCost);
+    // Magnitude-based tier so high-burn agents pop visually:
+    //   <= $0.05 faint | <= $1 normal | <= $5 warn | >$5 alert
+    let costTier = 'cost-normal';
+    if (rawCost > 5)      costTier = 'cost-alert';
+    else if (rawCost > 1) costTier = 'cost-warn';
+    else if (rawCost <= 0.05) costTier = 'cost-faint';
+    const costStr = `<span class="${costTier}" title="$${rawCost.toFixed(4)}">${costFmt}</span>`;
 
     const badgeClass = `badge-${member.status}`;
     const statusLabel = member.status.charAt(0).toUpperCase() + member.status.slice(1);
+    // Map each status to a sprite icon reference. Unknown statuses fall
+    // back to the idle moon (better than a missing graphic).
+    const iconByStatus = {
+      working:    { href: 'icon-working',    extra: 'status-icon--pulse' },
+      idle:       { href: 'icon-idle',       extra: '' },
+      stuck:      { href: 'icon-stuck',      extra: '' },
+      meeting:    { href: 'icon-meeting',    extra: '' },
+      brainstorm: { href: 'icon-brainstorm', extra: 'status-icon--pulse' },
+    };
+    const iconMeta = iconByStatus[member.status] || iconByStatus.idle;
+    const statusIconHtml = `<svg class="status-icon ${iconMeta.extra}" aria-hidden="true"><use href="#${iconMeta.href}"/></svg>`;
     const taskHtml = currentTask
       ? `<div class="agent-card-task">${this.escapeHtml((currentTask.title || '').slice(0, 60))}</div>`
       : '';
@@ -1158,6 +1194,7 @@ class OfficeApp {
           <div class="agent-card-role">${this.escapeHtml(member.role)}</div>
         </div>
         <span class="agent-status-badge ${badgeClass}">
+          ${statusIconHtml}
           <span class="status-dot"></span>
           ${statusLabel}
         </span>
@@ -1757,7 +1794,13 @@ class OfficeApp {
         <span class="count">${m.learningCount || 0}</span>
       </div>`).join('');
 
+    // Narrative summary: 2-3 sentences derived from roster + blocker
+    // data, so the top of Insights tells a story instead of just
+    // showing tables.
+    const narrative = await this._buildInsightsNarrative(roster, byCost, byLearning, totalCost);
+
     grid.innerHTML = `
+      ${narrative}
       <div class="insight-card insight-card--kpi">
         <div class="insight-card-title">Team spend today</div>
         <div class="insight-big-number">$${totalCost.toFixed(4)}</div>
@@ -1801,6 +1844,62 @@ class OfficeApp {
     if (st) this._renderStageTimings(st);
     const bl = document.getElementById('blockerLeaderboard');
     if (bl) this._renderBlockerLeaderboard(bl);
+  }
+
+  // Build a 2-3 sentence narrative summary for the top of Insights.
+  // Derived purely from client-side state already available on the
+  // roster + from a lightweight blocker fetch, so no new endpoint.
+  async _buildInsightsNarrative(roster, byCost, byLearning, totalCost) {
+    const sentences = [];
+    const top = byCost[0];
+    const avg = roster.length > 0 ? totalCost / roster.length : 0;
+    const topCost = (top && top.usage && top.usage.totalCostUSD) || 0;
+
+    if (totalCost < 0.01) {
+      sentences.push(`<span class="hl">Team just spawned</span> — spend and usage metrics will light up as agents start working.`);
+    } else {
+      if (top && avg > 0 && topCost > avg * 1.5) {
+        const ratio = (topCost / avg).toFixed(1);
+        sentences.push(`<span class="hl">${this._escapeHtml(top.name || 'Top agent')}</span> leads today's spend at <span class="hl">$${topCost.toFixed(3)}</span> (${ratio}× team average).`);
+      } else {
+        sentences.push(`Spend is evenly distributed — team total is <span class="hl">$${totalCost.toFixed(3)}</span> across ${roster.length} agent${roster.length === 1 ? '' : 's'}.`);
+      }
+    }
+
+    const topLearner = byLearning[0];
+    if (topLearner && (topLearner.learningCount || 0) > 0) {
+      sentences.push(`<span class="hl">${this._escapeHtml(topLearner.name)}</span> is the most prolific learner with <span class="hl">${topLearner.learningCount}</span> recorded insight${topLearner.learningCount === 1 ? '' : 's'}.`);
+    }
+
+    // Try to pull the oldest blocker for a "stuck on X for Y min" line.
+    try {
+      const res = await fetch('/api/office/task-queues', { signal: this._insightsAbortController ? this._insightsAbortController.signal : undefined });
+      if (res.ok) {
+        const data = await res.json();
+        const blocked = [];
+        for (const q of (data.queues || [])) {
+          for (const t of (q.tasks || [])) {
+            if (t.status === 'blocked') {
+              blocked.push({ title: t.title, assignedAt: t.assignedAt, agentName: q.agentName });
+            }
+          }
+        }
+        blocked.sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
+        if (blocked[0]) {
+          const b = blocked[0];
+          const mins = Math.max(0, Math.round((Date.now() - new Date(b.assignedAt).getTime()) / 60000));
+          const stuckCls = mins > 60 ? 'hl-alert' : mins > 15 ? 'hl-warn' : 'hl';
+          sentences.push(`<span class="${stuckCls}">${this._escapeHtml(b.agentName || 'An agent')}</span> has been blocked on "${this._escapeHtml((b.title || '').slice(0, 60))}" for <span class="${stuckCls}">${mins} min</span>.`);
+        } else {
+          sentences.push(`<span class="hl">No tasks blocked</span> right now — team is flowing.`);
+        }
+      }
+    } catch { /* narrative is best-effort */ }
+
+    return `<div class="insight-card insight-narrative">
+      <div class="insight-card-title">Team snapshot</div>
+      <div class="insight-narrative-body">${sentences.join(' ')}</div>
+    </div>`;
   }
 
   _renderCostBar(m, maxCost, rank) {
@@ -1853,15 +1952,32 @@ class OfficeApp {
         </div>`;
         return;
       }
+      // Cache the full list so _filterMeetings can re-filter client-side
+      // without refetching.
+      this._meetingsAll = standups;
       listEl.innerHTML = standups.map(s => `
-        <div class="meeting-item" onclick="office.openMeeting('${this._escapeAttr(s.id)}')">
+        <div class="meeting-item" data-label="${this._escapeAttr((this._humanizeStandupID(s.id) + ' ' + (s.modified || '')).toLowerCase())}" onclick="office.openMeeting('${this._escapeAttr(s.id)}')">
           <div class="meeting-title">${this._escapeHtml(this._humanizeStandupID(s.id))}</div>
           <div class="meeting-meta">${this._escapeHtml(s.modified || '')}</div>
         </div>`).join('');
+      // Re-apply any current search filter so switching tabs doesn't
+      // reveal items the operator previously filtered out.
+      const input = document.getElementById('meetingsSearch');
+      if (input && input.value) this._filterMeetings(input.value);
     } catch (err) {
       if (err && err.name === 'AbortError') return;
       listEl.innerHTML = '<div class="meetings-empty">Failed to load meetings.</div>';
     }
+  }
+
+  _filterMeetings(q) {
+    const needle = (q || '').trim().toLowerCase();
+    const items = document.querySelectorAll('#meetingsList .meeting-item');
+    items.forEach(el => {
+      const label = el.dataset.label || '';
+      const match = !needle || label.includes(needle);
+      el.classList.toggle('filtered-out', !match);
+    });
   }
 
   _humanizeStandupID(id) {
@@ -3602,6 +3718,64 @@ class OfficeApp {
     }
   }
 
+  // ---- Tasks filter bar (Round 7 E1) ----
+  // AND across categories (query AND priority AND status), OR within
+  // a category (priority=high OR priority=med). Matches Linear /
+  // GitHub filter conventions.
+  _applyTaskFilter(tasks) {
+    const f = this._taskFilter;
+    if (!f) return tasks;
+    const q = (f.q || '').trim().toLowerCase();
+    const pri = f.priority || new Set();
+    const st = f.status || new Set();
+    if (!q && pri.size === 0 && st.size === 0) return tasks;
+    return tasks.filter(t => {
+      if (q) {
+        const hay = `${t.title || ''} ${t.description || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (pri.size > 0 && !pri.has(t.priority || 'medium')) return false;
+      if (st.size > 0) {
+        // Map the kanban status chip onto raw task.status values.
+        const s = t.status || 'pending';
+        const chipMatchesStatus =
+          (st.has('pending') && (s === 'pending' || s === 'acknowledged')) ||
+          (st.has('in_progress') && s === 'in_progress') ||
+          (st.has('blocked') && s === 'blocked') ||
+          (st.has('completed') && (s === 'completed' || s === 'failed'));
+        if (!chipMatchesStatus) return false;
+      }
+      return true;
+    });
+  }
+
+  _onTaskFilterInput(q) {
+    this._taskFilter.q = q || '';
+    this.renderTasks();
+    this.renderKanbanBoard();
+  }
+
+  _toggleTaskChip(kind, value) {
+    if (!this._taskFilter[kind]) return;
+    const set = this._taskFilter[kind];
+    if (set.has(value)) set.delete(value); else set.add(value);
+    // Reflect chip state in the DOM.
+    const sel = `[data-chip="${kind}"][data-value="${value}"]`;
+    const btn = document.querySelector(sel);
+    if (btn) btn.classList.toggle('active', set.has(value));
+    this.renderTasks();
+    this.renderKanbanBoard();
+  }
+
+  _clearTaskFilters() {
+    this._taskFilter = { q: '', priority: new Set(), status: new Set() };
+    const input = document.getElementById('taskFilterSearch');
+    if (input) input.value = '';
+    document.querySelectorAll('.task-filter-chip.active').forEach(b => b.classList.remove('active'));
+    this.renderTasks();
+    this.renderKanbanBoard();
+  }
+
   renderTasks() {
     const list = document.getElementById('tasksList');
     if (!list) return;
@@ -3622,7 +3796,7 @@ class OfficeApp {
 
     html += this.renderFileLocks();
 
-    const openBugs = bugTasks.filter(t => t.status !== 'resolved');
+    const openBugs = this._applyTaskFilter(bugTasks.filter(t => t.status !== 'resolved'));
     if (openBugs.length > 0) {
       html += '<div class="tasks-section-title">Bug Tasks</div>';
       html += openBugs.map(t => {
@@ -3729,7 +3903,9 @@ class OfficeApp {
     if (!backlogEl || !todoEl || !wipEl || !reviewEl || !doneEl) return;
 
     const queues = this.taskQueues || [];
-    const allTasks = queues.flatMap(q => (q.tasks || []).map(t => ({ ...t, _sessionId: q.sessionId })));
+    const allTasksRaw = queues.flatMap(q => (q.tasks || []).map(t => ({ ...t, _sessionId: q.sessionId })));
+    // Apply the task-filter-bar filter so the board honors search + chips.
+    const allTasks = this._applyTaskFilter(allTasksRaw);
 
     // 5-column status mapping:
     // pending        -> Backlog
@@ -3777,13 +3953,21 @@ class OfficeApp {
     reviewEl.innerHTML = renderCards(review);
     doneEl.innerHTML = renderCards(done);
 
+    // WIP limit: one active task per worker. Above that, the In
+    // Progress column gets a warn badge (over-limit) so bottlenecks
+    // are visible at a glance.
+    const teamSize = (this.state && Array.isArray(this.state.members)) ? this.state.members.length : 0;
+    const wipLimit = teamSize > 0 ? teamSize : null;
+
     // Update counts with a subtle pulse when the value changes; tracked
     // per-element so a re-render with unchanged counts stays quiet.
-    const setCount = (el, next) => {
+    const setCount = (el, next, limit) => {
       if (!el) return;
       const prev = parseInt(el.dataset.prevCount || '0', 10);
-      el.textContent = String(next);
+      const overLimit = limit && next > limit;
+      el.textContent = overLimit ? `${next}/${limit}` : String(next);
       el.dataset.prevCount = String(next);
+      el.classList.toggle('over-limit', !!overLimit);
       if (prev !== next) {
         el.classList.remove('count-pulse');
         // Force reflow so re-adding the class retriggers the animation.
@@ -3791,11 +3975,11 @@ class OfficeApp {
         el.classList.add('count-pulse');
       }
     };
-    setCount(document.getElementById('kanbanBacklogCount'), backlog.length);
-    setCount(document.getElementById('kanbanTodoCount'), todo.length);
-    setCount(document.getElementById('kanbanWipCount'), inProgress.length);
-    setCount(document.getElementById('kanbanReviewCount'), review.length);
-    setCount(document.getElementById('kanbanDoneCount'), done.length);
+    setCount(document.getElementById('kanbanBacklogCount'), backlog.length, null);
+    setCount(document.getElementById('kanbanTodoCount'), todo.length, null);
+    setCount(document.getElementById('kanbanWipCount'), inProgress.length, wipLimit);
+    setCount(document.getElementById('kanbanReviewCount'), review.length, null);
+    setCount(document.getElementById('kanbanDoneCount'), done.length, null);
   }
 
   // ========== Ad-Hoc Meetings ==========
@@ -4017,6 +4201,11 @@ class OfficeApp {
       feed.scrollTop = 0;
     }
 
+    // Re-apply the activity-type chip filter so new entries respect it.
+    if (this._activityFilter && this._activityFilter !== 'all') {
+      this._setActivityFilter(this._activityFilter);
+    }
+
     this._lastActivityRenderCount = currentCount;
   }
 
@@ -4060,6 +4249,46 @@ class OfficeApp {
     this._updateMissionCharCount();
 
     this.updateMissionBanner(settings.teamMission);
+  }
+
+  _filterSettings(q) {
+    const panel = document.getElementById('settingsPanel');
+    if (!panel) return;
+    const needle = (q || '').trim().toLowerCase();
+    const sections = panel.querySelectorAll('.settings-section');
+    let visible = 0;
+    sections.forEach(sec => {
+      if (!needle) {
+        sec.classList.remove('filtered-out');
+        visible++;
+        return;
+      }
+      // Match against the section title plus any label/span text.
+      const hay = sec.textContent.toLowerCase();
+      const match = hay.includes(needle);
+      sec.classList.toggle('filtered-out', !match);
+      if (match) visible++;
+    });
+    const empty = document.getElementById('settingsSearchEmpty');
+    if (empty) empty.classList.toggle('hidden', visible > 0);
+  }
+
+  _setActivityFilter(type) {
+    this._activityFilter = type || 'all';
+    document.querySelectorAll('#activityTypeBar .timeline-filter-chip').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.activityType === this._activityFilter);
+    });
+    // Apply to currently rendered entries. The activity feed is always
+    // fully rebuilt when events arrive (or stays stable), so we can
+    // toggle .filtered-out without touching activityLog itself.
+    const feed = document.getElementById('activityFeed');
+    if (!feed) return;
+    feed.querySelectorAll('.activity-entry').forEach(el => {
+      const cls = Array.from(el.classList).find(c => c.startsWith('type-')) || '';
+      const entryType = cls.replace('type-', '');
+      const show = this._activityFilter === 'all' || entryType === this._activityFilter;
+      el.classList.toggle('filtered-out', !show);
+    });
   }
 
   _updateMissionCharCount() {

@@ -11,6 +11,32 @@
   <link rel="stylesheet" href="office.css">
 </head>
 <body>
+  <!-- Inline SVG icon sprite. Referenced via <svg class="status-icon"><use href="#icon-X"/></svg>. -->
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="icon-working" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="3.5" fill="currentColor" opacity="0.6"/>
+      <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+    </symbol>
+    <symbol id="icon-idle" viewBox="0 0 16 16">
+      <path d="M11.5 9.5A5 5 0 1 1 6.5 4.5a4 4 0 0 0 5 5z" fill="currentColor"/>
+    </symbol>
+    <symbol id="icon-stuck" viewBox="0 0 16 16">
+      <path d="M8 1.5 15 14H1Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      <line x1="8" y1="6" x2="8" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="8" cy="12" r="0.9" fill="currentColor"/>
+    </symbol>
+    <symbol id="icon-meeting" viewBox="0 0 16 16">
+      <circle cx="5" cy="6" r="2" fill="currentColor"/>
+      <circle cx="11" cy="6" r="2" fill="currentColor"/>
+      <path d="M2 13c0-1.7 1.3-3 3-3s3 1.3 3 3v1H2zm6 0c0-1.7 1.3-3 3-3s3 1.3 3 3v1H8z" fill="currentColor"/>
+    </symbol>
+    <symbol id="icon-brainstorm" viewBox="0 0 16 16">
+      <path d="M8 1.5 9.2 5.2 13 6.4 9.2 7.6 8 11.3 6.8 7.6 3 6.4 6.8 5.2Z" fill="currentColor"/>
+      <circle cx="13" cy="13" r="1.3" fill="currentColor" opacity="0.7"/>
+      <circle cx="3" cy="13" r="0.9" fill="currentColor" opacity="0.5"/>
+    </symbol>
+  </svg>
+
   <div class="office-app">
 
     <!-- Header -->
@@ -108,18 +134,18 @@
 
       <!-- Icon Nav (48px) -->
       <nav class="office-icon-nav" role="navigation" aria-label="Office navigation">
-        <button class="nav-icon active" data-tab="agents" onclick="office.switchTab('agents')" title="Agents">
+        <button class="nav-icon active" data-tab="agents" onclick="office.switchTab('agents')" title="Agents (g a)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </button>
-        <button class="nav-icon" data-tab="tasks" onclick="office.switchTab('tasks')" title="Tasks">
+        <button class="nav-icon" data-tab="tasks" onclick="office.switchTab('tasks')" title="Tasks (g k)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           <span class="nav-badge hidden" id="navBadge-tasks">0</span>
         </button>
-        <button class="nav-icon" data-tab="standup" onclick="office.switchTab('standup')" title="Standup">
+        <button class="nav-icon" data-tab="standup" onclick="office.switchTab('standup')" title="Standup (g s)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           <span class="nav-badge hidden" id="navBadge-standup"></span>
         </button>
-        <button class="nav-icon" data-tab="messages" onclick="office.switchTab('messages')" title="Chat">
+        <button class="nav-icon" data-tab="messages" onclick="office.switchTab('messages')" title="Chat (g c)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span class="nav-badge hidden" id="navBadge-messages">0</span>
         </button>
@@ -129,22 +155,22 @@
         <button class="nav-icon" data-tab="activity" onclick="office.switchTab('activity')" title="Activity">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         </button>
-        <button class="nav-icon" data-tab="timeline" onclick="office.switchTab('timeline')" title="Timeline">
+        <button class="nav-icon" data-tab="timeline" onclick="office.switchTab('timeline')" title="Timeline (g t)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         </button>
-        <button class="nav-icon" data-tab="insights" onclick="office.switchTab('insights')" title="Insights">
+        <button class="nav-icon" data-tab="insights" onclick="office.switchTab('insights')" title="Insights (g i)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
         </button>
-        <button class="nav-icon" data-tab="meetings" onclick="office.switchTab('meetings')" title="Meetings">
+        <button class="nav-icon" data-tab="meetings" onclick="office.switchTab('meetings')" title="Meetings (g m)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         </button>
-        <button class="nav-icon" data-tab="network" onclick="office.switchTab('network')" title="Agent Network">
+        <button class="nav-icon" data-tab="network" onclick="office.switchTab('network')" title="Agent Network (g n)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="18" r="2.2"/><line x1="6.6" y1="7.2" x2="10.4" y2="10.8"/><line x1="17.4" y1="7.2" x2="13.6" y2="10.8"/><line x1="6.6" y1="16.8" x2="10.4" y2="13.2"/><line x1="17.4" y1="16.8" x2="13.6" y2="13.2"/></svg>
         </button>
-        <button class="nav-icon" data-tab="reports" onclick="office.switchTab('reports')" title="Reports">
+        <button class="nav-icon" data-tab="reports" onclick="office.switchTab('reports')" title="Reports (g r)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
         </button>
-        <button class="nav-icon" data-tab="settings" onclick="office.switchTab('settings')" title="Settings">
+        <button class="nav-icon" data-tab="settings" onclick="office.switchTab('settings')" title="Settings (g g)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </nav>
@@ -184,6 +210,23 @@
         <div class="tab-panel hidden" id="panel-tasks" role="tabpanel">
           <div class="panel-header">
             <h2 class="panel-title">Tasks</h2>
+          </div>
+          <div class="task-filter-bar" id="taskFilterBar">
+            <input type="text" class="task-filter-search" id="taskFilterSearch" placeholder="Search tasks…" oninput="office._onTaskFilterInput(this.value)">
+            <div class="task-filter-group" title="Priority (OR within group)">
+              <span class="task-filter-group-label">Priority</span>
+              <button class="task-filter-chip" data-chip="priority" data-value="high" onclick="office._toggleTaskChip('priority','high')">High</button>
+              <button class="task-filter-chip" data-chip="priority" data-value="medium" onclick="office._toggleTaskChip('priority','medium')">Med</button>
+              <button class="task-filter-chip" data-chip="priority" data-value="low" onclick="office._toggleTaskChip('priority','low')">Low</button>
+            </div>
+            <div class="task-filter-group" title="Status (OR within group)">
+              <span class="task-filter-group-label">Status</span>
+              <button class="task-filter-chip" data-chip="status" data-value="pending" onclick="office._toggleTaskChip('status','pending')">Pending</button>
+              <button class="task-filter-chip" data-chip="status" data-value="in_progress" onclick="office._toggleTaskChip('status','in_progress')">Doing</button>
+              <button class="task-filter-chip" data-chip="status" data-value="blocked" onclick="office._toggleTaskChip('status','blocked')">Blocked</button>
+              <button class="task-filter-chip" data-chip="status" data-value="completed" onclick="office._toggleTaskChip('status','completed')">Done</button>
+            </div>
+            <button class="task-filter-chip" data-chip="clear" onclick="office._clearTaskFilters()">Clear</button>
           </div>
           <div class="kanban-board" id="kanbanBoard">
             <div class="kanban-col kanban-col-backlog" data-col="backlog">
@@ -293,6 +336,15 @@
           <div class="panel-header">
             <h2 class="panel-title">Activity</h2>
           </div>
+          <div class="activity-type-bar" id="activityTypeBar">
+            <button class="timeline-filter-chip active" data-activity-type="all" onclick="office._setActivityFilter('all')">All</button>
+            <button class="timeline-filter-chip" data-activity-type="system" onclick="office._setActivityFilter('system')">System</button>
+            <button class="timeline-filter-chip" data-activity-type="task" onclick="office._setActivityFilter('task')">Tasks</button>
+            <button class="timeline-filter-chip" data-activity-type="standup" onclick="office._setActivityFilter('standup')">Standup</button>
+            <button class="timeline-filter-chip" data-activity-type="message" onclick="office._setActivityFilter('message')">Messages</button>
+            <button class="timeline-filter-chip" data-activity-type="lock" onclick="office._setActivityFilter('lock')">Locks</button>
+            <button class="timeline-filter-chip" data-activity-type="brainstorm" onclick="office._setActivityFilter('brainstorm')">Brainstorm</button>
+          </div>
           <div class="activity-feed" id="activityFeed">
             <div class="activity-empty">No activity yet. Events will appear here in real time.</div>
           </div>
@@ -336,8 +388,11 @@
             <h2 class="panel-title">Meetings</h2>
           </div>
           <div class="meetings-layout">
-            <aside class="meetings-list" id="meetingsList">
-              <div class="meetings-empty">Loading…</div>
+            <aside class="meetings-list-wrap">
+              <input type="text" class="meetings-search-input" id="meetingsSearch" placeholder="Search meetings…" oninput="office._filterMeetings(this.value)">
+              <div class="meetings-list" id="meetingsList">
+                <div class="meetings-empty">Loading…</div>
+              </div>
             </aside>
             <section class="meetings-detail" id="meetingsDetail">
               <div class="meetings-placeholder">Select a meeting on the left to view its transcript.</div>
@@ -360,6 +415,16 @@
               <svg class="network-canvas" id="networkCanvas" aria-label="Agent relationship graph"></svg>
               <div class="network-empty hidden" id="networkEmpty">
                 Agents will connect here as they message each other.
+              </div>
+              <div class="network-legend" role="note" aria-label="Graph legend">
+                <div class="network-legend-title">Legend</div>
+                <div class="network-legend-body">
+                  <div class="network-legend-row"><span class="network-legend-dot idle"></span><span>Idle</span></div>
+                  <div class="network-legend-row"><span class="network-legend-dot working"></span><span>Working</span></div>
+                  <div class="network-legend-row"><span class="network-legend-dot meeting"></span><span>In meeting</span></div>
+                  <div class="network-legend-row"><span class="network-legend-dot stuck"></span><span>Stuck</span></div>
+                  <div class="network-legend-row" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-default)"><span class="t-meta" style="font-size:9px">Edge thickness = msg count · opacity = recency</span></div>
+                </div>
               </div>
             </div>
             <aside class="network-drawer hidden" id="networkDrawer" aria-live="polite">
@@ -386,6 +451,10 @@
             <h2 class="panel-title">Settings</h2>
           </div>
           <div class="settings-panel" id="settingsPanel">
+            <div class="settings-search-wrap">
+              <input type="text" class="settings-search-input" id="settingsSearch" placeholder="Search settings… (mission, brainstorm, idle, locks…)" oninput="office._filterSettings(this.value)">
+            </div>
+            <div class="settings-search-empty hidden" id="settingsSearchEmpty">No settings match your search.</div>
             <div class="settings-section">
               <div class="settings-section-title">Team Mission</div>
               <textarea class="settings-textarea" id="settingTeamMission"

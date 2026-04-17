@@ -5805,3 +5805,311 @@
 
 /* ========== END Round 6 applications ========== */
 
+/* ========== Round 7: search, transparency, affordances ========== */
+
+/* --- Scrollbars (system-wide) --- */
+.office-app *::-webkit-scrollbar { width: 10px; height: 10px; }
+.office-app *::-webkit-scrollbar-track { background: transparent; }
+.office-app *::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.office-app *::-webkit-scrollbar-thumb:hover { background: #3f3f46; background-clip: padding-box; }
+.office-app *::-webkit-scrollbar-corner { background: transparent; }
+.office-app { scrollbar-color: #27272a transparent; scrollbar-width: thin; }
+.office-app html { scroll-behavior: smooth; }
+
+/* --- prefers-reduced-motion guard ---
+ * Users who explicitly prefer less motion get snap transitions.
+ * Their focus rings, hover cursors, and colour changes still work.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* --- Nav icon focus ring + active indicator --- */
+.nav-icon {
+  position: relative;
+  transition: background 150ms ease-out;
+}
+.nav-icon:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  z-index: 1;
+}
+.nav-icon::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  transform: translateY(-50%);
+  transition: height 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.nav-icon.active::before { height: 60%; }
+
+/* --- Icon sprite --- */
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.status-icon {
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+.status-icon--spin { animation: spin 1.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.status-icon--pulse {
+  animation: iconPulseSoft 1.8s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes iconPulseSoft {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+
+/* --- Tasks: filter bar (E1) --- */
+.task-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 12px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-default);
+}
+.task-filter-search {
+  flex: 1 1 220px;
+  min-width: 160px;
+  max-width: 320px;
+  height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-primary);
+}
+.task-filter-search::placeholder { color: var(--text-faint); }
+.task-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-default);
+}
+.task-filter-group-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 0 2px;
+}
+.task-filter-chip {
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: 99px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
+}
+.task-filter-chip:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.task-filter-chip.active {
+  background: var(--accent-bg);
+  color: #fff;
+  border-color: var(--accent);
+}
+.task-filter-chip[data-chip="clear"] {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+.task-filter-chip[data-chip="clear"]:hover {
+  color: var(--text-primary);
+}
+
+/* --- Meetings: search --- */
+.meetings-list-wrap {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-default);
+  padding: 10px 8px 8px;
+  min-width: 340px;
+  width: 340px;
+  overflow: hidden;
+}
+.meetings-list-wrap .meetings-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  border-right: none !important;
+  padding: 0 !important;
+  width: auto !important;
+}
+.meeting-item.filtered-out { display: none; }
+.meetings-search-input {
+  width: 100%;
+  height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+.meetings-search-input::placeholder { color: var(--text-faint); }
+
+/* --- Settings: search --- */
+.settings-search-wrap {
+  position: sticky;
+  top: 0;
+  background: var(--bg-app);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-default);
+  z-index: 2;
+}
+.settings-search-input {
+  width: 100%;
+  height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-primary);
+}
+.settings-section.filtered-out { display: none; }
+.settings-search-empty {
+  padding: 16px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+/* --- Activity: type chips --- */
+.activity-type-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-default);
+}
+.activity-entry.filtered-out { display: none; }
+
+/* --- Network: legend --- */
+.network-legend {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 5;
+  background: rgba(15, 15, 17, 0.88);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 6px 10px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 44px;
+  transition: min-width 180ms ease-out, padding 180ms ease-out;
+  cursor: default;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(4px);
+}
+.network-legend .network-legend-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.network-legend .network-legend-body {
+  display: none;
+}
+.network-legend:hover .network-legend-body { display: block; }
+.network-legend:hover { min-width: 200px; }
+.network-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.network-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.network-legend-dot.idle    { background: #52525b; }
+.network-legend-dot.working { background: #22c55e; }
+.network-legend-dot.stuck   { background: #ef4444; }
+.network-legend-dot.meeting { background: #a855f7; }
+
+/* --- Kanban: WIP over limit --- */
+.kanban-col-count.over-limit {
+  background: rgba(234, 179, 8, 0.15) !important;
+  color: var(--warn) !important;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  animation: wipPulse 2.2s ease-in-out infinite;
+}
+@keyframes wipPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.3); }
+  50%      { box-shadow: 0 0 0 4px rgba(234, 179, 8, 0); }
+}
+
+/* --- Agent-card cost color coding --- */
+.agent-card-cost .cost-faint { color: var(--text-faint); }
+.agent-card-cost .cost-normal { color: var(--text-secondary); }
+.agent-card-cost .cost-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+.agent-card-cost .cost-alert {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* --- Insights narrative card --- */
+.insight-narrative {
+  grid-column: 1 / -1;
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.05), transparent 70%);
+  border-color: rgba(168, 85, 247, 0.25);
+  padding: 14px 16px;
+}
+.insight-narrative .insight-card-title {
+  color: var(--strategic);
+  margin-bottom: 6px;
+}
+.insight-narrative-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+.insight-narrative-body .hl {
+  color: var(--accent-hi);
+  font-weight: 600;
+}
+.insight-narrative-body .hl-warn  { color: var(--warn); font-weight: 600; }
+.insight-narrative-body .hl-alert { color: var(--error); font-weight: 600; }
+
+/* ========== END Round 7 ========== */
+
