@@ -535,9 +535,12 @@ func (s *Server) setupRouter() chi.Router {
 			})
 		})
 
-		// Authenticated routes
+		// Authenticated routes. Accept either a valid browser session cookie
+		// OR a valid agent token -- jarvis-mcp running inside spawned sessions
+		// calls /api/status and /api/config from tools, and those calls should
+		// succeed as long as the in-session agent token is attached.
 		r.Group(func(r chi.Router) {
-			r.Use(mw.Auth(s.authManager))
+			r.Use(mw.AuthWithAgentToken(s.authManager, s.agentTokenMgr))
 
 			// SSE endpoint (long-lived, no CSRF)
 			r.Get("/events", s.sseBroker.Subscribe)

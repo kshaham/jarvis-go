@@ -12,7 +12,20 @@ import (
 // Exempt paths: /api/health, /api/auth/*, and static files. /api/hook-event
 // is exempt here but guarded by HMAC signature verification in its handler.
 // /api/office/agent/* is NOT exempt; it's guarded by AgentTokenAuth below.
+//
+// Agents running inside spawned sessions also have a valid agent token
+// (JARVIS_AGENT_TOKEN) but no session cookie. jarvis-mcp calls routes like
+// /api/status and /api/config from within those sessions, so we accept the
+// agent token as a valid alternative form of authentication on any route
+// that Auth guards. This mirrors what the `cm` CLI already does.
 func Auth(am *auth.Manager) func(http.Handler) http.Handler {
+	return AuthWithAgentToken(am, nil)
+}
+
+// AuthWithAgentToken is like Auth but additionally accepts a valid agent
+// token as authentication. Pass nil for atm to get the strict cookie-only
+// behavior.
+func AuthWithAgentToken(am *auth.Manager, atm *auth.AgentTokenManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// If no password is configured, auth is disabled -- pass through
@@ -33,6 +46,21 @@ func Auth(am *auth.Manager) func(http.Handler) http.Handler {
 			if am.ValidateSessionFromRequest(r) {
 				next.ServeHTTP(w, r)
 				return
+			}
+
+			// Fallback: accept a valid agent token so jarvis-mcp tools that
+			// touch general status/config routes work inside spawned sessions.
+			if atm != nil {
+				presented := r.Header.Get("X-Jarvis-Agent-Token")
+				if presented == "" {
+					if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+						presented = strings.TrimPrefix(h, "Bearer ")
+					}
+				}
+				if atm.Validate(presented) {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
 
 			// Unauthorized
