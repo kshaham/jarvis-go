@@ -410,15 +410,20 @@ func (m *Manager) SendMessage(from, to, content string) {
 		Timestamp: time.Now(),
 	}
 
-	// Look up agent names for fromName/toName
+	// Look up agent names for fromName/toName + touch sender liveness.
 	m.mu.RLock()
-	if fromAgent, ok := m.agents[from]; ok && fromAgent.Config != nil {
-		msg.FromName = fromAgent.Config.Name
+	var fromAgent *AgentState
+	if a, ok := m.agents[from]; ok && a.Config != nil {
+		msg.FromName = a.Config.Name
+		fromAgent = a
 	}
 	if toAgent, ok := m.agents[to]; ok && toAgent.Config != nil {
 		msg.ToName = toAgent.Config.Name
 	}
 	m.mu.RUnlock()
+	if fromAgent != nil {
+		fromAgent.TouchAgentAPI()
+	}
 
 	m.mu.Lock()
 	m.messages = append(m.messages, msg)
@@ -1186,6 +1191,7 @@ func (m *Manager) SubmitLeaderTasksResponse(sessionID, content string) bool {
 	if agent == nil {
 		return false
 	}
+	agent.TouchAgentAPI()
 
 	agent.mu.Lock()
 	ch := agent.LeaderTaskCh
@@ -1221,6 +1227,7 @@ func (m *Manager) SubmitReflectionResponse(sessionID, learning, category, taskID
 	if agent == nil {
 		return false
 	}
+	agent.TouchAgentAPI()
 
 	agent.mu.Lock()
 	ch := agent.ReflectionCh
@@ -1288,6 +1295,7 @@ func (m *Manager) SubmitCuriosityDiscovery(sessionID, summary string) bool {
 	if agent == nil {
 		return false
 	}
+	agent.TouchAgentAPI()
 
 	agent.mu.Lock()
 	ch := agent.CuriosityCh

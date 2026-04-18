@@ -312,6 +312,7 @@ func (m *Manager) SubmitBrainstormResponse(sessionID, proposals string) bool {
 	if agent == nil {
 		return false
 	}
+	agent.TouchAgentAPI()
 
 	sanitized := sanitizeForTerminal(proposals)
 

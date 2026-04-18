@@ -1874,7 +1874,7 @@ func (ctx *Context) OfficeAgentMessage(w http.ResponseWriter, r *http.Request) {
 // OfficeAgentGetTasks returns tasks for the requesting agent.
 func (ctx *Context) OfficeAgentGetTasks(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("sessionId")
-	agent := ctx.OfficeManager.GetAgent(sessionID)
+	agent := ctx.OfficeManager.GetAgentAndTouch(sessionID)
 	if agent == nil {
 		ok(w, map[string]interface{}{"tasks": []interface{}{}})
 		return
@@ -2141,6 +2141,9 @@ func (ctx *Context) OfficeAgentFileLock(w http.ResponseWriter, r *http.Request) 
 	if req.SessionID == "" || req.FilePath == "" || req.Action == "" {
 		request.WriteError(w, http.StatusBadRequest, "sessionId, filePath, and action are required")
 		return
+	}
+	if agent := ctx.OfficeManager.GetAgent(req.SessionID); agent != nil {
+		agent.TouchAgentAPI()
 	}
 	// Validate file path: no path traversal, no absolute paths
 	if strings.Contains(req.FilePath, "..") || strings.HasPrefix(req.FilePath, "/") || strings.Contains(req.FilePath, "\x00") {

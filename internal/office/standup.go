@@ -335,6 +335,9 @@ func (m *Manager) SubmitStandupResponse(sessionID, content string) bool {
 	if agent == nil {
 		return false
 	}
+	// Even a late / duplicate / rejected submission is evidence the
+	// agent is alive -- counts for the stuck detector.
+	agent.TouchAgentAPI()
 
 	sanitized := sanitizeForTerminal(content)
 
