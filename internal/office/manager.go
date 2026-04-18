@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,6 +55,17 @@ type Manager struct {
 	// sibling container can reach it over the compose network. Persisted
 	// so the URL survives container restarts within the same team.
 	teamDevURL         string
+	// Optional PID of the dev server process so Jarvis can SIGTERM on
+	// wrap-up / lead death. 0 = no PID tracked (caller accepted the orphan
+	// risk by announcing without --pid).
+	teamDevPID         int
+	// Free-text login credentials for the dev instance. Written by the
+	// lead ("admin@dev.local / password123" or a multi-line block).
+	// Stored server-side at 0o600 and never logged. Empty = no creds set.
+	teamDevCreds       string
+	// Consecutive health-check failures on teamDevURL. After 3 strikes
+	// the URL is auto-cleared so agents stop pointing at a dead server.
+	devHealthFailures  int
 	// Which template the current team was spawned from + its resolved
 	// working directory. Exposed in the status payload so the UI can show
 	// a "current team" banner while a team is running.
@@ -208,6 +221,26 @@ func (m *Manager) HandleAgentDeath(sessionID string) {
 				}
 			}
 			m.mu.RUnlock()
+		}
+	}
+
+	// If the dead agent was a strategic-tier lead AND the team has no
+	// other living strategic agent to hand off to, their dev instance
+	// is orphaned — kill it so teammates don't keep hitting a dead URL.
+	// We leave the URL alive if another lead can take over.
+	wasLead := agent.Config != nil && agent.Config.Tier == "strategic"
+	if wasLead {
+		m.mu.RLock()
+		otherLeadAlive := false
+		for _, other := range m.agents {
+			if other.SessionID != sessionID && other.Config != nil && other.Config.Tier == "strategic" {
+				otherLeadAlive = true
+				break
+			}
+		}
+		m.mu.RUnlock()
+		if !otherLeadAlive {
+			go m.ClearTeamDevInstance(true)
 		}
 	}
 
@@ -389,6 +422,9 @@ func (m *Manager) SetTeamSpawned(v bool) {
 	} else {
 		m.StopIdleMonitoring()
 		m.StopTelegramUpdates()
+		// Team shut down — kill any orphaned dev server the lead started
+		// so the next team doesn't race for ports against a zombie process.
+		m.ClearTeamDevInstance(true)
 		m.mu.Lock()
 		m.pendingLeaderQuery = nil
 		m.telegramEnabled = false
@@ -848,6 +884,16 @@ func (m *Manager) loadPersistedMission() {
 	if udata, uerr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-url.txt")); uerr == nil {
 		m.teamDevURL = strings.TrimSpace(string(udata))
 	}
+	// Dev server PID for orphan cleanup on wrap-up / lead death.
+	if pdata, perr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-pid.txt")); perr == nil {
+		if pid, pierr := strconv.Atoi(strings.TrimSpace(string(pdata))); pierr == nil && pid > 0 {
+			m.teamDevPID = pid
+		}
+	}
+	// Dev instance credentials (free-text login blob).
+	if cdata, cerr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-creds.txt")); cerr == nil {
+		m.teamDevCreds = strings.TrimSpace(string(cdata))
+	}
 }
 
 // SetTeamDailyBudget updates the daily spend budget (USD) and persists it.
@@ -877,19 +923,34 @@ func (m *Manager) GetTeamDevURL() string {
 	return m.teamDevURL
 }
 
-// SetTeamDevURL records the URL of the dev instance the lead is running.
-// Empty string clears it. The URL is persisted so it survives restarts,
-// and a localhost-only URL logs a warning because agents browsing from the
-// headless-shell sibling container can't reach it.
-func (m *Manager) SetTeamDevURL(url string) {
+// GetTeamDevPID returns the currently-tracked dev server PID, or 0.
+func (m *Manager) GetTeamDevPID() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.teamDevPID
+}
+
+// SetTeamDevURL records the URL of the dev instance the lead is running
+// along with an optional process PID used for orphan cleanup. Empty URL
+// clears the slot. A localhost-only URL logs a warning — the CLI + HTTP
+// handler reject it at the edge before it reaches here, but if something
+// else calls this we still want a signal in the logs.
+func (m *Manager) SetTeamDevURL(url string, pid int) {
 	trimmed := strings.TrimSpace(url)
 	if trimmed != "" && (strings.Contains(trimmed, "localhost") || strings.Contains(trimmed, "127.0.0.1")) {
 		slog.Warn("dev URL appears to be localhost-only; agents browsing from headless-shell may not reach it",
 			"url", trimmed, "hint", "use http://jarvis:<port> instead")
 	}
+	if pid < 0 {
+		pid = 0
+	}
 
 	m.mu.Lock()
 	m.teamDevURL = trimmed
+	m.teamDevPID = pid
+	// Reset the health-check counter so a freshly-announced URL gets a
+	// clean slate of 3 strikes before auto-clearing.
+	m.devHealthFailures = 0
 	m.mu.Unlock()
 
 	homeDir, _ := os.UserHomeDir()
@@ -900,8 +961,143 @@ func (m *Manager) SetTeamDevURL(url string) {
 	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o644); err == nil {
 		_ = os.Rename(tmpFile, targetFile)
 	}
+	pidFile := filepath.Join(dir, "team-dev-pid.txt")
+	if pid > 0 {
+		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o644)
+	} else {
+		_ = os.Remove(pidFile)
+	}
 
-	m.broadcast("office:devInstanceChanged", map[string]interface{}{"url": trimmed})
+	m.broadcast("office:devInstanceChanged", map[string]interface{}{"url": trimmed, "pid": pid})
+}
+
+// GetTeamDevCredentials returns the currently-set dev login blob, or "".
+func (m *Manager) GetTeamDevCredentials() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.teamDevCreds
+}
+
+// SetTeamDevCredentials records the dev instance login blob. Persisted at
+// mode 0o600 since even dev-throwaway creds shouldn't be world-readable.
+// Empty string clears the slot. SSE broadcast intentionally omits the
+// value itself — only a boolean "is set" — so the dashboard knows creds
+// are available without the value leaking across the wire.
+func (m *Manager) SetTeamDevCredentials(creds string) {
+	trimmed := strings.TrimSpace(creds)
+	m.mu.Lock()
+	m.teamDevCreds = trimmed
+	m.mu.Unlock()
+
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+	_ = os.MkdirAll(dir, 0o755)
+	tmpFile := filepath.Join(dir, "team-dev-creds.txt.tmp")
+	targetFile := filepath.Join(dir, "team-dev-creds.txt")
+	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o600); err == nil {
+		_ = os.Rename(tmpFile, targetFile)
+		_ = os.Chmod(targetFile, 0o600)
+	}
+
+	m.broadcast("office:devCredentialsChanged", map[string]interface{}{"set": trimmed != ""})
+}
+
+// ClearTeamDevInstance clears the dev URL, credentials, and optionally
+// kills the tracked PID. Called on team wrap-up, lead death, or
+// health-check expiry. killProc=true only succeeds if a PID was recorded
+// and it's safe to signal (>= 100, so we can't accidentally SIGTERM PID 1
+// or a low-numbered Jarvis subsystem).
+func (m *Manager) ClearTeamDevInstance(killProc bool) {
+	m.mu.Lock()
+	pid := m.teamDevPID
+	hadURL := m.teamDevURL != ""
+	m.mu.Unlock()
+
+	if killProc && pid >= 100 {
+		// SIGTERM first; give the process 3s to exit cleanly before SIGKILL.
+		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+			slog.Warn("dev server SIGTERM failed", "pid", pid, "err", err)
+		} else {
+			slog.Info("dev server SIGTERM sent", "pid", pid)
+			// Poll for the process to exit.
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				if err := syscall.Kill(pid, 0); err != nil {
+					// Process gone.
+					break
+				}
+				time.Sleep(150 * time.Millisecond)
+			}
+			// Still alive? escalate.
+			if err := syscall.Kill(pid, 0); err == nil {
+				if kerr := syscall.Kill(pid, syscall.SIGKILL); kerr == nil {
+					slog.Info("dev server SIGKILL sent after SIGTERM timeout", "pid", pid)
+				}
+			}
+		}
+	}
+
+	// Clear URL and creds via the normal setters so persistence + broadcasts fire.
+	if hadURL {
+		m.SetTeamDevURL("", 0)
+	} else {
+		// Ensure PID is cleared even if URL was already empty.
+		m.mu.Lock()
+		m.teamDevPID = 0
+		m.mu.Unlock()
+		homeDir, _ := os.UserHomeDir()
+		_ = os.Remove(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-pid.txt"))
+	}
+	m.SetTeamDevCredentials("")
+}
+
+// sharedDevHealthClient is used by checkDevInstanceHealth to ping the
+// announced URL. Short timeout so a slow dev server doesn't stall the
+// monitoring ticker.
+var sharedDevHealthClient = &http.Client{Timeout: 5 * time.Second}
+
+// CheckDevInstanceHealth pings the announced URL and auto-clears after 3
+// consecutive failures. No-op when no URL is announced. Any HTTP response
+// (including 4xx) counts as healthy — we only fail on network errors and
+// 5xx — because auth-gated dev instances legitimately return 401/403.
+func (m *Manager) CheckDevInstanceHealth() {
+	m.mu.RLock()
+	url := m.teamDevURL
+	m.mu.RUnlock()
+	if url == "" {
+		return
+	}
+
+	resp, err := sharedDevHealthClient.Get(url)
+	healthy := err == nil && resp != nil && resp.StatusCode < 500
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	m.mu.Lock()
+	if healthy {
+		m.devHealthFailures = 0
+		m.mu.Unlock()
+		return
+	}
+	m.devHealthFailures++
+	failCount := m.devHealthFailures
+	m.mu.Unlock()
+
+	errMsg := "5xx"
+	if err != nil {
+		errMsg = err.Error()
+	}
+	if failCount >= 3 {
+		slog.Warn("dev URL unreachable after 3 consecutive checks; auto-clearing", "url", url, "lastError", errMsg)
+		m.broadcast("office:devInstanceCleared", map[string]interface{}{
+			"reason": "health_check_failed", "lastError": errMsg, "url": url,
+		})
+		// Clear URL+creds but don't kill the PID — if the process is dead
+		// (which is why health checks failed), a kill signal on its PID
+		// could land on a recycled process with the same PID.
+		m.ClearTeamDevInstance(false)
+	}
 }
 
 // ActiveMeetingCount returns the number of active meetings.

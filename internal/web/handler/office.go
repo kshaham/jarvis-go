@@ -178,9 +178,19 @@ type agentFileLockRequest struct {
 
 // agentDevInstanceRequest is the body for POST /office/agent/dev-instance.
 // URL is the http://jarvis:<port> address of the dev server the lead has
-// just started. Empty URL clears the slot (equivalent to DELETE).
+// just started. Empty URL clears the slot (equivalent to DELETE). PID is
+// optional — pass the dev server's process ID so Jarvis can SIGTERM it on
+// wrap-up or lead death. 0 = no PID tracked (orphan risk accepted).
 type agentDevInstanceRequest struct {
 	URL string `json:"url"`
+	PID int    `json:"pid"`
+}
+
+// agentDevCredentialsRequest is the body for POST /office/agent/dev-credentials.
+// Credentials is a free-text blob (e.g. "admin@dev.local / password123"),
+// whatever format makes sense for the dev app. Empty clears the slot.
+type agentDevCredentialsRequest struct {
+	Credentials string `json:"credentials"`
 }
 
 type agentSkillCreateRequest struct {
@@ -2079,29 +2089,66 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 	ok(w, nil)
 }
 
-// OfficeAgentGetDevInstance returns the dev URL the lead has announced.
-// Empty string when no dev server is running. Any teammate agent may call
+// OfficeAgentGetDevInstance returns the dev URL + PID the lead has announced.
+// Empty url/0 pid when no dev server is running. Any teammate agent may call
 // this via `cm dev url` before running browser-screenshot.
 func (ctx *Context) OfficeAgentGetDevInstance(w http.ResponseWriter, r *http.Request) {
-	ok(w, map[string]interface{}{"url": ctx.OfficeManager.GetTeamDevURL()})
+	ok(w, map[string]interface{}{
+		"url": ctx.OfficeManager.GetTeamDevURL(),
+		"pid": ctx.OfficeManager.GetTeamDevPID(),
+	})
 }
 
 // OfficeAgentPostDevInstance records the URL of the dev server the lead
-// has just started. URL must reach headless-shell over the compose network;
-// the manager logs a warning if it looks like a localhost-only URL.
+// has just started along with an optional PID for orphan cleanup.
+// Rejects localhost URLs (unreachable from headless-shell) with 400 unless
+// the caller passes ?force=true to acknowledge the warning.
 func (ctx *Context) OfficeAgentPostDevInstance(w http.ResponseWriter, r *http.Request) {
 	var req agentDevInstanceRequest
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	ctx.OfficeManager.SetTeamDevURL(req.URL)
-	ok(w, map[string]interface{}{"url": ctx.OfficeManager.GetTeamDevURL()})
+	forced := r.URL.Query().Get("force") == "true"
+	if !forced && (strings.Contains(req.URL, "localhost") || strings.Contains(req.URL, "127.0.0.1")) {
+		request.WriteError(w, http.StatusBadRequest,
+			"localhost URLs aren't reachable from headless-shell; use http://jarvis:<port> (or pass ?force=true to override)")
+		return
+	}
+	ctx.OfficeManager.SetTeamDevURL(req.URL, req.PID)
+	ok(w, map[string]interface{}{
+		"url": ctx.OfficeManager.GetTeamDevURL(),
+		"pid": ctx.OfficeManager.GetTeamDevPID(),
+	})
 }
 
 // OfficeAgentDeleteDevInstance clears the dev URL (e.g. on wrap-up).
+// Also attempts to SIGTERM the tracked PID via ClearTeamDevInstance.
 func (ctx *Context) OfficeAgentDeleteDevInstance(w http.ResponseWriter, r *http.Request) {
-	ctx.OfficeManager.SetTeamDevURL("")
+	ctx.OfficeManager.ClearTeamDevInstance(true)
 	ok(w, map[string]interface{}{"url": ""})
+}
+
+// OfficeAgentGetDevCredentials returns the dev login blob, or empty string.
+func (ctx *Context) OfficeAgentGetDevCredentials(w http.ResponseWriter, r *http.Request) {
+	ok(w, map[string]interface{}{"credentials": ctx.OfficeManager.GetTeamDevCredentials()})
+}
+
+// OfficeAgentPostDevCredentials records the free-text login blob.
+func (ctx *Context) OfficeAgentPostDevCredentials(w http.ResponseWriter, r *http.Request) {
+	var req agentDevCredentialsRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	ctx.OfficeManager.SetTeamDevCredentials(req.Credentials)
+	// Echo only whether creds are set; never reflect the value back on a
+	// write response. Callers can re-GET if they need the value.
+	ok(w, map[string]interface{}{"set": req.Credentials != ""})
+}
+
+// OfficeAgentDeleteDevCredentials clears the login blob.
+func (ctx *Context) OfficeAgentDeleteDevCredentials(w http.ResponseWriter, r *http.Request) {
+	ctx.OfficeManager.SetTeamDevCredentials("")
+	ok(w, map[string]interface{}{"set": false})
 }
 
 // OfficeAgentTaskTriage handles task triage by a leader agent.

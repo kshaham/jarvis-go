@@ -97,6 +97,10 @@ func (m *Manager) StartIdleMonitoring() {
 				m.checkBlockedTasksForLeaderTriage()
 				m.PersistMetrics()
 				m.maybeTriggerWaterCoolerChat()
+				// Ping the announced dev URL; after 3 consecutive failures
+				// the health checker auto-clears the slot so teammates
+				// stop being pointed at a dead server.
+				m.CheckDevInstanceHealth()
 			}()
 
 			if tickCount%5 == 0 {

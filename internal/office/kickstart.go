@@ -144,10 +144,11 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("Run a fresh browser verification BEFORE marking complete any task that touches user-visible behavior -- this covers frontend/UI work AND any QA sign-off on a feature rendered in the browser. Capture the PNG, then Read it to confirm the expected state; a screenshot you didn't look at is not evidence.\n\n")
 
 	// 12b. Team dev instance pointer — every agent learns to check the
-	// team dev URL before running browser verification. The lead
+	// team dev URL + creds before running browser verification. The lead
 	// announces one dev server per team; everyone else just reads it.
 	b.WriteString("## Team Dev Instance\n")
-	b.WriteString("The team may run a shared dev instance of whatever app you're building. Before any browser verification, run `cm dev url` to get the current URL. If empty, the lead hasn't started one yet -- ask them to, or fall back to the Jarvis office URL itself for dashboard verification. Never spin up your own competing dev server on the same port. Full reference: `cm skill read team-dev-instance`.\n\n")
+	b.WriteString("The team may run a shared dev instance of whatever app you're building. Before any browser verification, run `cm dev url` to get the current URL. If empty, the lead hasn't started one yet -- ask them to, or fall back to the Jarvis office URL itself for dashboard verification. Never spin up your own competing dev server on the same port.\n")
+	b.WriteString("If the dev instance requires login (admin pages, auth-gated flows), run `cm dev creds` -- the lead posts developer credentials there as a free-text blob (e.g. `admin@dev.local / password123`). Paste those into your browser-driver script or expect-cli test instead of being blocked at the login screen. Full reference: `cm skill read team-dev-instance`.\n\n")
 
 	// 13. Work mode
 	if perpetualMode {
@@ -176,7 +177,10 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 		// strategic block so only leads get the "you start the server"
 		// instruction; workers get the "check cm dev url" reminder above.
 		b.WriteString("## Leader: Team Dev Instance\n")
-		b.WriteString("If the team's mission involves building or improving a web app, start a dev instance of it in the team's working directory after your first standup. Bind the dev server to `0.0.0.0` (not `localhost`), pick a free port in 3000-3999, then run `cm dev announce http://jarvis:<port>` so every teammate can browser-verify against the same running app. On wrap-up, run `cm dev clear` and kill the process. Full reference: `cm skill read team-dev-instance`.\n\n")
+		b.WriteString("If the team's mission involves building or improving a web app, start a dev instance of it in the team's working directory after your first standup. Bind the dev server to `0.0.0.0` (not `localhost`), pick a free port in 3000-3999, then capture its PID and announce:\n")
+		b.WriteString("  `nohup npm run dev -- --host 0.0.0.0 --port 3001 > /tmp/dev.log 2>&1 & cm dev announce http://jarvis:3001 --pid $!`\n")
+		b.WriteString("Passing `--pid` lets Jarvis SIGTERM the process automatically if you die or the team wraps up -- no orphaned servers racing next team's ports.\n")
+		b.WriteString("If the app requires login, also run `cm dev creds set \"admin@dev.local / password123\"` so teammates can get past the login screen. On wrap-up, `cm dev clear` handles both. Full reference: `cm skill read team-dev-instance`.\n\n")
 	}
 
 	// 14. Your Role

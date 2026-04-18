@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -288,12 +289,13 @@ func handleTask(args []string) {
 	}
 }
 
-// handleDev dispatches `cm dev <announce|url|clear>`. Wraps
-// /api/office/agent/dev-instance so leads can announce the dev server URL
-// and teammates can discover it before running browser verification.
+// handleDev dispatches `cm dev <announce|url|clear|creds>`. Wraps
+// /api/office/agent/dev-instance + /dev-credentials so leads can announce
+// the dev server URL + login creds and teammates can discover them before
+// running browser verification.
 func handleDev(args []string) {
 	if len(args) < 1 {
-		fatal("Usage: cm dev <announce|url|clear> [url]")
+		fatal("Usage: cm dev <announce|url|clear|creds> [args]")
 	}
 	switch args[0] {
 	case "url":
@@ -308,20 +310,97 @@ func handleDev(args []string) {
 		}
 		fmt.Println("")
 	case "announce":
-		requireArgs(args[1:], 1, "cm dev announce <url>  (e.g. http://jarvis:3001)")
-		u := args[1]
-		post("/api/office/agent/dev-instance", map[string]interface{}{"url": u})
-		if strings.Contains(u, "localhost") || strings.Contains(u, "127.0.0.1") {
-			fmt.Fprintf(os.Stderr, "warning: %q looks localhost-only; headless-shell agents may not reach it. Prefer http://jarvis:<port>.\n", u)
+		u, pid, force := parseAnnounceArgs(args[1:])
+		if u == "" {
+			fatal("Usage: cm dev announce <url> [--pid <n>] [--force]  (e.g. cm dev announce http://jarvis:3001 --pid 1234)")
 		}
-		fmt.Printf("Dev URL announced: %s\n", u)
+		if !force && (strings.Contains(u, "localhost") || strings.Contains(u, "127.0.0.1")) {
+			fatal(fmt.Sprintf("%q is localhost-only; headless-shell agents can't reach it. Rebind your dev server to 0.0.0.0 and use http://jarvis:<port>, or pass --force to override.", u))
+		}
+		body := map[string]interface{}{"url": u, "pid": pid}
+		path := "/api/office/agent/dev-instance"
+		if force {
+			path += "?force=true"
+		}
+		post(path, body)
+		if force {
+			fmt.Fprintf(os.Stderr, "warning: announced %q with --force; teammates may get connection refused.\n", u)
+		}
+		if pid > 0 {
+			fmt.Printf("Dev URL announced: %s (pid=%d, Jarvis will clean up on wrap-up / lead death)\n", u, pid)
+		} else {
+			fmt.Printf("Dev URL announced: %s (no PID tracked; remember to `cm dev clear` + kill the process yourself on wrap-up)\n", u)
+		}
 	case "clear":
 		// Empty URL clears the slot; the server-side SetTeamDevURL treats
 		// empty as "no dev server running" and broadcasts the change.
+		// DELETE also triggers SIGTERM on the tracked PID if any.
 		post("/api/office/agent/dev-instance", map[string]interface{}{"url": ""})
 		fmt.Println("Dev URL cleared.")
+	case "creds":
+		handleDevCreds(args[1:])
 	default:
 		fatal("Unknown dev subcommand: " + args[0])
+	}
+}
+
+// parseAnnounceArgs extracts the URL + optional --pid and --force flags
+// from `cm dev announce` args. Flags may appear in any order.
+func parseAnnounceArgs(args []string) (url string, pid int, force bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "--force":
+			force = true
+		case "--pid":
+			if i+1 >= len(args) {
+				fatal("--pid requires a value")
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 0 {
+				fatal(fmt.Sprintf("--pid must be a non-negative integer, got %q", args[i+1]))
+			}
+			pid = v
+			i++
+		default:
+			if strings.HasPrefix(a, "--") {
+				fatal("unknown flag: " + a)
+			}
+			if url == "" {
+				url = a
+			}
+		}
+	}
+	return
+}
+
+// handleDevCreds dispatches `cm dev creds [set <text...>|clear]`.
+func handleDevCreds(args []string) {
+	if len(args) == 0 {
+		// Read
+		result := get("/api/office/agent/dev-credentials")
+		if m, ok := result.(map[string]interface{}); ok {
+			if c, ok := m["credentials"].(string); ok {
+				fmt.Println(c)
+				return
+			}
+		}
+		fmt.Println("")
+		return
+	}
+	switch args[0] {
+	case "set":
+		if len(args) < 2 {
+			fatal("Usage: cm dev creds set <text...>  (e.g. cm dev creds set \"admin@dev.local / password123\")")
+		}
+		blob := strings.Join(args[1:], " ")
+		post("/api/office/agent/dev-credentials", map[string]interface{}{"credentials": blob})
+		fmt.Println("Dev credentials set.")
+	case "clear":
+		post("/api/office/agent/dev-credentials", map[string]interface{}{"credentials": ""})
+		fmt.Println("Dev credentials cleared.")
+	default:
+		fatal("Unknown creds subcommand: " + args[0] + " (expected: set|clear, or no args to read)")
 	}
 }
 
@@ -534,9 +613,13 @@ Commands:
   memory section --append <name> <entry>
                                       Append to a memory section
   memory query <keyword>              Search across memory sections
-  dev announce <url>                  Lead: announce the team dev server URL
+  dev announce <url> [--pid <n>]      Lead: announce dev URL (+PID for auto-cleanup)
+  dev announce <url> --force          Allow localhost URL (headless-shell won't reach it)
   dev url                             Print the current team dev URL (empty if none)
-  dev clear                           Lead: clear the dev URL on wrap-up
+  dev clear                           Lead: clear dev URL and SIGTERM the tracked PID
+  dev creds                           Print dev login credentials (empty if none)
+  dev creds set <text...>             Lead: set dev login blob (any text)
+  dev creds clear                     Lead: clear dev login credentials
   help                                Show this help
 
 Environment:
