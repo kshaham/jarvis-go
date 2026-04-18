@@ -104,6 +104,10 @@ func main() {
 	case "memory":
 		handleMemory(args)
 
+	// Team dev instance (shared browser verification URL)
+	case "dev":
+		handleDev(args)
+
 	// Help
 	case "help", "--help", "-h":
 		printUsage()
@@ -281,6 +285,43 @@ func handleTask(args []string) {
 
 	default:
 		fatal("Unknown task subcommand: " + subcmd)
+	}
+}
+
+// handleDev dispatches `cm dev <announce|url|clear>`. Wraps
+// /api/office/agent/dev-instance so leads can announce the dev server URL
+// and teammates can discover it before running browser verification.
+func handleDev(args []string) {
+	if len(args) < 1 {
+		fatal("Usage: cm dev <announce|url|clear> [url]")
+	}
+	switch args[0] {
+	case "url":
+		// Just print the URL string (not JSON) so it can be piped directly
+		// into `browser-screenshot $(cm dev url) /tmp/x.png`.
+		result := get("/api/office/agent/dev-instance")
+		if m, ok := result.(map[string]interface{}); ok {
+			if u, ok := m["url"].(string); ok {
+				fmt.Println(u)
+				return
+			}
+		}
+		fmt.Println("")
+	case "announce":
+		requireArgs(args[1:], 1, "cm dev announce <url>  (e.g. http://jarvis:3001)")
+		u := args[1]
+		post("/api/office/agent/dev-instance", map[string]interface{}{"url": u})
+		if strings.Contains(u, "localhost") || strings.Contains(u, "127.0.0.1") {
+			fmt.Fprintf(os.Stderr, "warning: %q looks localhost-only; headless-shell agents may not reach it. Prefer http://jarvis:<port>.\n", u)
+		}
+		fmt.Printf("Dev URL announced: %s\n", u)
+	case "clear":
+		// Empty URL clears the slot; the server-side SetTeamDevURL treats
+		// empty as "no dev server running" and broadcasts the change.
+		post("/api/office/agent/dev-instance", map[string]interface{}{"url": ""})
+		fmt.Println("Dev URL cleared.")
+	default:
+		fatal("Unknown dev subcommand: " + args[0])
 	}
 }
 
@@ -493,6 +534,9 @@ Commands:
   memory section --append <name> <entry>
                                       Append to a memory section
   memory query <keyword>              Search across memory sections
+  dev announce <url>                  Lead: announce the team dev server URL
+  dev url                             Print the current team dev URL (empty if none)
+  dev clear                           Lead: clear the dev URL on wrap-up
   help                                Show this help
 
 Environment:

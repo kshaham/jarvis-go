@@ -48,6 +48,11 @@ type Manager struct {
 	// Purely a UI signal — used by the header budget pill and the
 	// Insights progress bar. Persisted across restarts.
 	teamDailyBudget    float64
+	// Dev instance URL announced by the team lead. Empty = no dev server
+	// running. Format MUST be http://jarvis:<port> so the headless-shell
+	// sibling container can reach it over the compose network. Persisted
+	// so the URL survives container restarts within the same team.
+	teamDevURL         string
 	// Which template the current team was spawned from + its resolved
 	// working directory. Exposed in the status payload so the UI can show
 	// a "current team" banner while a team is running.
@@ -838,6 +843,11 @@ func (m *Manager) loadPersistedMission() {
 			m.teamDailyBudget = v
 		}
 	}
+	// Dev instance URL — restored so agents re-joining after a container
+	// restart still see the live URL if the dev server is still running.
+	if udata, uerr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-url.txt")); uerr == nil {
+		m.teamDevURL = strings.TrimSpace(string(udata))
+	}
 }
 
 // SetTeamDailyBudget updates the daily spend budget (USD) and persists it.
@@ -858,6 +868,40 @@ func (m *Manager) SetTeamDailyBudget(v float64) {
 	if err := os.WriteFile(tmpFile, []byte(strconv.FormatFloat(v, 'f', -1, 64)), 0o644); err == nil {
 		_ = os.Rename(tmpFile, targetFile)
 	}
+}
+
+// GetTeamDevURL returns the currently-announced dev instance URL, or "".
+func (m *Manager) GetTeamDevURL() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.teamDevURL
+}
+
+// SetTeamDevURL records the URL of the dev instance the lead is running.
+// Empty string clears it. The URL is persisted so it survives restarts,
+// and a localhost-only URL logs a warning because agents browsing from the
+// headless-shell sibling container can't reach it.
+func (m *Manager) SetTeamDevURL(url string) {
+	trimmed := strings.TrimSpace(url)
+	if trimmed != "" && (strings.Contains(trimmed, "localhost") || strings.Contains(trimmed, "127.0.0.1")) {
+		slog.Warn("dev URL appears to be localhost-only; agents browsing from headless-shell may not reach it",
+			"url", trimmed, "hint", "use http://jarvis:<port> instead")
+	}
+
+	m.mu.Lock()
+	m.teamDevURL = trimmed
+	m.mu.Unlock()
+
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+	_ = os.MkdirAll(dir, 0o755)
+	tmpFile := filepath.Join(dir, "team-dev-url.txt.tmp")
+	targetFile := filepath.Join(dir, "team-dev-url.txt")
+	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o644); err == nil {
+		_ = os.Rename(tmpFile, targetFile)
+	}
+
+	m.broadcast("office:devInstanceChanged", map[string]interface{}{"url": trimmed})
 }
 
 // ActiveMeetingCount returns the number of active meetings.
@@ -914,6 +958,7 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	curiosityEnabled := m.curiosityEnabled
 	teamMission := m.teamMission
 	teamDailyBudget := m.teamDailyBudget
+	teamDevURL := m.teamDevURL
 	lastTemplateID := m.lastTemplateID
 	lastWorkingDir := m.lastWorkingDir
 	var lastBrainstormAtMs int64
@@ -965,6 +1010,7 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 		"metrics":                     m.metrics.Snapshot(),
 		"teamMission":                 teamMission,
 		"teamDailyBudget":             teamDailyBudget,
+		"teamDevURL":                  teamDevURL,
 	}
 }
 

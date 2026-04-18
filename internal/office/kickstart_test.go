@@ -89,9 +89,10 @@ func TestPickSkillsForRoleMatchesExpectedBuckets(t *testing.T) {
 		{"Senior Architect", "implementation-plan"},
 		{"Senior Architect", "go-http-server"},
 		{"Senior Architect", "go-mcp-tools"},
-		// Frontend unchanged.
+		// Frontend: browser verification + team dev instance.
 		{"Frontend Engineer", "headless-browser"},
 		{"Frontend Engineer", "expect-testing"},
+		{"Frontend Engineer", "team-dev-instance"},
 		// Backend: Go fundamentals + jarvis-auth + atomic writes.
 		{"Backend Engineer", "go-concurrency"},
 		{"Backend Engineer", "go-http-server"},
@@ -103,10 +104,16 @@ func TestPickSkillsForRoleMatchesExpectedBuckets(t *testing.T) {
 		{"DevOps Engineer", "shell-scripting-safe"},
 		{"DevOps Engineer", "docker-compose-debug"},
 		{"DevOps Engineer", "release-prep"},
-		// QA: test generation + browser verification are both first-class.
+		// QA: test generation + browser verification + dev-instance discovery.
 		{"QA Engineer", "generate-tests"},
 		{"QA Engineer", "headless-browser"},
 		{"QA Engineer", "expect-testing"},
+		{"QA Engineer", "team-dev-instance"},
+		// Leads (manager/architect) + backend/devops also need the dev-instance skill.
+		{"Engineering Manager", "team-dev-instance"},
+		{"Senior Architect", "team-dev-instance"},
+		{"Backend Engineer", "team-dev-instance"},
+		{"DevOps Engineer", "team-dev-instance"},
 		{"UI/UX Designer", "design-principles"},
 		// Unknown role -> default bundle.
 		{"Some Unknown Role", "office-protocols"},

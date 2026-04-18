@@ -530,6 +530,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/memory", h.OfficeAgentGetMemory)
 				r.Get("/memory/section", h.OfficeAgentGetMemorySection)
 				r.Get("/memory/query", h.OfficeAgentGetMemoryQuery)
+				r.Get("/dev-instance", h.OfficeAgentGetDevInstance)
 				// Mutating
 				r.Post("/standup/response", h.OfficeAgentStandupResponse)
 				r.Post("/message", h.OfficeAgentMessage)
@@ -550,6 +551,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/memory/append", h.OfficeAgentPostMemoryAppend)
 				r.Post("/memory/section", h.OfficeAgentPostMemorySection)
 				r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)
+				r.Post("/dev-instance", h.OfficeAgentPostDevInstance)
+				r.Delete("/dev-instance", h.OfficeAgentDeleteDevInstance)
 			})
 		})
 

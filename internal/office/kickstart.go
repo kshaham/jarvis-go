@@ -143,6 +143,12 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("A real Chromium runs as a sibling container at `ws://headless-shell:9222` (env: `$EXPECT_BROWSER_WS_ENDPOINT`, `$HEADLESS_BROWSER_HOST`). Three pre-installed CLIs drive it over CDP: `browser-screenshot <url> [out.png]` for one-shot PNG captures, `expect-cli -m \"<natural-language test>\" -y` for UI flow assertions, and `puppeteer-core` in Node for custom scripts. Full reference: `cm skill read headless-browser`.\n")
 	b.WriteString("Run a fresh browser verification BEFORE marking complete any task that touches user-visible behavior -- this covers frontend/UI work AND any QA sign-off on a feature rendered in the browser. Capture the PNG, then Read it to confirm the expected state; a screenshot you didn't look at is not evidence.\n\n")
 
+	// 12b. Team dev instance pointer — every agent learns to check the
+	// team dev URL before running browser verification. The lead
+	// announces one dev server per team; everyone else just reads it.
+	b.WriteString("## Team Dev Instance\n")
+	b.WriteString("The team may run a shared dev instance of whatever app you're building. Before any browser verification, run `cm dev url` to get the current URL. If empty, the lead hasn't started one yet -- ask them to, or fall back to the Jarvis office URL itself for dashboard verification. Never spin up your own competing dev server on the same port. Full reference: `cm skill read team-dev-instance`.\n\n")
+
 	// 13. Work mode
 	if perpetualMode {
 		b.WriteString("## Work Mode: RALPH (perpetual)\n")
@@ -165,6 +171,12 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 			}
 		}
 		b.WriteString("\n")
+
+		// Leader responsibility for the team dev instance. Placed in the
+		// strategic block so only leads get the "you start the server"
+		// instruction; workers get the "check cm dev url" reminder above.
+		b.WriteString("## Leader: Team Dev Instance\n")
+		b.WriteString("If the team's mission involves building or improving a web app, start a dev instance of it in the team's working directory after your first standup. Bind the dev server to `0.0.0.0` (not `localhost`), pick a free port in 3000-3999, then run `cm dev announce http://jarvis:<port>` so every teammate can browser-verify against the same running app. On wrap-up, run `cm dev clear` and kill the process. Full reference: `cm skill read team-dev-instance`.\n\n")
 	}
 
 	// 14. Your Role

@@ -32,6 +32,7 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-task-handoff",
 		"office-code-review",
 		"implementation-plan",
+		"team-dev-instance",
 		"office-self-improvement",
 	},
 	"architect": {
@@ -40,6 +41,7 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-context-budget",
 		"office-onboarding",
 		"implementation-plan",
+		"team-dev-instance",
 		"go-concurrency",
 		"go-http-server",
 		"go-mcp-tools",
@@ -49,6 +51,7 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-memory-discipline",
 		"office-context-budget",
 		"headless-browser",
+		"team-dev-instance",
 		"expect-testing",
 		"web-design-guidelines",
 		"office-focused-search",
@@ -58,6 +61,7 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-protocols",
 		"office-memory-discipline",
 		"office-context-budget",
+		"team-dev-instance",
 		"go-concurrency",
 		"go-http-server",
 		"go-errors",
@@ -68,6 +72,7 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-protocols",
 		"office-memory-discipline",
 		"office-context-budget",
+		"team-dev-instance",
 		"git-advanced",
 		"shell-scripting-safe",
 		"docker-compose-debug",
@@ -82,6 +87,7 @@ var suggestedSkillsByRole = map[string][]string{
 		// feature. Without these two, QA agents default to unit-test-only
 		// verification and miss regressions that only appear in the DOM.
 		"headless-browser",
+		"team-dev-instance",
 		"expect-testing",
 		"generate-tests",
 		"run-tests",

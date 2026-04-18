@@ -176,6 +176,13 @@ type agentFileLockRequest struct {
 	Action    string `json:"action"`
 }
 
+// agentDevInstanceRequest is the body for POST /office/agent/dev-instance.
+// URL is the http://jarvis:<port> address of the dev server the lead has
+// just started. Empty URL clears the slot (equivalent to DELETE).
+type agentDevInstanceRequest struct {
+	URL string `json:"url"`
+}
+
 type agentSkillCreateRequest struct {
 	SkillName string `json:"skillName"`
 	Content   string `json:"content"`
@@ -2070,6 +2077,31 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	ok(w, nil)
+}
+
+// OfficeAgentGetDevInstance returns the dev URL the lead has announced.
+// Empty string when no dev server is running. Any teammate agent may call
+// this via `cm dev url` before running browser-screenshot.
+func (ctx *Context) OfficeAgentGetDevInstance(w http.ResponseWriter, r *http.Request) {
+	ok(w, map[string]interface{}{"url": ctx.OfficeManager.GetTeamDevURL()})
+}
+
+// OfficeAgentPostDevInstance records the URL of the dev server the lead
+// has just started. URL must reach headless-shell over the compose network;
+// the manager logs a warning if it looks like a localhost-only URL.
+func (ctx *Context) OfficeAgentPostDevInstance(w http.ResponseWriter, r *http.Request) {
+	var req agentDevInstanceRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	ctx.OfficeManager.SetTeamDevURL(req.URL)
+	ok(w, map[string]interface{}{"url": ctx.OfficeManager.GetTeamDevURL()})
+}
+
+// OfficeAgentDeleteDevInstance clears the dev URL (e.g. on wrap-up).
+func (ctx *Context) OfficeAgentDeleteDevInstance(w http.ResponseWriter, r *http.Request) {
+	ctx.OfficeManager.SetTeamDevURL("")
+	ok(w, map[string]interface{}{"url": ""})
 }
 
 // OfficeAgentTaskTriage handles task triage by a leader agent.
