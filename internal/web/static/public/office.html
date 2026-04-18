@@ -261,6 +261,9 @@
               <button class="view-mode-btn" data-mode="list" onclick="office.setViewMode('list')" title="List view">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
               </button>
+              <button class="view-mode-btn" data-mode="compact" onclick="office.setViewMode('compact')" title="Compact view — dense rows for large teams">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+              </button>
             </div>
           </div>
           <div class="filter-pills" id="agentFilters">
@@ -355,6 +358,7 @@
             </div>
           </div>
           <div class="standup-history-list hidden" id="standupHistoryList"></div>
+          <div class="standup-participant-strip hidden" id="standupParticipantStrip" aria-live="polite"></div>
           <div class="standup-transcript" id="standupTranscript">
             <div class="standup-empty">No standup in progress. Click "Start Standup" to begin.</div>
           </div>
@@ -372,6 +376,11 @@
         <div class="tab-panel hidden" id="panel-messages" role="tabpanel">
           <div class="panel-header">
             <h2 class="panel-title">Chat</h2>
+          </div>
+          <div class="messages-filter-bar" id="messagesFilterBar">
+            <input type="text" class="messages-filter-search" id="messagesFilterSearch" placeholder="Search messages, senders, recipients…" oninput="office._onMessageFilterInput(this.value)">
+            <button class="messages-filter-toggle" id="messagesFilterUnread" onclick="office._toggleUnreadOnly()" title="Show only threads with unread messages">Unread only</button>
+            <span class="messages-filter-count" id="messagesFilterCount">0 threads</span>
           </div>
           <div class="message-list" id="messageList">
             <div class="messages-empty">No messages yet.</div>
@@ -522,7 +531,11 @@
         <div class="tab-panel hidden" id="panel-reports" role="tabpanel">
           <div class="panel-header">
             <h2 class="panel-title">Reports</h2>
-            <button class="panel-btn" onclick="office.renderReportDashboard()">Refresh</button>
+            <div class="report-export-actions">
+              <button class="panel-btn" id="btnCopyReport" onclick="office.exportReportMarkdown()" title="Copy the report as markdown">Copy markdown</button>
+              <button class="panel-btn" id="btnDownloadReport" onclick="office.downloadReportMarkdown()" title="Download as .md">Download .md</button>
+              <button class="panel-btn" onclick="office.renderReportDashboard()">Refresh</button>
+            </div>
           </div>
           <div class="report-dashboard" id="reportContent">
             <div class="metrics-loading">Loading report...</div>

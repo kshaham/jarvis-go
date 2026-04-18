@@ -643,6 +643,333 @@
 
 /* ========== END Round 9 ========== */
 
+/* ========== Round 10: messages search, standup viz, pins, compact mode, report export ========== */
+
+/* F1 · Messages filter bar */
+.messages-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+.messages-filter-search {
+  flex: 1;
+  padding: 5px 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 120ms ease-out;
+}
+.messages-filter-search:focus {
+  border-color: var(--accent);
+}
+.messages-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: 99px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+.messages-filter-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+.messages-filter-toggle.active {
+  background: var(--accent-bg);
+  color: var(--accent-hi);
+  border-color: var(--accent);
+}
+.messages-filter-count {
+  font-family: var(--mono-stack);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  background: var(--bg-app);
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.message-thread.filtered-out {
+  display: none;
+}
+.message-thread mark {
+  background: rgba(234, 179, 8, 0.35);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* F2 · Standup participation viz */
+.standup-response-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.standup-response-bar-track {
+  flex: 1;
+  height: 5px;
+  background: var(--bg-elev);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.standup-response-bar-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 99px;
+  transition: width 320ms ease-out, background-color 200ms ease-out;
+}
+.standup-response-bar-fill[data-tier="warn"]  { background: var(--warn); }
+.standup-response-bar-fill[data-tier="alert"] { background: var(--error); }
+.standup-response-bar-pct {
+  font-family: var(--mono-stack);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 32px;
+  text-align: right;
+}
+
+.standup-participant-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+.standup-participant-strip-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.standup-participant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  height: 22px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: 99px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: border-color 180ms ease-out, color 180ms ease-out, background 180ms ease-out;
+}
+.standup-participant-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.standup-participant-chip[data-state="responded"] {
+  color: var(--success);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+.standup-participant-chip[data-state="responded"] .standup-participant-chip-dot { background: var(--success); }
+.standup-participant-chip[data-state="awaiting"] {
+  color: var(--warn);
+  border-color: rgba(234, 179, 8, 0.5);
+  background: rgba(234, 179, 8, 0.08);
+}
+.standup-participant-chip[data-state="awaiting"] .standup-participant-chip-dot {
+  background: var(--warn);
+  animation: participantPulse 1.4s ease-in-out infinite;
+}
+.standup-participant-chip[data-state="timeout"] {
+  color: var(--error);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+.standup-participant-chip[data-state="timeout"] .standup-participant-chip-dot { background: var(--error); }
+@keyframes participantPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.5); }
+  50%      { box-shadow: 0 0 0 4px rgba(234, 179, 8, 0); }
+}
+
+/* F3 · Agent pinning — star button + pinned row */
+.agent-star-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms ease-out, color 140ms ease-out, transform 140ms ease-out;
+  z-index: 2;
+}
+.agent-card:hover .agent-star-btn,
+.agent-card.is-pinned .agent-star-btn {
+  opacity: 1;
+}
+.agent-star-btn:hover {
+  color: var(--accent-hi);
+  transform: scale(1.15);
+}
+.agent-card.is-pinned .agent-star-btn {
+  color: var(--accent-hi);
+  filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.5));
+}
+.agent-star-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: fill 160ms ease-out;
+}
+.agent-card.is-pinned .agent-star-btn svg {
+  fill: currentColor;
+}
+@keyframes pinPop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+.agent-star-btn.pop svg { animation: pinPop 260ms ease-out; }
+
+.pinned-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pinned-row-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding-left: 2px;
+}
+.pinned-row-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 8px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.04), transparent);
+  border: 1px dashed rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+}
+
+/* F4 · Compact density mode for Agents tab */
+.agent-grid.view-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.agent-grid.view-compact .agent-card {
+  display: grid;
+  grid-template-columns: 28px minmax(120px, 1.2fr) minmax(80px, 1fr) 10px 70px 60px 22px;
+  grid-template-rows: auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  min-height: 34px;
+  border: none;
+  border-bottom: 1px solid var(--border-default);
+  border-radius: 0;
+  transition: background 120ms ease-out;
+}
+.agent-grid.view-compact .agent-card:last-child { border-bottom: none; }
+.agent-grid.view-compact .agent-card:nth-child(even) { background: var(--bg-elev); }
+.agent-grid.view-compact .agent-card:hover { background: var(--accent-bg); }
+
+/* Hide the rich parts in compact mode; JS also branches to a compact markup
+ * but if full markup is rendered (during transitions) we hide it gracefully. */
+.agent-grid.view-compact .agent-progress-block,
+.agent-grid.view-compact .agent-card-tool-now,
+.agent-grid.view-compact .agent-activity-summary,
+.agent-grid.view-compact .agent-quick-buttons,
+.agent-grid.view-compact .agent-avatar {
+  display: none;
+}
+.agent-compact-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.agent-compact-dot[data-status="working"] { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.agent-compact-dot[data-status="idle"]    { background: var(--text-muted); }
+.agent-compact-dot[data-status="meeting"] { background: var(--accent-hi); }
+.agent-compact-dot[data-status="stuck"]   { background: var(--error); }
+.agent-compact-dot[data-status="brainstorm"] { background: var(--warn); }
+.agent-compact-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-compact-role {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-compact-tasks,
+.agent-compact-cost {
+  font-family: var(--mono-stack);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+/* F5 · Report export buttons */
+.report-export-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.panel-btn.copied {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--success);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+/* ========== END Round 10 ========== */
+
 /* ========== Reset / Base ========== */
 
 *, *::before, *::after {

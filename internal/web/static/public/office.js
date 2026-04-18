@@ -144,6 +144,17 @@ class OfficeApp {
     this._sessionTasksCompleted = 0;
     this._completedTaskIds = new Set();
     this._lastStandupAt = 0;
+    // Round 10 state
+    this._messageFilter = { q: '', unreadOnly: false };
+    this._messageFilterDebounce = null;
+    // Pinned agents — stored as a Set of configId for role-stable pinning
+    // (survives respawn of the same role). Loaded synchronously from
+    // localStorage so first render already honors pins.
+    this._pinnedAgents = this._loadPinnedAgents();
+    // Which participants have spoken in the current standup — keyed by
+    // speakerName (matches what the backend puts in transcript entries)
+    // so we don't need to resolve names per render.
+    this._standupSpoken = new Set();
     // Install keyboard shortcut bindings (? for help, g+<key> chord for tab nav).
     this._installShortcutBindings();
   }
@@ -205,9 +216,9 @@ class OfficeApp {
     this._updateBudgetPill();
     this._scheduleOverviewRefresh();
 
-    // Restore view mode preference
-    if (this._viewMode === 'list') {
-      this.setViewMode('list');
+    // Restore view mode preference (list or compact; grid is default)
+    if (this._viewMode === 'list' || this._viewMode === 'compact') {
+      this.setViewMode(this._viewMode);
     }
 
     // Refresh CSRF token periodically
@@ -991,9 +1002,16 @@ class OfficeApp {
 
     // Apply filter
     const filter = this._agentFilter || 'all';
-    const visibleMembers = filter === 'all'
-      ? this.state.members
+    let visibleMembers = filter === 'all'
+      ? this.state.members.slice()
       : this.state.members.filter(m => m.status === filter);
+
+    // F3 · pinned agents float to the top. Stable sort: pinned first,
+    // preserving the existing order within each group.
+    visibleMembers = visibleMembers
+      .map((m, i) => ({ m, i, pinned: this.isPinned(m) }))
+      .sort((a, b) => (b.pinned - a.pinned) || (a.i - b.i))
+      .map(({ m }) => m);
 
     const existingCards = new Map();
     for (const card of grid.querySelectorAll('.agent-card')) {
@@ -1011,14 +1029,18 @@ class OfficeApp {
       }
     }
 
+    // Render/update. To reflect pinning order changes, re-append every
+    // card in the new order — moving an existing node is cheap and keeps
+    // pinned agents at the top.
     for (const member of visibleMembers) {
-      const existing = existingCards.get(member.sessionId);
-      if (existing) {
-        this.updateAgentCard(existing, member);
+      let card = existingCards.get(member.sessionId);
+      if (card) {
+        this.updateAgentCard(card, member);
       } else {
-        const card = this.createAgentCard(member);
-        grid.appendChild(card);
+        card = this.createAgentCard(member);
       }
+      card.classList.toggle('is-pinned', this.isPinned(member));
+      grid.appendChild(card);
     }
 
     // If filter results in no cards but members exist, show a hint
@@ -1043,8 +1065,9 @@ class OfficeApp {
     // .border-beam is always present so the ::before pseudo is ready;
     // .border-beam--active is added only while the agent is working
     // so the rotating conic-gradient only spins on active tiles.
-    card.className = `agent-card border-beam status-${member.status}${member.status === 'working' ? ' border-beam--active' : ''}`;
+    card.className = `agent-card border-beam status-${member.status}${member.status === 'working' ? ' border-beam--active' : ''}${this.isPinned(member) ? ' is-pinned' : ''}`;
     card.dataset.sessionId = member.sessionId;
+    if (member.configId) card.dataset.configId = member.configId;
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', `${member.name} - ${member.role} (${member.status})`);
@@ -1056,7 +1079,70 @@ class OfficeApp {
       }
     };
     this.fillAgentCard(card, member);
+    this._injectStarButton(card, member);
     return card;
+  }
+
+  // F3 · inject a star-toggle button into an agent card. Idempotent:
+  // safely skips if the card already has one (e.g. on updateAgentCard
+  // paths that re-run fillAgentCard).
+  _injectStarButton(card, member) {
+    if (card.querySelector(':scope > .agent-star-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'agent-star-btn';
+    btn.setAttribute('aria-label', this.isPinned(member) ? 'Unpin agent' : 'Pin agent');
+    btn.setAttribute('title', 'Pin to top');
+    btn.innerHTML = '<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      this.togglePin(member);
+      btn.classList.remove('pop');
+      // Force reflow so class re-add restarts animation.
+      void btn.offsetWidth;
+      btn.classList.add('pop');
+    };
+    card.appendChild(btn);
+  }
+
+  // F3 · pin helpers.
+  _pinKey(member) {
+    // Prefer configId (survives respawn); fall back to sessionId.
+    return (member && (member.configId || member.sessionId)) || '';
+  }
+
+  isPinned(member) {
+    const key = this._pinKey(member);
+    return !!key && this._pinnedAgents.has(key);
+  }
+
+  togglePin(member) {
+    const key = this._pinKey(member);
+    if (!key) return;
+    if (this._pinnedAgents.has(key)) {
+      this._pinnedAgents.delete(key);
+    } else {
+      this._pinnedAgents.add(key);
+    }
+    this._savePinnedAgents();
+    // Re-render the grid so sort order + is-pinned class refresh.
+    this.renderAgentCards();
+  }
+
+  _loadPinnedAgents() {
+    try {
+      const raw = localStorage.getItem('office_pinned_agents');
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  _savePinnedAgents() {
+    try {
+      localStorage.setItem('office_pinned_agents', JSON.stringify([...this._pinnedAgents]));
+    } catch { /* quota */ }
   }
 
   // F3 · map a Claude tool name to a sprite icon reference. Unknown
@@ -1091,6 +1177,28 @@ class OfficeApp {
     if (!member.role) member.role = '';
     if (!member.status) member.status = 'idle';
     if (!member.avatarColor) member.avatarColor = member.color || 'blue';
+
+    // F4 · compact view branch — emits a dense row with only the most
+    // scannable data (status dot + name + role + tasks + cost). The
+    // rich card markup below is skipped entirely so re-renders stay
+    // cheap when a 12+ agent team is in compact mode.
+    if (this._viewMode === 'compact') {
+      const queue = (this.taskQueues || []).find(q => q.sessionId === member.sessionId);
+      const tasks = queue ? queue.tasks || [] : [];
+      const completed = tasks.filter(t => t.status === 'completed' || t.status === 'failed').length;
+      const total = tasks.length;
+      const cost = this._formatCost(Number(member.totalCost) || 0);
+      card.innerHTML = `
+        <span class="agent-compact-dot" data-status="${this.escapeAttr(member.status)}" title="${this.escapeAttr(member.status)}"></span>
+        <span class="agent-compact-name">${this.escapeHtml(member.name)}</span>
+        <span class="agent-compact-role">${this.escapeHtml(member.role)}</span>
+        <span></span>
+        <span class="agent-compact-tasks">${completed}/${total}</span>
+        <span class="agent-compact-cost">${cost}</span>
+        <span></span>
+      `;
+      return;
+    }
 
     const queue = (this.taskQueues || []).find(q => q.sessionId === member.sessionId);
     const tasks = queue ? queue.tasks || [] : [];
@@ -1290,10 +1398,14 @@ class OfficeApp {
     // Update CSS status class; include no-anim to suppress fadeSlideIn on re-render.
     // Preserve .border-beam so the pseudo-element stays ready, toggle
     // .border-beam--active based on whether the agent is working.
-    card.className = `agent-card border-beam status-${member.status} no-anim${member.status === 'working' ? ' border-beam--active' : ''}`;
+    // Round 10 · preserve .is-pinned across re-renders.
+    const pinned = this.isPinned(member);
+    card.className = `agent-card border-beam status-${member.status} no-anim${member.status === 'working' ? ' border-beam--active' : ''}${pinned ? ' is-pinned' : ''}`;
     card.setAttribute('aria-label', `${member.name} - ${member.role} (${member.status})`);
     // Re-fill content to reflect new state
     this.fillAgentCard(card, member);
+    // fillAgentCard overwrites innerHTML, so re-inject the star button.
+    this._injectStarButton(card, member);
   }
 
   // ========== Detail Panel ==========
@@ -2304,6 +2416,8 @@ class OfficeApp {
   renderStandup() {
     const transcript = document.getElementById('standupTranscript');
     if (!transcript) return;
+    // F2 · participant strip mirrors standupActive.
+    this._renderStandupParticipantStrip();
 
     if (this.state.standupActive && this.state.standupTranscript && this.state.standupTranscript.length > 0) {
       const currentCount = this.state.standupTranscript.length;
@@ -2349,6 +2463,75 @@ class OfficeApp {
 
     transcript.innerHTML = '<div class="standup-empty">No standup in progress. Click "Start Standup" to begin.</div>';
     this.lastRenderedStandupCount = 0;
+  }
+
+  // F2 · render the live participant strip above the transcript.
+  // Derives state from the transcript (who has spoken) + members (who
+  // should speak) + each member's current status. Idempotent; called on
+  // every renderStandup().
+  _renderStandupParticipantStrip() {
+    const strip = document.getElementById('standupParticipantStrip');
+    if (!strip) return;
+
+    const active = this.state.standupActive;
+    if (!active) {
+      strip.classList.add('hidden');
+      strip.innerHTML = '';
+      this._standupSpoken = new Set();
+      return;
+    }
+
+    const members = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    if (members.length === 0) {
+      strip.classList.add('hidden');
+      return;
+    }
+    strip.classList.remove('hidden');
+
+    // Rebuild spoken set from transcript every render — cheap and always
+    // in sync with SSE updates that mutated state.standupTranscript.
+    const spoken = new Set();
+    const transcript = Array.isArray(this.state.standupTranscript) ? this.state.standupTranscript : [];
+    for (const msg of transcript) {
+      if (msg && msg.type === 'agent_response' && msg.speakerName) {
+        spoken.add(msg.speakerName);
+      }
+    }
+    this._standupSpoken = spoken;
+
+    // Current-turn agent: the last "prompt" or "standup_prompt" entry in the
+    // transcript addressed a specific agent. We infer current turn from the
+    // most recent entry whose type is a prompt. Fall back to "first who
+    // hasn't spoken".
+    let currentTurn = null;
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      const msg = transcript[i];
+      if (msg && (msg.type === 'standup_prompt' || msg.type === 'prompt') && msg.targetName) {
+        currentTurn = msg.targetName;
+        break;
+      }
+    }
+    if (!currentTurn) {
+      const nextUp = members.find(m => !spoken.has(m.name));
+      currentTurn = nextUp ? nextUp.name : null;
+    }
+
+    const chips = members.map(m => {
+      let state = 'pending';
+      if (spoken.has(m.name)) state = 'responded';
+      else if (m.name === currentTurn) state = 'awaiting';
+      if (m.status === 'stuck' && state !== 'responded') state = 'timeout';
+      return `<span class="standup-participant-chip" data-state="${state}" title="${this.escapeAttr(m.name)} — ${state}">
+        <span class="standup-participant-chip-dot"></span>
+        ${this.escapeHtml(m.name || '')}
+      </span>`;
+    }).join('');
+
+    const respondedCount = spoken.size;
+    strip.innerHTML = `
+      <span class="standup-participant-strip-label">Turn ${respondedCount} of ${members.length}</span>
+      ${chips}
+    `;
   }
 
   createStandupEntry(msg, isHistory = false) {
@@ -2399,6 +2582,7 @@ class OfficeApp {
 
     if (!this.state.recentMessages || this.state.recentMessages.length === 0) {
       list.innerHTML = '<div class="messages-empty">No messages yet.</div>';
+      this._updateMessageFilterCount(0, 0);
       return;
     }
 
@@ -2425,7 +2609,40 @@ class OfficeApp {
     const threads = Array.from(threadMap.values())
       .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
 
-    list.innerHTML = threads.map(thread => {
+    // F1 · apply filter. Returns the threads to render + the per-thread
+    // highlight regex so the body HTML can mark matches inline.
+    const { q, unreadOnly } = this._messageFilter;
+    const needle = (q || '').trim().toLowerCase();
+    const highlightRegex = needle ? new RegExp(`(${this._escapeRegex(needle)})`, 'gi') : null;
+
+    const matchesThread = (thread) => {
+      if (unreadOnly) {
+        const hasUnread = thread.messages.some(m => m.id && !this._readMessages.has(m.id));
+        if (!hasUnread) return false;
+      }
+      if (!needle) return true;
+      if (thread.participants.toLowerCase().includes(needle)) return true;
+      return thread.messages.some(m =>
+        (m.content || '').toLowerCase().includes(needle) ||
+        (m.fromName || '').toLowerCase().includes(needle) ||
+        (m.toName || '').toLowerCase().includes(needle));
+    };
+
+    const visibleThreads = threads.filter(matchesThread);
+    this._updateMessageFilterCount(visibleThreads.length, threads.length);
+
+    if (visibleThreads.length === 0) {
+      list.innerHTML = `<div class="messages-empty">No threads match ${needle ? `"${this.escapeHtml(q)}"` : 'your filter'}.</div>`;
+      return;
+    }
+
+    const highlight = (text) => {
+      const esc = this.escapeHtml(text);
+      if (!highlightRegex) return esc;
+      return esc.replace(highlightRegex, '<mark>$1</mark>');
+    };
+
+    list.innerHTML = visibleThreads.map(thread => {
       const unreadInThread = thread.messages.filter(
         m => m.id && !this._readMessages.has(m.id)
       ).length;
@@ -2444,16 +2661,16 @@ class OfficeApp {
           : '';
         return `<div class="thread-message-item${isUnread ? ' unread' : ''}">
           <div class="thread-message-meta">
-            <span>${this.escapeHtml(msg.fromName)} to ${this.escapeHtml(msg.toName)}</span>
+            <span>${highlight(msg.fromName || '')} to ${highlight(msg.toName || '')}</span>
             <span>${time}</span>
           </div>
-          ${this.escapeHtml(msg.content)}
+          ${highlight(msg.content || '')}
         </div>`;
       }).join('');
 
       return `<div class="message-thread" data-thread-key="${this.escapeAttr(thread.key)}">
         <div class="message-thread-header" onclick="office._toggleMessageThread(this)">
-          <span class="message-thread-participants">${this.escapeHtml(thread.participants)}</span>
+          <span class="message-thread-participants">${highlight(thread.participants)}</span>
           <div class="message-thread-meta">
             ${unreadBadge}
             <span>${timeStr}</span>
@@ -2463,6 +2680,39 @@ class OfficeApp {
         <div class="message-thread-body">${messagesHtml}</div>
       </div>`;
     }).join('');
+  }
+
+  // F1 · debounced filter input handler.
+  _onMessageFilterInput(q) {
+    if (this._messageFilterDebounce) clearTimeout(this._messageFilterDebounce);
+    this._messageFilterDebounce = setTimeout(() => {
+      this._messageFilter.q = q || '';
+      this.renderMessages();
+    }, 120);
+  }
+
+  _toggleUnreadOnly() {
+    this._messageFilter.unreadOnly = !this._messageFilter.unreadOnly;
+    const btn = document.getElementById('messagesFilterUnread');
+    if (btn) btn.classList.toggle('active', this._messageFilter.unreadOnly);
+    this.renderMessages();
+  }
+
+  _updateMessageFilterCount(visible, total) {
+    const el = document.getElementById('messagesFilterCount');
+    if (!el) return;
+    if (total === 0) {
+      el.textContent = '0 threads';
+    } else if (visible === total) {
+      el.textContent = `${total} thread${total === 1 ? '' : 's'}`;
+    } else {
+      el.textContent = `${visible} of ${total} threads`;
+    }
+  }
+
+  // Regex metacharacter escape for user-supplied substrings.
+  _escapeRegex(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   _toggleMessageThread(headerEl) {
@@ -2885,15 +3135,22 @@ class OfficeApp {
   }
 
   setViewMode(mode) {
+    // Round 10 · adds 'compact' as a third option. Toggle classes rather
+    // than replace so the grid's own layout classes survive.
+    const valid = ['grid', 'list', 'compact'];
+    if (!valid.includes(mode)) mode = 'grid';
     this._viewMode = mode;
     localStorage.setItem('office-view-mode', mode);
     const grid = document.getElementById('agentGrid');
     if (grid) {
       grid.classList.toggle('view-list', mode === 'list');
+      grid.classList.toggle('view-compact', mode === 'compact');
     }
     document.querySelectorAll('.view-mode-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.mode === mode);
     });
+    // Full re-render so compact markup branch runs for existing cards.
+    if (this.state.teamSpawned) this.renderAgentCards();
   }
 
   updateNavBadges() {
@@ -4954,9 +5211,22 @@ class OfficeApp {
         const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
         const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const ratePct = Math.round((s.responseRate || 0) * 100);
+        // F2 · response-rate bar with tier colors so history is
+        // visually scannable at a glance.
+        let tier = 'ok';
+        if (ratePct < 50) tier = 'alert';
+        else if (ratePct < 75) tier = 'warn';
         return `<div class="standup-history-item" onclick="office.viewStandupDetail(decodeURIComponent('${encodeURIComponent(s.id)}'))">
-          <span class="standup-history-date">${dateStr} ${timeStr}</span>
-          <span class="standup-history-meta">${s.participantCount} agents, ${ratePct}% response</span>
+          <div class="standup-history-item-row">
+            <span class="standup-history-date">${dateStr} ${timeStr}</span>
+            <span class="standup-history-meta">${s.participantCount} agents</span>
+          </div>
+          <div class="standup-response-bar">
+            <div class="standup-response-bar-track">
+              <div class="standup-response-bar-fill" data-tier="${tier}" style="width:${ratePct}%"></div>
+            </div>
+            <span class="standup-response-bar-pct">${ratePct}%</span>
+          </div>
         </div>`;
       }).join('');
     } catch {
@@ -5328,6 +5598,144 @@ class OfficeApp {
     }).catch(() => {
       el.innerHTML = '<div class="empty-state"><div class="empty-icon">!</div><div class="empty-text">Failed to load report</div><div class="empty-hint">Check your connection and try again</div><button class="btn btn-sm" style="margin-top:8px" onclick="office.renderReportDashboard()">Retry</button></div>';
     });
+  }
+
+  // F5 · build a markdown snapshot of the team state. Pure function on
+  // this.state / this.taskQueues / this.officeSettings — no fetch, no
+  // re-render — so the same text can power both Copy and Download.
+  _buildReportMarkdown() {
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const members = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    const queues = this.taskQueues || [];
+    const settings = this.officeSettings || {};
+
+    // Totals across the team.
+    const totalCost = members.reduce((s, m) => s + (Number(m.totalCost) || 0), 0);
+    const counts = { working: 0, idle: 0, meeting: 0, stuck: 0 };
+    for (const m of members) { if (counts[m.status] !== undefined) counts[m.status]++; }
+
+    let totalTasks = 0, completedTasks = 0, blockedTasks = 0;
+    const blockers = [];
+    for (const q of queues) {
+      const owner = members.find(m => m.sessionId === q.sessionId);
+      for (const t of (q.tasks || [])) {
+        totalTasks++;
+        if (t.status === 'completed' || t.status === 'failed') completedTasks++;
+        if (t.status === 'blocked') {
+          blockedTasks++;
+          blockers.push({ title: t.title || '', agent: owner ? owner.name : '', since: t.assignedAt });
+        }
+      }
+    }
+
+    const asciiBar = (pctRaw) => {
+      const pct = Math.max(0, Math.min(100, Math.round(pctRaw)));
+      const filled = Math.round((pct / 100) * 10);
+      return '▰'.repeat(filled) + '▱'.repeat(10 - filled);
+    };
+
+    const lines = [];
+    lines.push(`# Jarvis Office Report — ${dateStr} ${timeStr}`);
+    lines.push('');
+    if (settings.teamMission) {
+      lines.push(`> **Mission:** ${settings.teamMission}`);
+      lines.push('');
+    }
+
+    lines.push('## Team at a glance');
+    lines.push('');
+    lines.push(`- **Members:** ${members.length} (${counts.working} working · ${counts.idle} idle · ${counts.meeting} meeting · ${counts.stuck} stuck)`);
+    lines.push(`- **Tasks:** ${completedTasks} / ${totalTasks} completed${totalTasks > 0 ? ` · ${Math.round((completedTasks / totalTasks) * 100)}%` : ''}`);
+    if (blockedTasks > 0) lines.push(`- **Blocked:** ${blockedTasks} task${blockedTasks === 1 ? '' : 's'}`);
+    lines.push(`- **Spend today:** $${totalCost.toFixed(4)}${settings.teamDailyBudget > 0 ? ` of $${settings.teamDailyBudget} budget (${asciiBar((totalCost / settings.teamDailyBudget) * 100)} ${Math.round((totalCost / settings.teamDailyBudget) * 100)}%)` : ''}`);
+    lines.push('');
+
+    lines.push('## Agents');
+    lines.push('');
+    lines.push('| Agent | Role | Status | Tasks | Spend |');
+    lines.push('|---|---|---|---|---|');
+    for (const m of members) {
+      const q = queues.find(qq => qq.sessionId === m.sessionId);
+      const ts = q ? q.tasks || [] : [];
+      const done = ts.filter(t => t.status === 'completed' || t.status === 'failed').length;
+      const cost = (Number(m.totalCost) || 0).toFixed(4);
+      const star = this.isPinned(m) ? '⭐ ' : '';
+      lines.push(`| ${star}${m.name || '—'} | ${m.role || '—'} | ${m.status || '—'} | ${done}/${ts.length} | $${cost} |`);
+    }
+    lines.push('');
+
+    if (blockers.length > 0) {
+      lines.push('## Top blockers');
+      lines.push('');
+      blockers.slice(0, 5).forEach((b, i) => {
+        lines.push(`${i + 1}. **${b.title}** — ${b.agent || 'unassigned'}${b.since ? ` (since ${new Date(b.since).toLocaleString()})` : ''}`);
+      });
+      lines.push('');
+    }
+
+    // Recent standup response-rate, if history is cached.
+    const lastStandup = this.lastCompletedStandup;
+    if (lastStandup && typeof lastStandup.responseRate === 'number') {
+      const pct = Math.round(lastStandup.responseRate * 100);
+      lines.push('## Last standup');
+      lines.push('');
+      lines.push(`- **Response rate:** ${asciiBar(pct)} ${pct}%`);
+      if (lastStandup.completedAt) lines.push(`- **Completed:** ${new Date(lastStandup.completedAt).toLocaleString()}`);
+      lines.push('');
+    }
+
+    lines.push('---');
+    lines.push(`_Generated from the Jarvis office dashboard._`);
+    return lines.join('\n');
+  }
+
+  async exportReportMarkdown() {
+    const md = this._buildReportMarkdown();
+    const btn = document.getElementById('btnCopyReport');
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(md);
+      } else {
+        // Fallback: hidden textarea + execCommand('copy'). Works in
+        // non-secure contexts but is being deprecated by browsers.
+        const ta = document.createElement('textarea');
+        ta.value = md;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      if (btn) {
+        const original = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1200);
+      }
+      this.showToast('Report copied', 'success');
+    } catch (err) {
+      console.error('Copy failed:', err);
+      this.showToast('Copy failed — try Download .md instead', 'error');
+    }
+  }
+
+  downloadReportMarkdown() {
+    const md = this._buildReportMarkdown();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `jarvis-report-${dateStr}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Release the blob URL after a tick so the browser commits the download.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    this.showToast('Report downloaded', 'success');
   }
 
   _renderExperimentHistory(experiments) {
@@ -6532,9 +6940,11 @@ class OfficeApp {
         const sid = agentEl.dataset.sessionId;
         const member = (this.state.members || []).find(m => m.sessionId === sid);
         if (!member) return;
+        const pinned = this.isPinned(member);
         const items = [
           { label: 'Open detail', onClick: () => this.showDetail(sid) },
           { label: 'Send prompt…', onClick: () => this.openMemberModal(sid) },
+          { label: pinned ? 'Unpin' : 'Pin to top', onClick: () => this.togglePin(member) },
           { label: 'Start brainstorm', onClick: () => this.triggerBrainstorm() },
           { separator: true },
           { label: 'Open session (terminal)', onClick: () => { window.location.href = `/?id=${encodeURIComponent(sid)}`; } },
