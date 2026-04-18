@@ -568,6 +568,18 @@ func (m *Manager) checkForStuckAgents() {
 		if agent.Config == nil {
 			continue
 		}
+		// If the session reports it's currently executing a turn, the
+		// agent is by definition not stuck -- it's just thinking. The
+		// SDK's working flag is ground truth; trust it over any
+		// heuristic timestamp. Observed 2026-04-18 00:53:48: Captain
+		// was flagged "inactive=5m6s" after a successful standup
+		// response, only because he was silently working through a
+		// long multi-step turn between that response and the next
+		// API call.
+		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
+
 		agent.mu.Lock()
 		lastPromptAt := agent.LastPromptSentAt
 		lastTurnAt := agent.LastTurnAt
