@@ -702,6 +702,17 @@ class OfficeApp {
       this.addActivityEntry('system', `UI task completed without visual verification: ${title}`);
     });
 
+    // R16 · New project folder was created + seeded by the spawn-team flow.
+    // Activity-feed only — no toast, since the team-spawn toast already
+    // fires a couple seconds later.
+    this.eventSource.addEventListener('office:projectCreated', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const name = (data.name || 'project').toString();
+      const path = (data.path || '').toString();
+      this.addActivityEntry('system', `Created new project ${name}${path ? ` at ${path}` : ''} (seeded with CLAUDE.md)`);
+    });
+
     this.eventSource.onopen = () => {
       const wasReconnecting = this.sseReconnecting;
       this.sseReconnectDelay = 1000;
@@ -3513,6 +3524,24 @@ class OfficeApp {
     if (s2) s2.classList.remove('active');
   }
 
+  // R16 · Toggle visibility of the two working-dir input groups depending
+  // on which spawnMode radio is selected. Called from the radio onchange.
+  _updateSpawnMode() {
+    const mode = document.querySelector('input[name="spawnMode"]:checked')?.value || 'existing';
+    const existing = document.getElementById('spawnExistingMode');
+    const newProj = document.getElementById('spawnNewProjectMode');
+    if (existing) existing.classList.toggle('hidden', mode !== 'existing');
+    if (newProj) newProj.classList.toggle('hidden', mode !== 'new');
+    // Autofocus the input that just became visible so the operator can
+    // type immediately after toggling.
+    setTimeout(() => {
+      const target = mode === 'new'
+        ? document.getElementById('spawnProjectName')
+        : document.getElementById('spawnWorkingDir');
+      if (target) target.focus();
+    }, 0);
+  }
+
   populateProviderSelect(selectEl, currentProvider) {
     const providers = [
       { value: 'claude-subscription', label: 'Claude Subscription' },
@@ -3648,12 +3677,33 @@ class OfficeApp {
       spawnHeaderBtn.textContent = 'Spawning...';
     }
 
-    const workingDir = document.getElementById('spawnWorkingDir').value.trim();
-    if (!workingDir) {
-      this.showNotification('Working directory is required', 'warning');
-      if (btn) { btn.disabled = false; btn.textContent = 'Spawn Team'; }
-      if (spawnHeaderBtn) { spawnHeaderBtn.disabled = false; spawnHeaderBtn.textContent = 'Spawn Team'; }
-      return;
+    // R16 · Branch on "Existing folder" vs "New project" mode. In new-
+    // project mode we ship {newProject, projectName} instead of
+    // workingDir — the backend creates /app/workspace/<name> and seeds
+    // a CLAUDE.md before validating the resolved path against the
+    // allowlist.
+    const spawnModeEl = document.querySelector('input[name="spawnMode"]:checked');
+    const spawnMode = spawnModeEl ? spawnModeEl.value : 'existing';
+    let workingDir = '';
+    let newProject = false;
+    let projectName = '';
+    if (spawnMode === 'new') {
+      newProject = true;
+      projectName = (document.getElementById('spawnProjectName')?.value || '').trim();
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(projectName)) {
+        this.showNotification('Project name must be 1-64 chars: letters, numbers, underscores, hyphens only', 'warning');
+        if (btn) { btn.disabled = false; btn.textContent = 'Spawn Team'; }
+        if (spawnHeaderBtn) { spawnHeaderBtn.disabled = false; spawnHeaderBtn.textContent = 'Spawn Team'; }
+        return;
+      }
+    } else {
+      workingDir = document.getElementById('spawnWorkingDir').value.trim();
+      if (!workingDir) {
+        this.showNotification('Working directory is required', 'warning');
+        if (btn) { btn.disabled = false; btn.textContent = 'Spawn Team'; }
+        if (spawnHeaderBtn) { spawnHeaderBtn.disabled = false; spawnHeaderBtn.textContent = 'Spawn Team'; }
+        return;
+      }
     }
 
     const membersInfo = this._currentMembers || OfficeApp.TEAM_MEMBERS_INFO;
@@ -3697,6 +3747,8 @@ class OfficeApp {
         templateId: this._selectedTemplateId || undefined,
         telegramEnabled,
         telegramIntervalMin,
+        newProject,
+        projectName,
       });
 
       if (data.success) {

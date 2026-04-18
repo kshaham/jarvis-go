@@ -1,0 +1,109 @@
+# {{.Name}}
+
+**Freshly-created project.** No existing code yet — you're starting from an empty directory. Scaffold whatever the mission calls for; pick the framework that fits.
+{{if .Mission}}
+## Mission
+
+{{.Mission}}
+{{end}}
+## Default design system
+
+Unless the mission above explicitly calls for a different aesthetic, build this project using the slate-blue glass design system documented below. Use exactly these tokens so the app feels cohesive with the operator's Jarvis dashboard.
+
+### Color
+
+- **Canvas:** `#06080C` (deep slate)
+- **Glass surface:** `rgba(255, 255, 255, 0.04)` with `backdrop-filter: blur(24px)`
+- **Text primary:** `#FFFFFF`
+- **Text secondary:** `#CBD5E1`
+- **Text muted:** `#94A3B8`
+- **Text faint:** `#7F8C9E`
+- **Accent gradient:** `linear-gradient(to right bottom, #53617A, #3A445C)`
+- **Border (default):** `rgba(255, 255, 255, 0.08)`
+- **Border (hover):** `rgba(255, 255, 255, 0.18)`
+- **Status:** success `#22c55e` · warn `#eab308` · error `#ef4444`
+
+### Typography
+
+- Inter 400/500/600 loaded from Google Fonts with system-font fallback (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`)
+- **H1** 36px / 600 / -0.025em tracking / 40px line-height
+- **H2** 26px / 600 / -0.025em
+- **H3** 24px / 600 / -0.025em
+- **Body** 12-14px / 500
+- **Caption / label** 10-11px / 600 uppercase with 0.5px tracking (use this for labels on glass cards)
+
+### Surfaces
+
+- 24px `backdrop-filter: blur` on every panel / card / modal
+- **Hero edge treatment (signature):** 1px slate gradient hairline around hero cards + primary modals. Paint it with the double-background trick:
+
+  ```css
+  .hero-card {
+    background:
+      linear-gradient(rgba(16, 21, 31, 0.92), rgba(16, 21, 31, 0.92)) padding-box,
+      linear-gradient(to right bottom, #53617A, #3A445C) border-box;
+    border: 1px solid transparent;
+    border-radius: 24px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25),
+                0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(24px);
+  }
+  ```
+- **Radii scale:** 2px, 8px, 12px, 24px, 32px, 9999px (pill)
+- **Shadow stack:**
+  - Soft: `0 1px 2px rgba(0, 0, 0, 0.05)`
+  - Card: `0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)`
+  - Hero: `0 25px 50px -12px rgba(0, 0, 0, 0.25)`
+
+### Spacing
+
+4px base unit. Scale: **4, 8, 12, 16, 20, 24, 28, 32**. Card padding defaults to 16-20px. Section padding 24-48px.
+
+### Motion
+
+- `--motion-fast: 150ms`
+- `--motion-ease: cubic-bezier(0.4, 0, 0.2, 1)`
+- Hover = **color change only** — no transforms, no border-beam, no decorative glows
+- Any `transition:` declaration should go through these two tokens
+
+### Ambient background (optional but recommended)
+
+Full-bleed CSS-only dot-matrix with slow 120s drift. `prefers-reduced-motion: reduce` disables the drift. No Three.js.
+
+```css
+#ambientBg {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    radial-gradient(circle at 18% 8%, rgba(83, 97, 122, 0.22), transparent 55%),
+    radial-gradient(circle at 82% 92%, rgba(58, 68, 92, 0.28), transparent 55%),
+    radial-gradient(circle, rgba(148, 163, 184, 0.10) 1px, transparent 1.4px);
+  background-size: 100% 100%, 100% 100%, 24px 24px;
+  animation: ambientDrift 120s linear infinite;
+}
+@keyframes ambientDrift { to { background-position: 0 0, 0 0, 100px 100px; } }
+@media (prefers-reduced-motion: reduce) { #ambientBg { animation: none; } }
+```
+
+### Buttons
+
+- 12px radius, 11px / 500 Inter
+- Primary: wears the slate gradient, `rgba(255,255,255,0.18)` border, `brightness(1.1)` on hover
+- Secondary: `rgba(255,255,255,0.04)` fill, `rgba(255,255,255,0.1)` border, text becomes `--text-primary` on hover
+
+### Inputs
+
+- 12px radius
+- `rgba(255,255,255,0.04)` fill, `rgba(255,255,255,0.08)` border, 14px body text
+- Focus ring: `0 0 0 2px rgba(148,163,184,0.45)`
+
+## How the team works here
+
+- **Lead:** run the app's dev server via `cm dev announce http://jarvis:<port> --pid $!`. If the project is fullstack, use named slots: `--name frontend` + `--name api`. Expo teams use `expo start --web --host 0.0.0.0 --port 19006`.
+- **Everyone:** check `cm dev url` + `cm dev creds` before browser verification.
+- **Every UI task completion MUST cite browser verification** in the `cm task complete --summary` (e.g. "Screenshotted at /tmp/signup.png — new layout visible").
+- Bind dev servers to `0.0.0.0`. Pick ports in 3000-3999 (frontend) / 8000-8999 (backend) / 19006 (Expo web). Avoid 3555/3556 (Jarvis) and 9222 (headless-shell).
+- Full reference: `cm skill read team-dev-instance`.
+
+## Files agents should read first
+
+_(Populated as the project grows. Update this list when you add architectural notes, product spec, API contracts, etc.)_

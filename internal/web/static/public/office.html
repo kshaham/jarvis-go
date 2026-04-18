@@ -775,8 +775,27 @@
         </div>
 
         <div class="spawn-config-section">
-          <label class="spawn-config-label">Working Directory</label>
-          <input type="text" class="spawn-config-input" id="spawnWorkingDir" placeholder="/path/to/project">
+          <div class="spawn-mode-toggle" role="radiogroup" aria-label="Working directory mode">
+            <label class="spawn-mode-option">
+              <input type="radio" name="spawnMode" value="existing" checked onchange="office._updateSpawnMode()">
+              <span>Existing folder</span>
+            </label>
+            <label class="spawn-mode-option">
+              <input type="radio" name="spawnMode" value="new" onchange="office._updateSpawnMode()">
+              <span>New project</span>
+            </label>
+          </div>
+
+          <div id="spawnExistingMode">
+            <label class="spawn-config-label">Working Directory</label>
+            <input type="text" class="spawn-config-input" id="spawnWorkingDir" placeholder="/path/to/project">
+          </div>
+
+          <div id="spawnNewProjectMode" class="hidden">
+            <label class="spawn-config-label">Project name (folder)</label>
+            <input type="text" class="spawn-config-input" id="spawnProjectName" placeholder="my-new-app" pattern="[a-zA-Z0-9_\-]{1,64}" autocomplete="off">
+            <p class="settings-hint">Creates <code>/app/workspace/&lt;name&gt;</code> and seeds a CLAUDE.md with design defaults. Letters, numbers, underscores, hyphens only.</p>
+          </div>
         </div>
 
         <div class="spawn-config-section">

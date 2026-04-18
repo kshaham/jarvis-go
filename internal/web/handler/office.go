@@ -57,7 +57,26 @@ type spawnTeamRequest struct {
 	PerpetualMode       *bool            `json:"perpetualMode"` // nil = default true
 	TelegramEnabled     bool             `json:"telegramEnabled"`
 	TelegramIntervalMin int              `json:"telegramIntervalMin"`
+	// NewProject + ProjectName together signal that the operator wants
+	// to spawn into a freshly-created /app/workspace/<ProjectName>
+	// directory seeded with a CLAUDE.md. Mutually exclusive with a
+	// pre-populated WorkingDir; when NewProject is true, WorkingDir is
+	// computed server-side and the caller's value is ignored.
+	NewProject  bool   `json:"newProject"`
+	ProjectName string `json:"projectName"`
 }
+
+// projectNameRe constrains the slug an operator can supply for the "New
+// project" flow. Letters / digits / underscore / hyphen only, 1-64 chars.
+// Excludes dots and slashes on purpose so no request can traverse out of
+// /app/workspace.
+var projectNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// newProjectRoot is the fixed parent directory for freshly-created
+// projects. Already in the workingDirAllowlist for production deploys
+// (see docker-compose.yml: /app/workspace is bind-mounted into the
+// jarvis container). Declared here so tests can reference the same path.
+const newProjectRoot = "/app/workspace"
 
 type autoStandupRequest struct {
 	Enabled  bool `json:"enabled"`
@@ -577,6 +596,43 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 			"daily spending cap reached; new team spawns are frozen until the cap is raised or the day rolls over")
 		return
 	}
+
+	// New-project flow: validate the slug, create /app/workspace/<name>
+	// if it doesn't exist, seed a CLAUDE.md with design defaults, and
+	// hand the resulting path to the normal working-dir resolver. The
+	// operator's pre-filled WorkingDir is ignored when NewProject is true.
+	if req.NewProject {
+		if !projectNameRe.MatchString(req.ProjectName) {
+			request.WriteError(w, http.StatusBadRequest,
+				"project name must match [a-zA-Z0-9_-]{1,64} (no dots or slashes)")
+			return
+		}
+		target := filepath.Join(newProjectRoot, req.ProjectName)
+		created := false
+		if _, statErr := os.Stat(target); os.IsNotExist(statErr) {
+			if mkErr := os.MkdirAll(target, 0o755); mkErr != nil {
+				slog.Error("new project: mkdir failed", "path", target, "err", mkErr)
+				request.WriteError(w, http.StatusInternalServerError,
+					"failed to create project directory: "+mkErr.Error())
+				return
+			}
+			created = true
+		}
+		if seedErr := office.SeedNewProjectCLAUDEMd(target, req.ProjectName, req.Mission); seedErr != nil {
+			// Non-fatal — the team can still spawn, but log loudly so the
+			// operator can fix perms / disk issues before the next one.
+			slog.Warn("new project: CLAUDE.md seed failed", "path", target, "err", seedErr)
+		}
+		if created {
+			ctx.SSEBroker.Broadcast("office:projectCreated", map[string]interface{}{
+				"name": req.ProjectName,
+				"path": target,
+			})
+			slog.Info("new project created", "name", req.ProjectName, "path", target)
+		}
+		req.WorkingDir = target
+	}
+
 	if req.WorkingDir == "" {
 		request.WriteError(w, http.StatusBadRequest, "workingDir is required")
 		return
