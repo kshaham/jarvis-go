@@ -1019,7 +1019,10 @@ class OfficeApp {
 
   createAgentCard(member) {
     const card = document.createElement('div');
-    card.className = `agent-card status-${member.status}`;
+    // .border-beam is always present so the ::before pseudo is ready;
+    // .border-beam--active is added only while the agent is working
+    // so the rotating conic-gradient only spins on active tiles.
+    card.className = `agent-card border-beam status-${member.status}${member.status === 'working' ? ' border-beam--active' : ''}`;
     card.dataset.sessionId = member.sessionId;
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
@@ -1033,6 +1036,20 @@ class OfficeApp {
     };
     this.fillAgentCard(card, member);
     return card;
+  }
+
+  // F3 · map a Claude tool name to a sprite icon reference. Unknown
+  // tools fall back to a generic "activity" icon. The referenced
+  // symbols live in the inline sprite at the top of office.html.
+  _toolIconRef(name) {
+    const lower = String(name || '').toLowerCase();
+    if (lower.startsWith('bash')) return 'icon-tool-bash';
+    if (lower.startsWith('read')) return 'icon-tool-read';
+    if (lower.startsWith('edit') || lower.startsWith('write') || lower.startsWith('multiedit')) return 'icon-tool-edit';
+    if (lower.startsWith('grep') || lower.startsWith('glob')) return 'icon-tool-search';
+    if (lower.startsWith('webfetch') || lower.startsWith('websearch')) return 'icon-tool-web';
+    if (lower.startsWith('task') || lower.startsWith('agent')) return 'icon-tool-agent';
+    return 'icon-tool-generic';
   }
 
   // Human-friendly cost formatter. Cents for sub-dollar values so the
@@ -1129,7 +1146,22 @@ class OfficeApp {
     if (member.status === 'working') {
       const activeTool = member.activeTool || (member.activeTools && member.activeTools[0]);
       if (activeTool) {
-        activeToolHtml = `<div class="agent-active-tool"><span class="tool-spinner"></span><span>${this.escapeHtml(String(activeTool).slice(0, 24))}</span></div>`;
+        // F3 · crafted tool row: uppercase tool name + optional
+        // monospace argument preview, truncated with full value in
+        // the title tooltip. Pairs with the border-beam on working
+        // tiles so the card reads "beam + currently running Bash
+        // on <cmd>" at a glance.
+        const toolStr = String(activeTool);
+        const colonIdx = toolStr.indexOf(':');
+        const toolName = colonIdx > 0 ? toolStr.slice(0, colonIdx) : toolStr;
+        const toolArg = colonIdx > 0 ? toolStr.slice(colonIdx + 1).trim() : '';
+        const iconRef = this._toolIconRef(toolName);
+        const argPreview = toolArg ? toolArg.slice(0, 40) + (toolArg.length > 40 ? '…' : '') : '';
+        activeToolHtml = `<div class="agent-card-tool-now" title="${this.escapeAttr(toolStr)}">
+          <svg class="tool-icon" aria-hidden="true"><use href="#${iconRef}"/></svg>
+          <span class="tool-name">${this.escapeHtml(toolName)}</span>
+          ${argPreview ? `<span class="tool-arg">${this.escapeHtml(argPreview)}</span>` : ''}
+        </div>`;
       } else {
         activeToolHtml = `<div class="agent-thinking"><span class="thinking-dots"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></span><span>Thinking...</span></div>`;
       }
@@ -1234,8 +1266,10 @@ class OfficeApp {
   }
 
   updateAgentCard(card, member) {
-    // Update CSS status class; include no-anim to suppress fadeSlideIn on re-render
-    card.className = `agent-card status-${member.status} no-anim`;
+    // Update CSS status class; include no-anim to suppress fadeSlideIn on re-render.
+    // Preserve .border-beam so the pseudo-element stays ready, toggle
+    // .border-beam--active based on whether the agent is working.
+    card.className = `agent-card border-beam status-${member.status} no-anim${member.status === 'working' ? ' border-beam--active' : ''}`;
     card.setAttribute('aria-label', `${member.name} - ${member.role} (${member.status})`);
     // Re-fill content to reflect new state
     this.fillAgentCard(card, member);
@@ -1668,14 +1702,25 @@ class OfficeApp {
 
   setTimelineKind(kind) {
     this._timelineKind = kind;
-    // Reflect active chip state
-    const chips = document.querySelectorAll('.timeline-filter-chip');
+    // Reflect active chip state -- only the kind chips, not the new
+    // range chips which live in a sibling bar.
+    const chips = document.querySelectorAll('.timeline-filters .timeline-filter-chip[data-timeline-kind]');
     chips.forEach(c => c.classList.toggle('active', (c.getAttribute('data-timeline-kind') || '') === kind));
     this.renderTimeline();
   }
 
   setTimelineAgent(sessionId) {
     this._timelineAgent = sessionId || '';
+    this.renderTimeline();
+  }
+
+  // F5 · quick time-range for the timeline -- backend's /api/office/timeline
+  // already accepts `since=<ISO8601>`; we just translate the chip label
+  // to a window and pass it through.
+  setTimelineRange(range) {
+    this._timelineRange = range || 'all';
+    const chips = document.querySelectorAll('.timeline-range-bar .timeline-filter-chip[data-timeline-range]');
+    chips.forEach(c => c.classList.toggle('active', c.getAttribute('data-timeline-range') === this._timelineRange));
     this.renderTimeline();
   }
 
@@ -1703,6 +1748,18 @@ class OfficeApp {
     const params = new URLSearchParams({ limit: '150' });
     if (this._timelineKind) params.set('type', this._timelineKind);
     if (this._timelineAgent) params.set('agent', this._timelineAgent);
+    // F5 · time-range chip -> `since` query param. UTC ISO8601 so
+    // there's no timezone mismatch between the JS client and the Go
+    // server.
+    const rangeMs = {
+      '15m': 15 * 60 * 1000,
+      '1h': 60 * 60 * 1000,
+      '4h': 4 * 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000,
+    }[this._timelineRange || 'all'];
+    if (rangeMs) {
+      params.set('since', new Date(Date.now() - rangeMs).toISOString());
+    }
     try {
       const res = await fetch('/api/office/timeline?' + params.toString());
       const data = await res.json();
@@ -2066,11 +2123,62 @@ class OfficeApp {
           <div class="meeting-timestamp t-mono">${this._escapeHtml(this._formatRelativeTime(new Date(line.timestamp || 0)))}</div>
         </div>`);
       }
-      detail.innerHTML = parts.join('');
+      // F6 · prepend transcript search box + match count above the
+      // rendered transcript lines. Pure client-side filter over the
+      // already-rendered lines; no refetch.
+      const searchHtml = `
+        <input type="text" class="meetings-transcript-search" id="transcriptSearch" placeholder="Search this transcript…" oninput="office._filterTranscript(this.value)">
+        <span class="transcript-match-count" id="transcriptMatchCount"></span>`;
+      detail.innerHTML = searchHtml + parts.join('');
     } catch (err) {
       if (err && err.name === 'AbortError') return;
       detail.innerHTML = '<div class="meetings-placeholder">Failed to load meeting.</div>';
     }
+  }
+
+  // F6 · filter transcript lines by substring match on speaker or
+  // content; highlight matches inline via <mark>. Input is escaped
+  // before being used in the regex to prevent regex-injection.
+  _filterTranscript(query) {
+    const q = (query || '').trim();
+    const lines = document.querySelectorAll('#meetingsDetail .meeting-transcript-line');
+    const countEl = document.getElementById('transcriptMatchCount');
+    if (!q) {
+      lines.forEach(line => {
+        line.classList.remove('filtered-out');
+        // Remove any previously-injected <mark> tags.
+        line.querySelectorAll('mark').forEach(m => {
+          const txt = document.createTextNode(m.textContent);
+          m.replaceWith(txt);
+        });
+      });
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+    const lower = q.toLowerCase();
+    const reSafe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(' + reSafe + ')', 'gi');
+    let shown = 0;
+    lines.forEach(line => {
+      const contentEl = line.querySelector('.meeting-content');
+      const speakerEl = line.querySelector('.meeting-speaker');
+      const contentTxt = contentEl ? contentEl.textContent : '';
+      const speakerTxt = speakerEl ? speakerEl.textContent : '';
+      const hay = (contentTxt + ' ' + speakerTxt).toLowerCase();
+      const match = hay.includes(lower);
+      line.classList.toggle('filtered-out', !match);
+      if (match) {
+        shown++;
+        // Restore original text then re-highlight so repeated filters
+        // don't compound <mark> wrappers. Use textContent for both
+        // read + reset so we don't parse arbitrary HTML.
+        if (contentEl) {
+          const raw = contentEl.textContent;
+          contentEl.innerHTML = this._escapeHtml(raw).replace(re, '<mark>$1</mark>');
+        }
+      }
+    });
+    if (countEl) countEl.textContent = shown === 0 ? `No matches for "${q}"` : `${shown} match${shown === 1 ? '' : 'es'}`;
   }
 
   // ========== Task detail modal ==========
@@ -3808,6 +3916,47 @@ class OfficeApp {
     this.renderKanbanBoard();
   }
 
+  // ---- F2: kanban hover quick-edit actions ----
+  // These call the same endpoints agents use via the `cm` CLI, so no
+  // new backend surface. All handlers are fire-and-forget -- the
+  // server broadcasts office:taskUpdated via SSE and our existing
+  // listeners re-render on receipt.
+  async _kanbanCyclePriority(sessionId, taskId, nextPri) {
+    try {
+      await this.postJson('/api/office/agent/task-progress', {
+        sessionId, taskId, priority: nextPri,
+      });
+    } catch (err) {
+      this.showNotification('Failed to update priority', 'error');
+    }
+  }
+  async _kanbanTaskStart(sessionId, taskId) {
+    try {
+      await this.postJson('/api/office/agent/task-ack', { sessionId, taskId });
+      await this.postJson('/api/office/agent/task-start', { sessionId, taskId });
+    } catch (err) {
+      this.showNotification('Failed to start task', 'error');
+    }
+  }
+  async _kanbanTaskBlock(sessionId, taskId) {
+    const reason = prompt('Why is this blocked?') || '';
+    if (!reason) return;
+    try {
+      await this.postJson('/api/office/agent/task-progress', {
+        sessionId, taskId, isBlocked: true, progress: reason,
+      });
+    } catch (err) {
+      this.showNotification('Failed to mark blocked', 'error');
+    }
+  }
+  async _kanbanTaskComplete(sessionId, taskId) {
+    try {
+      await this.postJson('/api/office/agent/task-complete', { sessionId, taskId });
+    } catch (err) {
+      this.showNotification('Failed to complete task', 'error');
+    }
+  }
+
   renderTasks() {
     const list = document.getElementById('tasksList');
     if (!list) return;
@@ -3951,15 +4100,25 @@ class OfficeApp {
     const review = allTasks.filter(t => t.status === 'blocked');
     const done = allTasks.filter(t => t.status === 'completed' || t.status === 'failed');
 
+    // Resolve the owning agent's current status per task so kanban
+    // cards in the "doing" column can light up with the border-beam
+    // only when the agent is actually computing right now.
+    const membersBySid = new Map((this.state.members || []).map(m => [m.sessionId, m]));
+
     const renderCards = (tasks) => {
       return tasks.map(t => {
         const isDone = t.status === 'completed' || t.status === 'failed';
         const isFailed = t.status === 'failed';
         const isBlocked = t.status === 'blocked';
+        const owner = t._sessionId ? membersBySid.get(t._sessionId) : null;
+        const ownerWorking = owner && owner.status === 'working';
+        const isDoingAndWorking = t.status === 'in_progress' && ownerWorking;
         const cls = [
           t.priority === 'high' ? 'card-high' : '',
           isDone ? 'card-done' : '',
           isBlocked ? 'card-blocked' : '',
+          'border-beam',
+          isDoingAndWorking ? 'border-beam--active' : '',
         ].filter(Boolean).join(' ');
         const priority = t.priority || 'medium';
         const priorityBadge = `<span class="priority-badge priority-${priority}">${priority}</span>`;
@@ -3972,9 +4131,34 @@ class OfficeApp {
         const clickHandler = t._sessionId
           ? `office.openTaskDetail('${this.escapeAttr(t._sessionId)}','${this.escapeAttr(t.id)}')`
           : `office.switchTab('tasks')`;
+        // F2 · hover-only quick-edit strip for mutable tasks. Only
+        // render if we know the owning session; bug tasks and orphans
+        // don't get the buttons since the existing endpoints need
+        // sessionId.
+        let quickHtml = '';
+        if (t._sessionId && !isDone) {
+          const sid = this.escapeAttr(t._sessionId);
+          const tid = this.escapeAttr(t.id);
+          // Priority cycle: high -> medium -> low -> high
+          const nextPri = priority === 'high' ? 'low' : (priority === 'medium' ? 'high' : 'medium');
+          const buttons = [];
+          buttons.push(`<button class="q-priority" data-pri="${this.escapeAttr(priority)}" title="Cycle priority (click to set to ${nextPri})" onclick="event.stopPropagation(); office._kanbanCyclePriority('${sid}','${tid}','${nextPri}')">${priority}</button>`);
+          if (t.status === 'pending' || t.status === 'acknowledged') {
+            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskStart('${sid}','${tid}')" title="Start this task">Start</button>`);
+          }
+          if (t.status === 'in_progress') {
+            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskBlock('${sid}','${tid}')" title="Mark blocked">Block</button>`);
+            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskComplete('${sid}','${tid}')" title="Mark complete">Done</button>`);
+          }
+          if (t.status === 'blocked') {
+            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskStart('${sid}','${tid}')" title="Unblock / resume">Resume</button>`);
+          }
+          quickHtml = `<div class="kanban-card-quick">${buttons.join('')}</div>`;
+        }
         return `<div class="kanban-card ${cls}" title="${this.escapeAttr(t.title || '')}" onclick="${clickHandler}">
           <div class="kanban-card-title">${this.escapeHtml(t.title || '')}</div>
           ${priorityBadge}${failedBadge}${blockedBadge}
+          ${quickHtml}
         </div>`;
       }).join('');
     };
@@ -5712,6 +5896,17 @@ class OfficeApp {
     this.renderAgentNetwork();
   }
 
+  // F4 · close network drawer, switch to Timeline tab, filter by agent.
+  // Reuses the existing timeline agent-filter state + render path;
+  // cross-tab integration in 4 lines.
+  _focusAgentOnTimeline(sessionId) {
+    this.closeNetworkDrawer();
+    this._timelineAgent = sessionId;
+    const sel = document.getElementById('timelineAgentFilter');
+    if (sel) sel.value = sessionId;
+    this.switchTab('timeline');
+  }
+
   _openNetworkNodeDrawer(sessionId) {
     const m = (this.state.members || []).find(x => x.sessionId === sessionId);
     if (!m) return;
@@ -5759,8 +5954,12 @@ class OfficeApp {
             : '<div class="drawer-sub">No messages yet.</div>'
         }</div>
       </div>
-      <div style="display:flex;gap:6px;margin-top:10px">
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
         <button class="panel-btn" onclick="office.showDetail('${this._escapeAttr(sessionId)}')">Open full detail</button>
+        <button class="network-drawer-focus-btn" onclick="office._focusAgentOnTimeline('${this._escapeAttr(sessionId)}')" title="Jump to Timeline filtered by this agent">
+          <svg aria-hidden="true"><use href="#icon-tool-agent"/></svg>
+          Focus on ${this._escapeHtml(m.name)}
+        </button>
       </div>
     `;
     this.renderAgentNetwork();
@@ -5888,7 +6087,8 @@ class OfficeApp {
         : m.status === 'stuck' ? 'stuck' : 'idle';
       const tool = m.activeTool || '';
       const elapsed = m.lastActivityAt ? this.formatTimeAgo(m.lastActivityAt) : '';
-      return `<div class="active-now-card status-${this._escapeAttr(m.status || 'idle')}" onclick="office.showDetail('${this._escapeAttr(m.sessionId)}')">
+      const beamCls = (m.status === 'working') ? ' border-beam border-beam--active' : ' border-beam';
+      return `<div class="active-now-card status-${this._escapeAttr(m.status || 'idle')}${beamCls}" onclick="office.showDetail('${this._escapeAttr(m.sessionId)}')">
         <div class="active-now-card-header">
           <span class="active-now-name">${this._escapeHtml(m.name)}</span>
           <span class="active-now-phase">${this._escapeHtml(phase)}</span>
