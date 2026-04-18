@@ -371,6 +371,7 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 		lastPrompt := agent.LastPromptSentAt
 		lastCheck, hasCheck := agent.ProgressChecks[active.ID]
 		lastAPI := agent.LastAgentAPIAt
+		lastTurn := agent.LastTurnAt
 		agent.mu.Unlock()
 
 		// Task must have been in_progress for at least the threshold.
@@ -380,6 +381,15 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 		}
 		taskAge := now.Sub(baseline)
 		if taskAge < autoCompleteThreshold {
+			continue
+		}
+
+		// Grace window after a turn ends: the agent needs a few seconds
+		// to emit task-complete / task-progress via the `cm` CLI post-
+		// turn. Observed 2026-04-18 03:53:41-44 UTC: Ops turn ended,
+		// auto-complete fired 3 seconds later before the agent could
+		// make any follow-up API call.
+		if !lastTurn.IsZero() && now.Sub(lastTurn) < 30*time.Second {
 			continue
 		}
 
@@ -496,7 +506,15 @@ func (m *Manager) checkStaleInProgressTasks() {
 		agent.mu.Lock()
 		lastCheck, hasCheck := agent.ProgressChecks[active.ID]
 		lastAPI := agent.LastAgentAPIAt
+		lastTurn := agent.LastTurnAt
 		agent.mu.Unlock()
+
+		// Grace window after a turn ends: the agent may be about to
+		// emit task-progress or task-complete. Don't interrupt with a
+		// progress-check prompt for 30s.
+		if !lastTurn.IsZero() && now.Sub(lastTurn) < 30*time.Second {
+			continue
+		}
 
 		// Recent API call from the agent (task-progress, task-ack,
 		// self-add, etc.) is proof they're still engaged. Skip the
