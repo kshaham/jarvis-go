@@ -531,6 +531,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/memory/section", h.OfficeAgentGetMemorySection)
 				r.Get("/memory/query", h.OfficeAgentGetMemoryQuery)
 				r.Get("/dev-instance", h.OfficeAgentGetDevInstance)
+				r.Get("/dev-instance/all", h.OfficeAgentGetDevInstanceAll)
 				r.Get("/dev-credentials", h.OfficeAgentGetDevCredentials)
 				// Mutating
 				r.Post("/standup/response", h.OfficeAgentStandupResponse)

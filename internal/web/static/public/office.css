@@ -1074,6 +1074,98 @@
 
 /* ========== END Round 10 ========== */
 
+/* ========== Round 15: team dev instances card ========== */
+
+.dev-instances-card {
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+.dev-instances-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.dev-instances-hint {
+  font-family: var(--mono-stack);
+  font-variant-numeric: tabular-nums;
+}
+.dev-instances-list {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr auto;
+  gap: 8px 14px;
+  align-items: center;
+}
+.dev-instance-row {
+  display: contents;
+}
+.dev-instance-slot {
+  font-family: var(--ui-stack);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+.dev-instance-url {
+  font-family: var(--mono-stack);
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.dev-instance-url:hover { color: var(--accent-hi); text-decoration: underline; }
+.dev-instance-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dev-instance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  font-family: var(--ui-stack);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.dev-instance-badge.healthy {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.12);
+}
+.dev-instance-badge.failing {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+}
+.dev-instance-badge.forced {
+  color: #fcd34d;
+  background: rgba(234, 179, 8, 0.14);
+}
+.dev-instance-badge.creds {
+  color: var(--accent-hi);
+}
+.dev-instance-meta {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: var(--mono-stack);
+  margin-top: -4px;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+
+/* ========== END Round 15 ========== */
+
 /* ========== Reset / Base ========== */
 
 *, *::before, *::after {

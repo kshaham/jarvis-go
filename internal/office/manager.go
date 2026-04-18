@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	urlPkg "net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +20,12 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// execCommand + execExitError indirect the os/exec types so tests can
+// swap them (not used today, but keeps the code testable).
+var execCommand = exec.Command
+
+type execExitError = exec.ExitError
 
 // Manager is the central coordinator for the Virtual Office.
 type Manager struct {
@@ -50,22 +59,12 @@ type Manager struct {
 	// Purely a UI signal — used by the header budget pill and the
 	// Insights progress bar. Persisted across restarts.
 	teamDailyBudget    float64
-	// Dev instance URL announced by the team lead. Empty = no dev server
-	// running. Format MUST be http://jarvis:<port> so the headless-shell
-	// sibling container can reach it over the compose network. Persisted
-	// so the URL survives container restarts within the same team.
-	teamDevURL         string
-	// Optional PID of the dev server process so Jarvis can SIGTERM on
-	// wrap-up / lead death. 0 = no PID tracked (caller accepted the orphan
-	// risk by announcing without --pid).
-	teamDevPID         int
-	// Free-text login credentials for the dev instance. Written by the
-	// lead ("admin@dev.local / password123" or a multi-line block).
-	// Stored server-side at 0o600 and never logged. Empty = no creds set.
-	teamDevCreds       string
-	// Consecutive health-check failures on teamDevURL. After 3 strikes
-	// the URL is auto-cleared so agents stop pointing at a dead server.
-	devHealthFailures  int
+	// Dev instances keyed by slot name (default slot is "app"; fullstack
+	// teams can have e.g. "frontend" + "api"). One dev server per slot.
+	// Persisted individually at ~/.jarvis/office-memory/team-dev-<slot>.json.
+	// All legacy getters (GetTeamDevURL etc.) route through the "app" slot
+	// so R13/R14 callers keep working without changes.
+	teamDevInstances   map[string]*devInstance
 	// Which template the current team was spawned from + its resolved
 	// working directory. Exposed in the status payload so the UI can show
 	// a "current team" banner while a team is running.
@@ -879,21 +878,80 @@ func (m *Manager) loadPersistedMission() {
 			m.teamDailyBudget = v
 		}
 	}
-	// Dev instance URL — restored so agents re-joining after a container
-	// restart still see the live URL if the dev server is still running.
-	if udata, uerr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-url.txt")); uerr == nil {
-		m.teamDevURL = strings.TrimSpace(string(udata))
+	// Dev instance slots — JSON files in ~/.jarvis/office-memory/ named
+	// team-dev-<slot>.json. Also migrate legacy R13/R14 flat files into
+	// the default "app" slot on first boot, then remove them.
+	m.loadDevInstances()
+}
+
+// loadDevInstances reads every team-dev-*.json in office-memory and
+// populates teamDevInstances. Also migrates the legacy R14 flat files
+// (team-dev-url.txt, team-dev-pid.txt, team-dev-creds.txt) into the
+// default "app" slot on first boot.
+func (m *Manager) loadDevInstances() {
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+	if m.teamDevInstances == nil {
+		m.teamDevInstances = map[string]*devInstance{}
 	}
-	// Dev server PID for orphan cleanup on wrap-up / lead death.
-	if pdata, perr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-pid.txt")); perr == nil {
-		if pid, pierr := strconv.Atoi(strings.TrimSpace(string(pdata))); pierr == nil && pid > 0 {
-			m.teamDevPID = pid
+
+	// Step 1: load all existing JSON slot files.
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasPrefix(name, "team-dev-") || !strings.HasSuffix(name, ".json") {
+				continue
+			}
+			slotName := strings.TrimSuffix(strings.TrimPrefix(name, "team-dev-"), ".json")
+			if !validDevSlotName(slotName) {
+				continue
+			}
+			data, readErr := os.ReadFile(filepath.Join(dir, name))
+			if readErr != nil {
+				continue
+			}
+			var inst devInstance
+			if unmErr := json.Unmarshal(data, &inst); unmErr != nil {
+				slog.Warn("malformed dev instance file; ignoring", "path", name, "err", unmErr)
+				continue
+			}
+			m.teamDevInstances[slotName] = &inst
 		}
 	}
-	// Dev instance credentials (free-text login blob).
-	if cdata, cerr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-creds.txt")); cerr == nil {
-		m.teamDevCreds = strings.TrimSpace(string(cdata))
+
+	// Step 2: migrate legacy flat files into "app" if the JSON doesn't
+	// already exist. JSON wins on conflict (covers the edge case of a
+	// partial manual edit).
+	if _, ok := m.teamDevInstances[defaultDevSlot]; !ok {
+		legacy := devInstance{}
+		migrated := false
+		if data, lerr := os.ReadFile(filepath.Join(dir, "team-dev-url.txt")); lerr == nil {
+			legacy.URL = strings.TrimSpace(string(data))
+			migrated = migrated || legacy.URL != ""
+		}
+		if data, lerr := os.ReadFile(filepath.Join(dir, "team-dev-pid.txt")); lerr == nil {
+			if pid, patErr := strconv.Atoi(strings.TrimSpace(string(data))); patErr == nil && pid > 0 {
+				legacy.PID = pid
+				migrated = true
+			}
+		}
+		if data, lerr := os.ReadFile(filepath.Join(dir, "team-dev-creds.txt")); lerr == nil {
+			legacy.Credentials = strings.TrimSpace(string(data))
+			migrated = migrated || legacy.Credentials != ""
+		}
+		if migrated {
+			m.teamDevInstances[defaultDevSlot] = &legacy
+			m.persistDevInstance(defaultDevSlot, &legacy)
+			slog.Info("migrated legacy dev instance flat files into app.json slot")
+		}
 	}
+
+	// Step 3: clean up legacy flat files now that JSON has been written.
+	// Idempotent — a later restart just finds nothing to remove.
+	_ = os.Remove(filepath.Join(dir, "team-dev-url.txt"))
+	_ = os.Remove(filepath.Join(dir, "team-dev-pid.txt"))
+	_ = os.Remove(filepath.Join(dir, "team-dev-creds.txt"))
 }
 
 // SetTeamDailyBudget updates the daily spend budget (USD) and persists it.
@@ -916,155 +974,464 @@ func (m *Manager) SetTeamDailyBudget(v float64) {
 	}
 }
 
-// GetTeamDevURL returns the currently-announced dev instance URL, or "".
+// devInstance is one dev-server slot for a team. Keyed by slot name in
+// Manager.teamDevInstances ("app" is the default). Persisted to disk as
+// team-dev-<slot>.json; creds go in the same file since the schema can
+// grow without adding new files.
+type devInstance struct {
+	URL            string    `json:"url"`
+	PID            int       `json:"pid"`
+	Credentials    string    `json:"credentials,omitempty"`
+	HealthFailures int       `json:"healthFailures"`
+	LastCheckAt    time.Time `json:"lastCheckAt,omitempty"`
+	// NextCheckAt gates the next health check. Populated on failure so
+	// repeated failures back off (tick×1, ×2, ×4). Zero = check next tick.
+	NextCheckAt    time.Time `json:"nextCheckAt,omitempty"`
+	ForceAnnounced bool      `json:"forceAnnounced,omitempty"`
+}
+
+// defaultDevSlot is the single-slot backward-compat key. R13/R14 callers
+// that don't pass a name write to and read from this slot.
+const defaultDevSlot = "app"
+
+// devSlotNameRe validates slot names — simple to avoid filesystem footguns
+// (slot name becomes part of the persisted filename).
+var devSlotNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
+
+// validDevSlotName returns true for safe filesystem-safe slot names.
+func validDevSlotName(name string) bool {
+	return devSlotNameRe.MatchString(name)
+}
+
+// GetTeamDevURL returns the default "app" slot's URL (backward-compat).
 func (m *Manager) GetTeamDevURL() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.teamDevURL
+	inst, ok := m.GetDevInstance(defaultDevSlot)
+	if !ok {
+		return ""
+	}
+	return inst.URL
 }
 
-// GetTeamDevPID returns the currently-tracked dev server PID, or 0.
+// GetTeamDevPID returns the default slot's PID (backward-compat).
 func (m *Manager) GetTeamDevPID() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.teamDevPID
+	inst, ok := m.GetDevInstance(defaultDevSlot)
+	if !ok {
+		return 0
+	}
+	return inst.PID
 }
 
-// SetTeamDevURL records the URL of the dev instance the lead is running
-// along with an optional process PID used for orphan cleanup. Empty URL
-// clears the slot. A localhost-only URL logs a warning — the CLI + HTTP
-// handler reject it at the edge before it reaches here, but if something
-// else calls this we still want a signal in the logs.
-func (m *Manager) SetTeamDevURL(url string, pid int) {
+// GetTeamDevCredentials returns the default slot's credentials (backward-compat).
+func (m *Manager) GetTeamDevCredentials() string {
+	inst, ok := m.GetDevInstance(defaultDevSlot)
+	if !ok {
+		return ""
+	}
+	return inst.Credentials
+}
+
+// GetDevInstance returns a snapshot of the named slot (thread-safe). The
+// second return is false when the slot is absent.
+func (m *Manager) GetDevInstance(name string) (devInstance, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.teamDevInstances == nil {
+		return devInstance{}, false
+	}
+	inst, ok := m.teamDevInstances[name]
+	if !ok || inst == nil {
+		return devInstance{}, false
+	}
+	// Return a value copy so callers can't mutate state via the pointer.
+	return *inst, true
+}
+
+// ListDevInstances returns a snapshot of every slot keyed by name.
+func (m *Manager) ListDevInstances() map[string]devInstance {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]devInstance, len(m.teamDevInstances))
+	for k, v := range m.teamDevInstances {
+		if v != nil {
+			out[k] = *v
+		}
+	}
+	return out
+}
+
+// portFromURL extracts the host port as a string ("" if absent/invalid).
+func portFromURL(raw string) string {
+	u, err := urlPkg.Parse(raw)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.Port()
+}
+
+// DevInstancePortConflict returns the slot name that currently holds the
+// given URL's port, or "" if free. Used by SetDevInstance to reject
+// re-announces on an already-held port unless --force is passed.
+func (m *Manager) DevInstancePortConflict(newName, newURL string) string {
+	newPort := portFromURL(newURL)
+	if newPort == "" {
+		return ""
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for name, inst := range m.teamDevInstances {
+		if name == newName || inst == nil || inst.URL == "" {
+			continue
+		}
+		if portFromURL(inst.URL) == newPort {
+			return name
+		}
+	}
+	return ""
+}
+
+// SetDevInstance writes a slot. Pass force=true to skip the port-conflict
+// guard. Callers should enforce localhost-reject + URL validation at the
+// HTTP layer; this function only logs a warning.
+func (m *Manager) SetDevInstance(name, url string, pid int, force bool) error {
+	if name == "" {
+		name = defaultDevSlot
+	}
+	if !validDevSlotName(name) {
+		return fmt.Errorf("invalid slot name %q (allowed: a-z A-Z 0-9 _ - up to 32 chars)", name)
+	}
 	trimmed := strings.TrimSpace(url)
 	if trimmed != "" && (strings.Contains(trimmed, "localhost") || strings.Contains(trimmed, "127.0.0.1")) {
 		slog.Warn("dev URL appears to be localhost-only; agents browsing from headless-shell may not reach it",
-			"url", trimmed, "hint", "use http://jarvis:<port> instead")
+			"slot", name, "url", trimmed, "hint", "use http://jarvis:<port> instead")
 	}
 	if pid < 0 {
 		pid = 0
 	}
 
-	m.mu.Lock()
-	m.teamDevURL = trimmed
-	m.teamDevPID = pid
-	// Reset the health-check counter so a freshly-announced URL gets a
-	// clean slate of 3 strikes before auto-clearing.
-	m.devHealthFailures = 0
-	m.mu.Unlock()
-
-	homeDir, _ := os.UserHomeDir()
-	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
-	_ = os.MkdirAll(dir, 0o755)
-	tmpFile := filepath.Join(dir, "team-dev-url.txt.tmp")
-	targetFile := filepath.Join(dir, "team-dev-url.txt")
-	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o644); err == nil {
-		_ = os.Rename(tmpFile, targetFile)
-	}
-	pidFile := filepath.Join(dir, "team-dev-pid.txt")
-	if pid > 0 {
-		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o644)
-	} else {
-		_ = os.Remove(pidFile)
-	}
-
-	m.broadcast("office:devInstanceChanged", map[string]interface{}{"url": trimmed, "pid": pid})
-}
-
-// GetTeamDevCredentials returns the currently-set dev login blob, or "".
-func (m *Manager) GetTeamDevCredentials() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.teamDevCreds
-}
-
-// SetTeamDevCredentials records the dev instance login blob. Persisted at
-// mode 0o600 since even dev-throwaway creds shouldn't be world-readable.
-// Empty string clears the slot. SSE broadcast intentionally omits the
-// value itself — only a boolean "is set" — so the dashboard knows creds
-// are available without the value leaking across the wire.
-func (m *Manager) SetTeamDevCredentials(creds string) {
-	trimmed := strings.TrimSpace(creds)
-	m.mu.Lock()
-	m.teamDevCreds = trimmed
-	m.mu.Unlock()
-
-	homeDir, _ := os.UserHomeDir()
-	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
-	_ = os.MkdirAll(dir, 0o755)
-	tmpFile := filepath.Join(dir, "team-dev-creds.txt.tmp")
-	targetFile := filepath.Join(dir, "team-dev-creds.txt")
-	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o600); err == nil {
-		_ = os.Rename(tmpFile, targetFile)
-		_ = os.Chmod(targetFile, 0o600)
-	}
-
-	m.broadcast("office:devCredentialsChanged", map[string]interface{}{"set": trimmed != ""})
-}
-
-// ClearTeamDevInstance clears the dev URL, credentials, and optionally
-// kills the tracked PID. Called on team wrap-up, lead death, or
-// health-check expiry. killProc=true only succeeds if a PID was recorded
-// and it's safe to signal (>= 100, so we can't accidentally SIGTERM PID 1
-// or a low-numbered Jarvis subsystem).
-func (m *Manager) ClearTeamDevInstance(killProc bool) {
-	m.mu.Lock()
-	pid := m.teamDevPID
-	hadURL := m.teamDevURL != ""
-	m.mu.Unlock()
-
-	if killProc && pid >= 100 {
-		// SIGTERM first; give the process 3s to exit cleanly before SIGKILL.
-		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-			slog.Warn("dev server SIGTERM failed", "pid", pid, "err", err)
-		} else {
-			slog.Info("dev server SIGTERM sent", "pid", pid)
-			// Poll for the process to exit.
-			deadline := time.Now().Add(3 * time.Second)
-			for time.Now().Before(deadline) {
-				if err := syscall.Kill(pid, 0); err != nil {
-					// Process gone.
-					break
-				}
-				time.Sleep(150 * time.Millisecond)
-			}
-			// Still alive? escalate.
-			if err := syscall.Kill(pid, 0); err == nil {
-				if kerr := syscall.Kill(pid, syscall.SIGKILL); kerr == nil {
-					slog.Info("dev server SIGKILL sent after SIGTERM timeout", "pid", pid)
-				}
-			}
+	// Port conflict guard. --force bypasses so leads can intentionally
+	// share a port (e.g. a hot-reload proxy) without us second-guessing.
+	if trimmed != "" && !force {
+		if conflict := m.DevInstancePortConflict(name, trimmed); conflict != "" {
+			return fmt.Errorf("port %s is already held by slot %q; pick a different port or clear that slot first (or --force to override)",
+				portFromURL(trimmed), conflict)
 		}
 	}
 
-	// Clear URL and creds via the normal setters so persistence + broadcasts fire.
-	if hadURL {
-		m.SetTeamDevURL("", 0)
-	} else {
-		// Ensure PID is cleared even if URL was already empty.
-		m.mu.Lock()
-		m.teamDevPID = 0
-		m.mu.Unlock()
-		homeDir, _ := os.UserHomeDir()
-		_ = os.Remove(filepath.Join(homeDir, ".jarvis", "office-memory", "team-dev-pid.txt"))
+	m.mu.Lock()
+	if m.teamDevInstances == nil {
+		m.teamDevInstances = map[string]*devInstance{}
 	}
-	m.SetTeamDevCredentials("")
+	inst := &devInstance{
+		URL:            trimmed,
+		PID:            pid,
+		ForceAnnounced: force && trimmed != "",
+	}
+	// Preserve existing credentials if this is an announce-only call.
+	if prev, ok := m.teamDevInstances[name]; ok && prev != nil {
+		inst.Credentials = prev.Credentials
+	}
+	m.teamDevInstances[name] = inst
+	m.mu.Unlock()
+
+	m.persistDevInstance(name, inst)
+	m.broadcast("office:devInstanceChanged", map[string]interface{}{
+		"name":           name,
+		"url":            trimmed,
+		"pid":            pid,
+		"forceAnnounced": inst.ForceAnnounced,
+	})
+	if inst.ForceAnnounced {
+		m.broadcast("office:devInstanceForced", map[string]interface{}{
+			"name": name,
+			"url":  trimmed,
+		})
+		slog.Warn("dev instance announced with --force", "slot", name, "url", trimmed)
+	}
+	return nil
 }
 
-// sharedDevHealthClient is used by checkDevInstanceHealth to ping the
-// announced URL. Short timeout so a slow dev server doesn't stall the
-// monitoring ticker.
+// SetDevInstanceCredentials writes creds for the named slot. Empty clears.
+func (m *Manager) SetDevInstanceCredentials(name, creds string) error {
+	if name == "" {
+		name = defaultDevSlot
+	}
+	if !validDevSlotName(name) {
+		return fmt.Errorf("invalid slot name %q", name)
+	}
+	trimmed := strings.TrimSpace(creds)
+
+	m.mu.Lock()
+	if m.teamDevInstances == nil {
+		m.teamDevInstances = map[string]*devInstance{}
+	}
+	inst, ok := m.teamDevInstances[name]
+	if !ok || inst == nil {
+		// Creating a creds-only slot (no URL yet) is useful for leads who
+		// want to pre-seed credentials before starting the server.
+		inst = &devInstance{}
+		m.teamDevInstances[name] = inst
+	}
+	inst.Credentials = trimmed
+	// If this slot has no URL and no PID and now no creds, drop it so
+	// listings stay clean.
+	empty := inst.URL == "" && inst.PID == 0 && inst.Credentials == ""
+	if empty {
+		delete(m.teamDevInstances, name)
+	}
+	m.mu.Unlock()
+
+	if empty {
+		m.removeDevInstanceFile(name)
+	} else {
+		m.persistDevInstance(name, inst)
+	}
+	m.broadcast("office:devCredentialsChanged", map[string]interface{}{
+		"name": name,
+		"set":  trimmed != "",
+	})
+	return nil
+}
+
+// SetTeamDevURL is the backward-compat wrapper for R13/R14 callers that
+// target the default "app" slot. --force is off; callers who need it must
+// call SetDevInstance directly (or go through the HTTP handler which
+// already routes ?force=true).
+func (m *Manager) SetTeamDevURL(url string, pid int) {
+	_ = m.SetDevInstance(defaultDevSlot, url, pid, false)
+}
+
+// SetTeamDevCredentials is the backward-compat wrapper for the "app" slot.
+func (m *Manager) SetTeamDevCredentials(creds string) {
+	_ = m.SetDevInstanceCredentials(defaultDevSlot, creds)
+}
+
+// ClearDevInstance clears one slot. killProc=true SIGTERMs the tracked
+// process tree (falling back to single-PID kill if pgrep isn't installed).
+func (m *Manager) ClearDevInstance(name string, killProc bool) {
+	if name == "" {
+		name = defaultDevSlot
+	}
+	m.mu.RLock()
+	var pid int
+	if inst, ok := m.teamDevInstances[name]; ok && inst != nil {
+		pid = inst.PID
+	}
+	m.mu.RUnlock()
+
+	if killProc && pid >= 100 {
+		killProcessTree(pid)
+	}
+
+	m.mu.Lock()
+	delete(m.teamDevInstances, name)
+	m.mu.Unlock()
+
+	m.removeDevInstanceFile(name)
+	m.broadcast("office:devInstanceCleared", map[string]interface{}{"name": name})
+}
+
+// ClearAllDevInstances wipes every slot. Used on team wrap-up.
+func (m *Manager) ClearAllDevInstances(killProc bool) {
+	m.mu.RLock()
+	names := make([]string, 0, len(m.teamDevInstances))
+	for n := range m.teamDevInstances {
+		names = append(names, n)
+	}
+	m.mu.RUnlock()
+	for _, n := range names {
+		m.ClearDevInstance(n, killProc)
+	}
+}
+
+// ClearTeamDevInstance is the backward-compat wrapper; clears every slot
+// since R13/R14 callers assumed "the" dev instance. This is the right
+// behavior on wrap-up / lead death: kill the whole tree.
+func (m *Manager) ClearTeamDevInstance(killProc bool) {
+	m.ClearAllDevInstances(killProc)
+}
+
+// persistDevInstance writes the slot JSON atomically. Credentials present
+// → file mode 0600; otherwise 0644 so the URL/PID remain readable.
+func (m *Manager) persistDevInstance(name string, inst *devInstance) {
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+	_ = os.MkdirAll(dir, 0o755)
+	target := filepath.Join(dir, "team-dev-"+name+".json")
+	tmp := target + ".tmp"
+	data, err := json.MarshalIndent(inst, "", "  ")
+	if err != nil {
+		slog.Warn("failed to marshal dev instance", "slot", name, "err", err)
+		return
+	}
+	mode := os.FileMode(0o644)
+	if inst.Credentials != "" {
+		mode = 0o600
+	}
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		slog.Warn("failed to persist dev instance", "slot", name, "err", err)
+		return
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		slog.Warn("failed to rename dev instance file", "slot", name, "err", err)
+		return
+	}
+	_ = os.Chmod(target, mode)
+}
+
+func (m *Manager) removeDevInstanceFile(name string) {
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+	_ = os.Remove(filepath.Join(dir, "team-dev-"+name+".json"))
+}
+
+// killProcessTree SIGTERMs the process and all descendants, escalating to
+// SIGKILL after 3s. Falls back to single-PID signaling if pgrep isn't on
+// $PATH (e.g. a minimal container image without procps).
+func killProcessTree(pid int) {
+	if pid < 100 {
+		return
+	}
+	descendants := collectDescendants(pid)
+	allPIDs := append([]int{}, descendants...)
+	allPIDs = append(allPIDs, pid)
+
+	// SIGTERM every process. Leaves first (descendants are collected
+	// breadth-first, so reverse to signal grandchildren before parents).
+	for i := len(allPIDs) - 1; i >= 0; i-- {
+		_ = syscall.Kill(allPIDs[i], syscall.SIGTERM)
+	}
+	slog.Info("dev server tree SIGTERM sent", "parentPID", pid, "descendants", len(descendants))
+
+	// Wait up to 3s for the tree to exit.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		anyAlive := false
+		for _, p := range allPIDs {
+			if syscall.Kill(p, 0) == nil {
+				anyAlive = true
+				break
+			}
+		}
+		if !anyAlive {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	// Escalate.
+	survivors := 0
+	for i := len(allPIDs) - 1; i >= 0; i-- {
+		p := allPIDs[i]
+		if syscall.Kill(p, 0) == nil {
+			if err := syscall.Kill(p, syscall.SIGKILL); err == nil {
+				survivors++
+			}
+		}
+	}
+	if survivors > 0 {
+		slog.Info("dev server tree SIGKILL sent after SIGTERM timeout", "parentPID", pid, "survivors", survivors)
+	}
+}
+
+// collectDescendants BFS-walks the process tree rooted at parent via
+// `pgrep -P`. Returns descendants in BFS order (grandchildren last). If
+// pgrep is unavailable, returns an empty slice; caller will still kill
+// the parent PID on its own.
+func collectDescendants(parent int) []int {
+	out := []int{}
+	queue := []int{parent}
+	// Safety cap: don't walk more than 500 nodes; malformed trees can
+	// produce cycles in pathological cases.
+	visited := map[int]bool{parent: true}
+	for len(queue) > 0 && len(out) < 500 {
+		next := queue[0]
+		queue = queue[1:]
+		children, err := pgrepChildren(next)
+		if err != nil {
+			// pgrep missing or failed — caller falls back to single-PID kill.
+			return out
+		}
+		for _, c := range children {
+			if visited[c] {
+				continue
+			}
+			visited[c] = true
+			out = append(out, c)
+			queue = append(queue, c)
+		}
+	}
+	return out
+}
+
+// pgrepChildren runs `pgrep -P <parent>` and parses the PID list. Returns
+// an error if pgrep isn't available so callers can fall back gracefully.
+func pgrepChildren(parent int) ([]int, error) {
+	cmd := execCommand("pgrep", "-P", strconv.Itoa(parent))
+	out, err := cmd.Output()
+	if err != nil {
+		// Exit status 1 from pgrep = "no matches" (normal, not an error
+		// for our purposes). Anything else means pgrep itself failed.
+		if exitErr, ok := err.(*execExitError); ok && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		if p, perr := strconv.Atoi(strings.TrimSpace(line)); perr == nil && p > 0 {
+			pids = append(pids, p)
+		}
+	}
+	return pids, nil
+}
+
+// sharedDevHealthClient is reused across every slot's tick to avoid
+// opening a new TCP handshake pool per tick. 5s timeout keeps the
+// monitoring goroutine responsive even if a dev server hangs.
 var sharedDevHealthClient = &http.Client{Timeout: 5 * time.Second}
 
-// CheckDevInstanceHealth pings the announced URL and auto-clears after 3
-// consecutive failures. No-op when no URL is announced. Any HTTP response
-// (including 4xx) counts as healthy — we only fail on network errors and
-// 5xx — because auth-gated dev instances legitimately return 401/403.
+// CheckDevInstanceHealth pings every announced slot, skipping those that
+// are still in backoff (NextCheckAt > now). On 3 consecutive failures the
+// URL is auto-cleared. 4xx responses (including 401/403) count as healthy
+// because auth-gated dev instances legitimately return them.
 func (m *Manager) CheckDevInstanceHealth() {
 	m.mu.RLock()
-	url := m.teamDevURL
+	names := make([]string, 0, len(m.teamDevInstances))
+	for n, inst := range m.teamDevInstances {
+		if inst != nil && inst.URL != "" {
+			names = append(names, n)
+		}
+	}
 	m.mu.RUnlock()
-	if url == "" {
+
+	now := time.Now()
+	for _, name := range names {
+		m.checkOneDevInstance(name, now)
+	}
+}
+
+// checkOneDevInstance runs one tick of the adaptive health-check for the
+// named slot. On success the failure counter resets; on failure the
+// counter increments and NextCheckAt is pushed out exponentially
+// (interval×1, ×2, ×4 capped) so a rate-limited dev server doesn't get
+// thrashed. Three strikes auto-clears the slot without SIGTERM (the
+// process is likely dead; signaling the PID risks hitting a recycled one).
+func (m *Manager) checkOneDevInstance(name string, now time.Time) {
+	m.mu.RLock()
+	inst, ok := m.teamDevInstances[name]
+	if !ok || inst == nil || inst.URL == "" {
+		m.mu.RUnlock()
+		return
+	}
+	url := inst.URL
+	nextCheckAt := inst.NextCheckAt
+	failures := inst.HealthFailures
+	m.mu.RUnlock()
+
+	if !nextCheckAt.IsZero() && now.Before(nextCheckAt) {
 		return
 	}
 
@@ -1075,28 +1442,50 @@ func (m *Manager) CheckDevInstanceHealth() {
 	}
 
 	m.mu.Lock()
-	if healthy {
-		m.devHealthFailures = 0
+	// Re-lookup in case the slot was cleared during the Get call.
+	inst, ok = m.teamDevInstances[name]
+	if !ok || inst == nil {
 		m.mu.Unlock()
 		return
 	}
-	m.devHealthFailures++
-	failCount := m.devHealthFailures
+	inst.LastCheckAt = now
+	if healthy {
+		inst.HealthFailures = 0
+		inst.NextCheckAt = time.Time{}
+		m.mu.Unlock()
+		return
+	}
+	inst.HealthFailures++
+	failures = inst.HealthFailures
+	// Exponential backoff: interval×1, ×2, ×4 (capped at ×4). Uses the
+	// same base interval as the idle monitor so the schedule stays
+	// predictable relative to other checks.
+	base := m.config.IdleCheckInterval
+	mult := time.Duration(1)
+	if failures >= 3 {
+		mult = 4
+	} else if failures == 2 {
+		mult = 2
+	}
+	inst.NextCheckAt = now.Add(base * mult)
 	m.mu.Unlock()
 
 	errMsg := "5xx"
 	if err != nil {
 		errMsg = err.Error()
 	}
-	if failCount >= 3 {
-		slog.Warn("dev URL unreachable after 3 consecutive checks; auto-clearing", "url", url, "lastError", errMsg)
+	if failures >= 3 {
+		slog.Warn("dev URL unreachable after 3 consecutive checks; auto-clearing",
+			"slot", name, "url", url, "lastError", errMsg)
 		m.broadcast("office:devInstanceCleared", map[string]interface{}{
-			"reason": "health_check_failed", "lastError": errMsg, "url": url,
+			"name":      name,
+			"reason":    "health_check_failed",
+			"lastError": errMsg,
+			"url":       url,
 		})
-		// Clear URL+creds but don't kill the PID — if the process is dead
-		// (which is why health checks failed), a kill signal on its PID
-		// could land on a recycled process with the same PID.
-		m.ClearTeamDevInstance(false)
+		// Don't kill — the process is almost certainly already dead, and
+		// a stale PID could now belong to a recycled unrelated process.
+		m.ClearDevInstance(name, false)
 	}
 }
 
@@ -1154,7 +1543,12 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	curiosityEnabled := m.curiosityEnabled
 	teamMission := m.teamMission
 	teamDailyBudget := m.teamDailyBudget
-	teamDevURL := m.teamDevURL
+	// Expose the default "app" slot URL for backward-compat consumers.
+	// The full slot map is available via /api/office/agent/dev-instance/all.
+	var teamDevURL string
+	if inst, ok := m.teamDevInstances[defaultDevSlot]; ok && inst != nil {
+		teamDevURL = inst.URL
+	}
 	lastTemplateID := m.lastTemplateID
 	lastWorkingDir := m.lastWorkingDir
 	var lastBrainstormAtMs int64

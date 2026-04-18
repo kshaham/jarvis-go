@@ -215,6 +215,9 @@ class OfficeApp {
     // whatever state the initial fetch populated.
     this._updateBudgetPill();
     this._scheduleOverviewRefresh();
+    // R15 · Team dev instances card: initial load; subsequent updates come
+    // over the office:devInstance* SSE events.
+    this.refreshDevInstances();
 
     // Restore view mode preference (list or compact; grid is default)
     if (this._viewMode === 'list' || this._viewMode === 'compact') {
@@ -682,6 +685,21 @@ class OfficeApp {
       const reason = (data.subtype || 'error').toString();
       this.addActivityEntry('system', `${who} turn failed (${reason})`);
       this.showNotification(`${who} hit a provider error -- may need a retry`, 'error');
+    });
+
+    // R15 · Team dev instances — re-pull the full slot map on any change so
+    // the dashboard card stays in sync with adds/clears/health flips.
+    this.eventSource.addEventListener('office:devInstanceChanged', () => { this.refreshDevInstances(); });
+    this.eventSource.addEventListener('office:devInstanceCleared', () => { this.refreshDevInstances(); });
+    this.eventSource.addEventListener('office:devInstanceForced', () => { this.refreshDevInstances(); });
+    this.eventSource.addEventListener('office:devCredentialsChanged', () => { this.refreshDevInstances(); });
+    // R15 · UI task completed without visual verification — surface a
+    // low-urgency toast so the operator notices discipline slippage.
+    this.eventSource.addEventListener('office:uiTaskMissingScreenshot', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const title = (data.title || 'UI task').toString().slice(0, 60);
+      this.addActivityEntry('system', `UI task completed without visual verification: ${title}`);
     });
 
     this.eventSource.onopen = () => {
@@ -7183,6 +7201,85 @@ class OfficeApp {
 
   closeShortcutsOverlay() {
     document.getElementById('shortcutsOverlay')?.classList.add('hidden');
+  }
+
+  // R15 · Fetch the full slot map + re-render the dashboard card. Called on
+  // init + any office:devInstance* SSE event. Uses the agent endpoint so
+  // jarvis-mcp running inside sessions can also drive updates; the browser
+  // session cookie carries the same auth.
+  async refreshDevInstances() {
+    try {
+      const res = await fetch('/api/office/agent/dev-instance/all', {
+        credentials: 'include',
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const slots = (data && data.slots) || {};
+      this._renderDevInstancesCard(slots);
+    } catch (err) {
+      // Non-critical — the SSE listener will try again on the next event.
+    }
+  }
+
+  // R15 · Render the team dev instances card. Hides when empty.
+  _renderDevInstancesCard(slots) {
+    const card = document.getElementById('devInstancesCard');
+    const list = document.getElementById('devInstancesList');
+    const count = document.getElementById('devInstancesCount');
+    if (!card || !list) return;
+
+    const names = Object.keys(slots || {}).sort();
+    if (names.length === 0) {
+      card.classList.add('hidden');
+      list.innerHTML = '';
+      return;
+    }
+    card.classList.remove('hidden');
+    if (count) count.textContent = `${names.length} running`;
+
+    const rows = names.map(name => {
+      const s = slots[name] || {};
+      const url = this.escapeHtml(s.url || '');
+      const healthy = (s.healthFailures || 0) === 0;
+      const failing = (s.healthFailures || 0) >= 2;
+      const forced = !!s.forceAnnounced;
+      const credsSet = !!s.credsSet;
+
+      const badges = [];
+      if (forced) {
+        badges.push('<span class="dev-instance-badge forced" title="Announced with --force">forced</span>');
+      }
+      if (failing) {
+        badges.push(`<span class="dev-instance-badge failing" title="Health check failing (${s.healthFailures} strikes)">failing</span>`);
+      } else if (healthy && s.url) {
+        badges.push('<span class="dev-instance-badge healthy" title="Health check passing">healthy</span>');
+      }
+      if (credsSet) {
+        badges.push('<span class="dev-instance-badge creds" title="Login credentials available via cm dev creds">creds</span>');
+      }
+
+      const metaParts = [];
+      if (s.pid) metaParts.push(`pid ${s.pid}`);
+      if (s.lastCheckAt) {
+        // Server sends ISO8601; show relative time using our existing util.
+        const ts = new Date(s.lastCheckAt).getTime();
+        if (ts) metaParts.push(`last check ${this.formatTimeAgo(ts)}`);
+      }
+      const meta = metaParts.length ? `<div class="dev-instance-meta">${this.escapeHtml(metaParts.join(' · '))}</div>` : '';
+
+      return `
+        <div class="dev-instance-row">
+          <span class="dev-instance-slot">${this.escapeHtml(name)}</span>
+          ${s.url
+            ? `<a class="dev-instance-url" href="${url}" target="_blank" rel="noopener noreferrer" title="${url}">${url}</a>`
+            : '<span class="dev-instance-url" style="color:var(--text-faint)">(no URL)</span>'}
+          <span class="dev-instance-badges">${badges.join('')}</span>
+          ${meta}
+        </div>
+      `;
+    });
+
+    list.innerHTML = rows.join('');
   }
 
   escapeHtml(text) {

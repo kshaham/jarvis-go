@@ -289,19 +289,22 @@ func handleTask(args []string) {
 	}
 }
 
-// handleDev dispatches `cm dev <announce|url|clear|creds>`. Wraps
+// handleDev dispatches `cm dev <announce|url|clear|list|creds>`. Wraps
 // /api/office/agent/dev-instance + /dev-credentials so leads can announce
-// the dev server URL + login creds and teammates can discover them before
-// running browser verification.
+// the dev server URL + login creds for one or more slots ("app" by
+// default; fullstack teams can use --name for "frontend"/"api"/etc.).
 func handleDev(args []string) {
 	if len(args) < 1 {
-		fatal("Usage: cm dev <announce|url|clear|creds> [args]")
+		fatal("Usage: cm dev <announce|url|clear|list|creds> [args]")
 	}
 	switch args[0] {
 	case "url":
-		// Just print the URL string (not JSON) so it can be piped directly
-		// into `browser-screenshot $(cm dev url) /tmp/x.png`.
-		result := get("/api/office/agent/dev-instance")
+		// Positional slot name, optional — defaults to "app".
+		slot := "app"
+		if len(args) > 1 && !strings.HasPrefix(args[1], "--") {
+			slot = args[1]
+		}
+		result := get("/api/office/agent/dev-instance?name=" + url.QueryEscape(slot))
 		if m, ok := result.(map[string]interface{}); ok {
 			if u, ok := m["url"].(string); ok {
 				fmt.Println(u)
@@ -309,15 +312,18 @@ func handleDev(args []string) {
 			}
 		}
 		fmt.Println("")
+	case "list":
+		result := get("/api/office/agent/dev-instance/all")
+		printJSON(result)
 	case "announce":
-		u, pid, force := parseAnnounceArgs(args[1:])
+		slot, u, pid, force := parseAnnounceArgs(args[1:])
 		if u == "" {
-			fatal("Usage: cm dev announce <url> [--pid <n>] [--force]  (e.g. cm dev announce http://jarvis:3001 --pid 1234)")
+			fatal("Usage: cm dev announce <url> [--name <slot>] [--pid <n>] [--force]  (e.g. cm dev announce http://jarvis:3001 --pid 1234)")
 		}
 		if !force && (strings.Contains(u, "localhost") || strings.Contains(u, "127.0.0.1")) {
 			fatal(fmt.Sprintf("%q is localhost-only; headless-shell agents can't reach it. Rebind your dev server to 0.0.0.0 and use http://jarvis:<port>, or pass --force to override.", u))
 		}
-		body := map[string]interface{}{"url": u, "pid": pid}
+		body := map[string]interface{}{"name": slot, "url": u, "pid": pid}
 		path := "/api/office/agent/dev-instance"
 		if force {
 			path += "?force=true"
@@ -326,17 +332,28 @@ func handleDev(args []string) {
 		if force {
 			fmt.Fprintf(os.Stderr, "warning: announced %q with --force; teammates may get connection refused.\n", u)
 		}
+		slotLabel := ""
+		if slot != "" && slot != "app" {
+			slotLabel = fmt.Sprintf(" slot=%q", slot)
+		}
 		if pid > 0 {
-			fmt.Printf("Dev URL announced: %s (pid=%d, Jarvis will clean up on wrap-up / lead death)\n", u, pid)
+			fmt.Printf("Dev URL announced: %s%s (pid=%d, Jarvis will clean up on wrap-up / lead death)\n", u, slotLabel, pid)
 		} else {
-			fmt.Printf("Dev URL announced: %s (no PID tracked; remember to `cm dev clear` + kill the process yourself on wrap-up)\n", u)
+			fmt.Printf("Dev URL announced: %s%s (no PID tracked; remember to `cm dev clear` + kill the process yourself on wrap-up)\n", u, slotLabel)
 		}
 	case "clear":
-		// Empty URL clears the slot; the server-side SetTeamDevURL treats
-		// empty as "no dev server running" and broadcasts the change.
-		// DELETE also triggers SIGTERM on the tracked PID if any.
-		post("/api/office/agent/dev-instance", map[string]interface{}{"url": ""})
-		fmt.Println("Dev URL cleared.")
+		// --all wipes every slot; otherwise a positional name (default "app").
+		if len(args) > 1 && args[1] == "--all" {
+			del("/api/office/agent/dev-instance?all=true")
+			fmt.Println("All dev URLs cleared.")
+			return
+		}
+		slot := "app"
+		if len(args) > 1 && !strings.HasPrefix(args[1], "--") {
+			slot = args[1]
+		}
+		del("/api/office/agent/dev-instance?name=" + url.QueryEscape(slot))
+		fmt.Printf("Dev URL cleared (slot=%q).\n", slot)
 	case "creds":
 		handleDevCreds(args[1:])
 	default:
@@ -344,9 +361,11 @@ func handleDev(args []string) {
 	}
 }
 
-// parseAnnounceArgs extracts the URL + optional --pid and --force flags
-// from `cm dev announce` args. Flags may appear in any order.
-func parseAnnounceArgs(args []string) (url string, pid int, force bool) {
+// parseAnnounceArgs extracts URL + slot + optional --pid / --force flags
+// from `cm dev announce` args. Slot defaults to "app"; flags may appear
+// in any order.
+func parseAnnounceArgs(args []string) (slot, url string, pid int, force bool) {
+	slot = "app"
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch a {
@@ -362,6 +381,12 @@ func parseAnnounceArgs(args []string) (url string, pid int, force bool) {
 			}
 			pid = v
 			i++
+		case "--name":
+			if i+1 >= len(args) {
+				fatal("--name requires a value")
+			}
+			slot = args[i+1]
+			i++
 		default:
 			if strings.HasPrefix(a, "--") {
 				fatal("unknown flag: " + a)
@@ -374,11 +399,27 @@ func parseAnnounceArgs(args []string) (url string, pid int, force bool) {
 	return
 }
 
-// handleDevCreds dispatches `cm dev creds [set <text...>|clear]`.
+// handleDevCreds dispatches `cm dev creds [set <text...>|clear] [--name <slot>]`.
 func handleDevCreds(args []string) {
-	if len(args) == 0 {
+	// Strip out --name flag so the remaining positional args form the
+	// subcommand + text blob. Default slot is "app".
+	slot := "app"
+	cleaned := []string{}
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--name" {
+			if i+1 >= len(args) {
+				fatal("--name requires a value")
+			}
+			slot = args[i+1]
+			i++
+			continue
+		}
+		cleaned = append(cleaned, args[i])
+	}
+
+	if len(cleaned) == 0 {
 		// Read
-		result := get("/api/office/agent/dev-credentials")
+		result := get("/api/office/agent/dev-credentials?name=" + url.QueryEscape(slot))
 		if m, ok := result.(map[string]interface{}); ok {
 			if c, ok := m["credentials"].(string); ok {
 				fmt.Println(c)
@@ -388,19 +429,21 @@ func handleDevCreds(args []string) {
 		fmt.Println("")
 		return
 	}
-	switch args[0] {
+	switch cleaned[0] {
 	case "set":
-		if len(args) < 2 {
+		if len(cleaned) < 2 {
 			fatal("Usage: cm dev creds set <text...>  (e.g. cm dev creds set \"admin@dev.local / password123\")")
 		}
-		blob := strings.Join(args[1:], " ")
-		post("/api/office/agent/dev-credentials", map[string]interface{}{"credentials": blob})
-		fmt.Println("Dev credentials set.")
+		blob := strings.Join(cleaned[1:], " ")
+		post("/api/office/agent/dev-credentials",
+			map[string]interface{}{"name": slot, "credentials": blob})
+		fmt.Printf("Dev credentials set (slot=%q).\n", slot)
 	case "clear":
-		post("/api/office/agent/dev-credentials", map[string]interface{}{"credentials": ""})
-		fmt.Println("Dev credentials cleared.")
+		post("/api/office/agent/dev-credentials",
+			map[string]interface{}{"name": slot, "credentials": ""})
+		fmt.Printf("Dev credentials cleared (slot=%q).\n", slot)
 	default:
-		fatal("Unknown creds subcommand: " + args[0] + " (expected: set|clear, or no args to read)")
+		fatal("Unknown creds subcommand: " + cleaned[0] + " (expected: set|clear, or no args to read)")
 	}
 }
 
@@ -518,6 +561,27 @@ func post(path string, body map[string]interface{}) {
 	}
 }
 
+// del issues an HTTP DELETE against the given API path with agent auth.
+// Fatal-exits on non-2xx so CLI scripts fail loudly instead of silently
+// skipping over a delete that didn't happen.
+func del(path string) {
+	requireEnv()
+	req, err := http.NewRequest("DELETE", apiURL+path, nil)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	addAgentAuth(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		text, _ := io.ReadAll(resp.Body)
+		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
+	}
+}
+
 func get(path string) interface{} {
 	requireEnv()
 	req, err := http.NewRequest("GET", apiURL+path, nil)
@@ -613,13 +677,17 @@ Commands:
   memory section --append <name> <entry>
                                       Append to a memory section
   memory query <keyword>              Search across memory sections
-  dev announce <url> [--pid <n>]      Lead: announce dev URL (+PID for auto-cleanup)
+  dev announce <url> [--name <s>] [--pid <n>]
+                                      Lead: announce dev URL for slot s (default "app")
   dev announce <url> --force          Allow localhost URL (headless-shell won't reach it)
-  dev url                             Print the current team dev URL (empty if none)
-  dev clear                           Lead: clear dev URL and SIGTERM the tracked PID
-  dev creds                           Print dev login credentials (empty if none)
-  dev creds set <text...>             Lead: set dev login blob (any text)
-  dev creds clear                     Lead: clear dev login credentials
+  dev url [<slot>]                    Print URL for slot (default "app"; empty if none)
+  dev list                            JSON dump of every dev slot (url, pid, health, creds)
+  dev clear [<slot>]                  Lead: clear one slot (SIGTERMs PID tree)
+  dev clear --all                     Lead: wipe every dev slot (e.g. before wrap-up)
+  dev creds [--name <s>]              Print dev login blob for slot s (empty if none)
+  dev creds set <text...> [--name <s>]
+                                      Lead: set dev login blob for slot s
+  dev creds clear [--name <s>]        Lead: clear dev credentials for slot s
   help                                Show this help
 
 Environment:

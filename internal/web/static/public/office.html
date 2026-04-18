@@ -258,6 +258,18 @@
               <span class="team-overview-sub t-meta">tasks done</span>
             </div>
           </div>
+
+          <!-- R15 · Team dev instances card. Shows every announced dev slot,
+               live-updated from office:devInstance* SSE events. Hidden when
+               the team has no dev servers running. -->
+          <section class="dev-instances-card hidden" id="devInstancesCard" aria-label="Team dev instances">
+            <div class="dev-instances-header">
+              <span class="t-meta">Team dev instances</span>
+              <span class="t-meta dev-instances-hint" id="devInstancesCount">0 running</span>
+            </div>
+            <div class="dev-instances-list" id="devInstancesList"></div>
+          </section>
+
           <div class="panel-header">
             <h2 class="panel-title">Agents</h2>
             <div class="view-mode-toggle">

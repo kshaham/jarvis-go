@@ -179,17 +179,22 @@ type agentFileLockRequest struct {
 // agentDevInstanceRequest is the body for POST /office/agent/dev-instance.
 // URL is the http://jarvis:<port> address of the dev server the lead has
 // just started. Empty URL clears the slot (equivalent to DELETE). PID is
-// optional — pass the dev server's process ID so Jarvis can SIGTERM it on
-// wrap-up or lead death. 0 = no PID tracked (orphan risk accepted).
+// optional — pass the dev server's process ID so Jarvis can SIGTERM its
+// process tree on wrap-up or lead death. 0 = no PID tracked (orphan risk
+// accepted). Name is the slot key (defaults to "app" when blank) so
+// fullstack teams can track multiple dev servers under distinct names.
 type agentDevInstanceRequest struct {
-	URL string `json:"url"`
-	PID int    `json:"pid"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	PID  int    `json:"pid"`
 }
 
 // agentDevCredentialsRequest is the body for POST /office/agent/dev-credentials.
 // Credentials is a free-text blob (e.g. "admin@dev.local / password123"),
 // whatever format makes sense for the dev app. Empty clears the slot.
+// Name defaults to "app" and selects which slot the creds belong to.
 type agentDevCredentialsRequest struct {
+	Name        string `json:"name"`
 	Credentials string `json:"credentials"`
 }
 
@@ -1947,15 +1952,55 @@ func (ctx *Context) OfficeAgentTaskStart(w http.ResponseWriter, r *http.Request)
 	ok(w, nil)
 }
 
-// OfficeAgentTaskComplete marks a task as completed.
+// uiKeywordRe matches task titles that strongly suggest user-visible work.
+// Matching triggers the screenshot soft gate — the completion still lands,
+// but the response carries a warning that the agent didn't cite browser
+// verification in their summary.
+var uiKeywordRe = regexp.MustCompile(`(?i)\b(ui|frontend|front[- ]end|page|button|modal|dialog|layout|styling|css|design|screen(?:shot)?|visual|expo|react[- ]native)\b`)
+
+// verificationEvidenceRe matches phrases that would show up in a handoff
+// summary that ran a browser check — screenshot file paths, tool names,
+// "verified visually", etc. Presence of any match suppresses the gate.
+var verificationEvidenceRe = regexp.MustCompile(`(?i)(screenshot|browser[- ]screenshot|verified visually|expect-cli|puppeteer|\.png\b|confirmed\s+(?:in|via)\s+browser)`)
+
+// OfficeAgentTaskComplete marks a task as completed. Adds a `warning`
+// field to the response + broadcasts office:uiTaskMissingScreenshot when
+// the task title matches UI keywords but the summary lacks any mention
+// of browser verification. Soft enforcement — never blocks completion.
 func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Request) {
 	var req agentTaskCompleteRequest
 	if !decodeBody(w, r, &req) {
 		return
 	}
 	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
+	var warning string
 	if agent != nil {
+		// Capture the task title BEFORE the status update so the UI-keyword
+		// check has the full title even after the task transitions out of
+		// the active set.
+		var taskTitle string
+		for _, t := range agent.GetTasks() {
+			if t != nil && t.ID == req.TaskID {
+				taskTitle = t.Title
+				break
+			}
+		}
+
 		agent.UpdateTaskStatus(req.TaskID, office.TaskCompleted)
+
+		// Soft screenshot gate (R15 F8). Fire only for UI-keyword titles
+		// when the summary lacks browser-verification evidence.
+		if taskTitle != "" && uiKeywordRe.MatchString(taskTitle) && !verificationEvidenceRe.MatchString(req.Result) {
+			warning = "UI-tagged task completed without explicit visual verification evidence in the summary. Did you run browser-screenshot against the dev URL? Cite the path (e.g. '/tmp/after.png') or the tool name ('expect-cli passed') in your --summary."
+			ctx.SSEBroker.Broadcast("office:uiTaskMissingScreenshot", map[string]interface{}{
+				"sessionId": req.SessionID,
+				"taskId":    req.TaskID,
+				"title":     taskTitle,
+			})
+			slog.Warn("UI task completed without visual verification",
+				"sessionId", req.SessionID, "taskId", req.TaskID, "title", taskTitle)
+		}
+
 		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 			"taskId":    req.TaskID,
@@ -1997,7 +2042,11 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			go ctx.OfficeManager.CheckForIdleAgents()
 		}
 	}
-	ok(w, nil)
+	if warning != "" {
+		ok(w, map[string]interface{}{"warning": warning})
+	} else {
+		ok(w, nil)
+	}
 }
 
 // OfficeAgentTaskAck acknowledges a task.
@@ -2089,20 +2138,59 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 	ok(w, nil)
 }
 
-// OfficeAgentGetDevInstance returns the dev URL + PID the lead has announced.
-// Empty url/0 pid when no dev server is running. Any teammate agent may call
-// this via `cm dev url` before running browser-screenshot.
+// slotFromQuery returns the slot name for a dev-instance request. Empty
+// query param defaults to "app" so R13/R14 callers keep working.
+func slotFromQuery(r *http.Request) string {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		return "app"
+	}
+	return name
+}
+
+// OfficeAgentGetDevInstance returns one slot's URL + PID + credentials-set
+// flag. ?name=<slot> selects a specific slot (default "app"). Empty url/0
+// pid when no dev server is running for that slot.
 func (ctx *Context) OfficeAgentGetDevInstance(w http.ResponseWriter, r *http.Request) {
+	slot := slotFromQuery(r)
+	inst, exists := ctx.OfficeManager.GetDevInstance(slot)
+	if !exists {
+		ok(w, map[string]interface{}{"name": slot, "url": "", "pid": 0, "credsSet": false})
+		return
+	}
 	ok(w, map[string]interface{}{
-		"url": ctx.OfficeManager.GetTeamDevURL(),
-		"pid": ctx.OfficeManager.GetTeamDevPID(),
+		"name":           slot,
+		"url":            inst.URL,
+		"pid":            inst.PID,
+		"credsSet":       inst.Credentials != "",
+		"forceAnnounced": inst.ForceAnnounced,
+		"healthFailures": inst.HealthFailures,
 	})
 }
 
-// OfficeAgentPostDevInstance records the URL of the dev server the lead
-// has just started along with an optional PID for orphan cleanup.
-// Rejects localhost URLs (unreachable from headless-shell) with 400 unless
-// the caller passes ?force=true to acknowledge the warning.
+// OfficeAgentGetDevInstanceAll returns every slot. Used by the dashboard
+// card to show all team dev servers at once.
+func (ctx *Context) OfficeAgentGetDevInstanceAll(w http.ResponseWriter, r *http.Request) {
+	all := ctx.OfficeManager.ListDevInstances()
+	out := make(map[string]interface{}, len(all))
+	for name, inst := range all {
+		out[name] = map[string]interface{}{
+			"url":            inst.URL,
+			"pid":            inst.PID,
+			"credsSet":       inst.Credentials != "",
+			"forceAnnounced": inst.ForceAnnounced,
+			"healthFailures": inst.HealthFailures,
+			"lastCheckAt":    inst.LastCheckAt,
+		}
+	}
+	ok(w, map[string]interface{}{"slots": out})
+}
+
+// OfficeAgentPostDevInstance records a slot's URL + optional PID.
+// Rejects localhost URLs (unreachable from headless-shell) with 400
+// unless ?force=true, and rejects port conflicts with 409 unless
+// ?force=true overrides. Slot name comes from the body (req.Name) or
+// defaults to "app".
 func (ctx *Context) OfficeAgentPostDevInstance(w http.ResponseWriter, r *http.Request) {
 	var req agentDevInstanceRequest
 	if !decodeBody(w, r, &req) {
@@ -2114,41 +2202,77 @@ func (ctx *Context) OfficeAgentPostDevInstance(w http.ResponseWriter, r *http.Re
 			"localhost URLs aren't reachable from headless-shell; use http://jarvis:<port> (or pass ?force=true to override)")
 		return
 	}
-	ctx.OfficeManager.SetTeamDevURL(req.URL, req.PID)
+	slot := req.Name
+	if slot == "" {
+		slot = "app"
+	}
+	if err := ctx.OfficeManager.SetDevInstance(slot, req.URL, req.PID, forced); err != nil {
+		// Port conflicts return 409 so CLI clients can display a precise
+		// error message instead of the generic 400 used for bad input.
+		if strings.Contains(err.Error(), "already held by slot") {
+			request.WriteError(w, http.StatusConflict, err.Error())
+			return
+		}
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	inst, _ := ctx.OfficeManager.GetDevInstance(slot)
 	ok(w, map[string]interface{}{
-		"url": ctx.OfficeManager.GetTeamDevURL(),
-		"pid": ctx.OfficeManager.GetTeamDevPID(),
+		"name":           slot,
+		"url":            inst.URL,
+		"pid":            inst.PID,
+		"forceAnnounced": inst.ForceAnnounced,
 	})
 }
 
-// OfficeAgentDeleteDevInstance clears the dev URL (e.g. on wrap-up).
-// Also attempts to SIGTERM the tracked PID via ClearTeamDevInstance.
+// OfficeAgentDeleteDevInstance clears a single slot (default "app") and
+// SIGTERMs the tracked process tree. ?all=true wipes every slot — used
+// by `cm dev clear --all` and by team wrap-up.
 func (ctx *Context) OfficeAgentDeleteDevInstance(w http.ResponseWriter, r *http.Request) {
-	ctx.OfficeManager.ClearTeamDevInstance(true)
-	ok(w, map[string]interface{}{"url": ""})
+	if r.URL.Query().Get("all") == "true" {
+		ctx.OfficeManager.ClearAllDevInstances(true)
+		ok(w, map[string]interface{}{"cleared": "all"})
+		return
+	}
+	slot := slotFromQuery(r)
+	ctx.OfficeManager.ClearDevInstance(slot, true)
+	ok(w, map[string]interface{}{"cleared": slot})
 }
 
-// OfficeAgentGetDevCredentials returns the dev login blob, or empty string.
+// OfficeAgentGetDevCredentials returns the named slot's login blob.
 func (ctx *Context) OfficeAgentGetDevCredentials(w http.ResponseWriter, r *http.Request) {
-	ok(w, map[string]interface{}{"credentials": ctx.OfficeManager.GetTeamDevCredentials()})
+	slot := slotFromQuery(r)
+	inst, exists := ctx.OfficeManager.GetDevInstance(slot)
+	if !exists {
+		ok(w, map[string]interface{}{"name": slot, "credentials": ""})
+		return
+	}
+	ok(w, map[string]interface{}{"name": slot, "credentials": inst.Credentials})
 }
 
-// OfficeAgentPostDevCredentials records the free-text login blob.
+// OfficeAgentPostDevCredentials records the free-text login blob for a slot.
 func (ctx *Context) OfficeAgentPostDevCredentials(w http.ResponseWriter, r *http.Request) {
 	var req agentDevCredentialsRequest
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	ctx.OfficeManager.SetTeamDevCredentials(req.Credentials)
-	// Echo only whether creds are set; never reflect the value back on a
-	// write response. Callers can re-GET if they need the value.
-	ok(w, map[string]interface{}{"set": req.Credentials != ""})
+	slot := req.Name
+	if slot == "" {
+		slot = "app"
+	}
+	if err := ctx.OfficeManager.SetDevInstanceCredentials(slot, req.Credentials); err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Echo only whether creds are set; never reflect the value back.
+	ok(w, map[string]interface{}{"name": slot, "set": req.Credentials != ""})
 }
 
-// OfficeAgentDeleteDevCredentials clears the login blob.
+// OfficeAgentDeleteDevCredentials clears the login blob for a slot.
 func (ctx *Context) OfficeAgentDeleteDevCredentials(w http.ResponseWriter, r *http.Request) {
-	ctx.OfficeManager.SetTeamDevCredentials("")
-	ok(w, map[string]interface{}{"set": false})
+	slot := slotFromQuery(r)
+	_ = ctx.OfficeManager.SetDevInstanceCredentials(slot, "")
+	ok(w, map[string]interface{}{"name": slot, "set": false})
 }
 
 // OfficeAgentTaskTriage handles task triage by a leader agent.
