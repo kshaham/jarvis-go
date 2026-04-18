@@ -982,7 +982,7 @@ type devInstance struct {
 	URL            string    `json:"url"`
 	PID            int       `json:"pid"`
 	Credentials    string    `json:"credentials,omitempty"`
-	HealthFailures int       `json:"healthFailures"`
+	HealthFailures int       `json:"healthFailures,omitempty"`
 	LastCheckAt    time.Time `json:"lastCheckAt,omitempty"`
 	// NextCheckAt gates the next health check. Populated on failure so
 	// repeated failures back off (tick×1, ×2, ×4). Zero = check next tick.
@@ -1108,18 +1108,30 @@ func (m *Manager) SetDevInstance(name, url string, pid int, force bool) error {
 		pid = 0
 	}
 
-	// Port conflict guard. --force bypasses so leads can intentionally
-	// share a port (e.g. a hot-reload proxy) without us second-guessing.
-	if trimmed != "" && !force {
-		if conflict := m.DevInstancePortConflict(name, trimmed); conflict != "" {
-			return fmt.Errorf("port %s is already held by slot %q; pick a different port or clear that slot first (or --force to override)",
-				portFromURL(trimmed), conflict)
-		}
-	}
-
 	m.mu.Lock()
 	if m.teamDevInstances == nil {
 		m.teamDevInstances = map[string]*devInstance{}
+	}
+	// Port conflict guard — inlined inside the write lock so the check
+	// and the insert are one atomic operation. If we released the lock
+	// after `DevInstancePortConflict` (which takes RLock) and re-acquired
+	// before the insert, two concurrent announces on the same port could
+	// both pass. --force bypasses so leads can intentionally share a port
+	// (e.g. a hot-reload proxy) without us second-guessing.
+	if trimmed != "" && !force {
+		newPort := portFromURL(trimmed)
+		if newPort != "" {
+			for existingName, other := range m.teamDevInstances {
+				if existingName == name || other == nil || other.URL == "" {
+					continue
+				}
+				if portFromURL(other.URL) == newPort {
+					m.mu.Unlock()
+					return fmt.Errorf("port %s is already held by slot %q; pick a different port or clear that slot first (or --force to override)",
+						newPort, existingName)
+				}
+			}
+		}
 	}
 	inst := &devInstance{
 		URL:            trimmed,

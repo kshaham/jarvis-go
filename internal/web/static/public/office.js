@@ -7292,8 +7292,13 @@ class OfficeApp {
     const rows = names.map(name => {
       const s = slots[name] || {};
       const url = this.escapeHtml(s.url || '');
-      const healthy = (s.healthFailures || 0) === 0;
-      const failing = (s.healthFailures || 0) >= 2;
+      const failures = s.healthFailures || 0;
+      // Three-state health signal so the operator sees something meaningful
+      // at every failure count: 0 = healthy, 1 = degraded (first miss; in
+      // adaptive backoff), >=2 = failing (about to auto-clear at 3).
+      const healthy = failures === 0;
+      const degraded = failures === 1;
+      const failing = failures >= 2;
       const forced = !!s.forceAnnounced;
       const credsSet = !!s.credsSet;
 
@@ -7302,7 +7307,9 @@ class OfficeApp {
         badges.push('<span class="dev-instance-badge forced" title="Announced with --force">forced</span>');
       }
       if (failing) {
-        badges.push(`<span class="dev-instance-badge failing" title="Health check failing (${s.healthFailures} strikes)">failing</span>`);
+        badges.push(`<span class="dev-instance-badge failing" title="Health check failing (${failures} strikes)">failing</span>`);
+      } else if (degraded) {
+        badges.push('<span class="dev-instance-badge degraded" title="1 missed health check; re-checking with backoff">degraded</span>');
       } else if (healthy && s.url) {
         badges.push('<span class="dev-instance-badge healthy" title="Health check passing">healthy</span>');
       }

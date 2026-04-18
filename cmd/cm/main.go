@@ -364,7 +364,23 @@ func handleDev(args []string) {
 // parseAnnounceArgs extracts URL + slot + optional --pid / --force flags
 // from `cm dev announce` args. Slot defaults to "app"; flags may appear
 // in any order.
+// parseAnnounceArgs is the thin wrapper around parseAnnounceArgsE that
+// escalates validation errors to `fatal` (the CLI's terminate-with-usage
+// helper). Keeping the error-returning variant separate lets main_test.go
+// exercise every edge case without intercepting os.Exit.
 func parseAnnounceArgs(args []string) (slot, url string, pid int, force bool) {
+	slot, url, pid, force, err := parseAnnounceArgsE(args)
+	if err != nil {
+		fatal(err.Error())
+	}
+	return
+}
+
+// parseAnnounceArgsE is the pure, testable implementation. Returns an
+// error for any validation failure instead of calling fatal. Slot
+// defaults to "app". Flags may appear in any order relative to the
+// positional URL.
+func parseAnnounceArgsE(args []string) (slot, url string, pid int, force bool, err error) {
 	slot = "app"
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -373,30 +389,30 @@ func parseAnnounceArgs(args []string) (slot, url string, pid int, force bool) {
 			force = true
 		case "--pid":
 			if i+1 >= len(args) {
-				fatal("--pid requires a value")
+				return "", "", 0, false, fmt.Errorf("--pid requires a value")
 			}
-			v, err := strconv.Atoi(args[i+1])
-			if err != nil || v < 0 {
-				fatal(fmt.Sprintf("--pid must be a non-negative integer, got %q", args[i+1]))
+			v, aerr := strconv.Atoi(args[i+1])
+			if aerr != nil || v < 0 {
+				return "", "", 0, false, fmt.Errorf("--pid must be a non-negative integer, got %q", args[i+1])
 			}
 			pid = v
 			i++
 		case "--name":
 			if i+1 >= len(args) {
-				fatal("--name requires a value")
+				return "", "", 0, false, fmt.Errorf("--name requires a value")
 			}
 			slot = args[i+1]
 			i++
 		default:
 			if strings.HasPrefix(a, "--") {
-				fatal("unknown flag: " + a)
+				return "", "", 0, false, fmt.Errorf("unknown flag: %s", a)
 			}
 			if url == "" {
 				url = a
 			}
 		}
 	}
-	return
+	return slot, url, pid, force, nil
 }
 
 // handleDevCreds dispatches `cm dev creds [set <text...>|clear] [--name <slot>]`.
