@@ -302,17 +302,33 @@ func (ctx *Context) GetSessionRalphState(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// sessionWorkingDir returns the working directory for a session, trying
+// PTY sessions first then SDK sessions. Returns ok=false if neither
+// has the given id. Used by the status endpoints below so office
+// agents (SDK-mode) aren't 404'd every time the dashboard asks for
+// their git/build/test/hmr status -- observed on 2026-04-18 15:01:
+// Ops' git-status returned 404 because GetSession only searched PTY.
+func (ctx *Context) sessionWorkingDir(id string) (string, bool) {
+	if s, ok := ctx.SessionManager.GetSession(id); ok {
+		return s.WorkingDir, true
+	}
+	if sdk, ok := ctx.SessionManager.GetSDKSession(id); ok {
+		return sdk.WorkingDir, true
+	}
+	return "", false
+}
+
 // GetSessionGitStatus returns git status for a session's working directory.
 // GET /api/sessions/{id}/git-status
 func (ctx *Context) GetSessionGitStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	session, ok := ctx.SessionManager.GetSession(id)
+	workingDir, ok := ctx.sessionWorkingDir(id)
 	if !ok {
 		request.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	status := ctx.IntegrationMonitor.RefreshGitStatus(id, session.WorkingDir)
+	status := ctx.IntegrationMonitor.RefreshGitStatus(id, workingDir)
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"status":  status,
@@ -323,8 +339,7 @@ func (ctx *Context) GetSessionGitStatus(w http.ResponseWriter, r *http.Request) 
 // GET /api/sessions/{id}/build-status
 func (ctx *Context) GetSessionBuildStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_, ok := ctx.SessionManager.GetSession(id)
-	if !ok {
+	if _, ok := ctx.sessionWorkingDir(id); !ok {
 		request.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -343,8 +358,7 @@ func (ctx *Context) GetSessionBuildStatus(w http.ResponseWriter, r *http.Request
 // GET /api/sessions/{id}/test-status
 func (ctx *Context) GetSessionTestStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_, ok := ctx.SessionManager.GetSession(id)
-	if !ok {
+	if _, ok := ctx.sessionWorkingDir(id); !ok {
 		request.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -363,8 +377,7 @@ func (ctx *Context) GetSessionTestStatus(w http.ResponseWriter, r *http.Request)
 // GET /api/sessions/{id}/hmr-status
 func (ctx *Context) GetSessionHMRStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_, ok := ctx.SessionManager.GetSession(id)
-	if !ok {
+	if _, ok := ctx.sessionWorkingDir(id); !ok {
 		request.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
