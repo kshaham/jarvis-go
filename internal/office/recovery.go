@@ -472,6 +472,18 @@ func (m *Manager) checkStaleInProgressTasks() {
 			continue
 		}
 
+		// Don't poke an agent mid-turn. They can't read the progress
+		// prompt until their current turn ends; sending it anyway just
+		// piles another message on the SDK queue while the task-age
+		// counter advances and eventually escalates to "urgent".
+		// Observed 2026-04-18 03:23-03:33 UTC: Shield received 7
+		// progress checks at 5-min intervals culminating in 3 urgent
+		// checks (taskAge 15/20/25m) on a single in-progress task,
+		// while actively working the whole time.
+		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
+
 		staleBaseline := active.StartedAt
 		if staleBaseline.IsZero() {
 			staleBaseline = active.AssignedAt
@@ -483,7 +495,15 @@ func (m *Manager) checkStaleInProgressTasks() {
 
 		agent.mu.Lock()
 		lastCheck, hasCheck := agent.ProgressChecks[active.ID]
+		lastAPI := agent.LastAgentAPIAt
 		agent.mu.Unlock()
+
+		// Recent API call from the agent (task-progress, task-ack,
+		// self-add, etc.) is proof they're still engaged. Skip the
+		// progress check; they'll report naturally.
+		if !lastAPI.IsZero() && now.Sub(lastAPI) < 2*time.Minute {
+			continue
+		}
 
 		agentName := agent.SessionID
 		if agent.Config != nil {
