@@ -3095,6 +3095,13 @@ class OfficeApp {
 
   closeSpawnConfigModal() {
     document.getElementById('spawnConfigModal').classList.add('hidden');
+    // Reset breadcrumb so reopening the modal shows "1. Template"
+    // active even if the user closed it mid-configure. Without this,
+    // showTemplateStep's reset only runs on the Back button path.
+    const s1 = document.getElementById('spawnProgressStep1');
+    const s2 = document.getElementById('spawnProgressStep2');
+    if (s1) s1.classList.add('active');
+    if (s2) s2.classList.remove('active');
   }
 
   populateProviderSelect(selectEl, currentProvider) {

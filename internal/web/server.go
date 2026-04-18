@@ -212,7 +212,15 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 		}
 	})
 
-	authMgr := auth.NewManager(dataDir, isHTTPS)
+	authMgr, authErr := auth.NewManager(dataDir, isHTTPS)
+	if authErr != nil {
+		// Fatal: the session-cookie signing key can't be initialised.
+		// Proceeding would leave the Manager with a nil HMAC key, which
+		// hmac.New accepts silently -- every signed cookie would be
+		// trivially forgeable. Fail fast at startup instead.
+		slog.Error("Auth manager initialisation failed; refusing to start", "error", authErr)
+		os.Exit(1)
+	}
 	agentTokenMgr := auth.NewAgentTokenManager(dataDir)
 
 	// Configure trusted-proxy CIDRs for X-Forwarded-For handling. Reads the

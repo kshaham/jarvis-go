@@ -69,7 +69,14 @@ type Manager struct {
 // NewManager creates a new auth manager. configDir is typically ~/.jarvis.
 // The Secure flag on session cookies is decided per-request based on whether
 // the request arrived over TLS -- see BuildSessionCookie.
-func NewManager(configDir string, _ bool) *Manager {
+//
+// Returns an error if the HMAC signing secret cannot be loaded or
+// created. Previously failure was silently swallowed, leaving the
+// Manager with a nil signingSecret -- hmac.New accepts a nil key and
+// produces a deterministic MAC derived from the empty string, so every
+// signed session cookie would be trivially forgeable. We now fail fast
+// at server startup instead of booting in a broken state.
+func NewManager(configDir string, _ bool) (*Manager, error) {
 	m := &Manager{
 		configDir:      configDir,
 		authConfigPath: filepath.Join(configDir, "auth.json"),
@@ -77,7 +84,9 @@ func NewManager(configDir string, _ bool) *Manager {
 		sessions:       make(map[string]*SessionEntry),
 		rateLimits:     make(map[string]*RateLimitEntry),
 	}
-	m.loadOrCreateSecret()
+	if err := m.loadOrCreateSecret(); err != nil {
+		return nil, err
+	}
 
 	// Start periodic cleanup of expired sessions and rate limits.
 	go func() {
@@ -89,7 +98,7 @@ func NewManager(configDir string, _ bool) *Manager {
 		}
 	}()
 
-	return m
+	return m, nil
 }
 
 // cleanupExpiredSessions removes sessions that have been inactive beyond the timeout.
@@ -104,11 +113,13 @@ func (m *Manager) cleanupExpiredSessions() {
 	}
 }
 
-// loadOrCreateSecret reads the HMAC signing secret from disk, or generates a new one.
-func (m *Manager) loadOrCreateSecret() {
+// loadOrCreateSecret reads the HMAC signing secret from disk, or generates
+// a new one. Returns an error if neither path succeeds -- callers must
+// treat a nil signingSecret as a fatal misconfiguration because
+// hmac.New accepts nil and produces trivially-forgeable signatures.
+func (m *Manager) loadOrCreateSecret() error {
 	if err := os.MkdirAll(m.configDir, 0700); err != nil {
-		slog.Error("Failed to create config dir", "path", m.configDir, "error", err)
-		return
+		return fmt.Errorf("auth: create config dir %s: %w", m.configDir, err)
 	}
 
 	data, err := os.ReadFile(m.secretKeyPath)
@@ -117,22 +128,25 @@ func (m *Manager) loadOrCreateSecret() {
 		if decErr == nil && len(decoded) == secretKeyBytes {
 			m.signingSecret = decoded
 			slog.Info("Loaded existing auth signing secret")
-			return
+			return nil
 		}
 		slog.Error("Failed to decode auth secret, generating new one", "error", decErr)
 	}
 
 	secret := make([]byte, secretKeyBytes)
 	if _, err := rand.Read(secret); err != nil {
-		slog.Error("Failed to generate signing secret", "error", err)
-		return
+		return fmt.Errorf("auth: generate signing secret: %w", err)
 	}
 	m.signingSecret = secret
 
 	if err := os.WriteFile(m.secretKeyPath, []byte(hex.EncodeToString(secret)), 0600); err != nil {
 		slog.Error("Failed to persist signing secret", "error", err)
+		// The in-memory secret is still valid for this run. Persistence
+		// failure means we'll regenerate next boot, which invalidates
+		// existing cookies -- acceptable degradation.
 	}
 	slog.Info("Generated new auth signing secret")
+	return nil
 }
 
 // SigningKey returns the HMAC signing secret for use by other handlers that

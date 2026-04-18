@@ -135,12 +135,15 @@ func (s *Store) UpdateRunStatus(id string, at time.Time, status, errStr string) 
 }
 
 // SetNextRun records the upcoming fire time for display purposes.
+// Persists to disk so the UI's "next run" timestamp survives a restart
+// (the sibling UpdateRunStatus already does this; SetNextRun was missed).
 func (s *Store) SetNextRun(id string, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if j, ok := s.jobs[id]; ok {
 		ts := at
 		j.NextRunAt = &ts
+		s.save()
 	}
 }
 
