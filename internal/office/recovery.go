@@ -878,6 +878,13 @@ func (m *Manager) CheckForIdleAgents() {
 		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
 			continue
 		}
+		// Also skip if the agent is already in an active meeting.
+		// Starting a second brainstorm for the same idle agent while
+		// they have one pending in the SDK queue just doubles up and
+		// both time out.
+		if m.IsInActiveMeeting(agent.SessionID) {
+			continue
+		}
 		// Skip if agent still has enough work queued (more than 2 remaining).
 		pendingCount := agent.PendingTaskCount()
 		totalWork := pendingCount
@@ -1222,6 +1229,15 @@ func (m *Manager) checkForCuriousAgents() {
 		if sessions.IsSessionWorking(agent.SessionID) {
 			continue
 		}
+		// Also skip if the agent is already in an active meeting
+		// (brainstorm). Observed 2026-04-18 03:42:29: one
+		// idle-monitoring tick started a brainstorm for Ops (with
+		// Captain as facilitator) AND immediately queued a curiosity
+		// prompt to Ops, doubling up on an already-pending meeting
+		// prompt in the SDK queue.
+		if m.IsInActiveMeeting(agent.SessionID) {
+			continue
+		}
 
 		// Check curiosity cooldown.
 		agent.mu.Lock()
@@ -1319,11 +1335,8 @@ func (m *Manager) maybeTriggerWaterCoolerChat() {
 		return
 	}
 
-	// Find idle agents (no active task, no pending tasks, NOT mid-turn).
-	// The IsSessionWorking guard matches the pattern used elsewhere
-	// (ack-nudge, replenishment, curiosity, reflection, brainstorm):
-	// a water-cooler prompt stacked behind a working turn just
-	// lingers in the SDK queue and interferes with real work.
+	// Find idle agents (no active task, no pending tasks, NOT mid-turn,
+	// NOT already in a brainstorm or other active meeting).
 	roster := m.GetRoster()
 	var idle []*AgentState
 	for _, agent := range roster {
@@ -1331,6 +1344,9 @@ func (m *Manager) maybeTriggerWaterCoolerChat() {
 			continue
 		}
 		if sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
+		if m.IsInActiveMeeting(agent.SessionID) {
 			continue
 		}
 		idle = append(idle, agent)

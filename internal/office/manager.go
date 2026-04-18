@@ -280,6 +280,27 @@ func (m *Manager) GetAgentAndTouch(sessionID string) *AgentState {
 	return agent
 }
 
+// IsInActiveMeeting reports whether the given session is currently
+// a participant in any active meeting (brainstorm etc). Used by the
+// idle-check loops to avoid piling curiosity / water-cooler / other
+// discretionary prompts on top of a meeting prompt the agent has
+// yet to read.
+func (m *Manager) IsInActiveMeeting(sessionID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, mtg := range m.meetings {
+		if !mtg.Active {
+			continue
+		}
+		for _, p := range mtg.Participants {
+			if p == sessionID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Sessions returns the session store for direct PTY writes.
 func (m *Manager) Sessions() SessionStore {
 	m.mu.RLock()
