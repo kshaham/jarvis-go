@@ -138,6 +138,12 @@ class OfficeApp {
     this._activityFilter = 'all';
     // Full meetings list, kept so _filterMeetings can re-filter without refetching.
     this._meetingsAll = [];
+    // Round 9 state: session-local throughput counter, persisted blocker snapshot,
+    // last-seen standup timestamp (mirrored from SSE + settings refresh so the
+    // overview widget can show "Last standup" without an extra fetch).
+    this._sessionTasksCompleted = 0;
+    this._completedTaskIds = new Set();
+    this._lastStandupAt = 0;
     // Install keyboard shortcut bindings (? for help, g+<key> chord for tab nav).
     this._installShortcutBindings();
   }
@@ -193,6 +199,11 @@ class OfficeApp {
     this.fetchWhiteboardNotes();
     this.fetchAndRenderTasks();
     this.setupKeyboardShortcuts();
+    this._installContextMenus();
+    // Keep the header budget pill and Agents-tab overview widget in sync with
+    // whatever state the initial fetch populated.
+    this._updateBudgetPill();
+    this._scheduleOverviewRefresh();
 
     // Restore view mode preference
     if (this._viewMode === 'list') {
@@ -715,6 +726,11 @@ class OfficeApp {
     if (this.detailSessionId === member.sessionId) {
       this.renderDetailPanel(member.sessionId);
     }
+    // Round 9 · member-updated often carries a new totalCost — refresh
+    // the header budget pill + Agents-tab overview widget so the at-a-
+    // glance numbers stay in sync with the card.
+    this._updateBudgetPill();
+    this._scheduleOverviewRefresh();
   }
 
   handleMemberJoined(member) {
@@ -724,6 +740,7 @@ class OfficeApp {
     this.state.teamSpawned = true;
     this.render();
     this.addActivityEntry('system', `${member.name} joined the office`);
+    this._scheduleOverviewRefresh();
   }
 
   handleMemberLeft(data) {
@@ -736,6 +753,7 @@ class OfficeApp {
       this.state.teamSpawned = false;
       this.render();
     }
+    this._scheduleOverviewRefresh();
   }
 
   handleMessage(message) {
@@ -826,6 +844,9 @@ class OfficeApp {
     this.updateStandupButtons(true);
     this.renderStandup();
     this.addActivityEntry('standup', 'Standup meeting started');
+    // Round 9 · stamp for overview "Last standup" cell.
+    this._lastStandupAt = Date.now();
+    this._scheduleOverviewRefresh();
     this.addNotification('info', 'Standup started', 'Team standup meeting is now in progress');
 
     const userInput = document.getElementById('standupUserInput');
@@ -1888,6 +1909,10 @@ class OfficeApp {
         <div class="insight-card-title">Team spend today</div>
         <div class="insight-big-number">$${totalCost.toFixed(4)}</div>
         <div style="font-size:11px;color:#71717a">${totalTurns} turns across ${roster.length} agents</div>
+        <div class="insight-budget-bar" id="insightBudgetBar" data-tier="ok">
+          <div class="insight-budget-bar-track"><div class="insight-budget-bar-fill"></div></div>
+          <div class="insight-budget-bar-label t-meta"></div>
+        </div>
       </div>
       <div class="insight-card">
         <div class="insight-card-title">Cost per agent</div>
@@ -1919,6 +1944,7 @@ class OfficeApp {
       </div>
     `;
     // Populate the dynamic panels. All safe to run in parallel.
+    this._updateBudgetPill();
     const an = document.getElementById('activeNowGrid');
     if (an) this._renderActiveNowFeed(an);
     const tv = document.getElementById('teamVelocity');
@@ -4071,6 +4097,14 @@ class OfficeApp {
     this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 300);
     this._scheduleRender(() => this.renderAgentCards(), 'agents', 100);
     this.updateStatusBar();
+    // Round 9 · count task completions for the session-local throughput
+    // counter. De-duped via _completedTaskIds so backfill fetches or
+    // repeated SSE payloads don't double-count.
+    if (data && data.task && (data.task.status === 'completed' || data.task.status === 'failed') && data.task.id && !this._completedTaskIds.has(data.task.id)) {
+      this._completedTaskIds.add(data.task.id);
+      if (data.task.status === 'completed') this._sessionTasksCompleted++;
+    }
+    this._scheduleOverviewRefresh();
   }
 
   // ========== Kanban Board ==========
@@ -4377,12 +4411,24 @@ class OfficeApp {
       brainstorm: '&#10038;',
     };
 
+    // F2 · which activity types are drillable (system stays passive).
+    const drillableTypes = new Set(['task', 'standup', 'message', 'lock', 'meeting', 'brainstorm']);
+
     const buildEntryEl = (entry, isNew) => {
       const el = document.createElement('div');
-      el.className = `activity-entry type-${entry.type}${isNew ? ' just-added' : ''}`;
+      const drillable = drillableTypes.has(entry.type);
+      el.className = `activity-entry type-${entry.type}${isNew ? ' just-added' : ''}${drillable ? ' drillable' : ''}`;
       const time = new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const icon = iconMap[entry.type] || '&#9675;';
       el.innerHTML = `<span class="activity-time">${time}</span><span class="activity-icon">${icon}</span><span class="activity-text">${this.escapeHtml(entry.text)}</span>`;
+      if (drillable) {
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        el.addEventListener('click', () => this._drillActivityEntry(entry));
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._drillActivityEntry(entry); }
+        });
+      }
       return el;
     };
 
@@ -4462,9 +4508,13 @@ class OfficeApp {
     if (standupTimeout) standupTimeout.value = Math.round(settings.standupResponseTimeoutMs / 1000);
     if (fileLockExpiry) fileLockExpiry.value = Math.round(settings.fileLockExpiryMs / 60000);
     if (teamMission) teamMission.value = settings.teamMission || '';
+    const teamDailyBudget = el('settingTeamDailyBudget');
+    if (teamDailyBudget) teamDailyBudget.value = settings.teamDailyBudget || 0;
     this._updateMissionCharCount();
 
     this.updateMissionBanner(settings.teamMission);
+    // Round 9 · budget value may have changed → re-evaluate pill + bar.
+    this._updateBudgetPill();
   }
 
   _filterSettings(q) {
@@ -4564,6 +4614,11 @@ class OfficeApp {
       case 'teamMission':
         body.teamMission = el('settingTeamMission').value;
         break;
+      case 'teamDailyBudget': {
+        const raw = parseFloat(el('settingTeamDailyBudget').value);
+        body.teamDailyBudget = Number.isFinite(raw) && raw >= 0 ? raw : 0;
+        break;
+      }
     }
 
     try {
@@ -6208,6 +6263,431 @@ class OfficeApp {
   }
 
   // ============================================================================
+  // Round 9 · overview widget, activity drill, context menus, budget, quick-add
+  // ============================================================================
+
+  // F1 · compute a snapshot of team health from already-known state.
+  // Pure function: reads from this.state.members + this.taskQueues + the
+  // session-local throughput counter. Called on every overview render.
+  _computeTeamSnapshot() {
+    const members = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    const counts = { working: 0, idle: 0, stuck: 0, meeting: 0 };
+    let totalCost = 0;
+    for (const m of members) {
+      const s = m.status || 'idle';
+      if (counts[s] !== undefined) counts[s]++;
+      totalCost += Number(m.totalCost) || 0;
+    }
+
+    // Top blocker: walk all task queues, pick the oldest blocked or
+    // stuck-agent task. Fall back to in_progress tasks on stuck agents
+    // so the cell isn't empty when nothing is formally blocked.
+    const queues = this.taskQueues || [];
+    const blockedTasks = [];
+    for (const q of queues) {
+      const owner = members.find(m => m.sessionId === q.sessionId);
+      for (const t of (q.tasks || [])) {
+        if (t.status === 'blocked' || (owner && owner.status === 'stuck' && t.status === 'in_progress')) {
+          const since = t.assignedAt ? new Date(t.assignedAt).getTime() : 0;
+          blockedTasks.push({ task: t, owner, since });
+        }
+      }
+    }
+    blockedTasks.sort((a, b) => a.since - b.since);
+    const topBlocker = blockedTasks[0] || null;
+
+    // Standup schedule: derive last/next from autoStandupConfig if known,
+    // plus a locally-tracked _lastStandupAt that mirrors recent SSE.
+    let nextStandupMs = 0;
+    if (this.autoStandupConfig && this.autoStandupConfig.enabled && this.autoStandupConfig.nextAt) {
+      nextStandupMs = this.autoStandupConfig.nextAt;
+    }
+    const lastStandupMs = this._lastStandupAt || 0;
+
+    // Budget: pulled from officeSettings. 0 / unset → no budget.
+    const budget = (this.officeSettings && Number(this.officeSettings.teamDailyBudget)) || 0;
+
+    return {
+      total: members.length,
+      counts,
+      totalCost,
+      topBlocker,
+      lastStandupMs,
+      nextStandupMs,
+      throughput: this._sessionTasksCompleted,
+      budget,
+    };
+  }
+
+  // F1 · render the overview widget at the top of the Agents tab. Idempotent;
+  // called on every team state change (members, tasks, cost).
+  _renderOverviewWidget() {
+    const root = document.getElementById('teamOverview');
+    if (!root) return;
+    const members = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    if (members.length === 0) {
+      root.classList.add('hidden');
+      return;
+    }
+    root.classList.remove('hidden');
+
+    const snap = this._computeTeamSnapshot();
+
+    // Donut: 4 segments (working / idle / meeting / stuck). Skip empty
+    // segments so zero-count statuses don't produce weird arcs.
+    const segEl = document.getElementById('teamOverviewDonutSegments');
+    const totalEl = document.getElementById('teamOverviewTotal');
+    if (totalEl) totalEl.textContent = String(snap.total);
+    if (segEl) {
+      const segments = [
+        { key: 'working', count: snap.counts.working, cls: 'seg-working' },
+        { key: 'meeting', count: snap.counts.meeting, cls: 'seg-meeting' },
+        { key: 'idle',    count: snap.counts.idle,    cls: 'seg-idle' },
+        { key: 'stuck',   count: snap.counts.stuck,   cls: 'seg-stuck' },
+      ];
+      const total = snap.total || 1;
+      const r = 18;
+      const circumference = 2 * Math.PI * r;
+      let offset = 0;
+      const parts = [];
+      for (const s of segments) {
+        if (s.count <= 0) continue;
+        const frac = s.count / total;
+        const dash = frac * circumference;
+        parts.push(`<circle class="team-overview-donut-seg ${s.cls}" cx="24" cy="24" r="${r}" fill="none" stroke-width="6" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 24 24)"></circle>`);
+        offset += dash;
+      }
+      segEl.innerHTML = parts.join('');
+    }
+
+    // Standup cell.
+    const lastEl = document.getElementById('teamOverviewLastStandup');
+    const nextEl = document.getElementById('teamOverviewNextStandup');
+    if (lastEl) lastEl.textContent = snap.lastStandupMs > 0 ? this.formatTimeAgo(snap.lastStandupMs) : '—';
+    if (nextEl) {
+      if (snap.nextStandupMs > 0) {
+        const remaining = Math.max(0, snap.nextStandupMs - Date.now());
+        const mins = Math.round(remaining / 60000);
+        const hrs = Math.floor(mins / 60);
+        nextEl.textContent = hrs > 0 ? `Next: in ${hrs}h ${mins % 60}m` : `Next: in ${mins}m`;
+      } else {
+        nextEl.textContent = 'Next: —';
+      }
+    }
+
+    // Blocker cell.
+    const blockerEl = document.getElementById('teamOverviewBlocker');
+    const blockerDurEl = document.getElementById('teamOverviewBlockerDuration');
+    if (blockerEl && blockerDurEl) {
+      if (snap.topBlocker) {
+        const who = (snap.topBlocker.owner && snap.topBlocker.owner.name) || '—';
+        const title = (snap.topBlocker.task.title || '').slice(0, 36);
+        blockerEl.textContent = `${who} · ${title}`;
+        blockerDurEl.textContent = snap.topBlocker.since ? this.formatTimeAgo(snap.topBlocker.since) : '';
+      } else {
+        blockerEl.textContent = 'None';
+        blockerDurEl.textContent = '';
+      }
+    }
+
+    // Cost cell + budget hint.
+    const costEl = document.getElementById('teamOverviewCost');
+    const costBudgetEl = document.getElementById('teamOverviewCostBudget');
+    if (costEl) costEl.textContent = this._formatCost(snap.totalCost);
+    if (costBudgetEl) {
+      if (snap.budget > 0) {
+        const pct = Math.min(999, Math.round((snap.totalCost / snap.budget) * 100));
+        costBudgetEl.textContent = `${pct}% of $${snap.budget}`;
+      } else {
+        costBudgetEl.textContent = 'no budget set';
+      }
+    }
+
+    // Throughput cell.
+    const tpEl = document.getElementById('teamOverviewThroughput');
+    if (tpEl) tpEl.textContent = String(snap.throughput);
+
+    // Bind cell clicks once. The delegation sits on the root container
+    // so re-renders don't duplicate listeners.
+    if (!root.dataset.bound) {
+      root.dataset.bound = '1';
+      root.addEventListener('click', (e) => {
+        const cell = e.target.closest('.team-overview-cell');
+        if (!cell) return;
+        const kind = cell.dataset.overviewCell;
+        if (kind === 'blocker') this.switchTab('tasks');
+        else if (kind === 'cost') this.switchTab('insights');
+        else if (kind === 'throughput') { this.switchTab('timeline'); this.setTimelineKind('task'); }
+        else if (kind === 'standup') this.switchTab('standup');
+      });
+      root.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const cell = e.target.closest('.team-overview-cell');
+        if (!cell) return;
+        e.preventDefault();
+        cell.click();
+      });
+    }
+  }
+
+  // Called from handleMemberUpdated / handleTaskQueueUpdated / handleMessage.
+  _scheduleOverviewRefresh() {
+    this._scheduleRender(() => this._renderOverviewWidget(), 'overview', 150);
+  }
+
+  // F2 · make activity-feed entries jump to their source surface. Invoked
+  // from an onclick injected by renderActivity; see _makeActivityRowDrillable.
+  _drillActivityEntry(entry) {
+    if (!entry || !entry.type) return;
+    const type = entry.type;
+    if (type === 'system') return; // no target
+    if (type === 'task') {
+      this.switchTab('tasks');
+      return;
+    }
+    if (type === 'standup') { this.switchTab('standup'); return; }
+    if (type === 'message') {
+      this.switchTab('messages');
+      // best-effort: scroll to the bottom of message list so the recent
+      // message is visible.
+      setTimeout(() => {
+        const list = document.getElementById('messageList');
+        if (list) list.scrollTop = list.scrollHeight;
+      }, 80);
+      return;
+    }
+    if (type === 'lock') { this.switchTab('tasks'); return; }
+    if (type === 'meeting' || type === 'brainstorm') { this.switchTab('meetings'); return; }
+  }
+
+  // F3 · reusable context menu. `items` is an array of
+  //   { label, onClick, danger?: bool, separator?: bool }
+  _showContextMenu(x, y, items) {
+    const el = document.getElementById('ctxMenu');
+    if (!el) return;
+    el.innerHTML = items.map((it, i) => {
+      if (it.separator) return '<div class="ctx-sep"></div>';
+      const cls = it.danger ? 'ctx-danger' : '';
+      return `<button class="${cls}" data-ctx-idx="${i}">${this.escapeHtml(it.label)}</button>`;
+    }).join('');
+    el.classList.remove('hidden');
+    el.setAttribute('aria-hidden', 'false');
+
+    // Measure then clamp to viewport so the menu never clips.
+    el.style.visibility = 'hidden';
+    el.style.left = '0px';
+    el.style.top = '0px';
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const left = (x + rect.width > vw - 8) ? Math.max(8, vw - rect.width - 8) : x;
+    const top  = (y + rect.height > vh - 8) ? Math.max(8, vh - rect.height - 8) : y;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.visibility = '';
+
+    const close = () => {
+      el.classList.add('hidden');
+      el.setAttribute('aria-hidden', 'true');
+      el.innerHTML = '';
+      document.removeEventListener('click', onDocClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+    const onDocClick = (evt) => {
+      if (!el.contains(evt.target)) close();
+    };
+    const onKey = (evt) => { if (evt.key === 'Escape') close(); };
+
+    el.onclick = (evt) => {
+      const btn = evt.target.closest('[data-ctx-idx]');
+      if (!btn) return;
+      const idx = parseInt(btn.dataset.ctxIdx, 10);
+      const item = items[idx];
+      close();
+      if (item && typeof item.onClick === 'function') item.onClick();
+    };
+
+    // Defer the document-level dismisser so the right-click's own
+    // mouseup doesn't immediately close the menu we just opened.
+    setTimeout(() => {
+      document.addEventListener('click', onDocClick, true);
+      document.addEventListener('keydown', onKey, true);
+      window.addEventListener('resize', close);
+      window.addEventListener('scroll', close, true);
+    }, 0);
+  }
+
+  // F3 · bind once: delegated contextmenu listeners for agent + kanban cards.
+  _installContextMenus() {
+    if (this._ctxMenusInstalled) return;
+    this._ctxMenusInstalled = true;
+
+    document.addEventListener('contextmenu', (e) => {
+      // Agent card
+      const agentEl = e.target.closest('.agent-card[data-session-id]');
+      if (agentEl) {
+        e.preventDefault();
+        const sid = agentEl.dataset.sessionId;
+        const member = (this.state.members || []).find(m => m.sessionId === sid);
+        if (!member) return;
+        const items = [
+          { label: 'Open detail', onClick: () => this.showDetail(sid) },
+          { label: 'Send prompt…', onClick: () => this.openMemberModal(sid) },
+          { label: 'Start brainstorm', onClick: () => this.triggerBrainstorm() },
+          { separator: true },
+          { label: 'Open session (terminal)', onClick: () => { window.location.href = `/?id=${encodeURIComponent(sid)}`; } },
+        ];
+        this._showContextMenu(e.pageX, e.pageY, items);
+        return;
+      }
+      // Kanban card — inspected via the existing kanban card DOM shape.
+      const kanbanEl = e.target.closest('.kanban-card');
+      if (kanbanEl) {
+        // Pull the task ID / session from the click handler string on the
+        // card: it's `office.openTaskDetail('<sid>','<tid>')`. We parse
+        // rather than storing separately to avoid a second render pass.
+        const onclick = kanbanEl.getAttribute('onclick') || '';
+        const m = onclick.match(/openTaskDetail\('([^']+)','([^']+)'\)/);
+        if (!m) return;
+        e.preventDefault();
+        const sid = m[1];
+        const tid = m[2];
+        // Figure out current status from DOM classes to gate actions.
+        const isDone = kanbanEl.classList.contains('card-done');
+        const isBlocked = kanbanEl.classList.contains('card-blocked');
+        const items = [
+          { label: 'Open detail', onClick: () => this.openTaskDetail(sid, tid) },
+        ];
+        if (!isDone) {
+          if (isBlocked) {
+            items.push({ label: 'Resume', onClick: () => this._kanbanTaskStart(sid, tid) });
+          } else {
+            items.push({ label: 'Start', onClick: () => this._kanbanTaskStart(sid, tid) });
+            items.push({ label: 'Mark blocked', onClick: () => this._kanbanTaskBlock(sid, tid) });
+          }
+          items.push({ label: 'Mark complete', onClick: () => this._kanbanTaskComplete(sid, tid) });
+          items.push({ separator: true });
+          items.push({ label: 'Cycle priority', onClick: () => {
+            // Read current priority from the inner `.q-priority` button's data-attr.
+            const pri = kanbanEl.querySelector('.q-priority')?.dataset.pri || 'medium';
+            const nextPri = pri === 'high' ? 'low' : (pri === 'medium' ? 'high' : 'medium');
+            this._kanbanCyclePriority(sid, tid, nextPri);
+          }});
+        }
+        this._showContextMenu(e.pageX, e.pageY, items);
+      }
+    });
+  }
+
+  // F4 · header budget pill + insights progress bar. Called on cost + settings
+  // changes. Defensive against officeSettings not being fetched yet.
+  _updateBudgetPill() {
+    const pill = document.getElementById('budgetPill');
+    const val = document.getElementById('budgetPillValue');
+    const budget = (this.officeSettings && Number(this.officeSettings.teamDailyBudget)) || 0;
+    const members = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    const totalCost = members.reduce((s, m) => s + (Number(m.totalCost) || 0), 0);
+
+    if (!pill || !val) return;
+    if (budget <= 0) {
+      pill.classList.add('hidden');
+      pill.removeAttribute('data-tier');
+      return;
+    }
+    pill.classList.remove('hidden');
+    const pct = Math.max(0, (totalCost / budget) * 100);
+    let tier = 'ok';
+    if (pct >= 95) tier = 'alert';
+    else if (pct >= 80) tier = 'warn';
+    else if (pct >= 50) tier = 'mid';
+    pill.setAttribute('data-tier', tier);
+    pill.style.setProperty('--budget-pct', Math.min(100, pct).toFixed(0));
+    val.textContent = `$${totalCost.toFixed(2)} / $${budget}`;
+    pill.title = `Today: $${totalCost.toFixed(4)} of $${budget} (${pct.toFixed(0)}%)`;
+
+    // Also refresh the Insights bar if the tab is mounted — lightweight.
+    const bar = document.getElementById('insightBudgetBar');
+    if (bar) {
+      bar.setAttribute('data-tier', tier);
+      const fill = bar.querySelector('.insight-budget-bar-fill');
+      if (fill) {
+        fill.style.width = `${Math.min(100, pct).toFixed(1)}%`;
+        fill.setAttribute('data-tier', tier);
+      }
+      const label = bar.querySelector('.insight-budget-bar-label');
+      if (label) label.textContent = `$${totalCost.toFixed(2)} / $${budget} · ${pct.toFixed(0)}%`;
+    }
+  }
+
+  // F5 · quick-add task modal.
+  openQuickAddModal() {
+    const overlay = document.getElementById('quickAddModal');
+    const assigneeSel = document.getElementById('qaAssignee');
+    const titleInput = document.getElementById('qaTitle');
+    const descInput = document.getElementById('qaDescription');
+    const priInput = document.getElementById('qaPriority');
+    if (!overlay || !assigneeSel) return;
+
+    // Populate assignees from current roster.
+    const roster = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
+    if (roster.length === 0) {
+      this.showToast('Spawn a team first', 'warning');
+      return;
+    }
+    assigneeSel.innerHTML = '<option value="">Select a member...</option>' +
+      roster.map(m => `<option value="${this.escapeAttr(m.sessionId)}">${this.escapeHtml(m.name || m.sessionId)} · ${this.escapeHtml(m.role || '')}</option>`).join('');
+
+    if (titleInput) titleInput.value = '';
+    if (descInput) descInput.value = '';
+    if (priInput) priInput.value = 'medium';
+    overlay.classList.remove('hidden');
+    setTimeout(() => titleInput && titleInput.focus(), 40);
+  }
+
+  closeQuickAddModal() {
+    const overlay = document.getElementById('quickAddModal');
+    if (overlay) overlay.classList.add('hidden');
+  }
+
+  async submitQuickAddTask() {
+    const assigneeSel = document.getElementById('qaAssignee');
+    const titleInput = document.getElementById('qaTitle');
+    const descInput = document.getElementById('qaDescription');
+    const priInput = document.getElementById('qaPriority');
+    const submitBtn = document.getElementById('btnQuickAddSubmit');
+    if (!assigneeSel || !titleInput) return;
+
+    const sessionId = assigneeSel.value.trim();
+    const title = titleInput.value.trim();
+    if (!sessionId) { this.showToast('Pick an assignee', 'warning'); return; }
+    if (!title) { this.showToast('Title is required', 'warning'); return; }
+
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const data = await this.postJson('/api/office/agent/task/self-add', {
+        sessionId,
+        title,
+        description: descInput ? descInput.value.trim() : '',
+        priority: priInput ? priInput.value : 'medium',
+      });
+      if (data && data.success) {
+        this.showToast('Task added', 'success');
+        this.closeQuickAddModal();
+        this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 100);
+      } else {
+        this.showToast((data && data.error) || 'Failed to add task', 'error');
+      }
+    } catch (err) {
+      console.error('Quick-add task failed:', err);
+      this.showToast('Network error adding task', 'error');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
+  // ============================================================================
   // Keyboard shortcuts overlay
   // ============================================================================
 
@@ -6232,6 +6712,15 @@ class OfficeApp {
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
         this.openShortcutsOverlay();
+        return;
+      }
+
+      // F5 · bare 't' opens the quick-add task modal. Only fires when
+      // not typing in a field (already gated above) and not as part of
+      // the "g t" chord sequence below.
+      if (e.key === 't' && lastKey !== 'g') {
+        e.preventDefault();
+        this.openQuickAddModal();
         return;
       }
 

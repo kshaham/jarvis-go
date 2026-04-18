@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,10 @@ type Manager struct {
 	autoStandupEnabled bool
 	curiosityEnabled   bool
 	teamMission        string
+	// Daily USD spend budget for the whole team. 0 = unset / no budget.
+	// Purely a UI signal — used by the header budget pill and the
+	// Insights progress bar. Persisted across restarts.
+	teamDailyBudget    float64
 	// Which template the current team was spawned from + its resolved
 	// working directory. Exposed in the status payload so the UI can show
 	// a "current team" banner while a team is running.
@@ -826,6 +831,33 @@ func (m *Manager) loadPersistedMission() {
 	if err == nil {
 		m.teamMission = strings.TrimSpace(string(data))
 	}
+	// Daily budget lives in its own tiny file so the mission file stays
+	// human-readable plain text. Missing/invalid -> 0 (no budget).
+	if bdata, berr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-daily-budget.txt")); berr == nil {
+		if v, perr := strconv.ParseFloat(strings.TrimSpace(string(bdata)), 64); perr == nil && v >= 0 {
+			m.teamDailyBudget = v
+		}
+	}
+}
+
+// SetTeamDailyBudget updates the daily spend budget (USD) and persists it.
+// 0 means "no budget" and hides the header pill on the frontend.
+func (m *Manager) SetTeamDailyBudget(v float64) {
+	if v < 0 {
+		v = 0
+	}
+	m.mu.Lock()
+	m.teamDailyBudget = v
+	m.mu.Unlock()
+
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+	_ = os.MkdirAll(dir, 0o755)
+	tmpFile := filepath.Join(dir, "team-daily-budget.txt.tmp")
+	targetFile := filepath.Join(dir, "team-daily-budget.txt")
+	if err := os.WriteFile(tmpFile, []byte(strconv.FormatFloat(v, 'f', -1, 64)), 0o644); err == nil {
+		_ = os.Rename(tmpFile, targetFile)
+	}
 }
 
 // ActiveMeetingCount returns the number of active meetings.
@@ -881,6 +913,7 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	autoStandupEnabled := m.autoStandupEnabled
 	curiosityEnabled := m.curiosityEnabled
 	teamMission := m.teamMission
+	teamDailyBudget := m.teamDailyBudget
 	lastTemplateID := m.lastTemplateID
 	lastWorkingDir := m.lastWorkingDir
 	var lastBrainstormAtMs int64
@@ -931,6 +964,7 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 		"lastBrainstormAt":            lastBrainstormAtMs,
 		"metrics":                     m.metrics.Snapshot(),
 		"teamMission":                 teamMission,
+		"teamDailyBudget":             teamDailyBudget,
 	}
 }
 
@@ -973,11 +1007,24 @@ func (m *Manager) UpdateOfficeSettings(settings map[string]interface{}) {
 	if v, ok := settings["teamMission"].(string); ok {
 		missionUpdate = v
 	}
+	// teamDailyBudget is applied after releasing the lock so the setter
+	// can persist + lock internally without re-entrant locking.
+	var budgetUpdate *float64
+	if v, ok := settings["teamDailyBudget"].(float64); ok {
+		clamped := v
+		if clamped < 0 {
+			clamped = 0
+		}
+		budgetUpdate = &clamped
+	}
 	m.mu.Unlock()
 
 	// SetTeamMission acquires its own lock, so call after releasing.
 	if missionUpdate != "" {
 		m.SetTeamMission(missionUpdate)
+	}
+	if budgetUpdate != nil {
+		m.SetTeamDailyBudget(*budgetUpdate)
 	}
 }
 

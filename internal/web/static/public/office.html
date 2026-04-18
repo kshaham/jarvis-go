@@ -93,6 +93,13 @@
         </div>
       </div>
       <div class="office-header-right">
+        <div class="budget-pill hidden" id="budgetPill" data-tier="ok" title="Today's spend vs. daily budget">
+          <span class="budget-pill-label t-meta">Today</span>
+          <span class="budget-pill-value t-mono" id="budgetPillValue">$0.00 / $0</span>
+        </div>
+        <button class="hdr-btn hdr-btn-add" id="btnQuickAddTask" onclick="office.openQuickAddModal()" title="Quick-add task (t)" aria-label="Quick-add task">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
         <div class="notification-center">
           <button class="notification-bell" onclick="office.toggleNotifications()" title="Notifications" aria-label="Toggle notifications">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -212,6 +219,39 @@
 
         <!-- Agents Tab -->
         <div class="tab-panel active" id="panel-agents" role="tabpanel">
+          <!-- Team overview widget (F1) — populated by _renderOverviewWidget(). Hidden until first render. -->
+          <div class="team-overview hidden" id="teamOverview" aria-label="Team overview">
+            <div class="team-overview-cell team-overview-cell-donut" role="button" tabindex="0" data-overview-cell="donut" title="Team status breakdown">
+              <svg class="team-overview-donut" width="48" height="48" viewBox="0 0 48 48" aria-hidden="true">
+                <circle class="team-overview-donut-track" cx="24" cy="24" r="18" fill="none" stroke-width="6"/>
+                <g id="teamOverviewDonutSegments"></g>
+              </svg>
+              <div class="team-overview-donut-labels">
+                <span class="t-meta">Team</span>
+                <span class="t-mono" id="teamOverviewTotal">0</span>
+              </div>
+            </div>
+            <div class="team-overview-cell" role="button" tabindex="0" data-overview-cell="standup" title="Standup schedule">
+              <span class="t-meta">Last standup</span>
+              <span class="t-mono" id="teamOverviewLastStandup">—</span>
+              <span class="team-overview-sub t-meta" id="teamOverviewNextStandup">Next: —</span>
+            </div>
+            <div class="team-overview-cell" role="button" tabindex="0" data-overview-cell="blocker" title="Top blocker — click to jump to Tasks">
+              <span class="t-meta">Top blocker</span>
+              <span class="team-overview-primary" id="teamOverviewBlocker">None</span>
+              <span class="team-overview-sub t-meta" id="teamOverviewBlockerDuration"></span>
+            </div>
+            <div class="team-overview-cell" role="button" tabindex="0" data-overview-cell="cost" title="Today's team cost — click to jump to Insights">
+              <span class="t-meta">Today's cost</span>
+              <span class="t-mono team-overview-primary" id="teamOverviewCost">$0.00</span>
+              <span class="team-overview-sub t-meta" id="teamOverviewCostBudget"></span>
+            </div>
+            <div class="team-overview-cell" role="button" tabindex="0" data-overview-cell="throughput" title="Tasks completed this session — click to jump to Timeline">
+              <span class="t-meta">Throughput</span>
+              <span class="t-mono team-overview-primary" id="teamOverviewThroughput">0</span>
+              <span class="team-overview-sub t-meta">tasks done</span>
+            </div>
+          </div>
           <div class="panel-header">
             <h2 class="panel-title">Agents</h2>
             <div class="view-mode-toggle">
@@ -510,6 +550,11 @@
                 <span class="char-count" id="missionCharCount">0 / 1000</span>
               </div>
               <p class="settings-hint">Agents re-evaluate their work in real-time when you change this.</p>
+              <label class="settings-field" style="margin-top:12px">
+                <span>Daily budget (USD)</span>
+                <input type="number" class="settings-number" id="settingTeamDailyBudget" min="0" max="10000" step="1" value="0" onchange="office.updateSetting('teamDailyBudget')" placeholder="0 = off">
+              </label>
+              <p class="settings-hint">Shows a progress pill in the header. Set to 0 to hide.</p>
             </div>
             <div class="settings-section">
               <div class="settings-section-title">Auto-Standup</div>
@@ -807,6 +852,44 @@
       </div>
     </div>
   </div>
+
+  <!-- Quick-add Task Modal (F5) -->
+  <div id="quickAddModal" class="member-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="quickAddTitle" onclick="if(event.target===this)office.closeQuickAddModal()">
+    <div class="member-modal quick-add-modal">
+      <button class="modal-close" onclick="office.closeQuickAddModal()" aria-label="Close">&times;</button>
+      <h2 class="spawn-config-title" id="quickAddTitle">Quick-add task</h2>
+      <p class="spawn-config-subtitle">Assign a task to any team member without opening the full spawn flow.</p>
+      <div class="qa-field">
+        <label class="spawn-config-label" for="qaAssignee">Assign to</label>
+        <select class="spawn-config-select" id="qaAssignee">
+          <option value="">Select a member...</option>
+        </select>
+      </div>
+      <div class="qa-field">
+        <label class="spawn-config-label" for="qaTitle">Title</label>
+        <input type="text" class="spawn-config-input" id="qaTitle" placeholder="What needs to be done?" maxlength="200">
+      </div>
+      <div class="qa-field">
+        <label class="spawn-config-label" for="qaDescription">Description <span class="t-meta">(optional)</span></label>
+        <textarea class="spawn-config-input" id="qaDescription" rows="3" placeholder="Additional context..." maxlength="800"></textarea>
+      </div>
+      <div class="qa-field">
+        <label class="spawn-config-label" for="qaPriority">Priority</label>
+        <select class="spawn-config-select" id="qaPriority">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      <div class="modal-footer-sticky spawn-config-actions">
+        <button class="panel-btn" onclick="office.closeQuickAddModal()">Cancel</button>
+        <button class="panel-btn panel-btn-primary" id="btnQuickAddSubmit" onclick="office.submitQuickAddTask()">Add task</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context Menu (F3) — single reusable element, positioned on contextmenu events. -->
+  <div id="ctxMenu" class="ctx-menu hidden" role="menu" aria-hidden="true"></div>
 
   <!-- Code Review Modal -->
   <div id="reviewModal" class="member-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">

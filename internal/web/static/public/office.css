@@ -365,6 +365,284 @@
 
 /* ========== END Round 8 ========== */
 
+/* ========== Round 9: overview + cross-tab + context menus + budget + quick-add ========== */
+
+/* F1 · Home overview widget */
+.team-overview {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr 1fr 1fr;
+  align-items: center;
+  gap: 0;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  transition: transform 150ms ease-out,
+    box-shadow 150ms ease-out,
+    border-color 150ms ease-out;
+}
+.team-overview-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 14px;
+  border-left: 1px solid var(--border-default);
+  cursor: pointer;
+  transition: background 140ms ease-out;
+  min-width: 0;
+}
+.team-overview-cell:first-of-type { border-left: none; cursor: default; }
+.team-overview-cell:hover:not(:first-of-type) { background: rgba(59, 130, 246, 0.05); }
+.team-overview-cell .t-meta { margin-bottom: 2px; }
+.team-overview-value {
+  font-family: var(--mono-stack);
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.team-overview-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.team-overview-sub.hl-warn  { color: var(--warn); }
+.team-overview-sub.hl-alert { color: var(--error); }
+.team-overview-donut {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 4px 4px;
+  cursor: default;
+}
+.team-overview-donut svg {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+}
+.team-overview-donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+.team-overview-donut-legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+
+/* F2 · Activity drill-affordance */
+.activity-entry.drillable {
+  cursor: pointer;
+  transition: background 140ms ease-out, border-color 140ms ease-out;
+  border-left: 2px solid transparent;
+}
+.activity-entry.drillable:hover {
+  background: var(--bg-card-hover);
+  border-left-color: var(--accent);
+}
+
+/* F3 · Context menu */
+.ctx-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 180px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  user-select: none;
+  animation: slideInFade 140ms ease-out;
+}
+.ctx-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+.ctx-menu button:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-left-color: var(--accent);
+}
+.ctx-menu button.ctx-danger { color: var(--error); }
+.ctx-menu button.ctx-danger:hover { background: rgba(239, 68, 68, 0.08); border-left-color: var(--error); }
+.ctx-menu .ctx-sep {
+  height: 1px;
+  background: var(--border-default);
+  margin: 4px 2px;
+}
+
+/* F4 · Budget pill + insights progress bar */
+.budget-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 99px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  font-size: 11px;
+  font-family: var(--mono-stack);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.budget-pill[data-tier="ok"]    { color: var(--success); border-color: rgba(34, 197, 94, 0.3); }
+.budget-pill[data-tier="mid"]   { color: var(--accent-hi); border-color: rgba(59, 130, 246, 0.35); }
+.budget-pill[data-tier="warn"]  { color: var(--warn); border-color: rgba(234, 179, 8, 0.45); background: rgba(234, 179, 8, 0.08); }
+.budget-pill[data-tier="alert"] { color: var(--error); border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.1); font-weight: 600; }
+.budget-pill .budget-pill-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-family: inherit;
+}
+
+.insight-budget-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+.insight-budget-bar-track {
+  height: 6px;
+  background: var(--bg-elev);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.insight-budget-bar-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 99px;
+  transition: width 320ms ease-out, background-color 200ms ease-out;
+}
+.insight-budget-bar-fill[data-tier="mid"]   { background: var(--accent); }
+.insight-budget-bar-fill[data-tier="warn"]  { background: var(--warn); }
+.insight-budget-bar-fill[data-tier="alert"] { background: var(--error); }
+.insight-budget-bar-meta {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono-stack);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* F5 · Quick-add task modal */
+.quick-add-modal .member-modal {
+  max-width: 440px;
+}
+.quick-add-modal .member-modal-header {
+  margin-bottom: 14px;
+}
+.quick-add-modal .qa-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.quick-add-modal .qa-field label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.quick-add-modal .qa-field input,
+.quick-add-modal .qa-field select,
+.quick-add-modal .qa-field textarea {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+.quick-add-modal .qa-field textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-family: var(--mono-stack);
+  font-size: 12px;
+}
+
+/* Header quick-add button (reuses .hdr-btn styling, small visual tweak) */
+.hdr-btn.hdr-btn-add {
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--accent-hi);
+}
+.hdr-btn.hdr-btn-add:hover { color: var(--text-primary); background: var(--accent-bg); border-color: var(--accent); }
+
+/* F1 · donut segment colors + a couple of HTML-side class aliases so the
+ * JS-rendered markup matches the widget layout. Kept append-only so we
+ * don't risk touching older Round-9 blocks above. */
+.team-overview-cell-donut {
+  grid-column: 1;
+  cursor: default;
+}
+.team-overview-cell-donut svg {
+  flex-shrink: 0;
+}
+.team-overview-donut-track {
+  stroke: var(--bg-elev);
+}
+.team-overview-donut-seg.seg-working { stroke: var(--accent); }
+.team-overview-donut-seg.seg-idle    { stroke: var(--text-muted); }
+.team-overview-donut-seg.seg-meeting { stroke: var(--accent-hi); }
+.team-overview-donut-seg.seg-stuck   { stroke: var(--error); }
+.team-overview-donut-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono-stack);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.team-overview-primary {
+  font-family: var(--mono-stack);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Round 9 quick-add modal uses .spawn-config-* inputs already, so
+ * the qa-field wrapper only needs label + spacing. */
+.qa-field { margin-bottom: 12px; }
+.qa-field .spawn-config-label { margin-bottom: 4px; display: block; }
+
+/* ========== END Round 9 ========== */
+
 /* ========== Reset / Base ========== */
 
 *, *::before, *::after {
