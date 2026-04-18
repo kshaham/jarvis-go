@@ -920,9 +920,15 @@ func (m *Manager) CheckForIdleAgents() {
 		slog.Info("Agent running low on tasks, finding work", "name", agentName, "remaining", totalWork)
 
 		// Strategy 1: Brainstorm with a strategic-tier (captain/leader) agent.
-		// Only pick leaders that aren't busy with their own tasks.
+		// Only pick leaders that aren't busy with their own tasks AND
+		// aren't currently in a turn (a prompt sent to a mid-turn
+		// facilitator just queues; the brainstorm times out at 5 min
+		// without a response. Observed 2026-04-18 04:02:59: Ops +
+		// Stack brainstorm where Stack was working -> Ops ended up
+		// facilitator -> timeout).
 		leader := m.findStrategicAgent(agent.SessionID)
-		if leader != nil && leader.ActiveTask() == nil && leader.PendingTaskCount() == 0 {
+		if leader != nil && leader.ActiveTask() == nil && leader.PendingTaskCount() == 0 &&
+			!sessions.IsSessionWorking(leader.SessionID) {
 			meeting := m.StartBrainstorm([]string{agent.SessionID, leader.SessionID})
 			if meeting != nil {
 				leaderName := leader.SessionID
@@ -936,6 +942,7 @@ func (m *Manager) CheckForIdleAgents() {
 		}
 
 		// Strategy 2: Brainstorm with any available (non-busy) agent.
+		// findAvailableAgent now also filters by IsSessionWorking.
 		partner := m.findAvailableAgent(agent.SessionID)
 		if partner != nil {
 			meeting := m.StartBrainstorm([]string{agent.SessionID, partner.SessionID})
@@ -968,12 +975,15 @@ func (m *Manager) findStrategicAgent(excludeSessionID string) *AgentState {
 	return nil
 }
 
-// findAvailableAgent returns an agent that has no active task and is not the
-// given session. Prefers role-affinity matches when the requesting agent has
-// a known role in the roleAffinity map.
+// findAvailableAgent returns an agent that has no active task, is not
+// currently in a turn, and is not the given session. Prefers
+// role-affinity matches when the requesting agent has a known role in
+// the roleAffinity map.
 func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	sessions := m.sessions
 
 	// Look up the requesting agent's role for affinity matching.
 	var requestingRole string
@@ -983,9 +993,18 @@ func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 
 	preferredRoles := RoleAffinityPartners(requestingRole)
 
-	// Helper: check if agent is truly idle (no active or pending tasks).
+	// Helper: check if agent is truly idle (no active or pending tasks
+	// AND not currently executing a turn). Sending a brainstorm prompt
+	// to a mid-turn agent queues behind their current work; they can't
+	// respond, and the 5-min timeout is the only resolution.
 	isIdle := func(a *AgentState) bool {
-		return a.ActiveTask() == nil && a.PendingTaskCount() <= 1
+		if a.ActiveTask() != nil || a.PendingTaskCount() > 1 {
+			return false
+		}
+		if sessions != nil && sessions.IsSessionWorking(a.SessionID) {
+			return false
+		}
+		return true
 	}
 
 	// First pass: find an affinity-matched available agent.
