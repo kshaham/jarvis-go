@@ -78,9 +78,13 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-protocols",
 		"office-memory-discipline",
 		"office-context-budget",
+		// Browser verification is first-class for QA of any user-visible
+		// feature. Without these two, QA agents default to unit-test-only
+		// verification and miss regressions that only appear in the DOM.
+		"headless-browser",
+		"expect-testing",
 		"generate-tests",
 		"run-tests",
-		"go-testing",
 		"debug",
 		"review-changes",
 	},

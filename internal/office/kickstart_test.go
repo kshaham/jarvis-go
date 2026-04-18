@@ -103,9 +103,10 @@ func TestPickSkillsForRoleMatchesExpectedBuckets(t *testing.T) {
 		{"DevOps Engineer", "shell-scripting-safe"},
 		{"DevOps Engineer", "docker-compose-debug"},
 		{"DevOps Engineer", "release-prep"},
-		// QA unchanged.
+		// QA: test generation + browser verification are both first-class.
 		{"QA Engineer", "generate-tests"},
-		{"QA Engineer", "go-testing"},
+		{"QA Engineer", "headless-browser"},
+		{"QA Engineer", "expect-testing"},
 		{"UI/UX Designer", "design-principles"},
 		// Unknown role -> default bundle.
 		{"Some Unknown Role", "office-protocols"},

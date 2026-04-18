@@ -140,8 +140,8 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 
 	// 12. Headless browser pointer
 	b.WriteString("## Headless Browser\n")
-	b.WriteString("A real Chromium runs as a sibling container at `ws://headless-shell:9222` (env: `$EXPECT_BROWSER_WS_ENDPOINT`, `$HEADLESS_BROWSER_HOST`). Use `browser-screenshot <url> [out.png]` for one-shot captures and read the PNG to verify. Full reference: `cm skill read headless-browser`.\n")
-	b.WriteString("Run a fresh browser verification BEFORE marking any UI/frontend task complete.\n\n")
+	b.WriteString("A real Chromium runs as a sibling container at `ws://headless-shell:9222` (env: `$EXPECT_BROWSER_WS_ENDPOINT`, `$HEADLESS_BROWSER_HOST`). Three pre-installed CLIs drive it over CDP: `browser-screenshot <url> [out.png]` for one-shot PNG captures, `expect-cli -m \"<natural-language test>\" -y` for UI flow assertions, and `puppeteer-core` in Node for custom scripts. Full reference: `cm skill read headless-browser`.\n")
+	b.WriteString("Run a fresh browser verification BEFORE marking complete any task that touches user-visible behavior -- this covers frontend/UI work AND any QA sign-off on a feature rendered in the browser. Capture the PNG, then Read it to confirm the expected state; a screenshot you didn't look at is not evidence.\n\n")
 
 	// 13. Work mode
 	if perpetualMode {
