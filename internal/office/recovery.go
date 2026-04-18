@@ -351,12 +351,26 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 			continue
 		}
 
+		// If the SDK reports this session is currently in a turn, the
+		// agent is working on SOMETHING -- we have no way to know if
+		// it's this task specifically, but auto-completing a task out
+		// from under a working agent is much worse than missing the
+		// auto-complete for another tick. Observed 2026-04-18 01:41-
+		// 01:43 UTC: Captain/Shield/Dash all had their in-progress
+		// tasks auto-completed while still mid-turn working on them
+		// ("taskAge=7m+" but the agents were producing task-progress
+		// calls seconds later).
+		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
+
 		// Check if the agent has been idle (LastPromptSentAt indicates
 		// last time we sent something -- if it was long ago and the task
 		// has been running for a while, the agent is likely done).
 		agent.mu.Lock()
 		lastPrompt := agent.LastPromptSentAt
 		lastCheck, hasCheck := agent.ProgressChecks[active.ID]
+		lastAPI := agent.LastAgentAPIAt
 		agent.mu.Unlock()
 
 		// Task must have been in_progress for at least the threshold.
@@ -366,6 +380,12 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 		}
 		taskAge := now.Sub(baseline)
 		if taskAge < autoCompleteThreshold {
+			continue
+		}
+
+		// A recent API call from the agent (task-progress, self-add,
+		// etc.) proves they're still engaged. Skip the auto-complete.
+		if !lastAPI.IsZero() && now.Sub(lastAPI) < 2*time.Minute {
 			continue
 		}
 
