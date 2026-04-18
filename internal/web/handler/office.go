@@ -1381,6 +1381,12 @@ func (ctx *Context) OfficeGetLearnings(w http.ResponseWriter, r *http.Request) {
 }
 
 // OfficeGetLearningsByConfig returns learnings for a specific config ID.
+// The frontend (office.js _renderDetailLearnings) expects data.learnings
+// to be a flat array of learning entries. Previously the handler
+// returned the ENTIRE parsed file -- a struct with {configId, name,
+// learnings:[...]} -- nested under learnings, so data.learnings ended
+// up being an object rather than an array. items.slice(0,30) threw and
+// the modal showed "Failed to load learnings." for every agent.
 func (ctx *Context) OfficeGetLearningsByConfig(w http.ResponseWriter, r *http.Request) {
 	configID := chi.URLParam(r, "configId")
 	if !safeName(configID) {
@@ -1399,12 +1405,26 @@ func (ctx *Context) OfficeGetLearningsByConfig(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Attempt to parse as JSON; fall back to raw string if invalid.
-	var parsed interface{}
-	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
-		parsed = string(data)
+	// Decode the file as the canonical AgentLearningData shape and hand
+	// the UI the entries array directly.
+	var parsed struct {
+		ConfigID  string      `json:"configId"`
+		Name      string      `json:"name"`
+		Learnings interface{} `json:"learnings"`
 	}
-	ok(w, map[string]interface{}{"learnings": parsed, "configId": configID})
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		request.WriteError(w, http.StatusInternalServerError, "failed to parse learnings file: "+jsonErr.Error())
+		return
+	}
+	out := parsed.Learnings
+	if out == nil {
+		out = []interface{}{}
+	}
+	ok(w, map[string]interface{}{
+		"learnings": out,
+		"configId":  configID,
+		"name":      parsed.Name,
+	})
 }
 
 // OfficeGetCodeGraph returns the code graph by walking the team's working directory.
