@@ -1876,6 +1876,54 @@ html, body {
   height: 12px;
 }
 
+/* R18 · Danger-tinted quick button for Kill. Only shows destructive
+   intent on hover so the neutral state stays quiet. */
+.agent-quick-btn--danger {
+  color: #b45454;
+}
+.agent-quick-btn--danger:hover {
+  background: rgba(220, 38, 38, 0.18);
+  border-color: rgba(220, 38, 38, 0.55);
+  color: #fca5a5;
+}
+
+/* R18 · Turn-count badge on the card footer. Neutral after 50 turns,
+   warning amber at 80, red when the per-session turn cap fires. */
+.turn-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+.turn-badge.turn-hot {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+.turn-badge.turn-capped {
+  background: rgba(220, 38, 38, 0.16);
+  color: #fca5a5;
+  border-color: rgba(220, 38, 38, 0.45);
+}
+
+/* R18 · Brief red flash when an agent is killed by the operator.
+   Fades back after ~2s as the card removes itself via memberLeft. */
+@keyframes agentCardFlashKill {
+  0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.0); background: transparent; }
+  20%  { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.55); background: rgba(220, 38, 38, 0.08); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.0); background: transparent; }
+}
+.agent-card--flash-kill {
+  animation: agentCardFlashKill 2s ease-out;
+}
+
 /* Name row (name + score inline) */
 .agent-card-name-row {
   display: flex;

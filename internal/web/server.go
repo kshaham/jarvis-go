@@ -848,6 +848,9 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/code-graph/impact", h.OfficePostCodeGraphImpact)
 					r.Post("/wrap-up", h.OfficePostWrapUp)
 					r.Post("/wrap-up/cancel", h.OfficePostWrapUpCancel)
+					// R18 · surgical agent controls for operators
+					r.Post("/agent/kill", h.OfficeAgentKill)
+					r.Post("/agent/inject", h.OfficeAgentInjectPrompt)
 					r.Post("/standup", h.OfficePostStandup)
 					r.Post("/standup/user-message", h.OfficePostStandupUserMessage)
 					r.Put("/member/{sessionId}/personality", h.OfficePutMemberPersonality)

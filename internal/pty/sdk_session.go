@@ -37,10 +37,12 @@ type SDKSession struct {
 	claudeSessionID string
 
 	// Token tracking
-	totalInputTokens  int64
-	totalOutputTokens int64
-	totalCostUSD      float64
-	maxCostUSD        float64 // per-session spending cap; 0 = unlimited
+	totalInputTokens   int64
+	totalOutputTokens  int64
+	totalCostUSD       float64
+	maxCostUSD         float64 // per-session spending cap; 0 = unlimited
+	maxTurnsPerSession int     // per-session turn-count cap; 0 = unlimited
+	turnCapFired       bool    // so EventTurnCapReached only fires once
 
 	// Buffers
 	terminalBuffer *BufferAccumulator
@@ -93,7 +95,8 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		providerEnv:    config.ProviderEnv,
 		systemPrompt:   config.SystemPrompt,
 		mcpServers:     config.McpServers,
-		maxCostUSD:     config.MaxCostUSD,
+		maxCostUSD:         config.MaxCostUSD,
+		maxTurnsPerSession: config.MaxTurnsPerSession,
 		outputObservers: make(map[int]func(string)),
 		activeTools:     make(map[string]bool),
 	}
@@ -283,6 +286,8 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 						model = m
 					}
 				}
+				turnCap := s.maxTurnsPerSession
+				turnCapAlreadyFired := s.turnCapFired
 				s.mu.Unlock()
 
 				s.appendOutput(fmt.Sprintf("\n[Turn Complete] Turns: %d | Cost: $%.4f | Tokens: in=%d out=%d\n",
@@ -304,6 +309,24 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 				if capUSD > 0 && currentCost >= capUSD {
 					s.emitEvent(EventCostExceeded{Cost: currentCost, CapUSD: capUSD})
 					slog.Warn("SDK session hit cost cap; stopping", "session", s.ID, "cost", currentCost, "cap", capUSD)
+					go s.Stop()
+				}
+
+				// Per-session turn-count cap enforcement. Mirrors the cost
+				// path above. Guards with turnCapFired so we emit exactly
+				// once even if the goroutine Stop() takes a moment to
+				// wind the session down.
+				if turnCap > 0 && !turnCapAlreadyFired && event.Result.NumTurns >= turnCap {
+					s.mu.Lock()
+					s.turnCapFired = true
+					s.mu.Unlock()
+					s.emitEvent(EventTurnCapReached{
+						Turns: event.Result.NumTurns,
+						Cap:   turnCap,
+						Cost:  currentCost,
+					})
+					slog.Warn("SDK session hit turn cap; stopping",
+						"session", s.ID, "turns", event.Result.NumTurns, "cap", turnCap, "cost", currentCost)
 					go s.Stop()
 				}
 

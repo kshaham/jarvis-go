@@ -34,6 +34,14 @@ type SessionConfig struct {
 	// Zero means unlimited.
 	MaxCostUSD float64
 
+	// MaxTurnsPerSession is an optional per-session turn-count cap. When
+	// > 0, the session emits EventTurnCapReached and stops once the
+	// cumulative NumTurns from the SDK crosses the ceiling. Zero means
+	// unlimited. Defaults populated by the spawn flow so every session
+	// gets a sane runaway guard. Observed production incident: an agent
+	// hit 155 turns ($57.87) on one task window before operator noticed.
+	MaxTurnsPerSession int
+
 	// SDK mode fields (only used when Mode == ModeClaudeSDK)
 	SystemPrompt string            // Initial system prompt (kickstart)
 	McpServers   map[string]any    // MCP server configurations
@@ -108,6 +116,19 @@ type EventCostExceeded struct {
 }
 
 func (EventCostExceeded) eventType() string { return "costExceeded" }
+
+// EventTurnCapReached fires when a session's cumulative NumTurns hits
+// its per-session MaxTurnsPerSession cap. The session is stopped after
+// this event. Separate event (rather than reusing EventCostExceeded)
+// so operators can distinguish "ran out of money" from "ran out of
+// turns" in the activity log and billing analysis.
+type EventTurnCapReached struct {
+	Turns int
+	Cap   int
+	Cost  float64
+}
+
+func (EventTurnCapReached) eventType() string { return "turnCapReached" }
 
 // EventTurnError fires when an SDK turn completes with IsError=true
 // (e.g. provider rate-limit, 4xx/5xx, "Network error" code from a

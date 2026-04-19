@@ -79,6 +79,13 @@ var projectNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 // jarvis container). Declared here so tests can reference the same path.
 const newProjectRoot = "/app/workspace"
 
+// defaultMaxTurnsPerSession is the safety-net ceiling applied to every
+// freshly-spawned SDK session. R18 · An agent hit 155 turns ($57.87) on
+// one task window before anyone noticed; this cap ensures future
+// runaway loops fail fast. Legitimate long migrations can override via
+// the member spawn payload.
+const defaultMaxTurnsPerSession = 100
+
 type autoStandupRequest struct {
 	Enabled  bool `json:"enabled"`
 	Interval int  `json:"interval"`
@@ -527,13 +534,14 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
 			pty.SessionConfig{
-				ID:           sessionID,
-				WorkingDir:   req.WorkingDir,
-				Mode:         pty.ModeClaudeSDK,
-				Name:         member.Name,
-				ProviderEnv:  agentEnv,
-				SystemPrompt: kickstart,
-				McpServers:   mcpServers,
+				ID:                 sessionID,
+				WorkingDir:         req.WorkingDir,
+				Mode:               pty.ModeClaudeSDK,
+				Name:               member.Name,
+				ProviderEnv:        agentEnv,
+				SystemPrompt:       kickstart,
+				McpServers:         mcpServers,
+				MaxTurnsPerSession: defaultMaxTurnsPerSession,
 			},
 		)
 		if err != nil {

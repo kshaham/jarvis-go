@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -79,8 +80,50 @@ func (ctx *Context) checkSpendingThresholds() {
 				"percentUsed": pct,
 				"frozen":      t >= 100,
 			})
+			// R18 · Reaching 100% used to be display-only. Now we
+			// actively stop every running SDK session so the team can't
+			// continue burning past the cap. Per-session shutdown fires
+			// the usual EventExit → SSE broadcast chain; the office
+			// manager's HandleAgentDeath does the rest. Fires exactly
+			// once per day because the thresholdsFired map gates it.
+			if t >= 100 {
+				stopped := ctx.stopActiveSessionsForDailyCap()
+				ctx.SSEBroker.Broadcast("office:dailyCapHit", map[string]interface{}{
+					"todayCost":      cost,
+					"dailyCap":       cap,
+					"stoppedAgents":  stopped,
+				})
+				slog.Warn("daily cost cap hit; stopping active SDK sessions",
+					"cost", cost, "cap", cap, "stopped", stopped)
+			}
 		}
 	}
+}
+
+// stopActiveSessionsForDailyCap walks every live SDK session and stops
+// it. Returns the list of stopped sessionIDs so the caller can include
+// them in the office:dailyCapHit SSE payload for dashboard display.
+// PTY sessions are left alone -- they're operator shells, not agents.
+func (ctx *Context) stopActiveSessionsForDailyCap() []string {
+	sm := ctx.SessionManager
+	if sm == nil {
+		return nil
+	}
+	sessions := sm.GetAllSDKSessions()
+	var stopped []string
+	for _, s := range sessions {
+		if s == nil {
+			continue
+		}
+		id := s.ID
+		if err := sm.StopSDKSession(id); err != nil {
+			slog.Warn("failed to stop SDK session for daily cap",
+				"session", id, "err", err)
+			continue
+		}
+		stopped = append(stopped, id)
+	}
+	return stopped
 }
 
 // IsSpendingFrozen returns true when today's cost has reached the daily cap.

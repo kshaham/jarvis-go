@@ -687,6 +687,56 @@ class OfficeApp {
       this.showNotification(`${who} hit a provider error -- may need a retry`, 'error');
     });
 
+    // R18 · Operator stopped one agent. Flash the card then let the
+    // normal memberLeft broadcast remove it; we just surface the reason
+    // in the activity feed + a toast.
+    this.eventSource.addEventListener('office:agentKilled', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || data.sessionId || 'Agent';
+      const reason = (data.reason || 'operator').toString();
+      this.addActivityEntry('system', `${who} stopped (${reason})`);
+      this.showNotification(`Stopped ${who}`, 'info');
+      const card = document.querySelector(`.agent-card[data-session-id="${data.sessionId}"]`);
+      if (card) {
+        card.classList.add('agent-card--flash-kill');
+        setTimeout(() => card.classList.remove('agent-card--flash-kill'), 2000);
+      }
+    });
+
+    // R18 · An agent hit its per-session turn cap and the SDK stopped
+    // it. Mark the cap on the member so the badge flips red on the next
+    // render, and surface a loud toast.
+    this.eventSource.addEventListener('office:agentTurnCapReached', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || data.sessionId || 'Agent';
+      const turns = data.turns || 0;
+      const cost = typeof data.cost === 'number' ? data.cost.toFixed(2) : '?';
+      this.addActivityEntry('system', `${who} hit turn cap at ${turns} turns ($${cost})`);
+      this.showNotification(`${who} hit turn cap (${turns} turns, $${cost})`, 'error');
+      const m = this.state.members.find(x => x.sessionId === data.sessionId);
+      if (m) {
+        m.usage = m.usage || {};
+        m.usage.turnCapReached = true;
+        m.usage.turnCount = turns;
+        this._scheduleRender(() => this.renderAgentCards(), 'agents', 80);
+      }
+    });
+
+    // R18 · Team crossed its daily spending cap — every SDK session was
+    // stopped. Banner + activity feed entry; dashboard otherwise stays
+    // functional so the operator can raise the cap from Settings.
+    this.eventSource.addEventListener('office:dailyCapHit', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const cost = typeof data.todayCost === 'number' ? data.todayCost.toFixed(2) : '?';
+      const cap = typeof data.dailyCap === 'number' ? data.dailyCap.toFixed(2) : '?';
+      const stopped = Array.isArray(data.stoppedAgents) ? data.stoppedAgents.length : 0;
+      this.addActivityEntry('system', `Daily cap reached $${cost}/$${cap} — stopped ${stopped} agent${stopped === 1 ? '' : 's'}`);
+      this.showNotification(`Daily cap $${cap} reached ($${cost}) — ${stopped} agent${stopped === 1 ? '' : 's'} stopped`, 'error');
+    });
+
     // R15 · Team dev instances — re-pull the full slot map on any change so
     // the dashboard card stays in sync with adds/clears/health flips.
     this.eventSource.addEventListener('office:devInstanceChanged', () => { this.refreshDevInstances(); });
@@ -1291,6 +1341,17 @@ class OfficeApp {
       ? `<span class="agent-card-last-active" title="Last active">${this.escapeHtml(lastActiveStr)}</span>`
       : '';
 
+    // R18 · Turn-count badge. Shows after 50 turns (~mid-session), goes
+    // red at 80+ so operators can spot long-runners before the 100-turn
+    // cap stops them. Tooltip exposes exact count + cap flag.
+    const turnCount = (member.usage && typeof member.usage.turnCount === 'number') ? member.usage.turnCount : 0;
+    const turnCapped = !!(member.usage && member.usage.turnCapReached);
+    let turnBadgeHtml = '';
+    if (turnCount >= 50 || turnCapped) {
+      const cls = turnCapped ? 'turn-badge turn-capped' : turnCount >= 80 ? 'turn-badge turn-hot' : 'turn-badge';
+      turnBadgeHtml = `<span class="${cls}" title="${turnCount} turns${turnCapped ? ' — turn cap reached' : ''}">${turnCount}t</span>`;
+    }
+
     // Feature 5: Unread message badge
     const unreadCount = (this.state.recentMessages || []).filter(
       m => (m.toSessionId === member.sessionId) && m.id && !this._readMessages.has(m.id)
@@ -1368,7 +1429,9 @@ class OfficeApp {
       </div>
     ` : '';
 
-    // Quick action buttons (visible on hover)
+    // Quick action buttons (visible on hover). R18 adds Inject (nudge an
+    // agent with operator text) and Kill (surgical stop) alongside the
+    // existing Details / Prompt / Terminal trio.
     const quickActionsHtml = `
       <div class="agent-card-actions">
         <button class="agent-quick-btn" onclick="event.stopPropagation(); office.openMemberModal('${member.sessionId}')" title="Details">
@@ -1377,8 +1440,14 @@ class OfficeApp {
         <button class="agent-quick-btn" onclick="event.stopPropagation(); office.quickPrompt('${member.sessionId}')" title="Send prompt">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
+        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.injectPrompt('${member.sessionId}')" title="Inject operator prompt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+        </button>
         <button class="agent-quick-btn" onclick="event.stopPropagation(); office.navigateToSessionDirect('${member.sessionId}')" title="Terminal">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </button>
+        <button class="agent-quick-btn agent-quick-btn--danger" onclick="event.stopPropagation(); office.killAgent('${member.sessionId}')" title="Kill agent">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
         </button>
       </div>
     `;
@@ -1407,7 +1476,7 @@ class OfficeApp {
       ${recentActivityHtml}
       <div class="agent-card-footer">
         <span class="agent-card-workdir" title="${this.escapeAttr(member.workingDir || '')}">${this.escapeHtml((member.workingDir || '').replace(/^.*[/\\]/, ''))}</span>
-        <span class="agent-card-cost">${lastActiveHtml}${costStr}</span>
+        <span class="agent-card-cost">${lastActiveHtml}${turnBadgeHtml}${costStr}</span>
       </div>
       <div class="agent-card-badges">${autonomyBadgeHtml}${learningsBadgeHtml}</div>
       ${this._renderCardSparkline(member)}
@@ -3160,6 +3229,58 @@ class OfficeApp {
       }
     } catch {
       this.showNotification(`Failed to send prompt to ${name}`, 'error');
+    }
+  }
+
+  // R18 · Inject a corrective prompt into a running agent. Hits the
+  // browser-auth /api/office/agent/inject endpoint which prefixes the
+  // message with [OPERATOR PROMPT] so the agent knows it came from the
+  // human. Prompt is capped at 4 KB server-side.
+  async injectPrompt(sessionId) {
+    const member = this.state.members.find(m => m.sessionId === sessionId);
+    const name = member ? member.name : 'Agent';
+    const prompt = window.prompt(`Inject operator prompt for ${name} (max 4 KB):`);
+    if (!prompt || !prompt.trim()) return;
+    const trimmed = prompt.trim();
+    if (trimmed.length > 4096) {
+      this.showNotification('Prompt too long (4 KB limit)', 'error');
+      return;
+    }
+    try {
+      const data = await this.postJson('/api/office/agent/inject', {
+        sessionId,
+        prompt: trimmed,
+      });
+      if (data && data.injected) {
+        this.showNotification(`Injected prompt to ${name}`, 'success');
+      } else {
+        this.showNotification(`Failed to inject prompt to ${name}`, 'error');
+      }
+    } catch {
+      this.showNotification(`Failed to inject prompt to ${name}`, 'error');
+    }
+  }
+
+  // R18 · Kill a single agent. Confirmation + optional reason via
+  // window.prompt is enough for this operator-only action; the server
+  // broadcasts office:agentKilled so the card flashes + removes.
+  async killAgent(sessionId) {
+    const member = this.state.members.find(m => m.sessionId === sessionId);
+    const name = member ? member.name : 'Agent';
+    if (!window.confirm(`Stop agent ${name}?\n\nThis ends the session and reassigns its tasks.`)) return;
+    const reason = window.prompt(`Reason (optional):`, '') || '';
+    try {
+      const data = await this.postJson('/api/office/agent/kill', {
+        sessionId,
+        reason: reason.trim(),
+      });
+      if (data && data.stopped) {
+        this.showNotification(`Stopped ${name}`, 'success');
+      } else {
+        this.showNotification(`Failed to stop ${name}`, 'error');
+      }
+    } catch {
+      this.showNotification(`Failed to stop ${name}`, 'error');
     }
   }
 

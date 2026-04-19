@@ -144,6 +144,22 @@ func (m *SessionManager) GetSDKSession(id string) (*SDKSession, bool) {
 	return s, ok
 }
 
+// GetAllSDKSessions returns every live SDK session. Snapshot copy so
+// callers can iterate without holding the manager lock (useful for
+// bulk operations like daily-cap enforcement that call StopSDKSession
+// on each returned pointer, which would deadlock under an RLock).
+func (m *SessionManager) GetAllSDKSessions() []*SDKSession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*SDKSession, 0, len(m.sdkSessions))
+	for _, s := range m.sdkSessions {
+		if s != nil {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // StopSDKSession stops and removes an SDK session.
 func (m *SessionManager) StopSDKSession(id string) error {
 	m.mu.RLock()
