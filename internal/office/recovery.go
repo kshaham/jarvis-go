@@ -895,7 +895,11 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 		// Tier 2: Ctrl+C, wait 3s, send recovery prompt. Exit early if monitor stops.
 		sessions.WriteViaScreen(sessionID, "\x03")
 		monitorDone := m.monitorDone
-		go func() {
+		// R21 code review: wrap in safeRun so a panic inside
+		// WriteViaScreen (e.g., nil PTY after session tear-down race)
+		// broadcasts office:panicRecovered instead of taking the whole
+		// process down.
+		go safeRun("recovery-tier2", m.broadcast, func() {
 			select {
 			case <-time.After(3 * time.Second):
 			case <-monitorDone:
@@ -911,13 +915,14 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 				`Report your status: cm standup respond "<brief status>"`,
 			}, "\n")
 			sessions.WriteViaScreen(sessionID, recoveryPrompt+"\r")
-		}()
+		})
 
 	case RecoveryTier3:
 		// Tier 3: Ctrl+C, wait 3s, send diagnostic prompt. Exit early if monitor stops.
 		sessions.WriteViaScreen(sessionID, "\x03")
 		monitorDone := m.monitorDone
-		go func() {
+		// R21 code review: same panic-recovery wrap as Tier 2.
+		go safeRun("recovery-tier3", m.broadcast, func() {
 			select {
 			case <-time.After(3 * time.Second):
 			case <-monitorDone:
@@ -935,7 +940,7 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 				`Reply via: cm standup respond "<your status report>"`,
 			}, "\n")
 			sessions.WriteViaScreen(sessionID, diagnosticPrompt+"\r")
-		}()
+		})
 	}
 }
 

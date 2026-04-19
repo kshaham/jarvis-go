@@ -7,6 +7,7 @@ package pty
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -416,15 +417,20 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 }
 
 // looksLikeUserMessage peeks at the raw envelope and returns true if
-// its message.role is "user". Cheap string probe to avoid parsing
-// every non-typed event twice.
+// the top-level "type" field is "user". Structured check (per R21
+// code review) avoids the false-positive class where an assistant
+// message's text content happens to contain the literal substring
+// `"role":"user"` — common when agents discuss JSON schemas or
+// role-based access control. Parsing just the envelope type field is
+// cheap (the CLI emits a type on every line).
 func looksLikeUserMessage(raw []byte) bool {
-	// Anchor matches on the envelope path rather than any embedded
-	// quoted strings; false positives are harmless (observeUser will
-	// bail out if there are no tool_result blocks) but this keeps
-	// CPU down on heavy turns.
-	return strings.Contains(string(raw), `"role":"user"`) ||
-		strings.Contains(string(raw), `"role": "user"`)
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return false
+	}
+	return env.Type == "user"
 }
 
 // SendPrompt sends a message to the persistent session. Non-blocking.

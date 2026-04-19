@@ -40,7 +40,12 @@ func quarantineCorruptFile(path string, reason error) string {
 			"path", path, "renameErr", err, "reason", reason)
 		return ""
 	}
-	slog.Error("quarantined corrupt state file",
+	// R21 code review: "quarantine succeeded" is a warning, not an
+	// error. The broadcast + WARN is the operator signal; reserving
+	// ERROR for the failure branch keeps log-severity dashboards
+	// meaningful. The rename-failed path above keeps Warn too since
+	// neither branch is a crash-level event.
+	slog.Warn("quarantined corrupt state file",
 		"path", path, "corruptPath", corruptPath, "reason", reason)
 	return corruptPath
 }

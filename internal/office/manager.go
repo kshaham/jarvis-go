@@ -2282,10 +2282,14 @@ func (m *Manager) sweepStaleMeetings() []string {
 // may want to reassign) but removes the dangling reference so the
 // dashboard doesn't show "assigned to: <dead session>". Returns the
 // cleared bug IDs.
+//
+// Two-phase lock discipline (R21 code review fix): snapshot the list
+// of orphaned IDs under m.mu, release, then broadcast. SSE Send is
+// non-blocking so the prior pattern wasn't a real deadlock, but
+// releasing the lock for fan-out keeps m.mu contention-free for
+// unrelated reads happening on the same tick.
 func (m *Manager) sweepOrphanedBugs() []string {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	var cleared []string
 	for id, task := range m.bugTasks {
 		if task == nil || task.AssignedTo == "" {
@@ -2298,10 +2302,10 @@ func (m *Manager) sweepOrphanedBugs() []string {
 			"bugId", id, "deadSession", task.AssignedTo)
 		task.AssignedTo = ""
 		cleared = append(cleared, id)
-		// Broadcast outside the lock would be cleaner, but the call
-		// is non-blocking (office:* broadcast queues to the SSE
-		// broker which has its own worker). Holding the lock for the
-		// broadcast keeps the code simple.
+	}
+	m.mu.Unlock()
+
+	for _, id := range cleared {
 		m.broadcast("office:bugTaskOrphaned", map[string]interface{}{
 			"bugId": id,
 		})

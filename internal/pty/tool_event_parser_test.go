@@ -114,20 +114,29 @@ func TestHashCanonicalJSON_StableUnderKeyReordering(t *testing.T) {
 	}
 }
 
-func TestLooksLikeUserMessage_DetectsBothSpacings(t *testing.T) {
+func TestLooksLikeUserMessage_ChecksTopLevelType(t *testing.T) {
 	cases := []struct {
+		name string
 		in   string
 		want bool
 	}{
-		{`{"type":"user","message":{"role":"user"}}`, true},
-		{`{"type":"user","message":{"role": "user"}}`, true},
-		{`{"type":"assistant","message":{"role":"assistant"}}`, false},
-		{`{"type":"system"}`, false},
+		{"user envelope", `{"type":"user","message":{"role":"user"}}`, true},
+		{"assistant envelope", `{"type":"assistant","message":{"role":"assistant"}}`, false},
+		{"system envelope", `{"type":"system"}`, false},
+		// R21 code-review regression guard: an assistant message whose
+		// text content contains the literal substring `"role":"user"`
+		// (agent discussing a JSON schema, say) must NOT be treated
+		// as user-shaped. The previous string-contains check falsely
+		// matched here.
+		{"assistant text with role user substring",
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the payload {\"role\":\"user\"} was sent"}]}}`,
+			false},
+		{"malformed json", `{{not json}}`, false},
 	}
 	for _, tc := range cases {
 		got := looksLikeUserMessage([]byte(tc.in))
 		if got != tc.want {
-			t.Errorf("looksLikeUserMessage(%q) = %v, want %v", tc.in, got, tc.want)
+			t.Errorf("%s: looksLikeUserMessage = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
