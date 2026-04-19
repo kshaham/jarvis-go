@@ -237,8 +237,29 @@ func handleTask(args []string) {
 		} else {
 			fmt.Fprintln(os.Stderr, "warning: cm task complete called without --summary; future-you will not know what you did. See `cm skill read office-task-handoff`.")
 		}
-		post("/api/office/agent/task-complete", map[string]interface{}{"sessionId": sessionID, "taskId": taskID})
+		// Send the summary as `result` so the server's soft screenshot gate
+		// can scan it for browser-verification evidence. Without this the
+		// gate scans an empty string and EVERY UI-keyword task-complete
+		// fires the warning regardless of whether the agent cited a
+		// screenshot in their summary.
+		completeResp := postBody("/api/office/agent/task-complete", map[string]interface{}{
+			"sessionId": sessionID,
+			"taskId":    taskID,
+			"result":    summary,
+		})
 		fmt.Printf("Task %s marked as complete.\n", taskID)
+		// Surface the server's soft-gate warning (e.g. UI-keyword task
+		// completed without visible browser verification). Previously the
+		// CLI discarded the response body, so agents had no feedback loop
+		// and kept violating the rule.
+		if m, ok := completeResp.(map[string]interface{}); ok {
+			if warn, ok := m["warning"].(string); ok && warn != "" {
+				fmt.Fprintln(os.Stderr, "warning: "+warn)
+			}
+			if already, ok := m["alreadyComplete"].(bool); ok && already {
+				fmt.Fprintln(os.Stderr, "note: task was already complete; re-call was a no-op.")
+			}
+		}
 
 	case "ack":
 		requireArgs(subargs, 1, "cm task ack <taskId>")
@@ -558,6 +579,15 @@ func addAgentAuth(req *http.Request) {
 }
 
 func post(path string, body map[string]interface{}) {
+	_ = postBody(path, body)
+}
+
+// postBody is the same as post but returns the decoded JSON response.
+// Useful when the server signals semantic info in the body (e.g. the
+// soft screenshot gate returns {"warning": "..."} on task-complete).
+// Callers that don't need the body should stick to post() so the
+// majority of call sites stay terse.
+func postBody(path string, body map[string]interface{}) interface{} {
 	requireEnv()
 	data, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", apiURL+path, bytes.NewReader(data))
@@ -575,6 +605,9 @@ func post(path string, body map[string]interface{}) {
 		text, _ := io.ReadAll(resp.Body)
 		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
 	}
+	var out interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out
 }
 
 // del issues an HTTP DELETE against the given API path with agent auth.

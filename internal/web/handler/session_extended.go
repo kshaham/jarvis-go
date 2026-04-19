@@ -577,6 +577,17 @@ func (ctx *Context) SessionResize(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	session, ok := ctx.SessionManager.GetSession(id)
 	if !ok {
+		// SDK sessions have no PTY to resize — xterm.js fit-addon firing
+		// on window resize would otherwise 404 and clutter logs. Return
+		// 200 no-op so the frontend stays quiet; genuine typos on an
+		// unknown session ID still get 404.
+		if _, sdk := ctx.SessionManager.GetSDKSession(id); sdk {
+			request.WriteJSON(w, http.StatusOK, map[string]interface{}{
+				"success": true,
+				"noop":    "sdk session has no pty to resize",
+			})
+			return
+		}
 		request.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
