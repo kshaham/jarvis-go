@@ -326,6 +326,18 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 				})
 				s.emitEvent(EventIdle{})
 
+				// R21 code review: if both caps trip on the same turn
+				// (e.g. an expensive multi-step turn that also crosses
+				// the turn ceiling), we used to emit BOTH
+				// EventCostExceeded and EventTurnCapReached plus two
+				// concurrent go s.Stop() calls. Stop() is idempotent so
+				// the double-stop was harmless, but the dashboard got
+				// two different stop banners for one event. Cost cap
+				// takes precedence — operator cares more about "ran
+				// out of money" than "ran out of turns" when both hit
+				// the same turn. After either fires, skip the other.
+				stoppedThisTurn := false
+
 				// Per-session cost cap enforcement. Emits EventCostExceeded
 				// and stops the session asynchronously so we can finish
 				// emitting the current turn's events first.
@@ -333,13 +345,14 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 					s.emitEvent(EventCostExceeded{Cost: currentCost, CapUSD: capUSD})
 					slog.Warn("SDK session hit cost cap; stopping", "session", s.ID, "cost", currentCost, "cap", capUSD)
 					go s.Stop()
+					stoppedThisTurn = true
 				}
 
 				// Per-session turn-count cap enforcement. Mirrors the cost
 				// path above. Guards with turnCapFired so we emit exactly
 				// once even if the goroutine Stop() takes a moment to
 				// wind the session down.
-				if turnCap > 0 && !turnCapAlreadyFired && event.Result.NumTurns >= turnCap {
+				if !stoppedThisTurn && turnCap > 0 && !turnCapAlreadyFired && event.Result.NumTurns >= turnCap {
 					s.mu.Lock()
 					s.turnCapFired = true
 					s.mu.Unlock()

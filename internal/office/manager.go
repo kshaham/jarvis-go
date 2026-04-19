@@ -281,9 +281,13 @@ func (m *Manager) abortMeetingsFacilitatedBy(sessionID, facilitatorName, reason 
 	m.mu.Unlock()
 
 	for _, mtg := range toAbort {
-		// Deliver the sentinel to every participant's waitSlots so
-		// the readers return immediately. The waitSlot drop-guards
-		// cover the case where the slot was already finished.
+		// R21 code review: gate sentinel delivery by meeting type.
+		// Before: we delivered to BrainstormSlot AND StandupSlot for
+		// every participant, which could spuriously abort an
+		// unrelated concurrent meeting the participant was in. Now
+		// we only poke the slot type matching the dying meeting.
+		// The waitSlot drop-guards cover the case where the slot
+		// was already finished.
 		for _, pid := range mtg.Participants {
 			a := m.GetAgent(pid)
 			if a == nil {
@@ -293,11 +297,24 @@ func (m *Manager) abortMeetingsFacilitatedBy(sessionID, facilitatorName, reason 
 			bslot := a.BrainstormSlot
 			sslot := a.StandupSlot
 			a.mu.Unlock()
-			if bslot != nil {
-				bslot.deliver(meetingAbortedSentinel)
-			}
-			if sslot != nil {
-				sslot.deliver(meetingAbortedSentinel)
+			switch mtg.Type {
+			case "brainstorm":
+				if bslot != nil {
+					bslot.deliver(meetingAbortedSentinel)
+				}
+			case "standup":
+				if sslot != nil {
+					sslot.deliver(meetingAbortedSentinel)
+				}
+			default:
+				// Unknown meeting type — deliver to both as a best-
+				// effort fallback, matching the prior behavior.
+				if bslot != nil {
+					bslot.deliver(meetingAbortedSentinel)
+				}
+				if sslot != nil {
+					sslot.deliver(meetingAbortedSentinel)
+				}
 			}
 		}
 

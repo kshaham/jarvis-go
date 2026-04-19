@@ -32,6 +32,12 @@ type agentInjectRequest struct {
 // payloads reasonable and prevents accidental codebase pastes.
 const maxInjectPromptBytes = 4 * 1024
 
+// maxInjectBodyBytes is the outer JSON-body limit the decoder enforces
+// BEFORE we see req.Prompt. Just enough headroom for the envelope
+// (sessionId + key names + quoting) — previously 1024 bytes which was
+// 4× more slack than needed. R21 code review tightened this.
+const maxInjectBodyBytes = maxInjectPromptBytes + 256
+
 // OfficeAgentKill stops a single agent session. Surgical alternative to
 // /shutdown-team for rogue/runaway agents. Fires office:agentKilled
 // with the reason so the dashboard can flash the card before removing.
@@ -85,7 +91,7 @@ func (ctx *Context) OfficeAgentKill(w http.ResponseWriter, r *http.Request) {
 // without killing the accumulated context.
 func (ctx *Context) OfficeAgentInjectPrompt(w http.ResponseWriter, r *http.Request) {
 	var req agentInjectRequest
-	if !request.DecodeAndValidateMax(w, r, &req, maxInjectPromptBytes+1024) {
+	if !request.DecodeAndValidateMax(w, r, &req, maxInjectBodyBytes) {
 		return
 	}
 	if req.SessionID == "" {

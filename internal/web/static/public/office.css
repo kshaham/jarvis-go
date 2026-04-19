@@ -1902,15 +1902,24 @@ p, .agent-card-task, .agent-activity-item {
   transition-duration: 100ms;
   padding: 0;
 }
-/* R21 (§16) · 40×40 hit area. Pseudo-element is invisible; the
-   click event bubbles to the button via the parent containing it. */
+/* R21 (§16) · Hit-area expansion. Originally 40×40 centered on the
+   24×24 visual button, but (per R21 code review) in a tight 4px-gap
+   button row adjacent pseudos overlapped by 12px horizontally, so
+   clicks between two buttons would land on whichever was later in
+   DOM order instead of the visually-closer one.
+   Fix: expand vertically only. Horizontal hit area stays at button
+   width (24px); vertical extends to 40px. Net: fat-finger / trackpad
+   tolerance on the vertical axis, zero overlap between row buttons.
+   The §16 "40×40" guideline is a soft rule for standalone buttons;
+   for tight row clusters, non-overlapping hit areas beats
+   theoretical fingertip size. */
 .agent-quick-btn::before {
   content: '';
   position: absolute;
   top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 40px;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
   height: 40px;
 }
 .agent-quick-btn:hover {
@@ -4082,7 +4091,10 @@ p, .agent-card-task, .agent-activity-item {
 
 .skeleton-card {
   height: 140px;
-  border-radius: 10px;
+  /* R21 code review: match .agent-card's 14px radius so the skeleton
+     (visible while agent cards load) doesn't show a tighter corner
+     than the cards it's standing in for. */
+  border-radius: 14px;
 }
 
 .skeleton-line {
