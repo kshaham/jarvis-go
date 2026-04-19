@@ -121,6 +121,17 @@ func (ctx *Context) stopActiveSessionsForDailyCap() []string {
 				"session", id, "err", err)
 			continue
 		}
+		// R21 code review (third pass): StopSDKSession only signals
+		// the subprocess. Normally the EventExit → forwardSDKSessionEvents
+		// chain then calls HandleAgentDeath which unregisters from the
+		// office roster. But that chain is async and can fail if the
+		// forwarder goroutine already exited — leaving agents in
+		// m.agents with a dead session. Explicit UnregisterAgent here
+		// mirrors what OfficeAgentKill does and guarantees the roster
+		// drains even if the event chain fails.
+		if ctx.OfficeManager != nil {
+			ctx.OfficeManager.UnregisterAgent(id)
+		}
 		stopped = append(stopped, id)
 	}
 	return stopped

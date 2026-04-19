@@ -297,18 +297,20 @@ func (m *Manager) abortMeetingsFacilitatedBy(sessionID, facilitatorName, reason 
 			bslot := a.BrainstormSlot
 			sslot := a.StandupSlot
 			a.mu.Unlock()
+			// Note: standups don't go through m.meetings at all —
+			// StartStandup uses a separate m.standup state and is
+			// never scanned here. So "standup" can't show up as
+			// mtg.Type in practice; the default branch handles any
+			// future meeting type the same way we handle brainstorm.
 			switch mtg.Type {
 			case "brainstorm":
 				if bslot != nil {
 					bslot.deliver(meetingAbortedSentinel)
 				}
-			case "standup":
-				if sslot != nil {
-					sslot.deliver(meetingAbortedSentinel)
-				}
 			default:
-				// Unknown meeting type — deliver to both as a best-
-				// effort fallback, matching the prior behavior.
+				// Unknown / future meeting type — best-effort poke
+				// of both slots so we fail open rather than leave
+				// participants hanging.
 				if bslot != nil {
 					bslot.deliver(meetingAbortedSentinel)
 				}
@@ -763,9 +765,21 @@ func (m *Manager) UpdateBugTask(id string, status string) bool {
 func (m *Manager) GetMeetings() []*Meeting {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	// R21 code review (third pass): return deep copies so callers
+	// that iterate or serialize the result don't race with writers
+	// that mutate Meeting.Active (sweepStaleMeetings,
+	// abortMeetingsFacilitatedBy, endMeeting). Meetings are a small
+	// map (bounded by SweepMeetings at 6h cleanup), so the copy cost
+	// is negligible.
 	result := make([]*Meeting, 0, len(m.meetings))
 	for _, mtg := range m.meetings {
-		result = append(result, mtg)
+		if mtg == nil {
+			continue
+		}
+		copied := *mtg
+		// Participants slice is safe to share — it's written only
+		// once at meeting creation and never mutated.
+		result = append(result, &copied)
 	}
 	return result
 }

@@ -91,6 +91,66 @@ func TestAbortMeeting_DeliversSentinelAndBroadcasts(t *testing.T) {
 	}
 }
 
+// R21 code-review regression guard: when a brainstorm facilitator
+// dies, the sentinel must only hit BrainstormSlot. A participant
+// with a concurrent unrelated StandupSlot (e.g., from a different
+// flow) must NOT receive the sentinel on that slot.
+func TestAbortMeeting_BrainstormTypeDoesNotTouchStandupSlot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(func() { time.Sleep(80 * time.Millisecond) })
+
+	store := &recordingSessionStore{}
+	m := NewManager(store, func(event string, _ interface{}) {}, nil)
+
+	m.RegisterAgent("sess-fac", "cfg-fac", &TeamMemberConfig{ID: "cfg-fac", Name: "Facilitator", Tier: "strategic"})
+	m.RegisterAgent("sess-p", "cfg-p", &TeamMemberConfig{ID: "cfg-p", Name: "Part", Tier: "worker"})
+
+	meeting := &Meeting{
+		ID: "mtg-b", Type: "brainstorm",
+		Participants:         []string{"sess-fac", "sess-p"},
+		StartedAt:            time.Now(),
+		Active:               true,
+		FacilitatorSessionID: "sess-fac",
+	}
+	m.mu.Lock()
+	m.meetings[meeting.ID] = meeting
+	m.mu.Unlock()
+
+	// Arm BOTH slots on the participant — the brainstorm abort must
+	// only poke the brainstorm slot.
+	other := m.GetAgent("sess-p")
+	bslot := newWaitSlot()
+	sslot := newWaitSlot()
+	other.mu.Lock()
+	other.BrainstormSlot = bslot
+	other.StandupSlot = sslot
+	other.mu.Unlock()
+
+	brainstormReceived := make(chan string, 1)
+	standupReceived := make(chan string, 1)
+	go func() { brainstormReceived <- <-bslot.ch() }()
+	go func() { standupReceived <- <-sslot.ch() }()
+
+	m.HandleAgentDeath("sess-fac")
+
+	select {
+	case got := <-brainstormReceived:
+		if got != meetingAbortedSentinel {
+			t.Fatalf("brainstorm slot: expected sentinel, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("brainstorm slot did not receive sentinel")
+	}
+
+	// Standup slot should NOT have received anything.
+	select {
+	case got := <-standupReceived:
+		t.Fatalf("standup slot incorrectly received %q — brainstorm abort must not leak into standup slot", got)
+	case <-time.After(200 * time.Millisecond):
+		// expected: no delivery
+	}
+}
+
 func TestAbortMeeting_NoFacilitatorMatch_NoOp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Cleanup(func() { time.Sleep(80 * time.Millisecond) })

@@ -195,6 +195,29 @@ type AgentState struct {
 	toolLoopDetect *toolLoopDetector
 	ToolInLoop     bool
 	LoopingTool    string
+
+	// R21 code review (third pass) · Idempotency guard for stop-
+	// broadcast paths. Both OfficeAgentKill and
+	// checkForWedgedWorkingAgents emit distinct SSE events
+	// (office:agentKilled vs office:agentIdleStopped) and then call
+	// UnregisterAgent. If they race (operator clicks kill at the
+	// exact moment the wedge detector fires), both toasts hit the
+	// dashboard for one stop. ClaimStopBroadcast returns true
+	// exactly once per agent so the loser of the race skips its
+	// broadcast without affecting the UnregisterAgent cleanup
+	// (which is already idempotent via the !ok guard).
+	stopBroadcastOnce sync.Once
+}
+
+// ClaimStopBroadcast returns true on the first call per agent and
+// false thereafter. Callers about to emit a stop-reason SSE event
+// (office:agentKilled, office:agentIdleStopped) should check this
+// first and skip the broadcast if it returns false — the other
+// path already fired one.
+func (a *AgentState) ClaimStopBroadcast() bool {
+	claimed := false
+	a.stopBroadcastOnce.Do(func() { claimed = true })
+	return claimed
 }
 
 // recentTurnCostsCap bounds the per-agent recent-turn cost history.

@@ -56,6 +56,13 @@ func (ctx *Context) OfficeAgentKill(w http.ResponseWriter, r *http.Request) {
 		agentName = agent.Config.Name
 	}
 
+	// R21 code review (third pass): claim the stop-broadcast slot
+	// before doing work. If checkForWedgedWorkingAgents raced us and
+	// already fired office:agentIdleStopped, we still stop the
+	// session + unregister, but skip the duplicate office:agentKilled
+	// toast so the dashboard doesn't show both reasons for one stop.
+	mayBroadcast := agent != nil && agent.ClaimStopBroadcast()
+
 	// Stop the underlying session. Try SDK first (most agents); fall
 	// through to PTY for the handful of legacy sessions.
 	sm := ctx.SessionManager
@@ -75,12 +82,14 @@ func (ctx *Context) OfficeAgentKill(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "operator"
 	}
-	ctx.SSEBroker.Broadcast("office:agentKilled", map[string]interface{}{
-		"sessionId": req.SessionID,
-		"agentName": agentName,
-		"reason":    reason,
-	})
-	slog.Info("agent killed by operator", "session", req.SessionID, "name", agentName, "reason", reason)
+	if mayBroadcast {
+		ctx.SSEBroker.Broadcast("office:agentKilled", map[string]interface{}{
+			"sessionId": req.SessionID,
+			"agentName": agentName,
+			"reason":    reason,
+		})
+	}
+	slog.Info("agent killed by operator", "session", req.SessionID, "name", agentName, "reason", reason, "broadcast", mayBroadcast)
 	ok(w, map[string]interface{}{"stopped": req.SessionID})
 }
 

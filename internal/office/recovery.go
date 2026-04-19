@@ -696,12 +696,20 @@ func (m *Manager) checkForWedgedWorkingAgents() {
 			// Fall through — still broadcast so the dashboard flags
 			// the agent even if the stop didn't take.
 		}
-		m.broadcast("office:agentIdleStopped", map[string]interface{}{
-			"sessionId": agent.SessionID,
-			"agentName": agentName,
-			"idleMs":    idle.Milliseconds(),
-			"timeoutMs": cfg.WedgedWorkingTimeout.Milliseconds(),
-		})
+		// R21 code review (third pass): claim the stop-broadcast slot
+		// so we don't double-toast if OfficeAgentKill or another
+		// wedge-tick won this race. Ordering note: broadcast BEFORE
+		// UnregisterAgent so the dashboard receives the flash+reason
+		// event while the card is still on screen, then the card
+		// removes on the subsequent office:memberLeft.
+		if agent.ClaimStopBroadcast() {
+			m.broadcast("office:agentIdleStopped", map[string]interface{}{
+				"sessionId": agent.SessionID,
+				"agentName": agentName,
+				"idleMs":    idle.Milliseconds(),
+				"timeoutMs": cfg.WedgedWorkingTimeout.Milliseconds(),
+			})
+		}
 		// UnregisterAgent triggers the same HandleAgentDeath path used
 		// by R18's operator kill, so task reassignment + dev-instance
 		// cleanup still runs.

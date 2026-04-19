@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -139,9 +140,16 @@ type toolInvocationEmit struct {
 // or user message envelope. Returns nil if the raw bytes aren't a
 // recognized envelope shape — lets the caller ignore events that
 // don't carry content blocks without erroring.
+//
+// R21 code review (third pass): emit a Debug log on parse failure
+// so format regressions in the upstream CLI become diagnosable
+// without flooding production logs. Raw length only, not content,
+// to keep noise down.
 func parseContentBlocks(raw []byte) []rawContentBlock {
 	var env rawAssistantOrUserEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
+		slog.Debug("tool_event_parser: failed to parse content blocks",
+			"err", err, "rawLen", len(raw))
 		return nil
 	}
 	return env.Message.Content
