@@ -87,6 +87,11 @@ func (m *Manager) StartIdleMonitoring() {
 				m.CleanupExpiredLocks()
 				m.SweepBugTasks()
 				m.SweepMeetings()
+				// R20 · Force-end meetings still Active past 2h +
+				// clear dangling bug assignments. Covers ghost state
+				// from pre-R19 crashes and hard restarts.
+				m.sweepStaleMeetings()
+				m.sweepOrphanedBugs()
 				m.autoCompleteIdleAgentTasks()
 				m.checkUnacknowledgedTasks()
 				m.checkStaleInProgressTasks()

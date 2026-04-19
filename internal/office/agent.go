@@ -178,6 +178,14 @@ type AgentState struct {
 	// outbound events channel overflowed at some point and the
 	// dashboard may have stale data. Surfaced on the member card.
 	EventsDropped uint64
+
+	// R20 · Output-repeat loop advisory. loopDetect is the rolling
+	// hash ring; InLoop is a snapshot flag flipped on when the ring
+	// detects 3+ matches within 5 chunks. Advisory only — no
+	// auto-action. Exposed on the member payload so the card can
+	// show a "⟳ loop?" badge.
+	loopDetect *loopDetector
+	InLoop     bool
 }
 
 // recentTurnCostsCap bounds the per-agent recent-turn cost history.
@@ -337,6 +345,7 @@ type UsageSnapshot struct {
 	LastTurnAt        time.Time `json:"lastTurnAt,omitempty"`
 	RecentTurnCosts   []float64 `json:"recentTurnCosts,omitempty"`
 	EventsDropped     uint64    `json:"eventsDropped,omitempty"`
+	InLoop            bool      `json:"inLoop,omitempty"`
 }
 
 // Usage returns a snapshot of the agent's cumulative cost + token counts.
@@ -353,6 +362,7 @@ func (a *AgentState) Usage() UsageSnapshot {
 		LastTurnAt:        a.LastTurnAt,
 		RecentTurnCosts:   recent,
 		EventsDropped:     a.EventsDropped,
+		InLoop:            a.InLoop,
 	}
 }
 

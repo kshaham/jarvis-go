@@ -750,6 +750,47 @@ class OfficeApp {
       this.showNotification(`${who} stopped — wedged ${idleMin} min without activity`, 'error');
     });
 
+    // R20 · Output-repeat advisory — agent emitted the same chunk
+    // 3+ times inside the last 5 output events. Advisory only;
+    // operator can kill/inject via R18 buttons if it doesn't clear.
+    this.eventSource.addEventListener('office:agentPossibleLoop', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || data.sessionId || 'Agent';
+      this.addActivityEntry('system', `${who} may be looping on repeated output`);
+      this.showNotification(`${who} output-loop advisory — check agent`, 'warning');
+    });
+
+    // R20 · A corrupt state file was quarantined on boot (or a
+    // write error surfaced mid-run). Toast so operator investigates
+    // immediately instead of finding out days later.
+    this.eventSource.addEventListener('office:stateCorruption', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const file = (data.file || 'unknown').toString().split('/').pop();
+      const kind = data.kind === 'parse' ? 'parse' : 'read';
+      this.addActivityEntry('system', `State corruption in ${file} (${kind})`);
+      this.showNotification(`Corrupt state file ${file} quarantined — check logs`, 'error');
+    });
+
+    // R20 · A meeting still marked Active past the 2h TTL was
+    // force-ended. Activity-feed only; no toast because it's
+    // cleanup, not an incident.
+    this.eventSource.addEventListener('office:meetingForceEnded', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const mins = data.ageMs ? Math.round(data.ageMs / 60000) : '?';
+      this.addActivityEntry('system', `Force-ended stale ${data.type || 'meeting'} (${mins}m old)`);
+    });
+
+    // R20 · A bug task's assignee session is gone; assignment was
+    // cleared so the dashboard stops showing a dead reference.
+    this.eventSource.addEventListener('office:bugTaskOrphaned', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      this.addActivityEntry('system', `Bug ${data.bugId || '?'} assignee offline — cleared`);
+    });
+
     // R19 · Meeting facilitator died mid-flow — participants were
     // unblocked with a sentinel. Operator can restart the meeting
     // manually if desired (no auto-retry by design).
@@ -1397,6 +1438,14 @@ class OfficeApp {
       ? `<span class="drop-badge" title="${eventsDropped} SSE event${eventsDropped === 1 ? '' : 's'} dropped — dashboard data may be stale">⚠ ${eventsDropped}ev</span>`
       : '';
 
+    // R20 · Loop advisory badge. Advisory-only — the backend never
+    // auto-stops. Orange so it reads as "check this" without the red
+    // alarm of a hard failure. Clears on the next turn boundary.
+    const inLoop = !!(member.usage && member.usage.inLoop);
+    const loopBadgeHtml = inLoop
+      ? `<span class="loop-badge" title="Output-repeat advisory — agent may be looping on the same emission">⟳ loop?</span>`
+      : '';
+
     // Feature 5: Unread message badge
     const unreadCount = (this.state.recentMessages || []).filter(
       m => (m.toSessionId === member.sessionId) && m.id && !this._readMessages.has(m.id)
@@ -1521,7 +1570,7 @@ class OfficeApp {
       ${recentActivityHtml}
       <div class="agent-card-footer">
         <span class="agent-card-workdir" title="${this.escapeAttr(member.workingDir || '')}">${this.escapeHtml((member.workingDir || '').replace(/^.*[/\\]/, ''))}</span>
-        <span class="agent-card-cost">${lastActiveHtml}${dropBadgeHtml}${turnBadgeHtml}${costStr}</span>
+        <span class="agent-card-cost">${lastActiveHtml}${loopBadgeHtml}${dropBadgeHtml}${turnBadgeHtml}${costStr}</span>
       </div>
       <div class="agent-card-badges">${autonomyBadgeHtml}${learningsBadgeHtml}</div>
       ${this._renderCardSparkline(member)}

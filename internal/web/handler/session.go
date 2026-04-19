@@ -606,6 +606,13 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"id":   sessionID,
 				"data": e.Data,
 			})
+			// R20 · Feed into the output-repeat loop detector.
+			// Advisory-only; fires office:agentPossibleLoop once per
+			// streak. Detector self-resets when the streak breaks
+			// and is cleared on Idle (turn boundary) below.
+			if ctx.OfficeManager != nil {
+				ctx.OfficeManager.ObserveAgentOutput(sessionID, e.Data)
+			}
 		case pty.EventIdle:
 			broker.Broadcast("session:idle", map[string]interface{}{"id": sessionID})
 			broker.Broadcast("session:updated", map[string]interface{}{
@@ -614,6 +621,11 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 				agent.SetSDKWorking(false)
 				agent.SetEventsDropped(session.DroppedEvents())
+				// R20 · Loop detection is scoped to a single turn —
+				// legitimate multi-turn work often rebuilds/re-runs
+				// the same commands, which would otherwise look like
+				// a loop. Reset on turn boundary.
+				ctx.OfficeManager.ResetAgentLoopDetector(sessionID)
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}

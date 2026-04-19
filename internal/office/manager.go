@@ -624,18 +624,24 @@ func (m *Manager) persistMessages() {
 }
 
 // loadPersistedMessages restores messages from disk on startup.
+// R20 · parse errors quarantine the file + broadcast stateCorruption
+// instead of silently zeroing the message history.
 func (m *Manager) loadPersistedMessages() {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	data, err := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "messages.json"))
-	if err != nil {
+	path := filepath.Join(homeDir, ".jarvis", "office-memory", "messages.json")
+	var msgs []OfficeMessage
+	present, loaded := loadJSONFile(path, &msgs, m.broadcast)
+	if !present || !loaded {
 		return
 	}
-	var msgs []OfficeMessage
-	if err := json.Unmarshal(data, &msgs); err != nil {
-		return
+	// R20 · Drop zero timestamps + clamp future ones so dashboard
+	// sorting never shows bogus entries.
+	msgs, dropped, clamped := sanitizeMessageTimestamps(msgs)
+	if dropped > 0 || clamped > 0 {
+		slog.Warn("sanitized persisted messages", "dropped", dropped, "clampedFuture", clamped)
 	}
 	m.mu.Lock()
 	m.messages = msgs
@@ -936,18 +942,20 @@ func (m *Manager) SetTeamMission(s string) {
 }
 
 // loadPersistedMission reads the team mission from disk if available.
+// R20 · Invalid values broadcast stateCorruption + quarantine instead
+// of silently falling back to zero (which operator would read as "no
+// budget = unlimited").
 func (m *Manager) loadPersistedMission() {
 	homeDir, _ := os.UserHomeDir()
-	data, err := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-mission.txt"))
-	if err == nil {
-		m.teamMission = strings.TrimSpace(string(data))
+	missionPath := filepath.Join(homeDir, ".jarvis", "office-memory", "team-mission.txt")
+	if mission, present, loaded := loadTextFile(missionPath, m.broadcast); present && loaded {
+		m.teamMission = mission
 	}
 	// Daily budget lives in its own tiny file so the mission file stays
 	// human-readable plain text. Missing/invalid -> 0 (no budget).
-	if bdata, berr := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "team-daily-budget.txt")); berr == nil {
-		if v, perr := strconv.ParseFloat(strings.TrimSpace(string(bdata)), 64); perr == nil && v >= 0 {
-			m.teamDailyBudget = v
-		}
+	budgetPath := filepath.Join(homeDir, ".jarvis", "office-memory", "team-daily-budget.txt")
+	if v, ok := loadFloat64File(budgetPath, m.broadcast); ok {
+		m.teamDailyBudget = v
 	}
 	// Dev instance slots — JSON files in ~/.jarvis/office-memory/ named
 	// team-dev-<slot>.json. Also migrate legacy R13/R14 flat files into
@@ -2227,6 +2235,80 @@ func (m *Manager) SweepMeetings() int {
 	return swept
 }
 
+// staleMeetingTTL is the wall-clock ceiling for a meeting that still
+// reports Active. Real brainstorms complete in 5–10 minutes; a 2-hour
+// active meeting is almost certainly ghost state from a facilitator
+// crash that didn't fire office:meetingAborted (e.g. before R19 landed
+// or after a hard restart). Force-ending it unblocks participant UX.
+const staleMeetingTTL = 2 * time.Hour
+
+// sweepStaleMeetings force-ends meetings that have been Active longer
+// than staleMeetingTTL. Broadcasts office:meetingForceEnded per meeting
+// so the dashboard can toast + remove the ghost entry. Called from the
+// idle-monitor tick alongside SweepMeetings.
+//
+// Returns the force-ended meeting IDs so tests can assert.
+func (m *Manager) sweepStaleMeetings() []string {
+	now := time.Now()
+	m.mu.Lock()
+	var stale []*Meeting
+	for _, mtg := range m.meetings {
+		if mtg != nil && mtg.Active && now.Sub(mtg.StartedAt) > staleMeetingTTL {
+			mtg.Active = false
+			stale = append(stale, mtg)
+		}
+	}
+	m.mu.Unlock()
+
+	ids := make([]string, 0, len(stale))
+	for _, mtg := range stale {
+		age := now.Sub(mtg.StartedAt)
+		slog.Warn("force-ending stale meeting",
+			"meetingId", mtg.ID, "type", mtg.Type,
+			"age", age.Round(time.Minute).String())
+		m.broadcast("office:meetingForceEnded", map[string]interface{}{
+			"meetingId": mtg.ID,
+			"type":      mtg.Type,
+			"ageMs":     age.Milliseconds(),
+			"reason":    "exceeded staleMeetingTTL",
+		})
+		ids = append(ids, mtg.ID)
+	}
+	return ids
+}
+
+// sweepOrphanedBugs clears BugTask.AssignedTo when the assignee's
+// session is no longer in the agents map. Preserves the bug (operator
+// may want to reassign) but removes the dangling reference so the
+// dashboard doesn't show "assigned to: <dead session>". Returns the
+// cleared bug IDs.
+func (m *Manager) sweepOrphanedBugs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var cleared []string
+	for id, task := range m.bugTasks {
+		if task == nil || task.AssignedTo == "" {
+			continue
+		}
+		if _, alive := m.agents[task.AssignedTo]; alive {
+			continue
+		}
+		slog.Info("clearing orphaned bug assignment",
+			"bugId", id, "deadSession", task.AssignedTo)
+		task.AssignedTo = ""
+		cleared = append(cleared, id)
+		// Broadcast outside the lock would be cleaner, but the call
+		// is non-blocking (office:* broadcast queues to the SSE
+		// broker which has its own worker). Holding the lock for the
+		// broadcast keeps the code simple.
+		m.broadcast("office:bugTaskOrphaned", map[string]interface{}{
+			"bugId": id,
+		})
+	}
+	return cleared
+}
+
 // SweepBugTasks removes resolved bugs older than 24h and caps at MaxBugTasks.
 // Returns the number of swept entries.
 func (m *Manager) SweepBugTasks() int {
@@ -2309,17 +2391,16 @@ func (m *Manager) PersistMetrics() {
 }
 
 // LoadPersistedMetrics restores metrics counters from disk if available.
+// R20 · parse error -> quarantine + broadcast, not silent reset-to-zero.
 func (m *Manager) LoadPersistedMetrics() {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	data, err := os.ReadFile(filepath.Join(homeDir, ".jarvis", "office-memory", "metrics.json"))
-	if err != nil {
-		return
-	}
+	path := filepath.Join(homeDir, ".jarvis", "office-memory", "metrics.json")
 	var snap MetricsSnapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
+	present, loaded := loadJSONFile(path, &snap, m.broadcast)
+	if !present || !loaded {
 		return
 	}
 	m.metrics.TotalStandups.Store(snap.TotalStandups)
