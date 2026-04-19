@@ -2031,15 +2031,28 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	var warning string
 	if agent != nil {
-		// Capture the task title BEFORE the status update so the UI-keyword
-		// check has the full title even after the task transitions out of
-		// the active set.
+		// Capture the task title + prior status BEFORE the update so:
+		//  a) the UI-keyword check has the full title even after the task
+		//     transitions out of the active set, and
+		//  b) we can short-circuit when an already-completed task is
+		//     re-completed. Without (b), repeated `cm task complete` calls
+		//     re-fire the SSE broadcasts + UI-keyword warning every time,
+		//     spamming the activity feed (observed 6x on one task in prod).
 		var taskTitle string
+		var priorStatus office.TaskStatus
 		for _, t := range agent.GetTasks() {
 			if t != nil && t.ID == req.TaskID {
 				taskTitle = t.Title
+				priorStatus = t.Status
 				break
 			}
+		}
+		if priorStatus == office.TaskCompleted {
+			// Idempotent no-op: the task is already completed. Don't re-fire
+			// broadcasts, don't re-emit the screenshot-gate warning, don't
+			// inject a next-task prompt. Just acknowledge.
+			ok(w, map[string]interface{}{"alreadyComplete": true})
+			return
 		}
 
 		agent.UpdateTaskStatus(req.TaskID, office.TaskCompleted)
