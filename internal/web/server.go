@@ -821,6 +821,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/memory/{sessionId}", h.OfficeGetMemberMemory)
 				r.Get("/member/{sessionId}/personality", h.OfficeGetMemberPersonality)
 				r.Get("/telegram-config", h.OfficeGetTelegramConfig)
+				r.Get("/dev-instances", h.OfficeGetDevInstances)
 
 				// Mutating office endpoints (CSRF required)
 				r.Group(func(r chi.Router) {

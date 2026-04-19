@@ -7256,12 +7256,12 @@ class OfficeApp {
   }
 
   // R15 · Fetch the full slot map + re-render the dashboard card. Called on
-  // init + any office:devInstance* SSE event. Uses the agent endpoint so
-  // jarvis-mcp running inside sessions can also drive updates; the browser
-  // session cookie carries the same auth.
+  // init + any office:devInstance* SSE event. Hits the browser-auth
+  // mirror at /api/office/dev-instances; the agent-auth-only
+  // /api/office/agent/dev-instance/all rejects the session cookie with 401.
   async refreshDevInstances() {
     try {
-      const res = await fetch('/api/office/agent/dev-instance/all', {
+      const res = await fetch('/api/office/dev-instances', {
         credentials: 'include',
       });
       if (!res.ok) return;

@@ -2224,10 +2224,25 @@ func (ctx *Context) OfficeAgentGetDevInstance(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// OfficeAgentGetDevInstanceAll returns every slot. Used by the dashboard
-// card to show all team dev servers at once.
+// OfficeAgentGetDevInstanceAll returns every slot. Used by jarvis-mcp
+// running inside agent sessions (agent-token auth).
 func (ctx *Context) OfficeAgentGetDevInstanceAll(w http.ResponseWriter, r *http.Request) {
-	all := ctx.OfficeManager.ListDevInstances()
+	writeDevInstancesListing(w, ctx.OfficeManager)
+}
+
+// OfficeGetDevInstances is the browser-auth mirror of
+// OfficeAgentGetDevInstanceAll. The R15 dashboard card fetches this from
+// the office UI (which has a session cookie, not an agent token), so it
+// needs a route under the browser-auth group rather than /office/agent.
+// Value-free info: credsSet is a bool, never the plaintext credentials.
+func (ctx *Context) OfficeGetDevInstances(w http.ResponseWriter, r *http.Request) {
+	writeDevInstancesListing(w, ctx.OfficeManager)
+}
+
+// writeDevInstancesListing is the shared listing body so the agent-auth
+// and browser-auth handlers return identical shapes.
+func writeDevInstancesListing(w http.ResponseWriter, mgr *office.Manager) {
+	all := mgr.ListDevInstances()
 	out := make(map[string]interface{}, len(all))
 	for name, inst := range all {
 		out[name] = map[string]interface{}{
