@@ -130,6 +130,27 @@ type EventTurnCapReached struct {
 
 func (EventTurnCapReached) eventType() string { return "turnCapReached" }
 
+// EventToolInvocation fires once per completed tool_use → tool_result
+// pair inside an SDK turn. R21 · Powers tool-level loop detection:
+// identical (Name, ResultHash) tuples repeated across recent calls
+// inside the same turn are strong evidence the agent is stuck in a
+// retry loop. Emitted from sdk_session.go's eventConsumer by parsing
+// content blocks out of event.Raw (the Go SDK's ContentBlock struct
+// drops the tool_use/tool_result fields).
+//
+// InputHash is SHA-256 of the canonical JSON of the tool input;
+// ResultHash is SHA-256 of the tool_result content string. Both are
+// hex-encoded. ToolUseID is the pairing key the model assigns.
+type EventToolInvocation struct {
+	Name       string
+	ToolUseID  string
+	InputHash  string
+	ResultHash string
+	IsError    bool
+}
+
+func (EventToolInvocation) eventType() string { return "toolInvocation" }
+
 // EventTurnError fires when an SDK turn completes with IsError=true
 // (e.g. provider rate-limit, 4xx/5xx, "Network error" code from a
 // Z.AI-style gateway). Previously we only logged; this event lets

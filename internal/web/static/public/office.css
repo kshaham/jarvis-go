@@ -1246,6 +1246,26 @@ html, body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  /* R21 (make-interfaces-feel-better §8) · Crisper text on macOS.
+     Our dark background + light text was rendering with too much
+     weight — antialiased pulls the strokes back to what Linear /
+     Notion / Stripe use. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* R21 (§9) · Dynamic numbers all over the dashboard (cost, turns,
+     tokens, counts). Set tabular-nums globally so new UI doesn't
+     need to remember to opt in and counters stop shifting layout. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* R21 (§10) · Headings get text-wrap: balance so two-line titles
+   don't orphan a single word on the second line. Body-copy containers
+   get text-wrap: pretty for the same reason at paragraph scale. */
+h1, h2, h3, h4, .panel-title, .task-modal-title {
+  text-wrap: balance;
+}
+p, .agent-card-task, .agent-activity-item {
+  text-wrap: pretty;
 }
 
 /* ========== Header ========== */
@@ -1686,7 +1706,10 @@ html, body {
   border-radius: 4px;
   color: var(--text-faint);
   cursor: pointer;
-  transition: all 0.15s;
+  /* R21 (§14) · Name specific properties so unrelated style mutations
+     (debug color swaps, JS-applied widths) don't animate. */
+  transition-property: background, color;
+  transition-duration: 150ms;
   padding: 0;
 }
 .view-mode-btn.active {
@@ -1772,7 +1795,12 @@ html, body {
 .agent-card {
   background: var(--bg-card-solid);
   border: 1px solid var(--border-default);
-  border-radius: 10px;
+  /* R21 (§1) · Concentric border radius. Quick-action buttons inside
+     the card use radius 6px, positioned 8px from the edge, so the
+     card's outer radius must equal inner + inset = 6 + 8 = 14px.
+     The prior 10px was visibly "off" — buttons looked like they
+     were nested into a tighter curve than the card itself. */
+  border-radius: 14px;
   padding: 14px 16px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.2s, transform 0.15s;
@@ -1854,6 +1882,11 @@ html, body {
   opacity: 1;
 }
 .agent-quick-btn {
+  /* R21 (§16) · Visible surface remains 24×24 for the icon grid
+     but a ::before pseudo-element extends the hit area to 40×40
+     so fingers and trackpads don't miss. position: relative +
+     pseudo-element keeps the visual footprint small. */
+  position: relative;
   width: 24px;
   height: 24px;
   display: flex;
@@ -1864,12 +1897,30 @@ html, body {
   border-radius: 6px;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.1s;
+  /* R21 (§14) · transition: all replaced with specific properties. */
+  transition-property: background, color, scale;
+  transition-duration: 100ms;
   padding: 0;
+}
+/* R21 (§16) · 40×40 hit area. Pseudo-element is invisible; the
+   click event bubbles to the button via the parent containing it. */
+.agent-quick-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
 }
 .agent-quick-btn:hover {
   background: var(--border-hover);
   color: var(--text-primary);
+}
+/* R21 (§12) · Scale-on-press at exactly 0.96 — under 0.95 feels
+   exaggerated. Tactile feedback for kill / inject / details actions. */
+.agent-quick-btn:active {
+  scale: 0.96;
 }
 .agent-quick-btn svg {
   width: 12px;
@@ -1911,6 +1962,31 @@ html, body {
   background: rgba(220, 38, 38, 0.16);
   color: #fca5a5;
   border-color: rgba(220, 38, 38, 0.45);
+}
+
+/* R21 · Tool-level loop advisory — red because (toolName +
+   resultHash) repetition is almost always a real loop. Shows the
+   looping tool name inline so operators know where to look. */
+.tool-loop-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(220, 38, 38, 0.16);
+  color: #fca5a5;
+  border: 1px solid rgba(220, 38, 38, 0.45);
+  /* R21 · Pulse to catch the operator's eye — tool-level loop is
+     a stronger signal than the text-level advisory. Matches the
+     border-beam tempo so stacked badges feel coherent. */
+  animation: toolLoopPulse 2s ease-in-out infinite;
+}
+@keyframes toolLoopPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
 }
 
 /* R20 · Output-repeat loop advisory — orange so it reads as

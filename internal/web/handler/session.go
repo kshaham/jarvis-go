@@ -626,6 +626,8 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				// the same commands, which would otherwise look like
 				// a loop. Reset on turn boundary.
 				ctx.OfficeManager.ResetAgentLoopDetector(sessionID)
+				// R21 · Same reasoning for the tool-level detector.
+				ctx.OfficeManager.ResetAgentToolLoopDetector(sessionID)
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}
@@ -659,6 +661,14 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}
+			}
+		case pty.EventToolInvocation:
+			// R21 · Feed into the tool-level loop detector. Higher
+			// fidelity than the text-level advisory — a matched
+			// (tool, resultHash) triplet means the agent re-ran the
+			// same tool with the same output 3 times inside one turn.
+			if ctx.OfficeManager != nil {
+				ctx.OfficeManager.ObserveAgentToolInvocation(sessionID, e.Name, e.ResultHash)
 			}
 		case pty.EventCostExceeded:
 			broker.Broadcast("session:costExceeded", map[string]interface{}{

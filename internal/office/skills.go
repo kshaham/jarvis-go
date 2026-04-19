@@ -56,6 +56,10 @@ var suggestedSkillsByRole = map[string][]string{
 		"web-design-guidelines",
 		"office-focused-search",
 		"design-principles",
+		// R21 · Crafted-feel principles: concentric radii, optical
+		// alignment, tabular-nums, scale-on-press, 40x40 hit area.
+		// Read before merging any UI work.
+		"make-interfaces-feel-better",
 	},
 	"backend": {
 		"office-protocols",
@@ -93,6 +97,10 @@ var suggestedSkillsByRole = map[string][]string{
 		"run-tests",
 		"debug",
 		"review-changes",
+		// R21 · Checklist-driven UI polish pass. QA references this on
+		// any UI-keyword task to spot missing animations, hit areas,
+		// tabular numbers, and concentric radii before sign-off.
+		"make-interfaces-feel-better",
 	},
 	"designer": {
 		"office-protocols",
@@ -100,6 +108,7 @@ var suggestedSkillsByRole = map[string][]string{
 		"office-context-budget",
 		"design-principles",
 		"web-design-guidelines",
+		"make-interfaces-feel-better",
 		"headless-browser",
 		"office-focused-search",
 		"office-task-handoff",

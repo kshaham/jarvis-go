@@ -750,6 +750,18 @@ class OfficeApp {
       this.showNotification(`${who} stopped — wedged ${idleMin} min without activity`, 'error');
     });
 
+    // R21 · Tool-level loop advisory — higher-fidelity signal than
+    // the text-level one. Fires when the same (tool, resultHash)
+    // tuple repeats 3+ times inside one turn.
+    this.eventSource.addEventListener('office:agentToolLoop', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || data.sessionId || 'Agent';
+      const tool = data.tool || 'tool';
+      this.addActivityEntry('system', `${who} looping on ${tool}`);
+      this.showNotification(`${who} is looping on ${tool} — check the last few turns`, 'error');
+    });
+
     // R20 · Output-repeat advisory — agent emitted the same chunk
     // 3+ times inside the last 5 output events. Advisory only;
     // operator can kill/inject via R18 buttons if it doesn't clear.
@@ -1446,6 +1458,17 @@ class OfficeApp {
       ? `<span class="loop-badge" title="Output-repeat advisory — agent may be looping on the same emission">⟳ loop?</span>`
       : '';
 
+    // R21 · Tool-level loop advisory badge. Red because (toolName,
+    // resultHash) duplication is almost always a real loop —
+    // agent re-ran the same tool with the same args/output 3+ times.
+    // Shows the looping tool name ("⟲ Bash") so operators can jump
+    // straight to inspecting that command chain.
+    const toolInLoop = !!(member.usage && member.usage.toolInLoop);
+    const loopingTool = (member.usage && member.usage.loopingTool) || 'tool';
+    const toolLoopBadgeHtml = toolInLoop
+      ? `<span class="tool-loop-badge" title="Tool-loop advisory — ${this.escapeAttr(loopingTool)} produced identical output 3+ times">⟲ ${this.escapeHtml(loopingTool)}</span>`
+      : '';
+
     // Feature 5: Unread message badge
     const unreadCount = (this.state.recentMessages || []).filter(
       m => (m.toSessionId === member.sessionId) && m.id && !this._readMessages.has(m.id)
@@ -1570,7 +1593,7 @@ class OfficeApp {
       ${recentActivityHtml}
       <div class="agent-card-footer">
         <span class="agent-card-workdir" title="${this.escapeAttr(member.workingDir || '')}">${this.escapeHtml((member.workingDir || '').replace(/^.*[/\\]/, ''))}</span>
-        <span class="agent-card-cost">${lastActiveHtml}${loopBadgeHtml}${dropBadgeHtml}${turnBadgeHtml}${costStr}</span>
+        <span class="agent-card-cost">${lastActiveHtml}${toolLoopBadgeHtml}${loopBadgeHtml}${dropBadgeHtml}${turnBadgeHtml}${costStr}</span>
       </div>
       <div class="agent-card-badges">${autonomyBadgeHtml}${learningsBadgeHtml}</div>
       ${this._renderCardSparkline(member)}

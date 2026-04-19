@@ -69,6 +69,12 @@ type SDKSession struct {
 	// backlog without log spam.
 	droppedEvents atomic.Uint64
 
+	// R21 · Tool invocation tracker — pairs tool_use content blocks
+	// (from assistant messages) with their tool_result (from user
+	// messages) so we can emit a single EventToolInvocation per
+	// completed pair. Drives office-level tool-loop detection.
+	toolTracker *toolEventTracker
+
 	// Provider env and config
 	providerEnv  map[string]string
 	systemPrompt string
@@ -108,6 +114,7 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		maxTurnsPerSession: config.MaxTurnsPerSession,
 		outputObservers: make(map[int]func(string)),
 		activeTools:     make(map[string]bool),
+		toolTracker:     newToolEventTracker(),
 	}
 }
 
@@ -265,6 +272,12 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 					s.appendOutput(text)
 				}
 			}
+			// R21 · Stash any tool_use content blocks from Raw for
+			// pairing with their tool_result arrivals (which come
+			// as user-shaped messages the SDK doesn't type).
+			if len(event.Raw) > 0 {
+				s.toolTracker.observeAssistant(event.Raw)
+			}
 
 		case claude.TypeRateLimitEvent:
 			slog.Warn("SDK session rate limited", "session", s.ID)
@@ -374,9 +387,44 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 						"turns", event.Result.NumTurns,
 						"cost", event.Result.TotalCostUSD)
 				}
+				// R21 · Tool pairings that didn't match within this
+				// turn are stale — clear them so next turn starts
+				// with a clean map.
+				s.toolTracker.reset()
+			}
+
+		default:
+			// R21 · User-shaped messages carrying tool_result content
+			// blocks arrive with an unknown MessageType in v0.3.1
+			// (the SDK only types assistant/result/system/stream).
+			// Peek at the Raw envelope's role field — if it's "user",
+			// pair tool_result blocks against pending tool_use entries
+			// and emit one EventToolInvocation per matched pair.
+			if len(event.Raw) > 0 && looksLikeUserMessage(event.Raw) {
+				for _, inv := range s.toolTracker.observeUser(event.Raw) {
+					s.emitEvent(EventToolInvocation{
+						Name:       inv.Name,
+						ToolUseID:  inv.ToolUseID,
+						InputHash:  inv.InputHash,
+						ResultHash: inv.ResultHash,
+						IsError:    inv.IsError,
+					})
+				}
 			}
 		}
 	}
+}
+
+// looksLikeUserMessage peeks at the raw envelope and returns true if
+// its message.role is "user". Cheap string probe to avoid parsing
+// every non-typed event twice.
+func looksLikeUserMessage(raw []byte) bool {
+	// Anchor matches on the envelope path rather than any embedded
+	// quoted strings; false positives are harmless (observeUser will
+	// bail out if there are no tool_result blocks) but this keeps
+	// CPU down on heavy turns.
+	return strings.Contains(string(raw), `"role":"user"`) ||
+		strings.Contains(string(raw), `"role": "user"`)
 }
 
 // SendPrompt sends a message to the persistent session. Non-blocking.

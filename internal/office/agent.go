@@ -186,6 +186,15 @@ type AgentState struct {
 	// show a "⟳ loop?" badge.
 	loopDetect *loopDetector
 	InLoop     bool
+
+	// R21 · Tool-level loop advisory. Higher-fidelity signal than
+	// the text-level detector — keyed on (toolName, resultHash)
+	// tuples so only genuine re-runs of the same tool producing the
+	// same output count. Dashboard shows a red "⟲ <tool>" badge
+	// instead of the orange text-level one.
+	toolLoopDetect *toolLoopDetector
+	ToolInLoop     bool
+	LoopingTool    string
 }
 
 // recentTurnCostsCap bounds the per-agent recent-turn cost history.
@@ -346,6 +355,8 @@ type UsageSnapshot struct {
 	RecentTurnCosts   []float64 `json:"recentTurnCosts,omitempty"`
 	EventsDropped     uint64    `json:"eventsDropped,omitempty"`
 	InLoop            bool      `json:"inLoop,omitempty"`
+	ToolInLoop        bool      `json:"toolInLoop,omitempty"`
+	LoopingTool       string    `json:"loopingTool,omitempty"`
 }
 
 // Usage returns a snapshot of the agent's cumulative cost + token counts.
@@ -363,6 +374,8 @@ func (a *AgentState) Usage() UsageSnapshot {
 		RecentTurnCosts:   recent,
 		EventsDropped:     a.EventsDropped,
 		InLoop:            a.InLoop,
+		ToolInLoop:        a.ToolInLoop,
+		LoopingTool:       a.LoopingTool,
 	}
 }
 
