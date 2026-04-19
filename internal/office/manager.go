@@ -1976,6 +1976,21 @@ func (m *Manager) SubmitReflectionResponse(sessionID, learning, category, taskID
 		slog.Info("Learning entry persisted", "agent", agentName, "category", category)
 	}
 
+	// R17 · Also append the reflection to the agent's memory markdown so
+	// kickstart memory-inject naturally surfaces recent lessons. Without
+	// this, cm reflect → learnings.json only, and the agent's on-spawn
+	// memory drifts out of sync with what they just learned.
+	// Best-effort: a write failure here doesn't invalidate the learnings
+	// entry above, which is the durable canonical store.
+	workingDir := m.lastWorkingDir
+	if workingDir != "" && configID != "" {
+		ts := time.Now().UTC().Format("2006-01-02T15:04Z")
+		line := fmt.Sprintf("- [%s] (%s) %s", ts, category, learning)
+		if err := MemoryAppendSection(configID, workingDir, "learnings", line); err != nil {
+			slog.Warn("Failed to append reflection to memory", "agent", agentName, "err", err)
+		}
+	}
+
 	m.auditLog("office:reflectionResponse", sessionID, agentName, map[string]interface{}{
 		"learning": learning[:min(len(learning), 200)],
 		"category": category,

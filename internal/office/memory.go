@@ -109,8 +109,10 @@ func MemoryAppendSection(configID, workingDir, name, line string) error {
 
 // MemoryQuery does a line-level case-insensitive substring search across
 // all sections of the agent's memory file. Returns up to maxMemoryQueryHits
-// hits with section + line number + text. Returns nil if the file does
-// not exist.
+// hits with section + line number + text, sorted by line number descending
+// (newest-first) — appended entries live at the end of sections, so later
+// lines are typically newer lessons.
+// Returns nil if the file does not exist.
 func MemoryQuery(configID, workingDir, keyword string) ([]MemoryHit, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
@@ -132,6 +134,9 @@ func MemoryQuery(configID, workingDir, keyword string) ([]MemoryHit, error) {
 	lineNo := 0
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	// First pass: collect ALL matches so we can sort before truncating.
+	// A large memory file with thousands of lines still scans quickly
+	// (single linear walk, substring test per line).
 	for scanner.Scan() {
 		lineNo++
 		line := scanner.Text()
@@ -145,13 +150,17 @@ func MemoryQuery(configID, workingDir, keyword string) ([]MemoryHit, error) {
 				Line:    lineNo,
 				Text:    line,
 			})
-			if len(hits) >= maxMemoryQueryHits {
-				break
-			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	// Newest-first (higher line number ~ later in file ~ more recent).
+	sort.SliceStable(hits, func(i, j int) bool {
+		return hits[i].Line > hits[j].Line
+	})
+	if len(hits) > maxMemoryQueryHits {
+		hits = hits[:maxMemoryQueryHits]
 	}
 	return hits, nil
 }

@@ -109,6 +109,10 @@ func main() {
 	case "dev":
 		handleDev(args)
 
+	// Unified team knowledge search (R17)
+	case "knowledge", "know":
+		handleKnowledge(args)
+
 	// Help
 	case "help", "--help", "-h":
 		printUsage()
@@ -307,6 +311,128 @@ func handleTask(args []string) {
 
 	default:
 		fatal("Unknown task subcommand: " + subcmd)
+	}
+}
+
+// handleKnowledge dispatches `cm knowledge <search|tail>`.
+// Aliases: `cm know search ...` for typing convenience.
+func handleKnowledge(args []string) {
+	if len(args) < 1 {
+		fatal("Usage: cm knowledge <search|tail> [args]")
+	}
+	switch args[0] {
+	case "search":
+		query, limit, allProjects := parseKnowledgeArgs(args[1:])
+		if query == "" {
+			fatal("Usage: cm knowledge search <query> [--limit N] [--all]")
+		}
+		path := fmt.Sprintf("/api/office/agent/knowledge/search?q=%s&limit=%d",
+			url.QueryEscape(query), limit)
+		if allProjects {
+			path += "&all=true"
+		}
+		result := get(path)
+		printKnowledgeHits(result)
+	case "tail":
+		_, limit, allProjects := parseKnowledgeArgs(args[1:])
+		path := fmt.Sprintf("/api/office/agent/knowledge/tail?limit=%d", limit)
+		if allProjects {
+			path += "&all=true"
+		}
+		result := get(path)
+		printKnowledgeHits(result)
+	default:
+		fatal("Unknown knowledge subcommand: " + args[0] + " (expected: search|tail)")
+	}
+}
+
+// parseKnowledgeArgs pulls --limit N + --all from mixed positional args.
+// Remaining positional tokens join into the free-text query.
+func parseKnowledgeArgs(args []string) (query string, limit int, allProjects bool) {
+	limit = 20
+	var words []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "--limit", "-n":
+			if i+1 >= len(args) {
+				fatal(a + " requires a value")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n <= 0 {
+				fatal(a + " must be a positive integer")
+			}
+			limit = n
+			i++
+		case "--all", "--all-projects":
+			allProjects = true
+		default:
+			if strings.HasPrefix(a, "--") {
+				fatal("unknown flag: " + a)
+			}
+			words = append(words, a)
+		}
+	}
+	query = strings.Join(words, " ")
+	return
+}
+
+// printKnowledgeHits renders the server's hits array in a compact,
+// tty-friendly form. One line per hit: age, source/agent, excerpt.
+func printKnowledgeHits(result interface{}) {
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		printJSON(result)
+		return
+	}
+	hitsAny, _ := m["hits"].([]interface{})
+	if len(hitsAny) == 0 {
+		fmt.Println("(no matches)")
+		return
+	}
+	now := time.Now()
+	for _, h := range hitsAny {
+		hm, ok := h.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		source, _ := hm["source"].(string)
+		agent, _ := hm["agentName"].(string)
+		section, _ := hm["section"].(string)
+		excerpt, _ := hm["excerpt"].(string)
+		tsStr, _ := hm["timestamp"].(string)
+		age := ""
+		if tsStr != "" {
+			if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+				age = formatAge(now.Sub(t))
+			}
+		}
+		srcTag := source
+		if agent != "" {
+			srcTag = source + "/" + agent
+		}
+		if section != "" && section != "notes" {
+			srcTag += " (" + section + ")"
+		}
+		if age != "" {
+			fmt.Printf("[%s] %s\n  %s\n", age, srcTag, excerpt)
+		} else {
+			fmt.Printf("%s\n  %s\n", srcTag, excerpt)
+		}
+	}
+}
+
+// formatAge renders a duration compactly (e.g. "12s", "3m", "2h", "1d").
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }
 
@@ -726,6 +852,10 @@ Commands:
   memory section --append <name> <entry>
                                       Append to a memory section
   memory query <keyword>              Search across memory sections
+  knowledge search <query> [--limit N] [--all]
+                                      Team-wide search: all memory + learnings
+                                      + standups + whiteboard, recency-ranked
+  knowledge tail [--limit N]          Rolling tail of recent team knowledge
   dev announce <url> [--name <s>] [--pid <n>]
                                       Lead: announce dev URL for slot s (default "app")
   dev announce <url> --force          Allow localhost URL (headless-shell won't reach it)

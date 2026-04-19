@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2480,6 +2481,83 @@ func (ctx *Context) OfficeAgentGetFileLocks(w http.ResponseWriter, r *http.Reque
 }
 
 // OfficeAgentGetSkills returns skills available to agents.
+// OfficeAgentKnowledgeSearch exposes SearchKnowledge to agents via
+// `cm knowledge search <query>`. Default scope is the current team's
+// agents (pulled from the live roster) + the active team's project
+// workingDir. Pass ?all=true to broaden to every agent file on disk
+// (cross-project search; used rarely).
+func (ctx *Context) OfficeAgentKnowledgeSearch(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		request.WriteError(w, http.StatusBadRequest, "q is required")
+		return
+	}
+	limit := 20
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	opts := office.KnowledgeSearchOptions{
+		Query: query,
+		Limit: limit,
+	}
+	if r.URL.Query().Get("all") != "true" {
+		opts.AllowedAgents = liveTeamAgentSet(ctx)
+		opts.WorkingDir = liveTeamWorkingDir(ctx)
+	}
+	hits, err := office.SearchKnowledge(opts)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{"hits": hits})
+}
+
+// OfficeAgentKnowledgeTail is the non-query variant — pure recency.
+func (ctx *Context) OfficeAgentKnowledgeTail(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	var allowed map[string]bool
+	if r.URL.Query().Get("all") != "true" {
+		allowed = liveTeamAgentSet(ctx)
+	}
+	hits, err := office.TailKnowledge(limit, allowed)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{"hits": hits})
+}
+
+// liveTeamAgentSet builds the set of configIDs for agents currently in
+// the roster. Used to default knowledge queries to the active team
+// (so an agent on bonusbuddy doesn't see hits from kamban memory).
+func liveTeamAgentSet(ctx *Context) map[string]bool {
+	roster := ctx.OfficeManager.GetRoster()
+	if len(roster) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(roster))
+	for _, a := range roster {
+		if a.ConfigID != "" {
+			out[a.ConfigID] = true
+		}
+	}
+	return out
+}
+
+// liveTeamWorkingDir returns the working directory of any live agent —
+// they all share it for a single team. Empty if no team is running.
+func liveTeamWorkingDir(ctx *Context) string {
+	_, workingDir := ctx.OfficeManager.GetSpawnContext()
+	return workingDir
+}
+
 func (ctx *Context) OfficeAgentGetSkills(w http.ResponseWriter, r *http.Request) {
 	homeDir, _ := os.UserHomeDir()
 	skillsDir := filepath.Join(homeDir, ".claude", "skills")

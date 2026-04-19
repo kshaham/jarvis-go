@@ -137,7 +137,8 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("- Every task: `cm task ack <id>` -> `cm task start <id>` -> `cm task progress <id> \"...\"` -> `cm task complete <id> --summary \"<2-3 sentence handoff>\"`\n")
 	b.WriteString("- Never push to remote, never switch branches -- you live on `agent/<your-id>`.\n")
 	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
-	b.WriteString("- Your bash output is auto-compressed by rtk (60-90%% fewer tokens on git / build / test / cat / docker / etc.). Failures fall back to raw output automatically. Prefix a command with `rtk --raw` if you need the unfiltered stream for one invocation. Full reference: `cm skill read rtk`.\n\n")
+	b.WriteString("- Your bash output is auto-compressed by rtk (60-90%% fewer tokens on git / build / test / cat / docker / etc.). Failures fall back to raw output automatically. Prefix a command with `rtk --raw` if you need the unfiltered stream for one invocation. Full reference: `cm skill read rtk`.\n")
+	b.WriteString("- Before starting a task a teammate might have touched, run `cm knowledge search <keywords>` -- it searches every agent's memory + learnings + standups + whiteboard at once, recency-ranked. Saves hours on duplicate work. See `cm skill read office-knowledge-search`.\n\n")
 
 	// 12. Headless browser pointer
 	b.WriteString("## Headless Browser\n")

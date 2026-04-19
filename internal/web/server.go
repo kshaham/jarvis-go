@@ -533,6 +533,9 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/dev-instance", h.OfficeAgentGetDevInstance)
 				r.Get("/dev-instance/all", h.OfficeAgentGetDevInstanceAll)
 				r.Get("/dev-credentials", h.OfficeAgentGetDevCredentials)
+				// R17 · unified team knowledge search.
+				r.Get("/knowledge/search", h.OfficeAgentKnowledgeSearch)
+				r.Get("/knowledge/tail", h.OfficeAgentKnowledgeTail)
 				// Mutating
 				r.Post("/standup/response", h.OfficeAgentStandupResponse)
 				r.Post("/message", h.OfficeAgentMessage)
