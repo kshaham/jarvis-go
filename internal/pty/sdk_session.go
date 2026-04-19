@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,6 +60,14 @@ type SDKSession struct {
 	eventsOnce sync.Once
 	doneOnce   sync.Once
 	wg         sync.WaitGroup
+
+	// R19 · Event-drop observability. Counts how many times emitEvent
+	// hit the non-blocking default branch because the 256-slot events
+	// buffer was full. Exposed on the member payload so the dashboard
+	// can show a pill + tooltip; escalates from debug-log to a WARN at
+	// 1st drop and every 100th thereafter so operators see repeated
+	// backlog without log spam.
+	droppedEvents atomic.Uint64
 
 	// Provider env and config
 	providerEnv  map[string]string
@@ -427,8 +436,23 @@ func (s *SDKSession) emitEvent(event SessionEvent) {
 	select {
 	case s.events <- event:
 	default:
-		slog.Debug("SDK session event dropped (channel full)", "session", s.ID, "event", fmt.Sprintf("%T", event))
+		total := s.droppedEvents.Add(1)
+		slog.Debug("SDK session event dropped (channel full)", "session", s.ID, "event", fmt.Sprintf("%T", event), "totalDropped", total)
+		// R19 · WARN at first drop so operators notice immediately, and
+		// every 100th after that to surface sustained backlog without
+		// log spam. The per-drop debug line stays for deep traces.
+		if total == 1 || total%100 == 0 {
+			slog.Warn("SDK session event backlog — events dropped",
+				"session", s.ID, "totalDropped", total, "event", fmt.Sprintf("%T", event))
+		}
 	}
+}
+
+// DroppedEvents returns the count of events silently dropped from the
+// outbound channel because the buffer was full. Exposed for the member
+// payload so dashboards can badge high-drop agents.
+func (s *SDKSession) DroppedEvents() uint64 {
+	return s.droppedEvents.Load()
 }
 
 // notifyOutputObservers calls all registered output observers.

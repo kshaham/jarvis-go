@@ -737,6 +737,42 @@ class OfficeApp {
       this.showNotification(`Daily cap $${cap} reached ($${cost}) — ${stopped} agent${stopped === 1 ? '' : 's'} stopped`, 'error');
     });
 
+    // R19 · An SDK session was wedged in "working" state past the
+    // configured timeout (default 20 min) with no tool activity. The
+    // manager stopped it. Toast so operators know a silent hang was
+    // cleaned up — memberLeft will remove the card on its own.
+    this.eventSource.addEventListener('office:agentIdleStopped', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || data.sessionId || 'Agent';
+      const idleMin = data.idleMs ? Math.round(data.idleMs / 60000) : '?';
+      this.addActivityEntry('system', `${who} stopped: wedged ${idleMin}m without activity`);
+      this.showNotification(`${who} stopped — wedged ${idleMin} min without activity`, 'error');
+    });
+
+    // R19 · Meeting facilitator died mid-flow — participants were
+    // unblocked with a sentinel. Operator can restart the meeting
+    // manually if desired (no auto-retry by design).
+    this.eventSource.addEventListener('office:meetingAborted', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const kind = (data.type || 'meeting').toString();
+      const who = data.facilitator || 'facilitator';
+      this.addActivityEntry('system', `${kind} aborted — ${who} died mid-flow`);
+      this.showNotification(`${kind.charAt(0).toUpperCase() + kind.slice(1)} aborted — ${who} died`, 'error');
+    });
+
+    // R19 · A long-running office goroutine panicked and safeRun
+    // caught it. Keeps the server running; operator should investigate
+    // via logs since the subsystem usually won't restart itself.
+    this.eventSource.addEventListener('office:panicRecovered', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const where = data.where || 'unknown';
+      this.addActivityEntry('system', `Goroutine panic recovered: ${where}`);
+      this.showNotification(`Background task crashed: ${where} — check logs`, 'error');
+    });
+
     // R15 · Team dev instances — re-pull the full slot map on any change so
     // the dashboard card stays in sync with adds/clears/health flips.
     this.eventSource.addEventListener('office:devInstanceChanged', () => { this.refreshDevInstances(); });
@@ -1352,6 +1388,15 @@ class OfficeApp {
       turnBadgeHtml = `<span class="${cls}" title="${turnCount} turns${turnCapped ? ' — turn cap reached' : ''}">${turnCount}t</span>`;
     }
 
+    // R19 · Event-drop pill. Non-zero means the SDK session's outbound
+    // channel overflowed; dashboard data for this agent may be stale.
+    // Small grey pill so it doesn't scream, but the tooltip makes the
+    // implication explicit.
+    const eventsDropped = (member.usage && typeof member.usage.eventsDropped === 'number') ? member.usage.eventsDropped : 0;
+    const dropBadgeHtml = eventsDropped > 0
+      ? `<span class="drop-badge" title="${eventsDropped} SSE event${eventsDropped === 1 ? '' : 's'} dropped — dashboard data may be stale">⚠ ${eventsDropped}ev</span>`
+      : '';
+
     // Feature 5: Unread message badge
     const unreadCount = (this.state.recentMessages || []).filter(
       m => (m.toSessionId === member.sessionId) && m.id && !this._readMessages.has(m.id)
@@ -1476,7 +1521,7 @@ class OfficeApp {
       ${recentActivityHtml}
       <div class="agent-card-footer">
         <span class="agent-card-workdir" title="${this.escapeAttr(member.workingDir || '')}">${this.escapeHtml((member.workingDir || '').replace(/^.*[/\\]/, ''))}</span>
-        <span class="agent-card-cost">${lastActiveHtml}${turnBadgeHtml}${costStr}</span>
+        <span class="agent-card-cost">${lastActiveHtml}${dropBadgeHtml}${turnBadgeHtml}${costStr}</span>
       </div>
       <div class="agent-card-badges">${autonomyBadgeHtml}${learningsBadgeHtml}</div>
       ${this._renderCardSparkline(member)}

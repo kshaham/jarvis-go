@@ -323,6 +323,20 @@ func (a *sessionStoreAdapter) IsSessionWorking(sessionID string) bool {
 	return false
 }
 
+// StopSession terminates a session by ID, preferring SDK over PTY
+// since all office agents are SDK. Mirrors the R18 OfficeAgentKill
+// path so the office manager can trigger the same cleanup that an
+// operator-initiated kill does.
+func (a *sessionStoreAdapter) StopSession(sessionID string) error {
+	if _, ok := a.sm.GetSDKSession(sessionID); ok {
+		return a.sm.StopSDKSession(sessionID)
+	}
+	if _, ok := a.sm.GetSession(sessionID); ok {
+		return a.sm.StopSession(context.Background(), sessionID)
+	}
+	return fmt.Errorf("session not found: %s", sessionID)
+}
+
 // Start begins listening for HTTP connections.
 //
 // When --https is enabled, Jarvis listens on BOTH:

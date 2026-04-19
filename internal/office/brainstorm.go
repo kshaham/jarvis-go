@@ -117,8 +117,12 @@ func (m *Manager) StartBrainstorm(participantIDs []string) *Meeting {
 
 	slog.Info("Brainstorm meeting started", "id", meeting.ID, "participants", len(active))
 
-	// Run brainstorm flow async.
-	go m.runBrainstormFlow(meeting, active)
+	// Run brainstorm flow async. R19 · safeRun so a panic in the flow
+	// (e.g. during proposal distribution) broadcasts + logs instead of
+	// killing the brainstorm subsystem.
+	go safeRun("brainstorm-flow", m.broadcast, func() {
+		m.runBrainstormFlow(meeting, active)
+	})
 
 	return meeting
 }
@@ -177,6 +181,14 @@ facilitatorPicked:
 	if facilitatorAgent != nil && facilitatorAgent.Config != nil {
 		facilitatorName = facilitatorAgent.Config.Name
 	}
+
+	// R19 · Record the facilitator on the meeting so HandleAgentDeath
+	// can detect a mid-brainstorm facilitator death and abort cleanly.
+	m.mu.Lock()
+	if live, ok := m.meetings[meeting.ID]; ok {
+		live.FacilitatorSessionID = facilitatorID
+	}
+	m.mu.Unlock()
 
 	// Build participant names.
 	names := make([]string, 0, len(participants))
@@ -280,14 +292,16 @@ func (m *Manager) waitForBrainstormResponse(sessionID, speakerName string) strin
 		return fmt.Sprintf("%s was unreachable during brainstorm.", speakerName)
 	}
 
-	// Always create a fresh channel. If a prior brainstorm timed out
-	// and the facilitator's late response landed in the old buffer,
-	// reusing that channel would replay the previous round's message
-	// into this one. Matches the pattern in standup.go:281.
+	// R19 · waitSlot instead of raw channel — the defer finish() below
+	// makes any late reply from a prior round safe to drop at the
+	// sender. Supersedes the previous "always create a fresh channel"
+	// hack which didn't close the old one.
 	agent.mu.Lock()
-	agent.BrainstormCh = make(chan string, 1)
-	ch := agent.BrainstormCh
+	slot := newWaitSlot()
+	agent.BrainstormSlot = slot
 	agent.mu.Unlock()
+	defer slot.finish()
+	ch := slot.ch()
 
 	m.mu.RLock()
 	timeout := m.config.BrainstormTimeout
@@ -298,6 +312,12 @@ func (m *Manager) waitForBrainstormResponse(sessionID, speakerName string) strin
 
 	select {
 	case response := <-ch:
+		// R19 · Sentinel from abortMeetingsFacilitatedBy means the
+		// facilitator died; unblock with a clear message instead of
+		// treating the sentinel string as a real proposal.
+		if response == meetingAbortedSentinel {
+			return fmt.Sprintf("[meeting aborted: facilitator unavailable]")
+		}
 		return response
 	case <-timer.C:
 		slog.Warn("Brainstorm response timeout", "agent", speakerName)
@@ -317,21 +337,22 @@ func (m *Manager) SubmitBrainstormResponse(sessionID, proposals string) bool {
 	sanitized := sanitizeForTerminal(proposals)
 
 	agent.mu.Lock()
-	ch := agent.BrainstormCh
+	slot := agent.BrainstormSlot
 	agent.mu.Unlock()
 
-	if ch == nil {
+	if slot == nil {
 		slog.Warn("Brainstorm response with no pending request", "session", sessionID)
 		return false
 	}
 
-	select {
-	case ch <- sanitized:
+	if slot.deliver(sanitized) {
 		slog.Info("Brainstorm response received", "session", sessionID, "len", len(sanitized))
 		return true
-	default:
-		return false
 	}
+	if slot.closed.Load() {
+		recordLateResponse("brainstorm", sessionID)
+	}
+	return false
 }
 
 // endMeeting marks a meeting as inactive.

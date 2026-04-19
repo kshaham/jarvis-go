@@ -17,6 +17,11 @@ type SessionStore interface {
 	// would run up to TaskAckMaxNudges and auto-fail every queued task
 	// long before the agent gets a chance to acknowledge anything.
 	IsSessionWorking(sessionID string) bool
+	// StopSession stops the underlying session (PTY or SDK) by ID. Used
+	// by R19's wedged-working hard-stop — returns an error if no such
+	// session exists so the office manager can log and move on. Safe
+	// to call concurrently with other SessionStore methods.
+	StopSession(sessionID string) error
 }
 
 // OfficeEvent is emitted by the manager for state changes.

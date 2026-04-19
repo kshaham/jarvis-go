@@ -110,12 +110,20 @@ type AgentState struct {
 	// Written by the SDK event forwarder on every tool_use event.
 	ActiveTool string
 
-	// Response channels (replaces pending*Responses Maps)
-	StandupCh    chan string
-	BrainstormCh chan string
+	// Response channels (replaces pending*Responses Maps). R19 wraps
+	// standup / brainstorm / leader-task channels in waitSlot so a
+	// late reply from round N cannot pollute round N+1 — the reader
+	// marks the slot done via defer before returning, after which
+	// Submit* calls hit the closed flag and drop with a counter.
+	StandupSlot    *waitSlot
+	BrainstormSlot *waitSlot
+	LeaderTaskSlot *waitSlot
+	// Reflection / curiosity are still raw channels — they're not
+	// part of the round-pollution pattern (single reply, slot is torn
+	// down on the reader side). Leaving them untouched keeps the
+	// refactor surgical.
 	ReflectionCh chan string
 	CuriosityCh  chan string
-	LeaderTaskCh chan string
 
 	// Task queue (private -- use AddTask/GetTasks/UpdateTaskStatus)
 	taskQueue *TaskQueue
@@ -165,6 +173,11 @@ type AgentState struct {
 	// Last ~20 per-turn cost values (newest last). Powers the per-card
 	// sparkline and agent-detail cost chart. Bounded at recentTurnCostsCap.
 	RecentTurnCosts []float64
+	// R19 · Snapshot of the SDK session's dropped-event counter, synced
+	// on every heartbeat (Idle/Working/Tokens). Non-zero means the
+	// outbound events channel overflowed at some point and the
+	// dashboard may have stale data. Surfaced on the member card.
+	EventsDropped uint64
 }
 
 // recentTurnCostsCap bounds the per-agent recent-turn cost history.
@@ -323,6 +336,7 @@ type UsageSnapshot struct {
 	TurnCount         int64     `json:"turnCount"`
 	LastTurnAt        time.Time `json:"lastTurnAt,omitempty"`
 	RecentTurnCosts   []float64 `json:"recentTurnCosts,omitempty"`
+	EventsDropped     uint64    `json:"eventsDropped,omitempty"`
 }
 
 // Usage returns a snapshot of the agent's cumulative cost + token counts.
@@ -338,7 +352,17 @@ func (a *AgentState) Usage() UsageSnapshot {
 		TurnCount:         a.TurnCount,
 		LastTurnAt:        a.LastTurnAt,
 		RecentTurnCosts:   recent,
+		EventsDropped:     a.EventsDropped,
 	}
+}
+
+// SetEventsDropped syncs the SDK-session-level drop counter into the
+// agent so BuildMemberPayload can surface it without poking the pty
+// package. Called from the SSE forwarder on each heartbeat event.
+func (a *AgentState) SetEventsDropped(n uint64) {
+	a.mu.Lock()
+	a.EventsDropped = n
+	a.mu.Unlock()
 }
 
 // SetSDKWorking sets the SDK working flag under the mutex.

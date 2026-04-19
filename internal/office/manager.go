@@ -118,6 +118,12 @@ type Meeting struct {
 	Participants []string  `json:"participants"`
 	StartedAt    time.Time `json:"startedAt"`
 	Active       bool      `json:"active"`
+	// FacilitatorSessionID is set when the brainstorm flow picks its
+	// lead speaker (brainstorm.go). Persisted on the meeting so
+	// HandleAgentDeath can detect "facilitator died mid-meeting" and
+	// fire office:meetingAborted instead of letting participants sit
+	// on their waitSlots until the 5-min timeout.
+	FacilitatorSessionID string `json:"facilitatorSessionId,omitempty"`
 }
 
 // BugTask represents a bug filed by Lint or other agents.
@@ -243,11 +249,76 @@ func (m *Manager) HandleAgentDeath(sessionID string) {
 		}
 	}
 
+	// R19 · If this agent was facilitating a live meeting, abort it
+	// cleanly so participants unblock immediately instead of sitting
+	// on their waitSlots until the per-speaker timeout. Runs BEFORE
+	// UnregisterAgent so the meeting scan still sees the mapping.
+	m.abortMeetingsFacilitatedBy(sessionID, agentName, "facilitator_died")
+
 	m.UnregisterAgent(sessionID)
 	m.broadcast("office:agentDied", map[string]interface{}{
 		"sessionId": sessionID, "name": agentName,
 	})
 }
+
+// abortMeetingsFacilitatedBy marks any live meetings whose facilitator
+// matches sessionID as aborted, delivers a sentinel to every
+// participant's waitSlots so they unblock, and broadcasts
+// office:meetingAborted. No retry — operator restarts manually if
+// needed. Called from HandleAgentDeath.
+func (m *Manager) abortMeetingsFacilitatedBy(sessionID, facilitatorName, reason string) {
+	// Snapshot the meeting IDs to abort under the lock, then release
+	// so we can acquire agent locks below without lock ordering
+	// issues.
+	m.mu.Lock()
+	var toAbort []*Meeting
+	for _, mtg := range m.meetings {
+		if mtg != nil && mtg.Active && mtg.FacilitatorSessionID == sessionID {
+			toAbort = append(toAbort, mtg)
+			mtg.Active = false
+		}
+	}
+	m.mu.Unlock()
+
+	for _, mtg := range toAbort {
+		// Deliver the sentinel to every participant's waitSlots so
+		// the readers return immediately. The waitSlot drop-guards
+		// cover the case where the slot was already finished.
+		for _, pid := range mtg.Participants {
+			a := m.GetAgent(pid)
+			if a == nil {
+				continue
+			}
+			a.mu.Lock()
+			bslot := a.BrainstormSlot
+			sslot := a.StandupSlot
+			a.mu.Unlock()
+			if bslot != nil {
+				bslot.deliver(meetingAbortedSentinel)
+			}
+			if sslot != nil {
+				sslot.deliver(meetingAbortedSentinel)
+			}
+		}
+
+		slog.Warn("Meeting aborted: facilitator died",
+			"meetingId", mtg.ID, "type", mtg.Type, "facilitator", facilitatorName)
+		m.broadcast("office:meetingAborted", map[string]interface{}{
+			"meetingId":         mtg.ID,
+			"type":              mtg.Type,
+			"reason":            reason,
+			"facilitator":       facilitatorName,
+			"facilitatorSessionId": sessionID,
+		})
+	}
+}
+
+// meetingAbortedSentinel is the special string delivered to a
+// participant's waitSlot when the facilitator dies. The reader in
+// waitForBrainstormResponse / waitForStandupResponse recognizes it
+// and returns a user-facing "meeting aborted" fallback instead of
+// treating it as a real response.
+const meetingAbortedSentinel = "__OFFICE_MEETING_ABORTED__"
 
 // UnregisterAgent removes a team member.
 func (m *Manager) UnregisterAgent(sessionID string) {
@@ -1910,13 +1981,12 @@ func (m *Manager) SubmitLeaderTasksResponse(sessionID, content string) bool {
 	agent.TouchAgentAPI()
 
 	agent.mu.Lock()
-	ch := agent.LeaderTaskCh
+	slot := agent.LeaderTaskSlot
 	agent.mu.Unlock()
 
-	if ch != nil {
-		select {
-		case ch <- content:
-		default:
+	if slot != nil {
+		if !slot.deliver(content) && slot.closed.Load() {
+			recordLateResponse("leader-tasks", sessionID)
 		}
 	}
 

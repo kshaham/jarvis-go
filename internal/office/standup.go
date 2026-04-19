@@ -107,8 +107,13 @@ func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 
 	slog.Info("Standup started", "participants", len(active), "id", standupID)
 
-	// Run round-robin async.
-	go m.runStandupRoundRobin(standupID, active, sessions, cfg)
+	// Run round-robin async. R19 · wrap in safeRun so a panic in the
+	// round-robin (e.g. a nil sessions pointer or a malformed config)
+	// surfaces as an office:panicRecovered broadcast instead of
+	// silently killing the standup subsystem until restart.
+	go safeRun("standup-round-robin", m.broadcast, func() {
+		m.runStandupRoundRobin(standupID, active, sessions, cfg)
+	})
 
 	return standupResult
 }
@@ -276,11 +281,15 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 		return fmt.Sprintf("%s was unreachable during standup.", speakerName)
 	}
 
-	// Always create a fresh channel to avoid consuming stale responses.
+	// R19 · Fresh waitSlot so late replies from a prior round can't
+	// pollute this one. The defer finish() below is what makes
+	// post-return submissions safe to drop.
 	agent.mu.Lock()
-	agent.StandupCh = make(chan string, 1)
-	ch := agent.StandupCh
+	slot := newWaitSlot()
+	agent.StandupSlot = slot
 	agent.mu.Unlock()
+	defer slot.finish()
+	ch := slot.ch()
 
 	timeout := time.NewTimer(cfg.StandupResponseTimeout)
 	defer timeout.Stop()
@@ -293,6 +302,11 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 	for {
 		select {
 		case response := <-ch:
+			// R19 · Sentinel from abortMeetingsFacilitatedBy means the
+			// standup leader died; return a clear fallback.
+			if response == meetingAbortedSentinel {
+				return fmt.Sprintf("[standup aborted: facilitator unavailable]")
+			}
 			return response
 
 		case <-nudgeInterval.C:
@@ -342,24 +356,27 @@ func (m *Manager) SubmitStandupResponse(sessionID, content string) bool {
 	sanitized := sanitizeForTerminal(content)
 
 	agent.mu.Lock()
-	ch := agent.StandupCh
+	slot := agent.StandupSlot
 	agent.mu.Unlock()
 
-	if ch == nil {
+	if slot == nil {
 		if !active {
 			slog.Warn("Late standup response, no active standup", "session", sessionID)
 		}
 		return false
 	}
 
-	select {
-	case ch <- sanitized:
+	if slot.deliver(sanitized) {
 		slog.Info("Standup response received", "session", sessionID, "content_len", len(sanitized))
 		return true
-	default:
-		// Channel full -- duplicate response.
-		return false
 	}
+	// Either the slot was finished (late reply) or the buffer was
+	// full (duplicate). Count only the finished case since duplicates
+	// are a distinct, less-interesting failure mode.
+	if slot != nil && slot.closed.Load() {
+		recordLateResponse("standup", sessionID)
+	}
+	return false
 }
 
 // StopStandup cancels an active standup.
@@ -490,10 +507,11 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 			`Respond using: cm leader-tasks respond "TASKS_FOR:agentId\n- [HIGH] title | description\n..."`,
 		}, "\n")
 
-		// Reset leader task channel for this standup round.
+		// R19 · Fresh waitSlot per standup round — the goroutine below
+		// defers finish() so late leader replies drop safely.
 		agent.mu.Lock()
-		agent.LeaderTaskCh = make(chan string, 1)
-		ch := agent.LeaderTaskCh
+		slot := newWaitSlot()
+		agent.LeaderTaskSlot = slot
 		agent.mu.Unlock()
 
 		if sessions == nil {
@@ -506,20 +524,23 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 		}
 
 		// Wait for leader response and process task assignments (Gap 3+4+5).
-		go m.processLeaderTaskResponse(ch, agent, agents, sessions, teamMission)
+		go m.processLeaderTaskResponse(slot, agent, agents, sessions, teamMission)
 	}
 }
 
 // processLeaderTaskResponse waits for the leader's task assignment response,
 // parses it into per-agent tasks, injects task queues, and sends a summary.
-func (m *Manager) processLeaderTaskResponse(ch chan string, leader *AgentState, allAgents []*AgentState, sessions SessionStore, teamMission string) {
+func (m *Manager) processLeaderTaskResponse(slot *waitSlot, leader *AgentState, allAgents []*AgentState, sessions SessionStore, teamMission string) {
+	// R19 · finish() drops late replies at the sender.
+	defer slot.finish()
+
 	// Wait up to 5 minutes for the leader to respond.
 	timeout := time.NewTimer(5 * time.Minute)
 	defer timeout.Stop()
 
 	var response string
 	select {
-	case response = <-ch:
+	case response = <-slot.ch():
 		slog.Info("Leader task response received", "leader", leader.Config.Name, "len", len(response))
 	case <-timeout.C:
 		slog.Warn("Leader task response timeout", "leader", leader.Config.Name)

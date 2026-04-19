@@ -613,6 +613,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 			})
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 				agent.SetSDKWorking(false)
+				agent.SetEventsDropped(session.DroppedEvents())
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}
@@ -624,6 +625,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 			})
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 				agent.SetSDKWorking(true)
+				agent.SetEventsDropped(session.DroppedEvents())
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}
@@ -641,6 +643,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 			// Per-agent accumulation for office UI (cost bars, sparklines).
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 				agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
+				agent.SetEventsDropped(session.DroppedEvents())
 				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 					broker.Broadcast("office:memberUpdated", payload)
 				}

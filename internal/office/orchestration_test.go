@@ -35,6 +35,7 @@ func (r *recordingSessionStore) WriteInkPrompt(sessionID, prompt string) bool {
 func (r *recordingSessionStore) GetSessionIDs() []string                { return nil }
 func (r *recordingSessionStore) IsSessionAlive(sessionID string) bool   { return true }
 func (r *recordingSessionStore) IsSessionWorking(sessionID string) bool { return false }
+func (r *recordingSessionStore) StopSession(sessionID string) error     { return nil }
 
 func (r *recordingSessionStore) getWrites() []writeCall {
 	r.mu.Lock()

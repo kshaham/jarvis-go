@@ -42,6 +42,13 @@ type Config struct {
 	// reason is worse than leaving it idle. Operators who want to clean
 	// up truly dead agents can flip this on in settings.
 	AutoKillAfterStuck bool
+	// R19 · WedgedWorkingTimeout is the ceiling for a session that
+	// reports itself as "working" (IsSessionWorking == true) but has
+	// emitted no tool activity or EventTokens for this long. Catches
+	// hung SDK turns where the subprocess never returns — the
+	// turn-cap in R18 doesn't help because NumTurns only ticks at
+	// turn boundaries. Default 20 minutes. Set to 0 to disable.
+	WedgedWorkingTimeout time.Duration
 }
 
 // DefaultConfig returns production defaults matching TypeScript.
@@ -82,5 +89,6 @@ func DefaultConfig() *Config {
 		BlockedTriageMaxAttempts: 3,
 		ReflectionCooldown:       10 * time.Minute,
 		AutoKillAfterStuck:       false,
+		WedgedWorkingTimeout:     20 * time.Minute,
 	}
 }

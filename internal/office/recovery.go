@@ -91,6 +91,7 @@ func (m *Manager) StartIdleMonitoring() {
 				m.checkUnacknowledgedTasks()
 				m.checkStaleInProgressTasks()
 				m.checkForStuckAgents()
+				m.checkForWedgedWorkingAgents()
 				m.CheckForIdleAgents()
 				m.checkForCuriousAgents()
 				m.checkForReflectionOpportunity()
@@ -160,42 +161,48 @@ func (m *Manager) startAutoStandup() {
 	done := m.standupDone
 	m.mu.Unlock()
 
-	go func() {
+	// R19 · Outer loop wrapped in safeRun so one panic doesn't kill
+	// the timer. Per-tick work runs inside another safeRun so a panic
+	// during StartStandup is logged + broadcast and the ticker keeps
+	// scheduling future ticks.
+	go safeRun("auto-standup-timer", m.broadcast, func() {
 		for {
 			select {
 			case <-done:
 				return
 			case <-ticker.C:
 			}
-			m.mu.RLock()
-			enabled := m.autoStandupEnabled
-			standupActive := m.standup != nil && m.standup.Active
-			m.mu.RUnlock()
+			safeRun("auto-standup-tick", m.broadcast, func() {
+				m.mu.RLock()
+				enabled := m.autoStandupEnabled
+				standupActive := m.standup != nil && m.standup.Active
+				m.mu.RUnlock()
 
-			if !enabled || standupActive {
-				continue
-			}
-
-			// Check for active brainstorm meetings.
-			hasBrainstorm := false
-			m.mu.RLock()
-			for _, mtg := range m.meetings {
-				if mtg.Active && mtg.Type == "brainstorm" {
-					hasBrainstorm = true
-					break
+				if !enabled || standupActive {
+					return
 				}
-			}
-			m.mu.RUnlock()
 
-			if hasBrainstorm {
-				slog.Info("Auto-standup skipped: brainstorm meeting in progress")
-				continue
-			}
+				// Check for active brainstorm meetings.
+				hasBrainstorm := false
+				m.mu.RLock()
+				for _, mtg := range m.meetings {
+					if mtg.Active && mtg.Type == "brainstorm" {
+						hasBrainstorm = true
+						break
+					}
+				}
+				m.mu.RUnlock()
 
-			slog.Info("Auto-standup triggered")
-			m.StartStandup(nil)
+				if hasBrainstorm {
+					slog.Info("Auto-standup skipped: brainstorm meeting in progress")
+					return
+				}
+
+				slog.Info("Auto-standup triggered")
+				m.StartStandup(nil)
+			})
 		}
-	}()
+	})
 
 	m.broadcast("office:autoStandupScheduled", map[string]interface{}{
 		"intervalMs": m.config.AutoStandupInterval.Milliseconds(),
@@ -599,6 +606,101 @@ func (m *Manager) checkSessionHealth() {
 			slog.Warn("Agent session no longer alive, cleaning up", "session", sid)
 			m.HandleAgentDeath(sid)
 		}
+	}
+}
+
+// checkForWedgedWorkingAgents stops SDK sessions that have been
+// reporting "working" for longer than WedgedWorkingTimeout without
+// emitting any tool activity or EventTokens. This is the complement
+// of checkForStuckAgents — that one only looks at *non-working*
+// agents (the SDK flag is trusted) and cannot catch a wedged subprocess
+// that's stuck between turns. R18's turn cap doesn't help here either
+// because NumTurns only ticks at turn boundaries.
+//
+// Rarely trips in healthy operation. When it does, the agent gets
+// stopped the same way an operator-initiated kill does, and an
+// office:agentIdleStopped event fires for the dashboard.
+func (m *Manager) checkForWedgedWorkingAgents() {
+	m.mu.RLock()
+	cfg := m.config
+	sessions := m.sessions
+	teamSpawnedAt := m.teamSpawnedAt
+	m.mu.RUnlock()
+
+	if cfg.WedgedWorkingTimeout <= 0 || sessions == nil {
+		return
+	}
+	now := time.Now()
+	// Respect the same grace period as stuck-detection — a freshly
+	// spawned team is legitimately silent for a minute or two.
+	if !teamSpawnedAt.IsZero() && now.Sub(teamSpawnedAt) < cfg.StuckGracePeriod {
+		return
+	}
+
+	for _, agent := range m.GetRoster() {
+		if agent == nil || agent.Config == nil {
+			continue
+		}
+		// Only act on sessions that self-report as "working". Non-
+		// working agents are already covered by checkForStuckAgents.
+		if !sessions.IsSessionWorking(agent.SessionID) {
+			continue
+		}
+		agent.mu.Lock()
+		lastTurn := agent.LastTurnAt
+		lastAPI := agent.LastAgentAPIAt
+		lastPrompt := agent.LastPromptSentAt
+		agent.mu.Unlock()
+
+		// lastActivity = most recent signal from the agent OR the
+		// last prompt we sent it (the prompt itself proves it was
+		// reachable at that moment).
+		lastActivity := lastPrompt
+		if lastTurn.After(lastActivity) {
+			lastActivity = lastTurn
+		}
+		if lastAPI.After(lastActivity) {
+			lastActivity = lastAPI
+		}
+		if lastActivity.IsZero() {
+			// Agent spawned but hasn't made or received a turn yet —
+			// fall back to the spawn timestamp so we don't infinitely
+			// forgive a session that was born wedged.
+			lastActivity = teamSpawnedAt
+		}
+		if lastActivity.IsZero() {
+			continue
+		}
+
+		idle := now.Sub(lastActivity)
+		if idle < cfg.WedgedWorkingTimeout {
+			continue
+		}
+
+		agentName := agent.SessionID
+		if agent.Config != nil {
+			agentName = agent.Config.Name
+		}
+		slog.Warn("SDK session wedged in working state beyond timeout; stopping",
+			"session", agent.SessionID, "name", agentName,
+			"idle", idle.Round(time.Second).String(),
+			"timeout", cfg.WedgedWorkingTimeout.String())
+
+		if err := sessions.StopSession(agent.SessionID); err != nil {
+			slog.Warn("failed to stop wedged session", "session", agent.SessionID, "err", err)
+			// Fall through — still broadcast so the dashboard flags
+			// the agent even if the stop didn't take.
+		}
+		m.broadcast("office:agentIdleStopped", map[string]interface{}{
+			"sessionId": agent.SessionID,
+			"agentName": agentName,
+			"idleMs":    idle.Milliseconds(),
+			"timeoutMs": cfg.WedgedWorkingTimeout.Milliseconds(),
+		})
+		// UnregisterAgent triggers the same HandleAgentDeath path used
+		// by R18's operator kill, so task reassignment + dev-instance
+		// cleanup still runs.
+		m.UnregisterAgent(agent.SessionID)
 	}
 }
 
