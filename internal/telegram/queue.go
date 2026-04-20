@@ -247,6 +247,14 @@ func (mq *MessageQueue) maybeRetry(msg queuedMessage, err error) {
 		msg.ChatID, backoff, msg.Retries, msg.MaxRetries, err)
 
 	go func() {
+		// R26 · Low panic risk here (just slice append + channel
+		// send) but recover anyway so a malformed stopCh close or
+		// anything else doesn't take the retry path down silently.
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("[telegram/queue] retry goroutine panic: %v", rec)
+			}
+		}()
 		select {
 		case <-time.After(backoff):
 			mq.mu.Lock()

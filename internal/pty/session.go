@@ -536,6 +536,15 @@ func (s *Session) processOutput(rawData string) {
 			s.mu.Unlock()
 			if ptyFile != nil {
 				go func() {
+					// R26 · A closed ptyFile panics on Write; catch
+					// it so the timer-delayed auto-submit does not
+					// take the session goroutine down.
+					defer func() {
+						if rec := recover(); rec != nil {
+							slog.Warn("auto-submit goroutine recovered from panic",
+								"session", s.ID, "panic", rec)
+						}
+					}()
 					time.Sleep(1 * time.Second)
 					ptyFile.Write([]byte("\r"))
 					slog.Info("Auto-submitted pasted text", "session", s.ID)
@@ -602,6 +611,14 @@ func (s *Session) detectAndAutoRespondMenu(cleanData string) {
 		if ptyFile != nil {
 			// Send "1" + Enter to select the first option
 			go func() {
+				// R26 · ptyFile closed mid-timer would panic here;
+				// guard so the session goroutine survives.
+				defer func() {
+					if rec := recover(); rec != nil {
+						slog.Warn("auto-menu goroutine recovered from panic",
+							"session", s.ID, "panic", rec)
+					}
+				}()
 				time.Sleep(500 * time.Millisecond) // brief delay for Ink to be ready
 				ptyFile.Write([]byte("1"))
 				time.Sleep(200 * time.Millisecond)

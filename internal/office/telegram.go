@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -114,19 +115,32 @@ func (m *Manager) startPeriodicUpdates() {
 
 	go func() {
 		defer m.updateWg.Done()
+		// R26 · Per-tick panic recovery so a crash inside
+		// buildSprintSummary / SendOfficeUpdate logs + continues
+		// rather than silently killing the periodic-update goroutine.
+		// Outer goroutine stays alive across panics; only the
+		// offending tick is lost.
 		for {
 			select {
 			case <-ticker.C:
-				summary := m.buildSprintSummary()
-				m.mu.RLock()
-				notifier := m.telegramNotifier
-				m.mu.RUnlock()
-				if notifier != nil {
-					notifier.SendOfficeUpdate(summary)
-				}
-				m.mu.Lock()
-				m.lastTelegramUpdate = time.Now()
-				m.mu.Unlock()
+				func() {
+					defer func() {
+						if rec := recover(); rec != nil {
+							slog.Error("panic in telegram periodic update",
+								"panic", rec, "stack", string(debug.Stack()))
+						}
+					}()
+					summary := m.buildSprintSummary()
+					m.mu.RLock()
+					notifier := m.telegramNotifier
+					m.mu.RUnlock()
+					if notifier != nil {
+						notifier.SendOfficeUpdate(summary)
+					}
+					m.mu.Lock()
+					m.lastTelegramUpdate = time.Now()
+					m.mu.Unlock()
+				}()
 			case <-stopCh:
 				ticker.Stop()
 				return

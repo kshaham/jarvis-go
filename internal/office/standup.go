@@ -319,7 +319,7 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 
 			// Send Ctrl+C then nudge prompt in a goroutine to keep select responsive.
 			if sessions != nil {
-				go func() {
+				go safeRun("standup-nudge", m.broadcast, func() {
 					sessions.WriteViaScreen(sessionID, "\x03")
 					time.Sleep(2 * time.Second)
 					shortNudge := strings.Join([]string{
@@ -328,7 +328,7 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 						`cm standup respond "<your 2-3 sentence status update>"`,
 					}, "\n")
 					sessions.WriteInkPrompt(sessionID, shortNudge)
-				}()
+				})
 			}
 
 		case <-timeout.C:

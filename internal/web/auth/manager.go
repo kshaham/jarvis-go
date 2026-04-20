@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,12 +90,23 @@ func NewManager(configDir string, _ bool) (*Manager, error) {
 	}
 
 	// Start periodic cleanup of expired sessions and rate limits.
+	// R26 · Per-tick panic recovery so a cleanup crash logs + the
+	// next tick still runs. Silent death here would leave session /
+	// rate-limit state growing unbounded.
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			m.CleanupExpiredRateLimits()
-			m.cleanupExpiredSessions()
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						slog.Error("panic in auth cleanup tick",
+							"panic", rec, "stack", string(debug.Stack()))
+					}
+				}()
+				m.CleanupExpiredRateLimits()
+				m.cleanupExpiredSessions()
+			}()
 		}
 	}()
 

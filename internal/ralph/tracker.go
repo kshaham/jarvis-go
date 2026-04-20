@@ -2,7 +2,9 @@ package ralph
 
 import (
 	"fmt"
+	"log/slog"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -378,8 +380,20 @@ func (t *Tracker) scheduleDebouncedStateEvent() {
 	}
 	t.pendingEvents = true
 
-	// Fire asynchronously after debounce window
+	// Fire asynchronously after debounce window.
+	// R26 · Panic recovery so a crash inside snapshotStateLocked /
+	// emitEvent doesn't kill the goroutine before
+	// pendingEvents gets cleared — would leave the tracker stuck.
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("panic in ralph debounce",
+					"panic", rec, "stack", string(debug.Stack()))
+				t.mu.Lock()
+				t.pendingEvents = false
+				t.mu.Unlock()
+			}
+		}()
 		select {
 		case <-time.After(eventDebounceDuration):
 			t.mu.Lock()
