@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // Bot manages a Telegram Bot API connection.
@@ -15,11 +16,15 @@ type Bot struct {
 	token   string
 	chatID  string
 	enabled bool
+	client  *http.Client
 }
 
 // New returns a new unconfigured Bot.
 func New() *Bot {
-	return &Bot{}
+	// R28 · Bounded timeout so a slow/hung Telegram API can't block the
+	// operator's request goroutine indefinitely. Matches the queue/long-poll
+	// clients already used elsewhere in this package.
+	return &Bot{client: &http.Client{Timeout: 15 * time.Second}}
 }
 
 // Configure sets the bot token and chat ID, enabling the bot when both are non-empty.
@@ -64,9 +69,11 @@ func (b *Bot) SendMessage(text string) error {
 		"parse_mode": "HTML",
 	})
 
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := b.client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return err
+		// Strip the token before the error bubbles out — net/http wraps
+		// this as *url.Error{URL: "https://.../bot<TOKEN>/..."}.
+		return redactTokenErr(err, token)
 	}
 	defer resp.Body.Close()
 

@@ -326,7 +326,10 @@ func (mq *MessageQueue) sendTelegram(chatID, text string, keyboard *InlineKeyboa
 
 	resp, err := mq.client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("http post: %w", err)
+		// R28 · *url.Error from http.Client embeds the URL (with token)
+		// in its Error() output; redact before wrapping so retries/logs
+		// downstream never see the credential.
+		return fmt.Errorf("http post: %w", redactTokenErr(err, mq.token))
 	}
 	defer resp.Body.Close()
 

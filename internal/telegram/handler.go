@@ -285,7 +285,10 @@ func (h *Handler) getUpdates(ctx context.Context, offset int64, timeout int) ([]
 	// Reuse long-poll HTTP client for connection pooling.
 	resp, err := h.longPollClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("getUpdates request: %w", err)
+		// R28 · Redact token before wrapping — Go's *url.Error embeds the
+		// full request URL (with bot token) in Error(), which would
+		// otherwise surface through poll-loop log lines.
+		return nil, fmt.Errorf("getUpdates request: %w", redactTokenErr(err, token))
 	}
 	defer resp.Body.Close()
 

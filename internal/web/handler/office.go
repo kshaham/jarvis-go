@@ -3086,7 +3086,15 @@ func (ctx *Context) OfficeAgentPostMemorySection(w http.ResponseWriter, r *http.
 		err = office.MemoryWriteSection(agent.ConfigID, workingDir, req.Name, req.Content)
 	}
 	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to write section: "+err.Error())
+		// R28 · Sibling endpoints (OfficeAgentPostMemoryWrite,
+		// OfficeAgentPostMemoryAppend) already emit a generic message; do
+		// the same here. The raw err from writeMemorySections contains
+		// the temp-file path (~/.jarvis/agent-memory/<hash>/<configID>.md.tmp)
+		// which leaks the internal storage layout to any caller who can
+		// trigger an os.Rename or os.WriteFile failure.
+		slog.Error("memory section write failed",
+			"configID", agent.ConfigID, "section", req.Name, "append", req.Append, "err", err)
+		request.WriteError(w, http.StatusInternalServerError, "failed to write section")
 		return
 	}
 	ok(w, map[string]interface{}{"section": req.Name, "append": req.Append})

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -304,7 +305,13 @@ func (ctx *Context) SendTelegramTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ctx.TelegramBot.SendMessage("Test from Jarvis"); err != nil {
-		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		// R28 · Never echo the underlying error to the client: a transport
+		// failure surfaces as *url.Error whose URL field embeds the bot
+		// token. The error is already token-redacted by the telegram
+		// package before it reaches here, but we also keep the client-
+		// facing body generic so nothing leaks to devtools or proxy logs.
+		slog.Error("telegram test send failed", "err", err)
+		request.WriteError(w, http.StatusInternalServerError, "failed to send telegram message")
 		return
 	}
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
