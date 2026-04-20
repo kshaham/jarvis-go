@@ -58,35 +58,35 @@ type Manager struct {
 	// auto-standup, and auto-brainstorms. In-flight agent turns complete
 	// normally — pause is "no new input", not "suspend mid-step". Unpause
 	// restores normal behavior without requiring a respawn.
-	paused        bool
-	pausedAt      time.Time
-	pauseReason   string
-	teamMission        string
+	paused      bool
+	pausedAt    time.Time
+	pauseReason string
+	teamMission string
 	// Daily USD spend budget for the whole team. 0 = unset / no budget.
 	// Purely a UI signal — used by the header budget pill and the
 	// Insights progress bar. Persisted across restarts.
-	teamDailyBudget    float64
+	teamDailyBudget float64
 	// Dev instances keyed by slot name (default slot is "app"; fullstack
 	// teams can have e.g. "frontend" + "api"). One dev server per slot.
 	// Persisted individually at ~/.jarvis/office-memory/team-dev-<slot>.json.
 	// All legacy getters (GetTeamDevURL etc.) route through the "app" slot
 	// so R13/R14 callers keep working without changes.
-	teamDevInstances   map[string]*devInstance
+	teamDevInstances map[string]*devInstance
 	// Which template the current team was spawned from + its resolved
 	// working directory. Exposed in the status payload so the UI can show
 	// a "current team" banner while a team is running.
-	lastTemplateID   string
-	lastWorkingDir   string
-	lastBrainstormAt   time.Time
-	lastWaterCoolerAt  time.Time
-	triageAttempts     map[string]int       // taskID -> triage attempt count
-	lastTriageAt       map[string]time.Time // taskID -> last triage prompt time
+	lastTemplateID    string
+	lastWorkingDir    string
+	lastBrainstormAt  time.Time
+	lastWaterCoolerAt time.Time
+	triageAttempts    map[string]int       // taskID -> triage attempt count
+	lastTriageAt      map[string]time.Time // taskID -> last triage prompt time
 	// Entries in the maps above are pruned when a task moves out of Blocked
 	// state via pruneTriage (called from AgentState.UpdateTaskStatus through
 	// the Manager), and swept against live-task IDs in
 	// checkBlockedTasksForLeaderTriage so orphaned entries from deleted
 	// agents don't linger forever.
-	lastRecoveryAt     map[string]time.Time // sessionID -> last recovery prompt time (backoff)
+	lastRecoveryAt map[string]time.Time // sessionID -> last recovery prompt time (backoff)
 
 	idleTicker   *time.Ticker
 	monitorDone  chan struct{}
@@ -109,13 +109,13 @@ type Manager struct {
 
 // OfficeMessage represents a team message.
 type OfficeMessage struct {
-	ID            string    `json:"id"`
-	From          string    `json:"fromSessionId"`
-	To            string    `json:"toSessionId,omitempty"`
-	FromName      string    `json:"fromName,omitempty"`
-	ToName        string    `json:"toName,omitempty"`
-	Content       string    `json:"content"`
-	Timestamp     time.Time `json:"timestamp"`
+	ID        string    `json:"id"`
+	From      string    `json:"fromSessionId"`
+	To        string    `json:"toSessionId,omitempty"`
+	FromName  string    `json:"fromName,omitempty"`
+	ToName    string    `json:"toName,omitempty"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // Meeting represents a brainstorm or ad-hoc meeting.
@@ -164,15 +164,15 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		config = DefaultConfig()
 	}
 	mgr := &Manager{
-		agents:      make(map[string]*AgentState),
-		configIndex: make(map[string]string),
-		fileLocks:   make(map[string]*FileLock),
-		meetings:    make(map[string]*Meeting),
-		bugTasks:    make(map[string]*BugTask),
-		messages:    make([]OfficeMessage, 0),
-		sessions:    sessions,
-		broadcast:   broadcast,
-		auditWriter: NewAuditWriter(config.AuditMaxEntries),
+		agents:             make(map[string]*AgentState),
+		configIndex:        make(map[string]string),
+		fileLocks:          make(map[string]*FileLock),
+		meetings:           make(map[string]*Meeting),
+		bugTasks:           make(map[string]*BugTask),
+		messages:           make([]OfficeMessage, 0),
+		sessions:           sessions,
+		broadcast:          broadcast,
+		auditWriter:        NewAuditWriter(config.AuditMaxEntries),
 		metrics:            NewMetrics(),
 		config:             config,
 		autoStandupEnabled: true,
@@ -330,10 +330,10 @@ func (m *Manager) abortMeetingsFacilitatedBy(sessionID, facilitatorName, reason 
 		slog.Warn("Meeting aborted: facilitator died",
 			"meetingId", mtg.ID, "type", mtg.Type, "facilitator", facilitatorName)
 		m.broadcast("office:meetingAborted", map[string]interface{}{
-			"meetingId":         mtg.ID,
-			"type":              mtg.Type,
-			"reason":            reason,
-			"facilitator":       facilitatorName,
+			"meetingId":            mtg.ID,
+			"type":                 mtg.Type,
+			"reason":               reason,
+			"facilitator":          facilitatorName,
 			"facilitatorSessionId": sessionID,
 		})
 	}

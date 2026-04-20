@@ -76,10 +76,10 @@ func loadJSONFile(path string, dst interface{}, broadcast BroadcastFunc) (presen
 		corruptPath := quarantineCorruptFile(path, err)
 		if broadcast != nil {
 			broadcast("office:stateCorruption", map[string]interface{}{
-				"file":         path,
+				"file":          path,
 				"corruptedPath": corruptPath,
-				"error":        err.Error(),
-				"kind":         "parse",
+				"error":         err.Error(),
+				"kind":          "parse",
 			})
 		}
 		return true, false

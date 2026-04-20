@@ -31,13 +31,13 @@ import (
 // all tool fields captured. Fields are omitempty so one struct covers
 // text, thinking, tool_use, and tool_result blocks.
 type rawContentBlock struct {
-	Type       string          `json:"type"`
-	ID         string          `json:"id,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	ToolUseID  string          `json:"tool_use_id,omitempty"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	IsError    bool            `json:"is_error,omitempty"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 // rawAssistantOrUserEnvelope matches both assistant and user messages.

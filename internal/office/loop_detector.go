@@ -38,9 +38,9 @@ const (
 )
 
 type loopDetector struct {
-	mu        sync.Mutex
-	ring      [loopRingSize]string // zero-value "" means "empty slot"
-	idx       int
+	mu            sync.Mutex
+	ring          [loopRingSize]string // zero-value "" means "empty slot"
+	idx           int
 	advisoryFired bool
 }
 
@@ -135,8 +135,8 @@ func (m *Manager) ObserveAgentOutput(sessionID, chunk string) bool {
 		slog.Warn("agent output loop advisory",
 			"session", sessionID, "name", name, "hash", h[:16])
 		m.broadcast("office:agentPossibleLoop", map[string]interface{}{
-			"sessionId": sessionID,
-			"agentName": name,
+			"sessionId":  sessionID,
+			"agentName":  name,
 			"hashPrefix": h[:16],
 		})
 	}

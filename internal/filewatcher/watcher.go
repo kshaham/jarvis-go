@@ -48,10 +48,10 @@ type Watcher struct {
 }
 
 const (
-	defaultMaxWatches     = 500
-	initialPollInterval   = 5 * time.Second
-	maxPollInterval       = 30 * time.Second
-	pollJitter            = 2 * time.Second
+	defaultMaxWatches   = 500
+	initialPollInterval = 5 * time.Second
+	maxPollInterval     = 30 * time.Second
+	pollJitter          = 2 * time.Second
 )
 
 func New(ctx context.Context, maxWatches int) (*Watcher, error) {

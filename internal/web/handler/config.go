@@ -138,20 +138,20 @@ func maskSecret(v interface{}) string {
 func (ctx *Context) GetSettingsAccounts(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
 	result := map[string]interface{}{
-		"success":          true,
-		"provider":         settings["provider"],
-		"claudeApiKey":     maskSecret(settings["claudeApiKey"]),
-		"zaiApiKey":        maskSecret(settings["zaiApiKey"]),
-		"zaiModel":         settings["zaiModel"],
-		"zaiSonnetModel":   settings["zaiSonnetModel"],
-		"zaiHaikuModel":    settings["zaiHaikuModel"],
-		"zaiBaseUrl":       settings["zaiBaseUrl"],
-		"activeProfile":    settings["activeProfile"],
-		"profile1Name":     settings["profile1Name"],
-		"profile2Name":     settings["profile2Name"],
+		"success":           true,
+		"provider":          settings["provider"],
+		"claudeApiKey":      maskSecret(settings["claudeApiKey"]),
+		"zaiApiKey":         maskSecret(settings["zaiApiKey"]),
+		"zaiModel":          settings["zaiModel"],
+		"zaiSonnetModel":    settings["zaiSonnetModel"],
+		"zaiHaikuModel":     settings["zaiHaikuModel"],
+		"zaiBaseUrl":        settings["zaiBaseUrl"],
+		"activeProfile":     settings["activeProfile"],
+		"profile1Name":      settings["profile1Name"],
+		"profile2Name":      settings["profile2Name"],
 		"defaultWorkingDir": settings["defaultWorkingDir"],
-		"claudeMode":       settings["claudeMode"],
-		"allowedTools":     settings["allowedTools"],
+		"claudeMode":        settings["claudeMode"],
+		"allowedTools":      settings["allowedTools"],
 	}
 	request.WriteJSON(w, http.StatusOK, result)
 }
@@ -218,15 +218,15 @@ func (ctx *Context) GetDebugMemory(w http.ResponseWriter, r *http.Request) {
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"memory": map[string]interface{}{
-			"allocMB":         float64(memStats.Alloc) / 1024 / 1024,
-			"totalAllocMB":    float64(memStats.TotalAlloc) / 1024 / 1024,
-			"sysMB":           float64(memStats.Sys) / 1024 / 1024,
-			"heapAllocMB":     float64(memStats.HeapAlloc) / 1024 / 1024,
-			"heapInUseMB":     float64(memStats.HeapInuse) / 1024 / 1024,
-			"heapObjects":     memStats.HeapObjects,
-			"stackMB":         float64(memStats.StackInuse) / 1024 / 1024,
-			"numGC":           memStats.NumGC,
-			"lastGCPauseMs":   float64(memStats.PauseNs[(memStats.NumGC+255)%256]) / 1e6,
+			"allocMB":       float64(memStats.Alloc) / 1024 / 1024,
+			"totalAllocMB":  float64(memStats.TotalAlloc) / 1024 / 1024,
+			"sysMB":         float64(memStats.Sys) / 1024 / 1024,
+			"heapAllocMB":   float64(memStats.HeapAlloc) / 1024 / 1024,
+			"heapInUseMB":   float64(memStats.HeapInuse) / 1024 / 1024,
+			"heapObjects":   memStats.HeapObjects,
+			"stackMB":       float64(memStats.StackInuse) / 1024 / 1024,
+			"numGC":         memStats.NumGC,
+			"lastGCPauseMs": float64(memStats.PauseNs[(memStats.NumGC+255)%256]) / 1e6,
 		},
 		"counts": map[string]interface{}{
 			"goroutines":         runtime.NumGoroutine(),

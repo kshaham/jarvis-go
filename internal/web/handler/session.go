@@ -458,118 +458,118 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 				}
 			}()
 			switch e := event.(type) {
-		case pty.EventTerminal:
-			if eventCount <= 3 {
-				slog.Info("Terminal data", "sessionId", sessionID, "bytes", len(e.Data), "clients", broker.ClientCount())
-			}
-			// Feed terminal data to the Ralph tracker
-			if rt := getRalphTracker(); rt != nil {
-				rt.ProcessOutput(e.Data)
-			}
-			termBatcher.Add(sessionID, []byte(e.Data))
-		case pty.EventOutput:
-			broker.Broadcast("session:output", map[string]interface{}{
-				"id":   sessionID,
-				"data": e.Data,
-			})
-		case pty.EventIdle:
-			broker.Broadcast("session:idle", map[string]interface{}{"id": sessionID})
-			broker.Broadcast("session:updated", map[string]interface{}{
-				"id": sessionID, "status": "idle", "isWorking": false,
-			})
-			if rs := getRunSummary(); rs != nil {
-				rs.RecordIdle()
-			}
-			// Signal respawn controller about idle detection
-			ctx.RespawnMu.RLock()
-			rc := ctx.RespawnControllers[sessionID]
-			ctx.RespawnMu.RUnlock()
-			if rc != nil {
-				rc.OnIdlePrompt()
-			}
-			// Notify office if this is a team agent (full payload)
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					payload["status"] = "idle"
-					broker.Broadcast("office:memberUpdated", payload)
+			case pty.EventTerminal:
+				if eventCount <= 3 {
+					slog.Info("Terminal data", "sessionId", sessionID, "bytes", len(e.Data), "clients", broker.ClientCount())
 				}
-			}
-		case pty.EventWorking:
-			broker.Broadcast("session:working", map[string]interface{}{"id": sessionID})
-			broker.Broadcast("session:updated", map[string]interface{}{
-				"id": sessionID, "status": "busy", "isWorking": true,
-			})
-			if rs := getRunSummary(); rs != nil {
-				rs.RecordWorking()
-			}
-			ctx.RespawnMu.RLock()
-			rc := ctx.RespawnControllers[sessionID]
-			ctx.RespawnMu.RUnlock()
-			if rc != nil {
-				rc.OnWorkingDetected("terminal working indicator")
-			}
-			// Notify office if this is a team agent (full payload)
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					payload["status"] = "working"
-					broker.Broadcast("office:memberUpdated", payload)
+				// Feed terminal data to the Ralph tracker
+				if rt := getRalphTracker(); rt != nil {
+					rt.ProcessOutput(e.Data)
 				}
-			}
-		case pty.EventExit:
-			broker.Broadcast("session:stopped", map[string]interface{}{
-				"id":       sessionID,
-				"exitCode": e.ExitCode,
-			})
-			broker.Broadcast("session:updated", map[string]interface{}{
-				"id": sessionID, "status": "stopped", "isWorking": false,
-			})
-			broker.Broadcast("session:exit", map[string]interface{}{
-				"id":       sessionID,
-				"exitCode": e.ExitCode,
-			})
-			if rs := getRunSummary(); rs != nil {
-				rs.RecordWithSeverity(runsummary.EventExit, runsummary.SeverityInfo, map[string]interface{}{"exitCode": e.ExitCode})
-			}
-			// Notify Telegram of session completion
-			if ctx.TelegramHandler != nil {
-				duration := time.Since(session.CreatedAt)
-				if e.ExitCode == 0 {
-					ctx.TelegramHandler.NotifySessionComplete(sessionID, session.Name(), duration)
-				} else {
-					ctx.TelegramHandler.NotifySessionError(sessionID, session.Name(),
-						fmt.Sprintf("exited with code %d", e.ExitCode))
+				termBatcher.Add(sessionID, []byte(e.Data))
+			case pty.EventOutput:
+				broker.Broadcast("session:output", map[string]interface{}{
+					"id":   sessionID,
+					"data": e.Data,
+				})
+			case pty.EventIdle:
+				broker.Broadcast("session:idle", map[string]interface{}{"id": sessionID})
+				broker.Broadcast("session:updated", map[string]interface{}{
+					"id": sessionID, "status": "idle", "isWorking": false,
+				})
+				if rs := getRunSummary(); rs != nil {
+					rs.RecordIdle()
 				}
-			}
-			// Detect office agent death and clean up
-			if ctx.OfficeManager.GetAgent(sessionID) != nil {
-				ctx.OfficeManager.HandleAgentDeath(sessionID)
-			}
-			ctx.cleanupSessionResources(sessionID)
-		case pty.EventTokens:
-			broker.Broadcast("session:updated", map[string]interface{}{
-				"id": sessionID,
-				"tokens": map[string]int64{
-					"input": e.Input, "output": e.Output, "total": e.Total,
-				},
-			})
-			// Record dollar cost + token delta in daily stats so the
-			// informational spending widget has current data. R24 · The
-			// checkSpendingThresholds enforcement was removed; daily
-			// stats are kept purely for the header readout.
-			ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
-			// Per-agent accumulation: if this session is attached to an
-			// office agent, record the turn so the agent card + insights
-			// panel can render cost/token totals without a new endpoint.
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
-				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					broker.Broadcast("office:memberUpdated", payload)
+				// Signal respawn controller about idle detection
+				ctx.RespawnMu.RLock()
+				rc := ctx.RespawnControllers[sessionID]
+				ctx.RespawnMu.RUnlock()
+				if rc != nil {
+					rc.OnIdlePrompt()
 				}
-			}
-			// Feed run summary tracker with token data for milestone tracking
-			if rs := getRunSummary(); rs != nil {
-				rs.RecordTokens(e.Total)
-			}
+				// Notify office if this is a team agent (full payload)
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+						payload["status"] = "idle"
+						broker.Broadcast("office:memberUpdated", payload)
+					}
+				}
+			case pty.EventWorking:
+				broker.Broadcast("session:working", map[string]interface{}{"id": sessionID})
+				broker.Broadcast("session:updated", map[string]interface{}{
+					"id": sessionID, "status": "busy", "isWorking": true,
+				})
+				if rs := getRunSummary(); rs != nil {
+					rs.RecordWorking()
+				}
+				ctx.RespawnMu.RLock()
+				rc := ctx.RespawnControllers[sessionID]
+				ctx.RespawnMu.RUnlock()
+				if rc != nil {
+					rc.OnWorkingDetected("terminal working indicator")
+				}
+				// Notify office if this is a team agent (full payload)
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+						payload["status"] = "working"
+						broker.Broadcast("office:memberUpdated", payload)
+					}
+				}
+			case pty.EventExit:
+				broker.Broadcast("session:stopped", map[string]interface{}{
+					"id":       sessionID,
+					"exitCode": e.ExitCode,
+				})
+				broker.Broadcast("session:updated", map[string]interface{}{
+					"id": sessionID, "status": "stopped", "isWorking": false,
+				})
+				broker.Broadcast("session:exit", map[string]interface{}{
+					"id":       sessionID,
+					"exitCode": e.ExitCode,
+				})
+				if rs := getRunSummary(); rs != nil {
+					rs.RecordWithSeverity(runsummary.EventExit, runsummary.SeverityInfo, map[string]interface{}{"exitCode": e.ExitCode})
+				}
+				// Notify Telegram of session completion
+				if ctx.TelegramHandler != nil {
+					duration := time.Since(session.CreatedAt)
+					if e.ExitCode == 0 {
+						ctx.TelegramHandler.NotifySessionComplete(sessionID, session.Name(), duration)
+					} else {
+						ctx.TelegramHandler.NotifySessionError(sessionID, session.Name(),
+							fmt.Sprintf("exited with code %d", e.ExitCode))
+					}
+				}
+				// Detect office agent death and clean up
+				if ctx.OfficeManager.GetAgent(sessionID) != nil {
+					ctx.OfficeManager.HandleAgentDeath(sessionID)
+				}
+				ctx.cleanupSessionResources(sessionID)
+			case pty.EventTokens:
+				broker.Broadcast("session:updated", map[string]interface{}{
+					"id": sessionID,
+					"tokens": map[string]int64{
+						"input": e.Input, "output": e.Output, "total": e.Total,
+					},
+				})
+				// Record dollar cost + token delta in daily stats so the
+				// informational spending widget has current data. R24 · The
+				// checkSpendingThresholds enforcement was removed; daily
+				// stats are kept purely for the header readout.
+				ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
+				// Per-agent accumulation: if this session is attached to an
+				// office agent, record the turn so the agent card + insights
+				// panel can render cost/token totals without a new endpoint.
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+					agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
+					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+						broker.Broadcast("office:memberUpdated", payload)
+					}
+				}
+				// Feed run summary tracker with token data for milestone tracking
+				if rs := getRunSummary(); rs != nil {
+					rs.RecordTokens(e.Total)
+				}
 			}
 		}()
 	}
@@ -595,114 +595,114 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 					"id":   sessionID,
 					"data": e.Data,
 				})
-		case pty.EventOutput:
-			broker.Broadcast("session:output", map[string]interface{}{
-				"id":   sessionID,
-				"data": e.Data,
-			})
-			// R20 · Feed into the output-repeat loop detector.
-			// Advisory-only; fires office:agentPossibleLoop once per
-			// streak. Detector self-resets when the streak breaks
-			// and is cleared on Idle (turn boundary) below.
-			if ctx.OfficeManager != nil {
-				ctx.OfficeManager.ObserveAgentOutput(sessionID, e.Data)
-			}
-		case pty.EventIdle:
-			broker.Broadcast("session:idle", map[string]interface{}{"id": sessionID})
-			broker.Broadcast("session:updated", map[string]interface{}{
-				"id": sessionID, "status": "idle", "isWorking": false,
-			})
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				agent.SetSDKWorking(false)
-				agent.SetEventsDropped(session.DroppedEvents())
-				// R20 · Loop detection is scoped to a single turn —
-				// legitimate multi-turn work often rebuilds/re-runs
-				// the same commands, which would otherwise look like
-				// a loop. Reset on turn boundary.
-				ctx.OfficeManager.ResetAgentLoopDetector(sessionID)
-				// R21 · Same reasoning for the tool-level detector.
-				ctx.OfficeManager.ResetAgentToolLoopDetector(sessionID)
-				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					broker.Broadcast("office:memberUpdated", payload)
+			case pty.EventOutput:
+				broker.Broadcast("session:output", map[string]interface{}{
+					"id":   sessionID,
+					"data": e.Data,
+				})
+				// R20 · Feed into the output-repeat loop detector.
+				// Advisory-only; fires office:agentPossibleLoop once per
+				// streak. Detector self-resets when the streak breaks
+				// and is cleared on Idle (turn boundary) below.
+				if ctx.OfficeManager != nil {
+					ctx.OfficeManager.ObserveAgentOutput(sessionID, e.Data)
 				}
-			}
-		case pty.EventWorking:
-			broker.Broadcast("session:working", map[string]interface{}{"id": sessionID})
-			broker.Broadcast("session:updated", map[string]interface{}{
-				"id": sessionID, "status": "busy", "isWorking": true,
-			})
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				agent.SetSDKWorking(true)
-				agent.SetEventsDropped(session.DroppedEvents())
-				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					broker.Broadcast("office:memberUpdated", payload)
+			case pty.EventIdle:
+				broker.Broadcast("session:idle", map[string]interface{}{"id": sessionID})
+				broker.Broadcast("session:updated", map[string]interface{}{
+					"id": sessionID, "status": "idle", "isWorking": false,
+				})
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+					agent.SetSDKWorking(false)
+					agent.SetEventsDropped(session.DroppedEvents())
+					// R20 · Loop detection is scoped to a single turn —
+					// legitimate multi-turn work often rebuilds/re-runs
+					// the same commands, which would otherwise look like
+					// a loop. Reset on turn boundary.
+					ctx.OfficeManager.ResetAgentLoopDetector(sessionID)
+					// R21 · Same reasoning for the tool-level detector.
+					ctx.OfficeManager.ResetAgentToolLoopDetector(sessionID)
+					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+						broker.Broadcast("office:memberUpdated", payload)
+					}
 				}
-			}
-		case pty.EventTokens:
-			broker.Broadcast("session:updated", map[string]interface{}{
-				"id": sessionID,
-				"tokens": map[string]int64{
-					"input": e.Input, "output": e.Output, "total": e.Total,
-				},
-				"cost": e.Cost,
-			})
-			ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
-			// Per-agent accumulation for office UI (cost bars, sparklines).
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-				agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
-				agent.SetEventsDropped(session.DroppedEvents())
-				if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-					broker.Broadcast("office:memberUpdated", payload)
+			case pty.EventWorking:
+				broker.Broadcast("session:working", map[string]interface{}{"id": sessionID})
+				broker.Broadcast("session:updated", map[string]interface{}{
+					"id": sessionID, "status": "busy", "isWorking": true,
+				})
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+					agent.SetSDKWorking(true)
+					agent.SetEventsDropped(session.DroppedEvents())
+					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+						broker.Broadcast("office:memberUpdated", payload)
+					}
 				}
-			}
-		case pty.EventToolInvocation:
-			// R21 · Feed into the tool-level loop detector. Higher
-			// fidelity than the text-level advisory — a matched
-			// (tool, resultHash) triplet means the agent re-ran the
-			// same tool with the same output 3 times inside one turn.
-			if ctx.OfficeManager != nil {
-				ctx.OfficeManager.ObserveAgentToolInvocation(sessionID, e.Name, e.ResultHash)
-			}
-		case pty.EventTurnCapReached:
-			// R18 · Bridge the per-session turn cap into an office SSE
-			// event so the dashboard agent card can flash + flag the
-			// runaway agent before operators notice in the logs.
-			agentName := sessionID
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil && agent.Config != nil {
-				agentName = agent.Config.Name
-			}
-			broker.Broadcast("office:agentTurnCapReached", map[string]interface{}{
-				"sessionId": sessionID,
-				"agentName": agentName,
-				"turns":     e.Turns,
-				"cap":       e.Cap,
-				"cost":      e.Cost,
-			})
-		case pty.EventTurnError:
-			// Bridge SDK turn errors (provider 4xx/5xx, rate limits,
-			// "Network error" from the Z.AI gateway) into an office
-			// SSE event so the dashboard can flag the agent instead
-			// of letting them silently fall idle after a failed run.
-			agentName := sessionID
-			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil && agent.Config != nil {
-				agentName = agent.Config.Name
-			}
-			broker.Broadcast("office:agentTurnError", map[string]interface{}{
-				"sessionId":  sessionID,
-				"agentName":  agentName,
-				"subtype":    e.Subtype,
-				"stopReason": e.StopReason,
-				"result":     e.Result,
-				"numTurns":   e.NumTurns,
-			})
-		case pty.EventExit:
-			broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
-			broker.Broadcast("session:exit", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
-			broker.Broadcast("session:updated", map[string]interface{}{"id": sessionID, "status": "stopped", "isWorking": false})
-			if ctx.OfficeManager.GetAgent(sessionID) != nil {
-				ctx.OfficeManager.HandleAgentDeath(sessionID)
-			}
-			ctx.cleanupSessionResources(sessionID)
+			case pty.EventTokens:
+				broker.Broadcast("session:updated", map[string]interface{}{
+					"id": sessionID,
+					"tokens": map[string]int64{
+						"input": e.Input, "output": e.Output, "total": e.Total,
+					},
+					"cost": e.Cost,
+				})
+				ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
+				// Per-agent accumulation for office UI (cost bars, sparklines).
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+					agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
+					agent.SetEventsDropped(session.DroppedEvents())
+					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+						broker.Broadcast("office:memberUpdated", payload)
+					}
+				}
+			case pty.EventToolInvocation:
+				// R21 · Feed into the tool-level loop detector. Higher
+				// fidelity than the text-level advisory — a matched
+				// (tool, resultHash) triplet means the agent re-ran the
+				// same tool with the same output 3 times inside one turn.
+				if ctx.OfficeManager != nil {
+					ctx.OfficeManager.ObserveAgentToolInvocation(sessionID, e.Name, e.ResultHash)
+				}
+			case pty.EventTurnCapReached:
+				// R18 · Bridge the per-session turn cap into an office SSE
+				// event so the dashboard agent card can flash + flag the
+				// runaway agent before operators notice in the logs.
+				agentName := sessionID
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil && agent.Config != nil {
+					agentName = agent.Config.Name
+				}
+				broker.Broadcast("office:agentTurnCapReached", map[string]interface{}{
+					"sessionId": sessionID,
+					"agentName": agentName,
+					"turns":     e.Turns,
+					"cap":       e.Cap,
+					"cost":      e.Cost,
+				})
+			case pty.EventTurnError:
+				// Bridge SDK turn errors (provider 4xx/5xx, rate limits,
+				// "Network error" from the Z.AI gateway) into an office
+				// SSE event so the dashboard can flag the agent instead
+				// of letting them silently fall idle after a failed run.
+				agentName := sessionID
+				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil && agent.Config != nil {
+					agentName = agent.Config.Name
+				}
+				broker.Broadcast("office:agentTurnError", map[string]interface{}{
+					"sessionId":  sessionID,
+					"agentName":  agentName,
+					"subtype":    e.Subtype,
+					"stopReason": e.StopReason,
+					"result":     e.Result,
+					"numTurns":   e.NumTurns,
+				})
+			case pty.EventExit:
+				broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
+				broker.Broadcast("session:exit", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
+				broker.Broadcast("session:updated", map[string]interface{}{"id": sessionID, "status": "stopped", "isWorking": false})
+				if ctx.OfficeManager.GetAgent(sessionID) != nil {
+					ctx.OfficeManager.HandleAgentDeath(sessionID)
+				}
+				ctx.cleanupSessionResources(sessionID)
 			}
 		}()
 	}

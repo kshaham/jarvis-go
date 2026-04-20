@@ -7,8 +7,8 @@ func TestMatchPattern(t *testing.T) {
 		pattern, event string
 		want           bool
 	}{
-		{"", "session:idle", true},       // empty pattern is wildcard
-		{"*", "anything", true},          // literal wildcard
+		{"", "session:idle", true}, // empty pattern is wildcard
+		{"*", "anything", true},    // literal wildcard
 		{"session:idle", "session:idle", true},
 		{"session:idle", "session:created", false},
 		{"session:*", "session:created", true},
@@ -52,8 +52,8 @@ func TestExtractSessionID(t *testing.T) {
 func TestEventPrefix(t *testing.T) {
 	// (Tested indirectly via matchPattern; kept as sanity for future coverage.)
 	cases := map[string]string{
-		"":            "",
-		"foo":         "foo",
+		"":             "",
+		"foo":          "foo",
 		"session:idle": "session:idle",
 	}
 	for in, want := range cases {

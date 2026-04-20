@@ -32,10 +32,10 @@ type SDKSession struct {
 	name       string
 
 	// State
-	status         SessionStatus
-	isWorking      bool
-	lastActivityAt time.Time
-	isStopped      bool
+	status          SessionStatus
+	isWorking       bool
+	lastActivityAt  time.Time
+	isStopped       bool
 	claudeSessionID string
 
 	// Token tracking
@@ -97,23 +97,23 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 	}
 
 	return &SDKSession{
-		ID:             id,
-		WorkingDir:     config.WorkingDir,
-		CreatedAt:      time.Now(),
-		Mode:           ModeClaudeSDK,
-		name:           config.Name,
-		status:         StatusStopped,
-		terminalBuffer: NewBufferAccumulator(MaxTerminalBufferSize, TrimTerminalTo),
-		textOutput:     NewBufferAccumulator(MaxTextOutputSize, TrimTextTo),
-		events:         make(chan SessionEvent, eventChannelSize),
-		done:           make(chan struct{}),
-		providerEnv:    config.ProviderEnv,
-		systemPrompt:   config.SystemPrompt,
-		mcpServers:     config.McpServers,
+		ID:                 id,
+		WorkingDir:         config.WorkingDir,
+		CreatedAt:          time.Now(),
+		Mode:               ModeClaudeSDK,
+		name:               config.Name,
+		status:             StatusStopped,
+		terminalBuffer:     NewBufferAccumulator(MaxTerminalBufferSize, TrimTerminalTo),
+		textOutput:         NewBufferAccumulator(MaxTextOutputSize, TrimTextTo),
+		events:             make(chan SessionEvent, eventChannelSize),
+		done:               make(chan struct{}),
+		providerEnv:        config.ProviderEnv,
+		systemPrompt:       config.SystemPrompt,
+		mcpServers:         config.McpServers,
 		maxTurnsPerSession: config.MaxTurnsPerSession,
-		outputObservers: make(map[int]func(string)),
-		activeTools:     make(map[string]bool),
-		toolTracker:     newToolEventTracker(),
+		outputObservers:    make(map[int]func(string)),
+		activeTools:        make(map[string]bool),
+		toolTracker:        newToolEventTracker(),
 	}
 }
 

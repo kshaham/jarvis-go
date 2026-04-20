@@ -23,10 +23,10 @@ func TestSeedNewProjectCLAUDEMd_WritesTemplate(t *testing.T) {
 		"# my-app",
 		"Freshly-created project",
 		"Build a landing page",
-		"#06080C",                 // canvas color
+		"#06080C", // canvas color
 		"linear-gradient(to right bottom, #53617A, #3A445C)",
-		"cm dev announce",         // team-dev-instance pointer
-		"browser verification",    // screenshot rule
+		"cm dev announce",      // team-dev-instance pointer
+		"browser verification", // screenshot rule
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("CLAUDE.md missing %q", want)

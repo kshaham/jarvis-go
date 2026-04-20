@@ -521,11 +521,11 @@ var allToolDefs = []ToolDefinition{
 // allTools maps tool names to their handler functions.
 var allTools = map[string]ToolHandler{
 	// Session Tools
-	"create_session":    handleCreateSession,
-	"list_sessions":     handleListSessions,
-	"get_session":       handleGetSession,
-	"stop_session":      handleStopSession,
-	"send_to_session":   handleSendToSession,
+	"create_session":     handleCreateSession,
+	"list_sessions":      handleListSessions,
+	"get_session":        handleGetSession,
+	"stop_session":       handleStopSession,
+	"send_to_session":    handleSendToSession,
 	"get_session_output": handleGetSessionOutput,
 
 	// Agent Tools
@@ -547,9 +547,9 @@ var allTools = map[string]ToolHandler{
 	"delete_skill":  handleDeleteSkill,
 
 	// Monitoring Tools
-	"get_git_status":       handleGetGitStatus,
-	"get_build_status":     handleGetBuildStatus,
-	"get_test_status":      handleGetTestStatus,
+	"get_git_status":        handleGetGitStatus,
+	"get_build_status":      handleGetBuildStatus,
+	"get_test_status":       handleGetTestStatus,
 	"get_integration_state": handleGetIntegrationState,
 
 	// State Tools
@@ -561,10 +561,10 @@ var allTools = map[string]ToolHandler{
 	"generate_plan": handleGeneratePlan,
 
 	// Dynamic Tools
-	"register_tool":     handleRegisterTool,
-	"unregister_tool":   handleUnregisterTool,
+	"register_tool":      handleRegisterTool,
+	"unregister_tool":    handleUnregisterTool,
 	"list_dynamic_tools": handleListDynamicTools,
-	"run_prompt":        handleRunPrompt,
+	"run_prompt":         handleRunPrompt,
 
 	// Office Agent Tools
 	"office_task_list":       handleOfficeTaskList,
@@ -1372,4 +1372,3 @@ func handleOfficeMemoryAppend(args map[string]interface{}) ToolResult {
 	}
 	return toolSuccess(result)
 }
-

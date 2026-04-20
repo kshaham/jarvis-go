@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	bcryptCost         = 12
-	sessionTokenBytes  = 32
-	secretKeyBytes     = 64
-	maxPasswordLength  = 128
-	sessionTimeoutDur  = 24 * time.Hour
-	cookieName         = "jarvis_session"
+	bcryptCost        = 12
+	sessionTokenBytes = 32
+	secretKeyBytes    = 64
+	maxPasswordLength = 128
+	sessionTimeoutDur = 24 * time.Hour
+	cookieName        = "jarvis_session"
 
 	rateLimitTier1Attempts = 5
 	rateLimitTier1Block    = 5 * time.Minute

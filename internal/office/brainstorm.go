@@ -9,17 +9,17 @@ import (
 
 // roleAffinity maps roles to preferred brainstorm partner roles.
 var roleAffinity = map[string][]string{
-	"Frontend Engineer":    {"UI/UX Designer", "Design Lead", "Frontend Architect"},
-	"UI/UX Designer":       {"Frontend Engineer", "Frontend Architect", "Design Lead"},
-	"Backend Engineer":     {"DevOps Engineer", "Senior Architect", "Backend Architect"},
-	"DevOps Engineer":      {"Backend Engineer", "QA Engineer", "Site Reliability Engineer"},
-	"QA Engineer":          {"DevOps Engineer", "Frontend Engineer", "Backend Engineer"},
-	"Senior Architect":     {"Backend Engineer", "Frontend Engineer", "Engineering Manager"},
-	"Engineering Manager":  {"Senior Architect", "Tech Lead", "Product Manager"},
-	"Tech Lead":            {"Senior Architect", "Engineering Manager", "Backend Engineer"},
-	"Frontend Architect":   {"Frontend Engineer", "UI/UX Designer", "Senior Architect"},
-	"Backend Architect":    {"Backend Engineer", "Senior Architect", "DevOps Engineer"},
-	"Design Lead":          {"UI/UX Designer", "Frontend Engineer", "Product Manager"},
+	"Frontend Engineer":   {"UI/UX Designer", "Design Lead", "Frontend Architect"},
+	"UI/UX Designer":      {"Frontend Engineer", "Frontend Architect", "Design Lead"},
+	"Backend Engineer":    {"DevOps Engineer", "Senior Architect", "Backend Architect"},
+	"DevOps Engineer":     {"Backend Engineer", "QA Engineer", "Site Reliability Engineer"},
+	"QA Engineer":         {"DevOps Engineer", "Frontend Engineer", "Backend Engineer"},
+	"Senior Architect":    {"Backend Engineer", "Frontend Engineer", "Engineering Manager"},
+	"Engineering Manager": {"Senior Architect", "Tech Lead", "Product Manager"},
+	"Tech Lead":           {"Senior Architect", "Engineering Manager", "Backend Engineer"},
+	"Frontend Architect":  {"Frontend Engineer", "UI/UX Designer", "Senior Architect"},
+	"Backend Architect":   {"Backend Engineer", "Senior Architect", "DevOps Engineer"},
+	"Design Lead":         {"UI/UX Designer", "Frontend Engineer", "Product Manager"},
 }
 
 // RoleAffinityPartners returns the preferred partner roles for a given role.

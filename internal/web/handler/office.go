@@ -459,10 +459,10 @@ func (ctx *Context) OfficeTemplateFromTeam(w http.ResponseWriter, r *http.Reques
 	for _, agent := range roster {
 		cfg := agent.Config
 		m := teamtemplates.TeamTemplateMember{
-			ID:   cfg.ID,
-			Name: cfg.Name,
-			Role: cfg.Role,
-			Tier: cfg.Tier,
+			ID:    cfg.ID,
+			Name:  cfg.Name,
+			Role:  cfg.Role,
+			Tier:  cfg.Tier,
 			Color: cfg.Color,
 		}
 		if po := agent.GetPersonalityOverride(); po != nil {
@@ -998,90 +998,90 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 
 	// Inject kickstart prompts into PTY sessions (SDK sessions get kickstart via SystemPrompt).
 	if !useSDK {
-	teamMission := ctx.OfficeManager.GetTeamMission()
-	roster := ctx.OfficeManager.GetRoster()
-	for _, agent := range roster {
-		go func(a *office.AgentState) {
-			// A panic here (malformed memory file, nil deref in
-			// BuildKickstartPrompt, PTY write on a closed fd, etc.)
-			// would otherwise take down the whole jarvis process and
-			// all running agents with it.
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("kickstart injection panic", "agent", a.ConfigID, "err", r)
-				}
-			}()
-			agentMemory := office.LoadAgentMemory(a.ConfigID, req.WorkingDir)
-			prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual)
-			if prompt == "" {
-				return
-			}
-
-			s, ok := ctx.SessionManager.GetSession(a.SessionID)
-			if !ok {
-				return
-			}
-
-			// Use output observer to detect when Claude's prompt is ready.
-			// Claude shows ">" or "❯" when its TextInput is ready for input.
-			ready := make(chan struct{}, 1)
-			unsubscribe := s.AddOutputObserver(func(data string) {
-				// Look for Claude's prompt indicator in terminal output
-				if strings.Contains(data, "❯") || strings.Contains(data, "> ") ||
-					strings.Contains(data, "bypass permissions") {
-					select {
-					case ready <- struct{}{}:
-					default:
+		teamMission := ctx.OfficeManager.GetTeamMission()
+		roster := ctx.OfficeManager.GetRoster()
+		for _, agent := range roster {
+			go func(a *office.AgentState) {
+				// A panic here (malformed memory file, nil deref in
+				// BuildKickstartPrompt, PTY write on a closed fd, etc.)
+				// would otherwise take down the whole jarvis process and
+				// all running agents with it.
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("kickstart injection panic", "agent", a.ConfigID, "err", r)
 					}
+				}()
+				agentMemory := office.LoadAgentMemory(a.ConfigID, req.WorkingDir)
+				prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual)
+				if prompt == "" {
+					return
 				}
-			})
 
-			// Wait up to 60s for Claude to be ready
-			select {
-			case <-ready:
-				slog.Info("Claude prompt detected, injecting kickstart", "name", a.Config.Name)
-			case <-time.After(60 * time.Second):
-				slog.Warn("Timed out waiting for Claude prompt, injecting anyway", "name", a.Config.Name)
-			}
-			unsubscribe()
+				s, ok := ctx.SessionManager.GetSession(a.SessionID)
+				if !ok {
+					return
+				}
 
-			// Extra delay after prompt appears to ensure Ink's TextInput is fully initialized.
-			// 3s gives enough time for all 6+ agents on server hardware.
-			time.Sleep(3 * time.Second)
-
-			// Send kickstart and verify it was accepted (retry up to 3 times).
-			maxRetries := 3
-			for attempt := 0; attempt < maxRetries; attempt++ {
-				s.WriteInkPrompt(prompt)
-				slog.Info("Kickstart attempt", "name", a.Config.Name, "attempt", attempt+1, "session", a.SessionID)
-
-				// Watch for output activity (Claude responding = prompt accepted)
-				activity := make(chan struct{}, 1)
-				unsub := s.AddOutputObserver(func(data string) {
-					if len(data) > 20 {
+				// Use output observer to detect when Claude's prompt is ready.
+				// Claude shows ">" or "❯" when its TextInput is ready for input.
+				ready := make(chan struct{}, 1)
+				unsubscribe := s.AddOutputObserver(func(data string) {
+					// Look for Claude's prompt indicator in terminal output
+					if strings.Contains(data, "❯") || strings.Contains(data, "> ") ||
+						strings.Contains(data, "bypass permissions") {
 						select {
-						case activity <- struct{}{}:
+						case ready <- struct{}{}:
 						default:
 						}
 					}
 				})
 
+				// Wait up to 60s for Claude to be ready
 				select {
-				case <-activity:
-					unsub()
-					slog.Info("Kickstart confirmed -- agent is working", "name", a.Config.Name)
-					return // Success
-				case <-time.After(30 * time.Second):
-					unsub()
-					slog.Warn("No activity after kickstart, retrying", "name", a.Config.Name, "attempt", attempt+1)
-					// Try sending just Enter in case text was pasted but not submitted
-					s.WriteToPTY("\r")
-					time.Sleep(5 * time.Second)
+				case <-ready:
+					slog.Info("Claude prompt detected, injecting kickstart", "name", a.Config.Name)
+				case <-time.After(60 * time.Second):
+					slog.Warn("Timed out waiting for Claude prompt, injecting anyway", "name", a.Config.Name)
 				}
-			}
-			slog.Error("Kickstart failed after all retries", "name", a.Config.Name, "session", a.SessionID)
-		}(agent)
-	}
+				unsubscribe()
+
+				// Extra delay after prompt appears to ensure Ink's TextInput is fully initialized.
+				// 3s gives enough time for all 6+ agents on server hardware.
+				time.Sleep(3 * time.Second)
+
+				// Send kickstart and verify it was accepted (retry up to 3 times).
+				maxRetries := 3
+				for attempt := 0; attempt < maxRetries; attempt++ {
+					s.WriteInkPrompt(prompt)
+					slog.Info("Kickstart attempt", "name", a.Config.Name, "attempt", attempt+1, "session", a.SessionID)
+
+					// Watch for output activity (Claude responding = prompt accepted)
+					activity := make(chan struct{}, 1)
+					unsub := s.AddOutputObserver(func(data string) {
+						if len(data) > 20 {
+							select {
+							case activity <- struct{}{}:
+							default:
+							}
+						}
+					})
+
+					select {
+					case <-activity:
+						unsub()
+						slog.Info("Kickstart confirmed -- agent is working", "name", a.Config.Name)
+						return // Success
+					case <-time.After(30 * time.Second):
+						unsub()
+						slog.Warn("No activity after kickstart, retrying", "name", a.Config.Name, "attempt", attempt+1)
+						// Try sending just Enter in case text was pasted but not submitted
+						s.WriteToPTY("\r")
+						time.Sleep(5 * time.Second)
+					}
+				}
+				slog.Error("Kickstart failed after all retries", "name", a.Config.Name, "session", a.SessionID)
+			}(agent)
+		}
 	} // end if !useSDK
 
 	// Configure Telegram updates if requested
@@ -1149,10 +1149,10 @@ func (ctx *Context) OfficePauseTeam(w http.ResponseWriter, r *http.Request) {
 	wasPaused := ctx.OfficeManager.SetPaused(true, req.Reason)
 	paused, since, reason := ctx.OfficeManager.PauseSnapshot()
 	ctx.SSEBroker.Broadcast("office:teamPaused", map[string]interface{}{
-		"paused":       paused,
-		"since":        since.UnixMilli(),
-		"reason":       reason,
-		"wasPaused":    wasPaused,
+		"paused":    paused,
+		"since":     since.UnixMilli(),
+		"reason":    reason,
+		"wasPaused": wasPaused,
 	})
 	slog.Info("team paused", "reason", reason, "wasPaused", wasPaused)
 	ok(w, map[string]interface{}{"paused": true, "reason": reason})
@@ -1308,9 +1308,9 @@ func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request
 	}
 
 	ctx.SSEBroker.Broadcast("office:snapshotRestored", map[string]interface{}{
-		"name":          snap.Name,
-		"memberCount":   len(snap.Members),
-		"seededTasks":   seeded,
+		"name":        snap.Name,
+		"memberCount": len(snap.Members),
+		"seededTasks": seeded,
 	})
 	slog.Info("team snapshot restored",
 		"name", snap.Name, "members", len(snap.Members), "seededTasks", seeded)

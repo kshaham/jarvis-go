@@ -595,9 +595,9 @@ RECOMMENDATION: All tasks done
 
 func TestStringSimilarity(t *testing.T) {
 	tests := []struct {
-		a, b     string
-		minSim   float64
-		maxSim   float64
+		a, b   string
+		minSim float64
+		maxSim float64
 	}{
 		{"hello", "hello", 1.0, 1.0},
 		{"", "", 0.0, 0.0},

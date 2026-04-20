@@ -159,9 +159,9 @@ func TestCompletionMessageDetector_MatchesPattern(t *testing.T) {
 		{"Worked for 46s", true},
 		{"Worked for 1h 2m 3s", true},
 		{"worked for 5m", true},         // case insensitive
-		{"wait for 5s", false},           // not "Worked for"
-		{"run for 2m", false},            // not "Worked for"
-		{"for 3s the system...", false},   // not "Worked for"
+		{"wait for 5s", false},          // not "Worked for"
+		{"run for 2m", false},           // not "Worked for"
+		{"for 3s the system...", false}, // not "Worked for"
 		{"no match here", false},
 		{"", false},
 	}

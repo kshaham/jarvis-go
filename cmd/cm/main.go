@@ -3,8 +3,9 @@
 // (submit standup responses, report task progress, send messages, etc.)
 //
 // Environment variables:
-//   JARVIS_API_URL    - Server URL (e.g., http://localhost:3555)
-//   JARVIS_SESSION_ID - Current session ID
+//
+//	JARVIS_API_URL    - Server URL (e.g., http://localhost:3555)
+//	JARVIS_SESSION_ID - Current session ID
 package main
 
 import (

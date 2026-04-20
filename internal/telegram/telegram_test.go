@@ -59,9 +59,9 @@ func newMockServerBridge() *mockServerBridge {
 	}
 }
 
-func (m *mockServerBridge) GetSystemStatus() SystemStatus   { return m.systemStatus }
-func (m *mockServerBridge) GetSessionsList() []SessionInfo   { return m.sessions }
-func (m *mockServerBridge) GetAgentsList() []AgentInfo       { return m.agents }
+func (m *mockServerBridge) GetSystemStatus() SystemStatus      { return m.systemStatus }
+func (m *mockServerBridge) GetSessionsList() []SessionInfo     { return m.sessions }
+func (m *mockServerBridge) GetAgentsList() []AgentInfo         { return m.agents }
 func (m *mockServerBridge) GetDetailedStatus(id string) string { return m.detailedStatus }
 
 func (m *mockServerBridge) SendToSession(sessionID, message string) bool {

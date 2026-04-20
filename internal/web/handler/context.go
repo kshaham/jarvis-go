@@ -8,11 +8,11 @@ import (
 
 	"github.com/claudeman/jarvis-go/internal/cases"
 	"github.com/claudeman/jarvis-go/internal/integrations"
+	"github.com/claudeman/jarvis-go/internal/notifications"
 	"github.com/claudeman/jarvis-go/internal/office"
 	"github.com/claudeman/jarvis-go/internal/pty"
 	"github.com/claudeman/jarvis-go/internal/ralph"
 	"github.com/claudeman/jarvis-go/internal/respawn"
-	"github.com/claudeman/jarvis-go/internal/notifications"
 	"github.com/claudeman/jarvis-go/internal/runsummary"
 	"github.com/claudeman/jarvis-go/internal/scheduler"
 	"github.com/claudeman/jarvis-go/internal/state"
@@ -27,35 +27,35 @@ import (
 
 // Context holds shared dependencies injected into all handlers.
 type Context struct {
-	SessionManager     *pty.SessionManager
-	SSEBroker          *sse.Broker
-	CSRFStore          *middleware.CSRFStore
-	AuthManager        *auth.Manager
-	OfficeManager      *office.Manager
-	StateStore         *state.AppState
-	ScreenManager      *pty.ScreenManager
-	SubagentWatcher    *subagent.Watcher
-	CaseManager        *cases.CaseManager
-	RespawnControllers map[string]*respawn.Controller // sessionID -> controller
-	RespawnMu          sync.RWMutex
-	TemplateStore      *templates.Store
-	TeamTemplateStore  *teamtemplates.Store
-	AgentTokenMgr      *auth.AgentTokenManager
-	Scheduler          *scheduler.Store
-	SchedulerRunner    *scheduler.Runner
+	SessionManager      *pty.SessionManager
+	SSEBroker           *sse.Broker
+	CSRFStore           *middleware.CSRFStore
+	AuthManager         *auth.Manager
+	OfficeManager       *office.Manager
+	StateStore          *state.AppState
+	ScreenManager       *pty.ScreenManager
+	SubagentWatcher     *subagent.Watcher
+	CaseManager         *cases.CaseManager
+	RespawnControllers  map[string]*respawn.Controller // sessionID -> controller
+	RespawnMu           sync.RWMutex
+	TemplateStore       *templates.Store
+	TeamTemplateStore   *teamtemplates.Store
+	AgentTokenMgr       *auth.AgentTokenManager
+	Scheduler           *scheduler.Store
+	SchedulerRunner     *scheduler.Runner
 	Notifications       *notifications.Store
 	NotificationsRouter *notifications.Router
-	TelegramBot        *telegram.Bot
-	TelegramHandler    *telegram.Handler
-	IntegrationMonitor *integrations.Monitor
-	ScheduledTasks     map[string]interface{}
-	ScheduledTasksMu   sync.RWMutex
-	SessionColors      map[string]string // sessionID -> color label
-	SessionColorsMu    sync.RWMutex
-	RalphTrackers        map[string]*ralph.Tracker       // sessionID -> tracker
-	RalphTrackersMu      sync.RWMutex
-	RunSummaries         map[string]*runsummary.Tracker   // sessionID -> tracker
-	RunSummariesMu       sync.RWMutex
+	TelegramBot         *telegram.Bot
+	TelegramHandler     *telegram.Handler
+	IntegrationMonitor  *integrations.Monitor
+	ScheduledTasks      map[string]interface{}
+	ScheduledTasksMu    sync.RWMutex
+	SessionColors       map[string]string // sessionID -> color label
+	SessionColorsMu     sync.RWMutex
+	RalphTrackers       map[string]*ralph.Tracker // sessionID -> tracker
+	RalphTrackersMu     sync.RWMutex
+	RunSummaries        map[string]*runsummary.Tracker // sessionID -> tracker
+	RunSummariesMu      sync.RWMutex
 
 	// TailFileStreams tracks active SSE file-tail streams for cleanup.
 	TailFileStreams   map[string]func() // streamID -> cancel func
@@ -210,11 +210,11 @@ func (ctx *Context) getProviderEnvVars() map[string]string {
 
 // Z.AI model rate limits (max concurrent requests per model).
 var zaiModelRateLimits = map[string]int{
-	"glm-5.1":     2,
-	"glm-5":       2,
-	"glm-4.7":     3,
+	"glm-5.1":       2,
+	"glm-5":         2,
+	"glm-4.7":       3,
 	"glm-4.7-flash": 5,
-	"glm-4.5-air": 5,
+	"glm-4.5-air":   5,
 }
 
 // zaiModelDowngradePath defines the fallback chain when a model's slots are full.

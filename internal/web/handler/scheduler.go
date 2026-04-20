@@ -305,4 +305,4 @@ func (w *scheduledResponseWriter) Header() http.Header {
 	return w.header
 }
 func (w *scheduledResponseWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
-func (w *scheduledResponseWriter) WriteHeader(code int)         { w.status = code }
+func (w *scheduledResponseWriter) WriteHeader(code int)        { w.status = code }

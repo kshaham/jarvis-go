@@ -340,11 +340,11 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 		reason = "operator"
 	}
 	ctx.SSEBroker.Broadcast("office:agentRestarted", map[string]interface{}{
-		"sessionId":     newSessionID,
-		"oldSessionId":  req.SessionID,
-		"agentName":     agentName,
-		"reason":        reason,
-		"mode":          mode,
+		"sessionId":    newSessionID,
+		"oldSessionId": req.SessionID,
+		"agentName":    agentName,
+		"reason":       reason,
+		"mode":         mode,
 	})
 	slog.Info("operator restarted agent in place",
 		"name", agentName, "oldSession", req.SessionID,

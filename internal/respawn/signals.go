@@ -13,12 +13,12 @@ var CompletionTimePattern = regexp.MustCompile(`(?i)\bWorked\s+for\s+\d+[hms](\s
 // OutputSilenceDetector monitors terminal output and fires after a configurable
 // silence threshold. Each call to RecordOutput resets the timer.
 type OutputSilenceDetector struct {
-	mu             sync.Mutex
-	lastOutputAt   time.Time
-	threshold      time.Duration
-	timer          *time.Timer
-	onSilence      func(elapsed time.Duration)
-	stopped        bool
+	mu           sync.Mutex
+	lastOutputAt time.Time
+	threshold    time.Duration
+	timer        *time.Timer
+	onSilence    func(elapsed time.Duration)
+	stopped      bool
 }
 
 // NewOutputSilenceDetector creates a detector that calls onSilence when no

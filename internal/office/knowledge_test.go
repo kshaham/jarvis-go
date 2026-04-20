@@ -94,8 +94,8 @@ Glass blur regresses on iPhone SE at blur>24 — cap at 20.
 	wbDir := filepath.Join(home, ".jarvis", "office-memory")
 	board := TeamWhiteboard{Entries: map[string]TeamWhiteboardEntry{
 		"Captain": {Sections: map[string]TeamWhiteboardSection{
-			"tracking":  {Content: "19 mobile screens → 14 audited, 5 pending (liquid-glass)", UpdatedAt: time.Now().Add(-10 * time.Minute)},
-			"blockers":  {Content: "Expo dev server keeps exiting after first screenshot", UpdatedAt: time.Now().Add(-5 * time.Minute)},
+			"tracking": {Content: "19 mobile screens → 14 audited, 5 pending (liquid-glass)", UpdatedAt: time.Now().Add(-10 * time.Minute)},
+			"blockers": {Content: "Expo dev server keeps exiting after first screenshot", UpdatedAt: time.Now().Add(-5 * time.Minute)},
 		}},
 	}}
 	bdata, _ := json.MarshalIndent(board, "", "  ")

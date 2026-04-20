@@ -19,19 +19,19 @@ type Config struct {
 	// seconds after a team spawns. Protects agents that are still
 	// processing their initial kickstart from being auto-killed before
 	// they get to emit their first event.
-	StuckGracePeriod       time.Duration
-	TaskAckTimeout         time.Duration
-	TaskAckMaxNudges       int
-	ReplenishCooldown      time.Duration
-	FileLockTTL            time.Duration
-	MaxMessages            int
-	MaxBugTasks            int
-	AuditMaxEntries        int
-	AuditRotateSize        int64
+	StuckGracePeriod         time.Duration
+	TaskAckTimeout           time.Duration
+	TaskAckMaxNudges         int
+	ReplenishCooldown        time.Duration
+	FileLockTTL              time.Duration
+	MaxMessages              int
+	MaxBugTasks              int
+	AuditMaxEntries          int
+	AuditRotateSize          int64
 	AutoStandupInterval      time.Duration
 	IdleCheckInterval        time.Duration
 	IdleThreshold            time.Duration
-	MeetingInactivityTimeout  time.Duration
+	MeetingInactivityTimeout time.Duration
 	WaterCoolerCooldown      time.Duration
 	BlockedTriageMaxAttempts int
 	ReflectionCooldown       time.Duration
@@ -75,16 +75,16 @@ func DefaultConfig() *Config {
 		// agent space to finish its turn, and the new IsSessionWorking
 		// guard in CheckForIdleAgents prevents piling a second prompt
 		// on top of one being processed even within the window.
-		ReplenishCooldown:      3 * time.Minute,
-		FileLockTTL:            30 * time.Minute,
-		MaxMessages:            50,
-		MaxBugTasks:            100,
-		AuditMaxEntries:        500,
-		AuditRotateSize:        5 * 1024 * 1024,
+		ReplenishCooldown:        3 * time.Minute,
+		FileLockTTL:              30 * time.Minute,
+		MaxMessages:              50,
+		MaxBugTasks:              100,
+		AuditMaxEntries:          500,
+		AuditRotateSize:          5 * 1024 * 1024,
 		AutoStandupInterval:      4 * time.Hour,
 		IdleCheckInterval:        15 * time.Second,
 		IdleThreshold:            60 * time.Second,
-		MeetingInactivityTimeout:  300 * time.Second,
+		MeetingInactivityTimeout: 300 * time.Second,
 		WaterCoolerCooldown:      5 * time.Minute,
 		BlockedTriageMaxAttempts: 3,
 		ReflectionCooldown:       10 * time.Minute,

@@ -133,7 +133,7 @@ type SystemStatus struct {
 // SessionInfo describes a single session for listing purposes.
 type SessionInfo struct {
 	ID        string `json:"id"`
-	ShortID   string `json:"shortId"`   // first 8 chars of ID
+	ShortID   string `json:"shortId"` // first 8 chars of ID
 	Name      string `json:"name"`
 	Status    string `json:"status"`
 	Mode      string `json:"mode"`

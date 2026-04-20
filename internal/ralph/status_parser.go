@@ -28,10 +28,10 @@ const (
 type WorkTypeValue string
 
 const (
-	WorkImplementation  WorkTypeValue = "IMPLEMENTATION"
-	WorkTesting         WorkTypeValue = "TESTING"
-	WorkDocumentation   WorkTypeValue = "DOCUMENTATION"
-	WorkRefactoring     WorkTypeValue = "REFACTORING"
+	WorkImplementation WorkTypeValue = "IMPLEMENTATION"
+	WorkTesting        WorkTypeValue = "TESTING"
+	WorkDocumentation  WorkTypeValue = "DOCUMENTATION"
+	WorkRefactoring    WorkTypeValue = "REFACTORING"
 )
 
 // RalphStatus is the structured result of parsing a RALPH_STATUS block from
@@ -47,26 +47,26 @@ const (
 //	RECOMMENDATION: Continue with remaining tasks
 //	---END_RALPH_STATUS---
 type RalphStatus struct {
-	Status             RalphStatusValue `json:"status"`
-	TasksCompleted     int              `json:"tasksCompleted"`
-	FilesModified      int              `json:"filesModified"`
-	TestsStatus        TestsStatusValue `json:"testsStatus"`
-	WorkType           WorkTypeValue    `json:"workType"`
-	ExitSignal         bool             `json:"exitSignal"`
-	Recommendation     string           `json:"recommendation"`
+	Status         RalphStatusValue `json:"status"`
+	TasksCompleted int              `json:"tasksCompleted"`
+	FilesModified  int              `json:"filesModified"`
+	TestsStatus    TestsStatusValue `json:"testsStatus"`
+	WorkType       WorkTypeValue    `json:"workType"`
+	ExitSignal     bool             `json:"exitSignal"`
+	Recommendation string           `json:"recommendation"`
 }
 
 // Pre-compiled patterns for RALPH_STATUS block fields.
 var (
-	statusStartPattern      = regexp.MustCompile(`^---RALPH_STATUS---\s*$`)
-	statusEndPattern        = regexp.MustCompile(`^---END_RALPH_STATUS---\s*$`)
-	statusFieldPattern      = regexp.MustCompile(`(?i)^STATUS:\s*(IN_PROGRESS|COMPLETE|BLOCKED)\s*$`)
-	tasksCompletedPattern   = regexp.MustCompile(`(?i)^TASKS_COMPLETED_THIS_LOOP:\s*(\d+)\s*$`)
-	filesModifiedPattern    = regexp.MustCompile(`(?i)^FILES_MODIFIED:\s*(\d+)\s*$`)
-	testsStatusPattern      = regexp.MustCompile(`(?i)^TESTS_STATUS:\s*(PASSING|FAILING|NOT_RUN)\s*$`)
-	workTypePattern         = regexp.MustCompile(`(?i)^WORK_TYPE:\s*(IMPLEMENTATION|TESTING|DOCUMENTATION|REFACTORING)\s*$`)
-	exitSignalPattern       = regexp.MustCompile(`(?i)^EXIT_SIGNAL:\s*(true|false)\s*$`)
-	recommendationPattern   = regexp.MustCompile(`(?i)^RECOMMENDATION:\s*(.+)$`)
+	statusStartPattern    = regexp.MustCompile(`^---RALPH_STATUS---\s*$`)
+	statusEndPattern      = regexp.MustCompile(`^---END_RALPH_STATUS---\s*$`)
+	statusFieldPattern    = regexp.MustCompile(`(?i)^STATUS:\s*(IN_PROGRESS|COMPLETE|BLOCKED)\s*$`)
+	tasksCompletedPattern = regexp.MustCompile(`(?i)^TASKS_COMPLETED_THIS_LOOP:\s*(\d+)\s*$`)
+	filesModifiedPattern  = regexp.MustCompile(`(?i)^FILES_MODIFIED:\s*(\d+)\s*$`)
+	testsStatusPattern    = regexp.MustCompile(`(?i)^TESTS_STATUS:\s*(PASSING|FAILING|NOT_RUN)\s*$`)
+	workTypePattern       = regexp.MustCompile(`(?i)^WORK_TYPE:\s*(IMPLEMENTATION|TESTING|DOCUMENTATION|REFACTORING)\s*$`)
+	exitSignalPattern     = regexp.MustCompile(`(?i)^EXIT_SIGNAL:\s*(true|false)\s*$`)
+	recommendationPattern = regexp.MustCompile(`(?i)^RECOMMENDATION:\s*(.+)$`)
 )
 
 // ParseRalphStatusBlock extracts a RalphStatus from the lines between

@@ -39,10 +39,10 @@ var snapshotNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 // they live in their own files keyed by configID and survive
 // independently.
 type SnapshotMemberEntry struct {
-	ConfigID string           `json:"configId"`
-	Config   TeamMemberConfig `json:"config"`
-	Tasks    []*Task          `json:"tasks,omitempty"`
-	Whiteboard *WhiteboardNote `json:"whiteboard,omitempty"`
+	ConfigID   string           `json:"configId"`
+	Config     TeamMemberConfig `json:"config"`
+	Tasks      []*Task          `json:"tasks,omitempty"`
+	Whiteboard *WhiteboardNote  `json:"whiteboard,omitempty"`
 }
 
 // TeamSnapshot is the root snapshot record.

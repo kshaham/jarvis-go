@@ -39,14 +39,14 @@ type Session struct {
 	Mode       SessionMode
 
 	// Mutable state (guarded by mu)
-	name           string
-	status         SessionStatus
-	pid            int
-	isWorking      bool
-	lastActivityAt time.Time
+	name             string
+	status           SessionStatus
+	pid              int
+	isWorking        bool
+	lastActivityAt   time.Time
 	lastPromptTime   time.Time
 	lastAutoResponse time.Time
-	isStopped      bool
+	isStopped        bool
 
 	// Token tracking
 	totalInputTokens  int64

@@ -41,9 +41,9 @@ type AppState struct {
 	DailyStats []DailyTokenStats        `json:"dailyStats"`
 	Version    string                   `json:"version"`
 
-	filePath       string
-	debounceTimer  *time.Timer
-	debounceDirty  bool
+	filePath      string
+	debounceTimer *time.Timer
+	debounceDirty bool
 }
 
 // NewStore creates or loads state from the given file path.

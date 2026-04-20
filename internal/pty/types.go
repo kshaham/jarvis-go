@@ -38,10 +38,9 @@ type SessionConfig struct {
 	MaxTurnsPerSession int
 
 	// SDK mode fields (only used when Mode == ModeClaudeSDK)
-	SystemPrompt string            // Initial system prompt (kickstart)
-	McpServers   map[string]any    // MCP server configurations
+	SystemPrompt string         // Initial system prompt (kickstart)
+	McpServers   map[string]any // MCP server configurations
 }
-
 
 type NiceConfig struct {
 	Enabled  bool
@@ -77,18 +76,23 @@ type SessionEvent interface {
 }
 
 type EventTerminal struct{ Data string }
+
 func (EventTerminal) eventType() string { return "terminal" }
 
 type EventOutput struct{ Data string }
+
 func (EventOutput) eventType() string { return "output" }
 
 type EventIdle struct{}
+
 func (EventIdle) eventType() string { return "idle" }
 
 type EventWorking struct{}
+
 func (EventWorking) eventType() string { return "working" }
 
 type EventExit struct{ ExitCode int }
+
 func (EventExit) eventType() string { return "exit" }
 
 type EventTokens struct {
@@ -101,6 +105,7 @@ type EventTokens struct {
 	// Model identifies which model served the turn. Empty for PTY sessions.
 	Model string
 }
+
 func (EventTokens) eventType() string { return "tokens" }
 
 // EventTurnCapReached fires when a session's cumulative NumTurns hits
@@ -152,6 +157,7 @@ type EventTurnError struct {
 func (EventTurnError) eventType() string { return "turnError" }
 
 type EventError struct{ Err error }
+
 func (EventError) eventType() string { return "error" }
 
 type ScreenManagerInterface interface {

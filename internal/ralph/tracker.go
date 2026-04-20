@@ -11,11 +11,11 @@ import (
 
 // Configuration constants matching the Node.js implementation.
 const (
-	maxTodoItems           = 50
-	todoExpiryDuration     = 1 * time.Hour
-	cleanupThrottle        = 30 * time.Second
+	maxTodoItems            = 50
+	todoExpiryDuration      = 1 * time.Hour
+	cleanupThrottle         = 30 * time.Second
 	todoSimilarityThreshold = 0.85
-	eventDebounceDuration  = 50 * time.Millisecond
+	eventDebounceDuration   = 50 * time.Millisecond
 )
 
 // TodoItem represents a single todo item detected from terminal output.
@@ -28,15 +28,15 @@ type TodoItem struct {
 
 // TrackerState holds the current state of the Ralph tracker for a session.
 type TrackerState struct {
-	Enabled            bool                `json:"enabled"`
-	CompletionPhrase   string              `json:"completionPhrase"`
-	LoopIteration      int                 `json:"loopIteration"`
-	MaxIterations      int                 `json:"maxIterations"`
-	Todos              []TodoItem          `json:"todos"`
-	LastActivityAt     time.Time           `json:"lastActivityAt"`
-	CompletionDetected bool                `json:"completionDetected"`
+	Enabled            bool                 `json:"enabled"`
+	CompletionPhrase   string               `json:"completionPhrase"`
+	LoopIteration      int                  `json:"loopIteration"`
+	MaxIterations      int                  `json:"maxIterations"`
+	Todos              []TodoItem           `json:"todos"`
+	LastActivityAt     time.Time            `json:"lastActivityAt"`
+	CompletionDetected bool                 `json:"completionDetected"`
 	CircuitBreaker     CircuitBreakerStatus `json:"circuitBreaker"`
-	LastRalphStatus    *RalphStatus        `json:"lastRalphStatus,omitempty"`
+	LastRalphStatus    *RalphStatus         `json:"lastRalphStatus,omitempty"`
 }
 
 // TrackerEvent represents an event emitted by the Ralph tracker.

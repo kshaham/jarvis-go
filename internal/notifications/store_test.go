@@ -28,9 +28,9 @@ func TestStore_PersistsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "routes.json")
 	s1 := NewStore(path)
 	r := s1.Create(Route{
-		Name:    "keeper",
-		Enabled: true,
-		Match:   MatchRule{EventPattern: "session:*"},
+		Name:     "keeper",
+		Enabled:  true,
+		Match:    MatchRule{EventPattern: "session:*"},
 		Channels: []ChannelSpec{{Type: ChannelLog, Target: "standup"}},
 	})
 

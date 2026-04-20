@@ -363,8 +363,8 @@ func TestMultipleCycles(t *testing.T) {
 func TestStuckDetection_WarningAndRecovery(t *testing.T) {
 	cfg := fastConfig()
 	cfg.ConfirmationDelayMs = 30000 // very long so we stay in confirming_idle
-	cfg.StuckDetectionMs = 200       // warn after 200ms
-	cfg.StuckRecoveryMs = 500        // recover after 500ms
+	cfg.StuckDetectionMs = 200      // warn after 200ms
+	cfg.StuckRecoveryMs = 500       // recover after 500ms
 	cfg.MaxStuckRecoveries = 1
 	rc := NewController("test-session", cfg)
 	writer := &mockSessionWriter{}

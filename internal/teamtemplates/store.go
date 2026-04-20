@@ -18,7 +18,7 @@ type TeamTemplate struct {
 	Name        string               `json:"name"`
 	Description string               `json:"description"`
 	Category    string               `json:"category"`
-	IsBuiltIn   bool                `json:"isBuiltIn"`
+	IsBuiltIn   bool                 `json:"isBuiltIn"`
 	Members     []TeamTemplateMember `json:"members"`
 	CreatedAt   time.Time            `json:"createdAt"`
 	UpdatedAt   time.Time            `json:"updatedAt"`

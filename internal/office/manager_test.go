@@ -14,7 +14,7 @@ func (m *mockSessionStore) WriteInkPrompt(sessionID, prompt string) bool { retur
 func (m *mockSessionStore) GetSessionIDs() []string                      { return nil }
 func (m *mockSessionStore) IsSessionAlive(sessionID string) bool         { return true }
 func (m *mockSessionStore) IsSessionWorking(sessionID string) bool       { return false }
-func (m *mockSessionStore) StopSession(sessionID string) error            { return nil }
+func (m *mockSessionStore) StopSession(sessionID string) error           { return nil }
 
 func newTestManager() *Manager {
 	m := NewManager(&mockSessionStore{}, func(event string, data interface{}) {}, nil)
@@ -184,8 +184,8 @@ func TestManager_UpdateOfficeSettings(t *testing.T) {
 	// Valid value should be applied
 	m.UpdateOfficeSettings(map[string]interface{}{
 		"brainstormCooldownMs": float64(120000),
-		"teamMission":         "ship v2",
-		"curiosityEnabled":    false,
+		"teamMission":          "ship v2",
+		"curiosityEnabled":     false,
 	})
 	if m.config.BrainstormCooldown.Milliseconds() != 120000 {
 		t.Errorf("expected 120000ms, got %d", m.config.BrainstormCooldown.Milliseconds())
@@ -358,7 +358,6 @@ func TestHandleAgentDeath_NoStrategicAgent(t *testing.T) {
 	}
 }
 
-
 // TestSweepMeetings_RemovesStaleInactive verifies meetings that are inactive
 // and older than 6 hours are removed, while active or recent inactive meetings
 // are preserved.
@@ -403,4 +402,3 @@ func TestSweepMeetings_RemovesStaleInactive(t *testing.T) {
 		t.Error("expected old-active meeting to be preserved (active meetings are never swept)")
 	}
 }
-

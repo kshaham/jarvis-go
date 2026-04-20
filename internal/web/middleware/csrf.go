@@ -85,7 +85,7 @@ func CSRF(store *CSRFStore) func(http.Handler) http.Handler {
 			if r.Method == "POST" || r.Method == "PUT" || r.Method == "DELETE" || r.Method == "PATCH" {
 				token := r.Header.Get("X-CSRF-Token")
 				if token == "" || !store.Validate(token) {
-						w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusForbidden)
 					w.Write([]byte(`{"success":false,"error":"invalid CSRF token"}`))
 					return

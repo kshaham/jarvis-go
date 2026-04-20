@@ -14,8 +14,8 @@ const (
 
 // TranscriptEntry represents a line from Claude's transcript JSONL.
 type TranscriptEntry struct {
-	Type      string    `json:"type"`
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	Type      string      `json:"type"`
+	Timestamp time.Time   `json:"timestamp,omitempty"`
 	Data      interface{} `json:"data,omitempty"`
 }
 
@@ -28,4 +28,5 @@ type HookDetectedEvent struct {
 	Hook      HookEvent
 	SessionID string
 }
+
 func (HookDetectedEvent) transcriptEventType() string { return "hook_detected" }

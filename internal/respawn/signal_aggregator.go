@@ -17,9 +17,9 @@ func NewSignalAggregator(cfg RespawnConfig) *SignalAggregator {
 	return &SignalAggregator{
 		weights: map[DetectionLayer]int{
 			LayerCompletionMessage: cfg.ConfidenceWeightCompletion,
-			LayerOutputSilence:    cfg.ConfidenceWeightSilence,
-			LayerTokenStability:   cfg.ConfidenceWeightTokens,
-			LayerWorkingAbsence:   cfg.ConfidenceWeightNoWorking,
+			LayerOutputSilence:     cfg.ConfidenceWeightSilence,
+			LayerTokenStability:    cfg.ConfidenceWeightTokens,
+			LayerWorkingAbsence:    cfg.ConfidenceWeightNoWorking,
 		},
 		latest: make(map[DetectionLayer]DetectionSignal),
 	}

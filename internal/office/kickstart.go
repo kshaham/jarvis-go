@@ -19,15 +19,15 @@ const memoryInjectMaxChars = 1500
 //
 // The prompt sections are:
 //
-//   1. Header (name + role)
-//   2. Team mission, if set
-//   3. Capped previous-work memory + cm memory pointers
-//   4. Distilled learnings (small)
-//   5. Compact teammate findings (one line per peer)
-//   6. Identity + working dir
-//   7. Context budget reminder (5 lines)
-//   8. Personality
-//   9. Suggested skills for role (names + 1-line descriptions)
+//  1. Header (name + role)
+//  2. Team mission, if set
+//  3. Capped previous-work memory + cm memory pointers
+//  4. Distilled learnings (small)
+//  5. Compact teammate findings (one line per peer)
+//  6. Identity + working dir
+//  7. Context budget reminder (5 lines)
+//  8. Personality
+//  9. Suggested skills for role (names + 1-line descriptions)
 //  10. Team relationships
 //  11. One-paragraph protocol pointer to `office-protocols` skill
 //  12. Headless browser pointer to `headless-browser` skill

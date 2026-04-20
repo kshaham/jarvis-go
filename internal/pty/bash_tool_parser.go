@@ -25,20 +25,20 @@ var (
 
 // Known tool names from Claude CLI.
 var knownTools = map[string]bool{
-	"Bash":       true,
-	"Read":       true,
-	"Write":      true,
-	"Edit":       true,
-	"Glob":       true,
-	"Grep":       true,
-	"WebFetch":   true,
-	"WebSearch":  true,
-	"TodoRead":   true,
-	"TodoWrite":  true,
-	"Agent":      true,
-	"Task":       true,
-	"Skill":      true,
-	"LSP":        true,
+	"Bash":      true,
+	"Read":      true,
+	"Write":     true,
+	"Edit":      true,
+	"Glob":      true,
+	"Grep":      true,
+	"WebFetch":  true,
+	"WebSearch": true,
+	"TodoRead":  true,
+	"TodoWrite": true,
+	"Agent":     true,
+	"Task":      true,
+	"Skill":     true,
+	"LSP":       true,
 }
 
 // ParseToolInvocations extracts tool invocation events from terminal output text.

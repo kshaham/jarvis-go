@@ -38,29 +38,29 @@ import (
 
 // Server is the main HTTP server for Jarvis.
 type Server struct {
-	port            int
-	isHTTPS         bool
-	dataDir         string
-	httpServer      *http.Server
-	sessionManager  *pty.SessionManager
-	sseBroker       *sse.Broker
-	csrfStore       *mw.CSRFStore
-	authManager     *auth.Manager
-	agentTokenMgr   *auth.AgentTokenManager
-	officeManager   *office.Manager
-	stateStore      *state.AppState
-	screenManager   *pty.ScreenManager
-	subagentWatcher *subagent.Watcher
-	caseManager     *cases.CaseManager
-	templateStore     *templates.Store
-	teamTemplateStore *teamtemplates.Store
-	schedulerStore   *scheduler.Store
-	schedulerRunner  *scheduler.Runner
+	port                int
+	isHTTPS             bool
+	dataDir             string
+	httpServer          *http.Server
+	sessionManager      *pty.SessionManager
+	sseBroker           *sse.Broker
+	csrfStore           *mw.CSRFStore
+	authManager         *auth.Manager
+	agentTokenMgr       *auth.AgentTokenManager
+	officeManager       *office.Manager
+	stateStore          *state.AppState
+	screenManager       *pty.ScreenManager
+	subagentWatcher     *subagent.Watcher
+	caseManager         *cases.CaseManager
+	templateStore       *templates.Store
+	teamTemplateStore   *teamtemplates.Store
+	schedulerStore      *scheduler.Store
+	schedulerRunner     *scheduler.Runner
 	notificationsStore  *notifications.Store
 	notificationsRouter *notifications.Router
-	telegramBot       *telegram.Bot
-	telegramHandler *telegram.Handler
-	handlerCtx      *handler.Context
+	telegramBot         *telegram.Bot
+	telegramHandler     *telegram.Handler
+	handlerCtx          *handler.Context
 }
 
 // NewServer creates a new web server.
@@ -174,7 +174,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 				"mode": string(sess.Mode), "workingDir": sess.WorkingDir,
 				"pid": sess.PID(), "createdAt": sess.CreatedAt,
 				"isWorking": sess.IsWorking(),
-				"tokens": map[string]int64{"input": input, "output": output, "total": total},
+				"tokens":    map[string]int64{"input": input, "output": output, "total": total},
 			})
 		}
 		// Include SDK sessions in the session list
@@ -184,7 +184,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 				"mode": string(sdk.Mode), "workingDir": sdk.WorkingDir,
 				"pid": 0, "createdAt": sdk.CreatedAt,
 				"isWorking": sdk.IsWorking(),
-				"tokens": map[string]int64{"input": 0, "output": 0, "total": 0},
+				"tokens":    map[string]int64{"input": 0, "output": 0, "total": 0},
 			})
 		})
 
@@ -199,13 +199,13 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 		}
 
 		return map[string]interface{}{
-			"type":           "init",
-			"sessions":       sessionList,
-			"scheduledRuns":  []interface{}{},
-			"respawnStatus":  respawnStatus,
-			"version":        "0.2.0-go",
-			"settings":       stateStore.GetSettings(),
-			"config":         stateStore.GetConfig(),
+			"type":          "init",
+			"sessions":      sessionList,
+			"scheduledRuns": []interface{}{},
+			"respawnStatus": respawnStatus,
+			"version":       "0.2.0-go",
+			"settings":      stateStore.GetSettings(),
+			"config":        stateStore.GetConfig(),
 			"globalStats": map[string]interface{}{
 				"sessionCount": len(sessionList),
 			},
@@ -247,25 +247,25 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 	}
 
 	srv := &Server{
-		port:            port,
-		isHTTPS:         isHTTPS,
-		dataDir:         dataDir,
-		sessionManager:  sessionManager,
-		sseBroker:       broker,
-		csrfStore:       mw.NewCSRFStore(ctx),
-		authManager:     authMgr,
-		agentTokenMgr:   agentTokenMgr,
-		officeManager:   officeMgr,
-		stateStore:      stateStore,
-		screenManager:   screenMgr,
-		subagentWatcher: subagentW,
-		caseManager:     caseMgr,
-		templateStore:     tmplStore,
-		teamTemplateStore: teamTmplStore,
-		schedulerStore:    schedulerStore,
+		port:               port,
+		isHTTPS:            isHTTPS,
+		dataDir:            dataDir,
+		sessionManager:     sessionManager,
+		sseBroker:          broker,
+		csrfStore:          mw.NewCSRFStore(ctx),
+		authManager:        authMgr,
+		agentTokenMgr:      agentTokenMgr,
+		officeManager:      officeMgr,
+		stateStore:         stateStore,
+		screenManager:      screenMgr,
+		subagentWatcher:    subagentW,
+		caseManager:        caseMgr,
+		templateStore:      tmplStore,
+		teamTemplateStore:  teamTmplStore,
+		schedulerStore:     schedulerStore,
 		notificationsStore: notificationsStore,
-		telegramBot:       tgBot,
-		telegramHandler: tgHandler,
+		telegramBot:        tgBot,
+		telegramHandler:    tgHandler,
 	}
 	// Set serverRef so the init data closure can access handlerCtx
 	*serverRef = srv
@@ -433,24 +433,24 @@ func (s *Server) setupRouter() chi.Router {
 
 	// Handler context with shared dependencies
 	h := &handler.Context{
-		SessionManager:     s.sessionManager,
-		SSEBroker:          s.sseBroker,
-		CSRFStore:          s.csrfStore,
-		AuthManager:        s.authManager,
-		OfficeManager:      s.officeManager,
-		StateStore:         s.stateStore,
-		ScreenManager:      s.screenManager,
-		SubagentWatcher:    s.subagentWatcher,
-		CaseManager:        s.caseManager,
-		RespawnControllers: make(map[string]*respawn.Controller),
-		TemplateStore:      s.templateStore,
-		TeamTemplateStore:  s.teamTemplateStore,
-		AgentTokenMgr:      s.agentTokenMgr,
-		TelegramBot:        s.telegramBot,
-		TelegramHandler:    s.telegramHandler,
-		IntegrationMonitor: intMon,
-		ScheduledTasks:     make(map[string]interface{}),
-		SessionColors:      make(map[string]string),
+		SessionManager:          s.sessionManager,
+		SSEBroker:               s.sseBroker,
+		CSRFStore:               s.csrfStore,
+		AuthManager:             s.authManager,
+		OfficeManager:           s.officeManager,
+		StateStore:              s.stateStore,
+		ScreenManager:           s.screenManager,
+		SubagentWatcher:         s.subagentWatcher,
+		CaseManager:             s.caseManager,
+		RespawnControllers:      make(map[string]*respawn.Controller),
+		TemplateStore:           s.templateStore,
+		TeamTemplateStore:       s.teamTemplateStore,
+		AgentTokenMgr:           s.agentTokenMgr,
+		TelegramBot:             s.telegramBot,
+		TelegramHandler:         s.telegramHandler,
+		IntegrationMonitor:      intMon,
+		ScheduledTasks:          make(map[string]interface{}),
+		SessionColors:           make(map[string]string),
 		RalphTrackers:           make(map[string]*ralph.Tracker),
 		RunSummaries:            make(map[string]*runsummary.Tracker),
 		TailFileStreams:         make(map[string]func()),

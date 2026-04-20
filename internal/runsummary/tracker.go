@@ -47,12 +47,12 @@ type Event struct {
 
 // Stats holds aggregated statistics for a session's run.
 type Stats struct {
-	TotalRespawnCycles int           `json:"totalRespawnCycles"`
-	TotalActiveTime    time.Duration `json:"totalActiveTime"`
-	TotalIdleTime      time.Duration `json:"totalIdleTime"`
+	TotalRespawnCycles int            `json:"totalRespawnCycles"`
+	TotalActiveTime    time.Duration  `json:"totalActiveTime"`
+	TotalIdleTime      time.Duration  `json:"totalIdleTime"`
 	EventCounts        map[string]int `json:"eventCounts"`
-	LastTokenTotal     int64         `json:"lastTokenTotal"`
-	StateTransitions   int           `json:"stateTransitions"`
+	LastTokenTotal     int64          `json:"lastTokenTotal"`
+	StateTransitions   int            `json:"stateTransitions"`
 }
 
 // Tracker records significant events during a session's lifetime
@@ -69,10 +69,10 @@ type Tracker struct {
 	eventCounts        map[string]int
 
 	// Active/idle time tracking
-	isCurrentlyActive    bool
-	lastStatusChangeAt   time.Time
-	totalActiveTime      time.Duration
-	totalIdleTime        time.Duration
+	isCurrentlyActive  bool
+	lastStatusChangeAt time.Time
+	totalActiveTime    time.Duration
+	totalIdleTime      time.Duration
 
 	// Token milestone tracking
 	lastTokenMilestone int64
