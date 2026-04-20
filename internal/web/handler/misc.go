@@ -278,9 +278,15 @@ func (ctx *Context) UpdateTelegramConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	ctx.TelegramBot.Configure(body.Token, body.ChatID)
+	// R27 state review · The authoritative Telegram credential store
+	// is ~/.jarvis/telegram-settings.json (via the SettingsStore).
+	// Previously we ALSO wrote the bot token into state.json, which
+	// put a plaintext copy alongside non-secret config. Now we only
+	// persist the non-secret bits here — chatId and connected flag —
+	// so state.json stays credential-free. The token lives in
+	// telegram-settings.json where the SettingsStore manages it.
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"telegram": map[string]interface{}{
-			"token":     body.Token,
 			"chatId":    body.ChatID,
 			"connected": ctx.TelegramBot.IsConnected(),
 		},
@@ -324,9 +330,15 @@ func (ctx *Context) ConnectTelegram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx.TelegramBot.Configure(body.Token, body.ChatID)
+	// R27 state review · The authoritative Telegram credential store
+	// is ~/.jarvis/telegram-settings.json (via the SettingsStore).
+	// Previously we ALSO wrote the bot token into state.json, which
+	// put a plaintext copy alongside non-secret config. Now we only
+	// persist the non-secret bits here — chatId and connected flag —
+	// so state.json stays credential-free. The token lives in
+	// telegram-settings.json where the SettingsStore manages it.
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"telegram": map[string]interface{}{
-			"token":     body.Token,
 			"chatId":    body.ChatID,
 			"connected": ctx.TelegramBot.IsConnected(),
 		},
@@ -373,8 +385,14 @@ var allowedHookEvents = map[string]bool{
 
 // verifyHookSignature validates the HMAC-SHA256 signature sent in the
 // X-Hook-Signature header (format: "sha256=<hex>") against the raw body
-// and the server's signing key. Used to authenticate the local Claude CLI
-// hook caller without requiring a session cookie.
+// and the server's hook signing key. Used to authenticate the local
+// Claude CLI hook caller without requiring a session cookie.
+//
+// R27 security review · Accepts signatures under HookSigningKey
+// (preferred) OR the legacy session-cookie SigningKey for back-compat
+// with older hook signers. Constant-time compare on both paths. The
+// legacy fallback can be removed in a future round once every
+// deployed hook signer has migrated to the domain-separated key.
 func (ctx *Context) verifyHookSignature(body []byte, header string) bool {
 	const prefix = "sha256="
 	if !strings.HasPrefix(header, prefix) {
@@ -384,14 +402,21 @@ func (ctx *Context) verifyHookSignature(body []byte, header string) bool {
 	if err != nil {
 		return false
 	}
-	key := ctx.AuthManager.SigningKey()
-	if len(key) == 0 {
-		return false
+
+	check := func(key []byte) bool {
+		if len(key) == 0 {
+			return false
+		}
+		mac := hmac.New(sha256.New, key)
+		mac.Write(body)
+		return hmac.Equal(mac.Sum(nil), presented)
 	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(body)
-	expected := mac.Sum(nil)
-	return hmac.Equal(expected, presented)
+
+	if check(ctx.AuthManager.HookSigningKey()) {
+		return true
+	}
+	// Legacy: older signers used the session-cookie key directly.
+	return check(ctx.AuthManager.SigningKey())
 }
 
 // HandleHookEvent processes an incoming hook event and forwards signals
@@ -1364,14 +1389,28 @@ func (ctx *Context) GetRalphWizardFile(w http.ResponseWriter, r *http.Request) {
 
 	wizardDir := filepath.Join(caseInfo.Path, "ralph-wizard")
 
-	// Security: ensure path is within wizard directory
+	// Security: ensure path is within wizard directory. R27 security
+	// review · Lexical filepath.Abs is not enough — a symlink inside
+	// ralph-wizard/ pointing outside the case directory (e.g., an
+	// agent creates ralph-wizard/escape -> /etc) passes the string
+	// prefix check because the symlink itself lexically lives inside
+	// wizardDir. EvalSymlinks resolves the chain and catches the
+	// escape. internal/pty/workingdir.go already uses this pattern
+	// for spawn-time validation; applying it here for parity.
 	fullPath := filepath.Join(wizardDir, filePath)
-	resolvedPath, err := filepath.Abs(fullPath)
+	resolvedPath, err := filepath.EvalSymlinks(fullPath)
 	if err != nil {
+		// EvalSymlinks errors on missing files with os.IsNotExist —
+		// fall back to a 404 so clients see a clean not-found for
+		// typical "file doesn't exist" cases.
+		if os.IsNotExist(err) {
+			request.WriteError(w, http.StatusNotFound, "file not found")
+			return
+		}
 		request.WriteError(w, http.StatusBadRequest, "invalid file path")
 		return
 	}
-	resolvedWizard, err := filepath.Abs(wizardDir)
+	resolvedWizard, err := filepath.EvalSymlinks(wizardDir)
 	if err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "failed to resolve wizard directory")
 		return

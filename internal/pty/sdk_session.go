@@ -586,24 +586,6 @@ func (s *SDKSession) GetTerminalBuffer() string {
 	return s.terminalBuffer.Value()
 }
 
-func (s *SDKSession) GetTextOutput() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.textOutput.Value()
-}
-
-func (s *SDKSession) GetSessionID() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.claudeSessionID
-}
-
-func (s *SDKSession) GetTotalCostUSD() float64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.totalCostUSD
-}
-
 // WriteToPTY sends a prompt via the persistent session.
 func (s *SDKSession) WriteToPTY(input string) bool {
 	trimmed := strings.TrimSpace(input)

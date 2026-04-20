@@ -47,10 +47,6 @@ type NiceConfig struct {
 	Priority int
 }
 
-func DefaultNiceConfig() NiceConfig {
-	return NiceConfig{Enabled: false, Priority: 10}
-}
-
 type ClaudeMessage struct {
 	Type      string  `json:"type"`
 	Role      string  `json:"role,omitempty"`

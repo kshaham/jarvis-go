@@ -37,12 +37,39 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
 	sectionHeaderPrefix = "## section: "
 	maxMemoryQueryHits  = 20
 )
+
+// memoryFileLocks serializes writes to the same agent memory file.
+// R27 state review · AppendAgentMemory and MemoryWriteSection used to
+// write the same file path from different goroutines with no
+// coordination. A concurrent section rewrite could overwrite a fresh
+// append, or vice versa, leaving the file internally inconsistent.
+// Now every write path acquires the per-path lock before touching
+// the file.
+//
+// Lock discipline: ALWAYS lock the per-path mutex BEFORE opening or
+// truncating the file, release AFTER rename / close. A single mutex
+// per memory file is sufficient — there's one writer logical concept
+// per agent file, operations just need to serialize.
+var memoryFileLocks sync.Map // map[string]*sync.Mutex
+
+// memoryFileLock returns the mutex for the given memory file path,
+// creating it on first use. Callers must Lock() before touching the
+// file and Unlock() after.
+func memoryFileLock(path string) *sync.Mutex {
+	if v, ok := memoryFileLocks.Load(path); ok {
+		return v.(*sync.Mutex)
+	}
+	mu := &sync.Mutex{}
+	actual, _ := memoryFileLocks.LoadOrStore(path, mu)
+	return actual.(*sync.Mutex)
+}
 
 var memorySectionNameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
@@ -240,9 +267,13 @@ func loadMemorySections(configID, workingDir string) (map[string]string, string,
 }
 
 // writeMemorySections serializes a section map back to disk in the
-// canonical sectioned format.
+// canonical sectioned format. R27 · Serializes with AppendAgentMemory
+// against concurrent writes on the same file via memoryFileLock.
 func writeMemorySections(configID, workingDir, header string, sections map[string]string) error {
 	path := GetAgentMemoryPath(configID, workingDir)
+	lock := memoryFileLock(path)
+	lock.Lock()
+	defer lock.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

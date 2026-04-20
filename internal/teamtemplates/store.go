@@ -175,6 +175,19 @@ func (s *Store) load() {
 	// silently come back as "zero custom templates".
 	if err := json.Unmarshal(data, &list); err != nil {
 		slog.Warn("team-templates store: failed to unmarshal on load", "path", path, "err", err)
+		// R27 · Fall back to .backup on parse failure. The backup is
+		// rotated from the last successful save, so at worst we lose
+		// the edits from the one save that crashed.
+		backup := path + ".backup"
+		if bdata, bErr := os.ReadFile(backup); bErr == nil {
+			if bUmErr := json.Unmarshal(bdata, &list); bUmErr == nil {
+				slog.Warn("team-templates store: loaded from .backup after primary parse failure",
+					"backup", backup)
+				for _, t := range list {
+					s.templates[t.ID] = t
+				}
+			}
+		}
 		return
 	}
 	for _, t := range list {
@@ -185,12 +198,29 @@ func (s *Store) load() {
 // save persists templates to disk with temp-file + rename so a
 // crash mid-write can't corrupt the file. Errors are logged rather
 // than returned -- see the matching note on templates.Store.save.
+//
+// R27 state review · Rotate the live file to .backup before writing
+// the new version so a crash after rename-into-place but before the
+// next successful save always leaves one known-good copy on disk.
+// Matches the scheduler/store.go + notifications/store.go pattern.
+// Cleanup of the .tmp file on rename failure mirrors R26 phase 4.
 func (s *Store) save() {
 	path := filepath.Join(s.dir, "team-templates.json")
+	backup := path + ".backup"
 	data, err := json.MarshalIndent(s.listLocked(), "", "  ")
 	if err != nil {
 		slog.Error("team-templates store: failed to marshal", "err", err)
 		return
+	}
+	// Rotate current file to backup (best-effort; missing is fine for
+	// first-write case).
+	if _, statErr := os.Stat(path); statErr == nil {
+		if renameErr := os.Rename(path, backup); renameErr != nil {
+			slog.Warn("team-templates store: failed to rotate backup",
+				"path", path, "err", renameErr)
+			// fall through — prefer overwriting a slightly-stale
+			// backup over losing new data.
+		}
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
@@ -199,5 +229,6 @@ func (s *Store) save() {
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		slog.Error("team-templates store: failed to rename tmp into place", "path", path, "err", err)
+		_ = os.Remove(tmp)
 	}
 }

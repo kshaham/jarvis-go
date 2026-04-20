@@ -229,19 +229,3 @@ func (m *SessionManager) Events() <-chan SessionEvent {
 	return m.events
 }
 
-func (m *SessionManager) forwardEvents(session *Session) {
-	for {
-		select {
-		case event, ok := <-session.Events():
-			if !ok {
-				return // Channel closed, session done
-			}
-			select {
-			case m.events <- event:
-			default:
-			}
-		case <-session.Done():
-			return // Session stopped
-		}
-	}
-}

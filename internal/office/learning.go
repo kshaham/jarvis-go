@@ -55,14 +55,6 @@ type LearningMetrics struct {
 	LastDistillationAt int64 `json:"lastDistillationAt"`
 }
 
-// AgentLearning (legacy) stores accumulated learnings and discovered skills for an agent.
-// Kept for backward compatibility with SaveLearning/LoadLearnings wrappers.
-type legacyAgentLearning struct {
-	ConfigID  string   `json:"configId"`
-	Learnings []string `json:"learnings"`
-	Skills    []string `json:"skills"`
-}
-
 var learningMu sync.Mutex
 
 // learningsDir returns the directory for learning files.
@@ -85,14 +77,32 @@ func LoadLearningData(configID string) *AgentLearningData {
 }
 
 // loadLearningDataUnsafe reads without locking (caller must hold learningMu).
+//
+// R27 · On parse failure the old implementation silently returned a
+// zero-value struct, which the very next AddLearningEntry call would
+// then overwrite with empty data — destroying whatever was in the
+// corrupt file. Now the file is quarantined (renamed with a .corrupt-
+// <unix> suffix) so subsequent loads see it as "missing" and the
+// fresh-start zero value is safe, while the original stays on disk
+// for forensic inspection.
 func loadLearningDataUnsafe(configID string) *AgentLearningData {
-	data, err := os.ReadFile(learningPath(configID))
+	path := learningPath(configID)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return defaultLearningData(configID)
 	}
 
 	var ld AgentLearningData
 	if err := json.Unmarshal(data, &ld); err != nil {
+		ts := time.Now().Unix()
+		corruptPath := fmt.Sprintf("%s.corrupt-%d", path, ts)
+		if renameErr := os.Rename(path, corruptPath); renameErr != nil {
+			slog.Warn("failed to quarantine corrupt learning file",
+				"path", path, "renameErr", renameErr, "parseErr", err)
+		} else {
+			slog.Error("quarantined corrupt learning file",
+				"path", path, "corruptPath", corruptPath, "parseErr", err)
+		}
 		return defaultLearningData(configID)
 	}
 
@@ -144,6 +154,10 @@ func writeLearningData(ld *AgentLearningData) error {
 		return err
 	}
 	if err := os.Rename(tmpFile, targetFile); err != nil {
+		// R27 state review · Clean up the orphan .tmp so repeated
+		// rename failures don't accumulate files on disk. Matches
+		// the R26 phase 4 cleanup pattern.
+		_ = os.Remove(tmpFile)
 		return err
 	}
 
@@ -458,68 +472,3 @@ func BuildCrossAgentContextCompact(excludeConfigID string) string {
 	return sb.String()
 }
 
-// ---------------------------------------------------------------------------
-// Legacy wrappers for backward compatibility
-// ---------------------------------------------------------------------------
-
-// LoadLearnings reads an agent's accumulated learnings from disk using the
-// legacy AgentLearning shape. Wraps LoadLearningData for compatibility.
-func LoadLearnings(configID string) *legacyAgentLearning {
-	learningMu.Lock()
-	defer learningMu.Unlock()
-
-	ld := loadLearningDataUnsafe(configID)
-
-	legacy := &legacyAgentLearning{
-		ConfigID:  configID,
-		Learnings: make([]string, 0, len(ld.Learnings)),
-		Skills:    make([]string, 0, len(ld.Skills)),
-	}
-	for _, l := range ld.Learnings {
-		legacy.Learnings = append(legacy.Learnings, l.Content)
-	}
-	for _, s := range ld.Skills {
-		legacy.Skills = append(legacy.Skills, s.Name+": "+s.Description)
-	}
-	return legacy
-}
-
-// SaveLearning appends a plain-text learning entry (legacy interface).
-// Category defaults to "general".
-func SaveLearning(configID, learning string) error {
-	return AddLearningEntry(configID, "general", learning, "", "")
-}
-
-// SaveSkill appends a skill discovery (legacy interface).
-func SaveSkill(configID, skill string) error {
-	return AddSkillEntry(configID, skill, "")
-}
-
-// writeLearnings is kept for any internal callers that used the old signature.
-// It now delegates to writeLearningData via a conversion.
-func writeLearnings(legacy *legacyAgentLearning) error {
-	ld := loadLearningDataUnsafe(legacy.ConfigID)
-
-	// Re-build Learnings from legacy strings (avoid duplicates by content).
-	existing := make(map[string]bool)
-	for _, l := range ld.Learnings {
-		existing[l.Content] = true
-	}
-	for _, content := range legacy.Learnings {
-		if !existing[content] {
-			ld.Learnings = append(ld.Learnings, AgentLearning{
-				Category:  "general",
-				Content:   content,
-				CreatedAt: time.Now(),
-			})
-			existing[content] = true
-		}
-	}
-
-	// Cap.
-	if len(ld.Learnings) > maxLearnings {
-		ld.Learnings = ld.Learnings[len(ld.Learnings)-maxLearnings:]
-	}
-
-	return writeLearningData(ld)
-}

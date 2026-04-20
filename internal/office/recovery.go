@@ -833,21 +833,31 @@ func (m *Manager) checkForStuckAgents() {
 		// Backoff: suppress recovery if we already sent one recently for this
 		// agent. Tier 2 requires 30s since last recovery; Tier 3 requires 60s.
 		// Prevents spamming a persistently stuck agent on every idle tick.
-		m.mu.RLock()
+		//
+		// R27 concurrency review · Previously this did RLock → read →
+		// Unlock → executeRecoveryTier → Lock → write. Under the single
+		// idle-ticker goroutine that's safe, but if a second caller is
+		// ever added (manual API, test hook) the window between check
+		// and write opens a TOCTOU where two callers both pass the
+		// backoff gate and double-recover the same agent. Now we take
+		// a single Lock, test, and immediately mark lastRecoveryAt so
+		// any concurrent caller sees the recovery as in-flight before
+		// we even send the prompt.
+		m.mu.Lock()
 		lastRecovery := m.lastRecoveryAt[agent.SessionID]
-		m.mu.RUnlock()
-		if !lastRecovery.IsZero() {
-			var backoff time.Duration
-			switch tier {
-			case RecoveryTier2:
-				backoff = 30 * time.Second
-			case RecoveryTier3:
-				backoff = 60 * time.Second
-			}
-			if backoff > 0 && time.Since(lastRecovery) < backoff {
-				continue
-			}
+		var backoff time.Duration
+		switch tier {
+		case RecoveryTier2:
+			backoff = 30 * time.Second
+		case RecoveryTier3:
+			backoff = 60 * time.Second
 		}
+		if !lastRecovery.IsZero() && backoff > 0 && time.Since(lastRecovery) < backoff {
+			m.mu.Unlock()
+			continue
+		}
+		m.lastRecoveryAt[agent.SessionID] = time.Now()
+		m.mu.Unlock()
 
 		slog.Warn("Stuck agent recovery",
 			"tier", tier,
@@ -857,9 +867,6 @@ func (m *Manager) checkForStuckAgents() {
 			"inactive", inactiveDuration)
 
 		m.executeRecoveryTier(sessions, agent.SessionID, tier)
-		m.mu.Lock()
-		m.lastRecoveryAt[agent.SessionID] = time.Now()
-		m.mu.Unlock()
 
 		if tier == RecoveryTier3 {
 			m.broadcast("office:agentRestarted", map[string]interface{}{

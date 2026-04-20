@@ -131,12 +131,6 @@ func (w *Watcher) WatchCount() int {
 	return w.watchCount
 }
 
-func (w *Watcher) InFallbackMode() bool {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.fallbackMode
-}
-
 func (w *Watcher) Close() error {
 	w.cancel()
 	return w.fsWatcher.Close()

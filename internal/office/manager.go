@@ -1052,24 +1052,31 @@ func (m *Manager) SetTeamMission(s string) {
 	m.mu.Lock()
 	m.teamMission = trimmed
 	m.mu.Unlock()
+	m.persistTeamMission(trimmed)
+}
 
-	// Persist to disk atomically
-	homeDir, _ := os.UserHomeDir()
-	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
-	os.MkdirAll(dir, 0o755)
-	tmpFile := filepath.Join(dir, "team-mission.txt.tmp")
-	targetFile := filepath.Join(dir, "team-mission.txt")
-	// R26 state review: log rename errors + clean up the temp file
-	// so a full-disk or cross-device failure doesn't orphan files.
-	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o644); err != nil {
-		slog.Warn("failed to persist team mission (write tmp)", "err", err)
-	} else if err := os.Rename(tmpFile, targetFile); err != nil {
-		slog.Warn("failed to persist team mission (rename)", "err", err)
-		_ = os.Remove(tmpFile)
+// persistTeamMission writes the team mission to disk atomically and
+// broadcasts office:missionUpdated. R27 cleanup · Shared by
+// SetTeamMission (explicit set) and AppendMissionInsight (discovered
+// insight append) -- previously they each inlined the same write+rename
+// logic, which drifted out of sync during earlier review rounds.
+func (m *Manager) persistTeamMission(mission string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("failed to resolve home dir for mission persist", "err", err)
+	} else {
+		dir := filepath.Join(homeDir, ".jarvis", "office-memory")
+		os.MkdirAll(dir, 0o755)
+		tmp := filepath.Join(dir, "team-mission.txt.tmp")
+		target := filepath.Join(dir, "team-mission.txt")
+		if err := os.WriteFile(tmp, []byte(mission), 0o644); err != nil {
+			slog.Warn("failed to persist team mission (write tmp)", "err", err)
+		} else if err := os.Rename(tmp, target); err != nil {
+			slog.Warn("failed to persist team mission (rename)", "err", err)
+			_ = os.Remove(tmp)
+		}
 	}
-
-	// Broadcast to frontend
-	m.broadcast("office:missionUpdated", map[string]interface{}{"mission": trimmed})
+	m.broadcast("office:missionUpdated", map[string]interface{}{"mission": mission})
 }
 
 // loadPersistedMission reads the team mission from disk if available.
@@ -1106,6 +1113,10 @@ func (m *Manager) loadDevInstances() {
 	}
 
 	// Step 1: load all existing JSON slot files.
+	// R27 state review · Route through loadJSONFile so corrupt slots
+	// are quarantined (renamed to .corrupt-<unix>) and an
+	// office:stateCorruption event fires for the dashboard. Matches
+	// the R20 pattern for messages / metrics / mission.
 	entries, err := os.ReadDir(dir)
 	if err == nil {
 		for _, entry := range entries {
@@ -1117,13 +1128,9 @@ func (m *Manager) loadDevInstances() {
 			if !validDevSlotName(slotName) {
 				continue
 			}
-			data, readErr := os.ReadFile(filepath.Join(dir, name))
-			if readErr != nil {
-				continue
-			}
 			var inst devInstance
-			if unmErr := json.Unmarshal(data, &inst); unmErr != nil {
-				slog.Warn("malformed dev instance file; ignoring", "path", name, "err", unmErr)
+			present, loaded := loadJSONFile(filepath.Join(dir, name), &inst, m.broadcast)
+			if !present || !loaded {
 				continue
 			}
 			m.teamDevInstances[slotName] = &inst
@@ -2322,8 +2329,15 @@ func SaveAgentMemory(configID, workingDir, content string) error {
 }
 
 // AppendAgentMemory appends to an agent's project-scoped memory file.
+// R27 · Serializes with writeMemorySections via the shared
+// memoryFileLock keyed by path. Without this, a concurrent section
+// rewrite could overwrite an append (or vice versa) and leave the
+// file internally inconsistent.
 func AppendAgentMemory(configID, workingDir, entry string) error {
 	path := GetAgentMemoryPath(configID, workingDir)
+	lock := memoryFileLock(path)
+	lock.Lock()
+	defer lock.Unlock()
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -2346,24 +2360,7 @@ func (m *Manager) AppendMissionInsight(insight string) {
 	m.teamMission += "\n\n[Learned] " + insight
 	updated := m.teamMission
 	m.mu.Unlock()
-
-	// Persist to disk and broadcast (same logic as SetTeamMission but avoids double-lock race).
-	// R26 state review: log rename errors + clean up temp file on
-	// failure so a full-disk condition doesn't orphan files.
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		dir := filepath.Join(homeDir, ".jarvis", "office-memory")
-		os.MkdirAll(dir, 0o755)
-		tmp := filepath.Join(dir, "team-mission.txt.tmp")
-		target := filepath.Join(dir, "team-mission.txt")
-		if err := os.WriteFile(tmp, []byte(updated), 0o644); err != nil {
-			slog.Warn("failed to persist mission insight (write tmp)", "err", err)
-		} else if err := os.Rename(tmp, target); err != nil {
-			slog.Warn("failed to persist mission insight (rename)", "err", err)
-			_ = os.Remove(tmp)
-		}
-	}
-	m.broadcast("office:missionUpdated", map[string]interface{}{"mission": updated})
+	m.persistTeamMission(updated)
 }
 
 // GetTeamSpawnedAt returns the time the team was spawned, or a zero time if not spawned.

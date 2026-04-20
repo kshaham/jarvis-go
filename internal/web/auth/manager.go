@@ -34,6 +34,14 @@ const (
 	rateLimitTier1Block    = 5 * time.Minute
 	rateLimitTier2Attempts = 10
 	rateLimitTier2Block    = 30 * time.Minute
+	// R27 security review · rateLimitQuietWindow is how long an
+	// entry must be quiet (no attempts, block expired) before
+	// CleanupExpiredRateLimits is allowed to discard it. Needs to be
+	// comfortably longer than rateLimitTier1Block so an attacker
+	// cycling tier-1 blocks back-to-back can't reset their counter
+	// between blocks — the attempts accumulate across multiple
+	// blocks and escalate to tier-2.
+	rateLimitQuietWindow = 1 * time.Hour
 )
 
 // authConfig is the JSON structure stored in auth.json.
@@ -49,9 +57,14 @@ type SessionEntry struct {
 }
 
 // RateLimitEntry tracks failed login attempts per IP.
+// R27 · LastAttempt is the wall-clock time of the most recent failed
+// attempt. Used by CleanupExpiredRateLimits to distinguish an entry
+// that's "quiet long enough to forget" from one that's cycling tier-1
+// blocks to avoid escalation.
 type RateLimitEntry struct {
 	FailedAttempts int
 	BlockedUntil   time.Time
+	LastAttempt    time.Time
 }
 
 // Manager handles password authentication, session management, and rate limiting.
@@ -161,13 +174,46 @@ func (m *Manager) loadOrCreateSecret() error {
 	return nil
 }
 
-// SigningKey returns the HMAC signing secret for use by other handlers that
-// need to verify signed payloads (e.g. the hook-event HMAC check). Never
-// log or return this over the API.
+// SigningKey returns the HMAC signing secret used for session cookies.
+// Never log or return this over the API. Handlers that need a hook /
+// webhook HMAC key should prefer HookSigningKey instead so a leak of
+// one key does not compromise the other.
 func (m *Manager) SigningKey() []byte {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.signingSecret
+}
+
+// HookSigningKey returns the HMAC key used to verify hook-event
+// signatures. R27 security review: previously the hook endpoint
+// shared ctx.AuthManager.SigningKey() with session cookies, so any
+// log leak of the cookie-signing key also granted the ability to
+// forge hook events (and vice versa).
+//
+// Resolution order:
+//  1. JARVIS_HOOK_SIGNING_KEY env var (hex-encoded), when set.
+//  2. Derived key: HMAC-SHA256(sessionKey, "jarvis-hook-signing-v1").
+//     Deterministic + domain-separated from the cookie key, so any
+//     existing hook signer that knows the session key can compute
+//     this with one extra HMAC and keep working.
+//
+// Operators who want true key isolation should set the env var and
+// sync the value to whatever signs hook events.
+func (m *Manager) HookSigningKey() []byte {
+	if raw := os.Getenv("JARVIS_HOOK_SIGNING_KEY"); raw != "" {
+		if decoded, err := hex.DecodeString(raw); err == nil && len(decoded) >= 16 {
+			return decoded
+		}
+	}
+	m.mu.RLock()
+	base := m.signingSecret
+	m.mu.RUnlock()
+	if len(base) == 0 {
+		return nil
+	}
+	mac := hmac.New(sha256.New, base)
+	mac.Write([]byte("jarvis-hook-signing-v1"))
+	return mac.Sum(nil)
 }
 
 // IsPasswordConfigured returns true if a password hash exists in auth.json.
@@ -488,6 +534,7 @@ func (m *Manager) RecordFailedAttempt(ip string) (bool, int) {
 		m.rateLimits[ip] = entry
 	}
 	entry.FailedAttempts++
+	entry.LastAttempt = time.Now()
 
 	var blockDuration time.Duration
 	if entry.FailedAttempts >= rateLimitTier2Attempts {
@@ -516,17 +563,27 @@ func (m *Manager) ResetRateLimit(ip string) {
 }
 
 // CleanupExpiredRateLimits removes stale rate limit entries.
+//
+// R27 security review · The previous implementation reset the entry
+// whenever `FailedAttempts < rateLimitTier2Attempts` after the tier-1
+// block expired. An attacker could cycle tier-1 (5 fails → 5-min block,
+// wait, 4 more fails, cycle) forever without ever hitting tier-2 (10
+// fails → 30-min block) because the counter was wiped between cycles.
+//
+// New rule: only delete an entry when the last attempt is older than
+// rateLimitQuietWindow (1 hour) AND the block (if any) has expired.
+// This means failed attempts accumulate across repeated tier-1 cycles
+// and eventually escalate to tier-2. Successful logins still reset the
+// entry immediately via ResetRateLimit so legitimate users are unaffected.
 func (m *Manager) CleanupExpiredRateLimits() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
 	for ip, entry := range m.rateLimits {
-		if !entry.BlockedUntil.IsZero() && now.After(entry.BlockedUntil) {
-			if entry.FailedAttempts < rateLimitTier2Attempts {
-				delete(m.rateLimits, ip)
-			} else if now.Sub(entry.BlockedUntil) > rateLimitTier2Block {
-				delete(m.rateLimits, ip)
-			}
+		blockExpired := entry.BlockedUntil.IsZero() || now.After(entry.BlockedUntil)
+		quiet := !entry.LastAttempt.IsZero() && now.Sub(entry.LastAttempt) > rateLimitQuietWindow
+		if blockExpired && quiet {
+			delete(m.rateLimits, ip)
 		}
 	}
 }

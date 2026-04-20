@@ -127,6 +127,14 @@ func (s *SettingsStore) Load() error {
 		s.current = DefaultSettings()
 		return nil
 	}
+	// R27 security review · Tighten perms on existing settings files
+	// written before R27 with 0644. Best-effort — a chmod failure is
+	// logged but non-fatal (the caller may not own the file).
+	if info, statErr := os.Stat(s.filePath); statErr == nil {
+		if info.Mode().Perm() != 0o600 {
+			_ = os.Chmod(s.filePath, 0o600)
+		}
+	}
 
 	var loaded Settings
 	if err := json.Unmarshal(data, &loaded); err != nil {
@@ -153,7 +161,10 @@ func (s *SettingsStore) Save() error {
 	}
 
 	tmpPath := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	// R27 security review · Telegram settings carry the bot token,
+	// which is a credential. 0600 so only the Jarvis process owner
+	// can read it — matches the agent-token / auth.json pattern.
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("writing telegram settings tmp file: %w", err)
 	}
 
