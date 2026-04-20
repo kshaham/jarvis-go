@@ -3740,6 +3740,86 @@ p, .agent-card-task, .agent-activity-item {
   padding: 0 2px;
 }
 
+/* R23 · Member rail row wrapper — hosts the selectable button plus
+   the per-row action cluster (duplicate / remove). Position relative
+   so actions can sit in the corner on hover. */
+.spawn-member-row-wrap {
+  position: relative;
+}
+.spawn-member-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition-property: opacity;
+  transition-duration: 120ms;
+}
+.spawn-member-row-wrap:hover .spawn-member-actions,
+.spawn-member-row-wrap:focus-within .spawn-member-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.spawn-member-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-default);
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition-property: background, color, scale;
+  transition-duration: 120ms;
+}
+.spawn-member-action:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+.spawn-member-action:active { scale: 0.94; }
+.spawn-member-action svg { width: 12px; height: 12px; }
+.spawn-member-action--danger:hover {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+  border-color: rgba(220, 38, 38, 0.45);
+}
+
+/* R23 · "Add member" button at the bottom of the rail. Full-width
+   dashed outline so it reads as an add-slot, not an active row. */
+.spawn-member-add-row {
+  margin-top: 4px;
+}
+.spawn-member-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition-property: background, color, border-color, scale;
+  transition-duration: 120ms;
+}
+.spawn-member-add:hover {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-primary);
+  border-color: rgba(148, 163, 184, 0.55);
+}
+.spawn-member-add:active { scale: 0.99; }
+.spawn-member-add svg { width: 12px; height: 12px; }
+
 /* ----- Member editor pane ----- */
 .spawn-member-editor {
   background: var(--bg-card-solid);

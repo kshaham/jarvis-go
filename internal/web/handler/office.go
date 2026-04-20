@@ -48,6 +48,18 @@ type memberOverride struct {
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 	WorkingDir   string   `json:"workingDir,omitempty"`
+	// R23 · Per-member caps from the spawn modal. 0 means "use the
+	// team-wide default" (defaultMaxTurnsPerSession for turns; no cap
+	// for cost). Honored by spawnAgentSession when building the SDK
+	// session config.
+	MaxCostUSD float64 `json:"maxCostUSD,omitempty"`
+	MaxTurns   int     `json:"maxTurns,omitempty"`
+	// R23 · Operator-controlled stagger. When > 0, the outer spawn
+	// loop sleeps this many ms AFTER creating this member's session
+	// before moving to the next. Useful to avoid auth bottlenecks
+	// (Claude subscription rate limits) when spawning many agents
+	// at once. 0 = no delay (default).
+	SpawnDelayMs int `json:"spawnDelayMs,omitempty"`
 }
 
 type spawnTeamRequest struct {
@@ -65,6 +77,12 @@ type spawnTeamRequest struct {
 	// computed server-side and the caller's value is ignored.
 	NewProject  bool   `json:"newProject"`
 	ProjectName string `json:"projectName"`
+	// R23 · Team-wide daily spend cap applied at spawn time by
+	// writing to the same settings key the /api/spending/cap endpoint
+	// uses. 0 (or omitted) means "leave the existing cap unchanged" —
+	// operators who don't want to touch the cap can leave the field
+	// blank and the global value set in Settings stays in effect.
+	DailyCapUSD float64 `json:"dailyCapUSD,omitempty"`
 }
 
 // projectNameRe constrains the slug an operator can supply for the "New
@@ -85,6 +103,18 @@ const newProjectRoot = "/app/workspace"
 // runaway loops fail fast. Legitimate long migrations can override via
 // the member spawn payload.
 const defaultMaxTurnsPerSession = 100
+
+// firstNonEmpty returns the first non-empty string from its args, or
+// "" if all are empty. Used for R23's override-synthesized members to
+// pick override → default values when composing a TeamTemplateMember.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 type autoStandupRequest struct {
 	Enabled  bool `json:"enabled"`
@@ -485,7 +515,9 @@ func (ctx *Context) OfficeHealth(w http.ResponseWriter, r *http.Request) {
 // office manager, and broadcasts session:created events.
 // spawnAgentSession creates either an SDK or PTY session for a team member.
 // Returns the sessionID and mode used, or empty string on failure.
-func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool) (string, string) {
+// R23 · The optional `ov` carries per-member caps (MaxCostUSD,
+// MaxTurns) from the spawn modal. When nil, the legacy defaults apply.
+func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool, ov *memberOverride) (string, string) {
 	if trySDK {
 		agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
 		kickstart := office.BuildKickstartPrompt(
@@ -531,6 +563,19 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		if agentToken != "" {
 			agentEnv["JARVIS_AGENT_TOKEN"] = agentToken
 		}
+		// R23 · Apply per-member caps if the operator set them in the
+		// spawn modal. 0 falls back to the legacy defaults: a
+		// 100-turn ceiling and no cost cap.
+		maxTurns := defaultMaxTurnsPerSession
+		var maxCost float64
+		if ov != nil {
+			if ov.MaxTurns > 0 {
+				maxTurns = ov.MaxTurns
+			}
+			if ov.MaxCostUSD > 0 {
+				maxCost = ov.MaxCostUSD
+			}
+		}
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
 			pty.SessionConfig{
@@ -541,7 +586,8 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 				ProviderEnv:        agentEnv,
 				SystemPrompt:       kickstart,
 				McpServers:         mcpServers,
-				MaxTurnsPerSession: defaultMaxTurnsPerSession,
+				MaxTurnsPerSession: maxTurns,
+				MaxCostUSD:         maxCost,
 			},
 		)
 		if err != nil {
@@ -680,6 +726,58 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		}
 	}
 
+	// R23 · Members added in the spawn modal's Members tab (inline +
+	// or duplicate) live only in req.MemberOverrides — they have no
+	// template counterpart. Synthesize a template entry for each
+	// override ID that isn't already in the members list, using the
+	// override fields directly so the rest of the spawn loop treats
+	// them identically to template-provided members. Dropped
+	// members are simply absent from the overrides list and get
+	// skipped naturally.
+	existing := make(map[string]struct{}, len(members))
+	for _, m := range members {
+		existing[m.ID] = struct{}{}
+	}
+	var filtered []teamtemplates.TeamTemplateMember
+	for _, m := range members {
+		found := false
+		for _, ov := range req.MemberOverrides {
+			if ov.ID == m.ID {
+				found = true
+				break
+			}
+		}
+		if found {
+			filtered = append(filtered, m)
+		}
+	}
+	// When the modal posts any overrides at all, honor the list as
+	// the source of truth: members the operator removed in the UI
+	// drop, and members they added slot in after the existing ones.
+	if len(req.MemberOverrides) > 0 {
+		members = filtered
+		for _, ov := range req.MemberOverrides {
+			if _, has := existing[ov.ID]; has {
+				continue
+			}
+			// Synthetic member from an override-only entry (inline
+			// add / duplicate). Provider + model on the template
+			// member aren't populated — they'll come from the
+			// override in the same way as any other member.
+			members = append(members, teamtemplates.TeamTemplateMember{
+				ID:           ov.ID,
+				Name:         firstNonEmpty(ov.Name, ov.ID),
+				Role:         firstNonEmpty(ov.Role, "Engineer"),
+				Tier:         firstNonEmpty(ov.Tier, "worker"),
+				Color:        firstNonEmpty(ov.Color, "blue"),
+				Emoji:        ov.Emoji,
+				Personality:  ov.Personality,
+				SystemPrompt: ov.SystemPrompt,
+				Skills:       ov.Skills,
+			})
+		}
+	}
+
 	// Build default provider env vars
 	defaultProviderEnv := ctx.getProviderEnvVars()
 
@@ -794,7 +892,19 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	// Determine session mode: SDK (default for agents) or PTY (fallback)
 	useSDK := true // Use SDK mode by default for office agents
 
-	for _, member := range members {
+	// R23 · Team-wide daily cap from the spawn modal overrides the
+	// global settings value. Applied once per spawn, before any agent
+	// starts so the first turn that hits the cap triggers the R18
+	// enforcement path immediately.
+	if req.DailyCapUSD > 0 && ctx.StateStore != nil {
+		ctx.StateStore.UpdateSettings(map[string]interface{}{
+			spendingCapSettingKey: req.DailyCapUSD,
+		})
+		slog.Info("Applied per-team daily spend cap from spawn modal",
+			"dailyCapUSD", req.DailyCapUSD)
+	}
+
+	for i, member := range members {
 		// Use member-specific provider env if overridden, else apply default with allocated sonnet
 		envVars := defaultProviderEnv
 		if ov, hasOverride := overrideMap[member.ID]; hasOverride {
@@ -805,14 +915,33 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 
 		// Support per-agent working directory override
 		spawnReq := req
-		if ov, has := memberOverrideMap[member.ID]; has && ov.WorkingDir != "" {
-			spawnReq.WorkingDir = ov.WorkingDir
+		var memberOv *memberOverride
+		if ov, has := memberOverrideMap[member.ID]; has {
+			ov := ov // copy for &
+			memberOv = &ov
+			if ov.WorkingDir != "" {
+				spawnReq.WorkingDir = ov.WorkingDir
+			}
 		}
 
-		sessionID, usedMode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, useSDK)
+		sessionID, usedMode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, useSDK, memberOv)
 		if sessionID == "" {
 			errors = append(errors, fmt.Sprintf("Failed to create session for %s", member.Name))
 			continue
+		}
+
+		// R23 · Per-member spawn delay. Sleeps between member spawns so
+		// operators can stagger startup (Claude subscription rate-limit
+		// smoothing, Z.AI IP warm-up). Skip the sleep on the last member
+		// since nothing comes after. Capped at 60s per delay to avoid
+		// accidentally stalling a spawn for an unreasonable interval.
+		if memberOv != nil && memberOv.SpawnDelayMs > 0 && i < len(members)-1 {
+			delay := time.Duration(memberOv.SpawnDelayMs) * time.Millisecond
+			if delay > 60*time.Second {
+				delay = 60 * time.Second
+			}
+			slog.Info("Per-member spawn delay", "name", member.Name, "ms", delay.Milliseconds())
+			time.Sleep(delay)
 		}
 
 		// Register agent with full config including personality and skills

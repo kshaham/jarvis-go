@@ -3982,6 +3982,25 @@ class OfficeApp {
                 value="${this.escapeAttr((member.skills || []).join(', '))}"
                 placeholder="office-protocols, headless-browser, ...">
             </div>
+            <!-- R23 · Per-member caps. Leave blank / 0 to use team defaults. -->
+            <div class="spawn-editor-field">
+              <label for="spawn-maxcost-${safeId}">Max cost (USD)</label>
+              <input class="spawn-config-input" type="number" id="spawn-maxcost-${safeId}"
+                min="0" step="0.10" placeholder="0 = no cap"
+                value="${member.maxCostUSD ? member.maxCostUSD : ''}">
+            </div>
+            <div class="spawn-editor-field">
+              <label for="spawn-maxturns-${safeId}">Max turns</label>
+              <input class="spawn-config-input" type="number" id="spawn-maxturns-${safeId}"
+                min="0" step="1" placeholder="0 = team default (100)"
+                value="${member.maxTurns ? member.maxTurns : ''}">
+            </div>
+            <div class="spawn-editor-field span-2">
+              <label for="spawn-spawndelay-${safeId}">Spawn delay (ms after this agent)</label>
+              <input class="spawn-config-input" type="number" id="spawn-spawndelay-${safeId}"
+                min="0" step="250" max="60000" placeholder="0 = no delay"
+                value="${member.spawnDelayMs ? member.spawnDelayMs : ''}">
+            </div>
           </div>
         </section>
       </div>`;
@@ -3996,18 +4015,22 @@ class OfficeApp {
   // an item calls selectSpawnMember(id). Rail entries reflect live
   // edits via _syncSpawnRail so renaming a member in the editor
   // updates the rail label immediately.
+  //
+  // R23 · Each row now has Duplicate + Remove action buttons; the
+  // rail ends with a "+ Add member" button. All three mutate
+  // _currentMembers and call _refreshSpawnMembers to re-render.
   _renderSpawnMemberRail() {
     const rail = document.getElementById('spawnMembersList');
     if (!rail) return;
     const members = this._currentMembers || [];
     const colors = OfficeApp.SPAWN_AVATAR_COLORS;
-    rail.innerHTML = members.map(m => {
+    const rowsHtml = members.map(m => {
       const bg = colors[m.color] || '#7F8C9E';
       const safeId = this.escapeAttr(m.id);
       const initial = (m.name || '?')[0];
       const tierLabel = m.tier === 'strategic' ? 'LEAD' : 'WORKER';
       const tierClass = m.tier === 'strategic' ? 'tier-strategic' : '';
-      return `<li>
+      return `<li class="spawn-member-row-wrap">
         <button class="spawn-member-list-item" data-spawn-rail-id="${safeId}"
           onclick="office.selectSpawnMember('${safeId}')">
           <span class="spawn-member-avatar" style="background:${bg}">${this.escapeHtml(initial)}</span>
@@ -4017,10 +4040,117 @@ class OfficeApp {
           </span>
           <span class="spawn-member-tier-chip ${tierClass}" data-rail-tier>${tierLabel}</span>
         </button>
+        <div class="spawn-member-actions">
+          <button class="spawn-member-action" title="Duplicate member"
+            onclick="event.stopPropagation(); office.duplicateSpawnMember('${safeId}')" aria-label="Duplicate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="spawn-member-action spawn-member-action--danger" title="Remove member"
+            onclick="event.stopPropagation(); office.removeSpawnMember('${safeId}')" aria-label="Remove">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+          </button>
+        </div>
       </li>`;
     }).join('');
+    const addBtn = `<li class="spawn-member-add-row">
+      <button class="spawn-member-add" onclick="office.addSpawnMember()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add member
+      </button>
+    </li>`;
+    rail.innerHTML = rowsHtml + addBtn;
     const count = document.getElementById('spawnTabMemberCount');
     if (count) count.textContent = String(members.length);
+  }
+
+  // R23 · Regenerate BOTH the rail and the editor panel after a
+  // mutation to _currentMembers, then (optionally) select a target
+  // member. Keeps the two views coherent without forcing callers to
+  // remember both render calls.
+  _refreshSpawnMembers(selectId) {
+    const settings = this._spawnSettings || {};
+    const provider = document.getElementById('spawnDefaultProvider')?.value || settings.provider || 'claude-subscription';
+    const model = document.getElementById('spawnDefaultModel')?.value || this.getDefaultModelForProvider(provider, settings);
+    this.renderSpawnMemberRows(provider, model);
+    this._renderSpawnMemberRail();
+    const target = selectId || (this._currentMembers[0] && this._currentMembers[0].id);
+    if (target) this.selectSpawnMember(target);
+  }
+
+  // R23 · Generate a unique member ID that doesn't collide with any
+  // currently-in-memory member. Base on the template's naming style
+  // when cloning (e.g. "captain" -> "captain-2") or "member-<n>" for
+  // blank adds.
+  _uniqueSpawnMemberId(base) {
+    const members = this._currentMembers || [];
+    const ids = new Set(members.map(m => m.id));
+    if (base && !ids.has(base)) return base;
+    let n = 2;
+    while (ids.has(`${base || 'member'}-${n}`)) n++;
+    return `${base || 'member'}-${n}`;
+  }
+
+  // R23 · Append a blank worker to the team. Uses sensible defaults
+  // (Worker tier, first available color) so the editor opens in a
+  // usable state; operator renames and configures from there.
+  addSpawnMember() {
+    if (!this._currentMembers) this._currentMembers = [];
+    const colors = Object.keys(OfficeApp.SPAWN_AVATAR_COLORS);
+    const usedColors = new Set(this._currentMembers.map(m => m.color));
+    const nextColor = colors.find(c => !usedColors.has(c)) || 'blue';
+    const id = this._uniqueSpawnMemberId('member');
+    const n = this._currentMembers.length + 1;
+    const blank = {
+      id,
+      name: `Member ${n}`,
+      role: 'Engineer',
+      tier: 'worker',
+      color: nextColor,
+      emoji: '',
+      personality: '',
+      systemPrompt: '',
+      skills: [],
+    };
+    this._currentMembers.push(blank);
+    this._refreshSpawnMembers(id);
+  }
+
+  // R23 · Duplicate an existing member. Clones all config fields
+  // except the ID, assigns a new unique ID, and auto-selects the
+  // clone so the operator can edit it immediately.
+  duplicateSpawnMember(memberId) {
+    const members = this._currentMembers || [];
+    const idx = members.findIndex(m => m.id === memberId);
+    if (idx < 0) return;
+    const src = members[idx];
+    const clone = {
+      ...src,
+      skills: Array.isArray(src.skills) ? [...src.skills] : [],
+      id: this._uniqueSpawnMemberId(`${src.id}-copy`),
+      name: `${src.name} (copy)`,
+    };
+    members.splice(idx + 1, 0, clone);
+    this._refreshSpawnMembers(clone.id);
+  }
+
+  // R23 · Remove a member after a confirmation. Refuses to remove
+  // the last remaining member — a team needs at least one agent or
+  // the spawn handler will reject it.
+  removeSpawnMember(memberId) {
+    const members = this._currentMembers || [];
+    if (members.length <= 1) {
+      this.showNotification('A team needs at least one member', 'warning');
+      return;
+    }
+    const target = members.find(m => m.id === memberId);
+    const label = target ? (target.name || target.id) : 'this member';
+    if (!window.confirm(`Remove ${label} from the team?`)) return;
+    const idx = members.findIndex(m => m.id === memberId);
+    if (idx < 0) return;
+    members.splice(idx, 1);
+    // Prefer the neighbor above the removed row when reselecting.
+    const fallback = members[Math.max(0, idx - 1)];
+    this._refreshSpawnMembers(fallback ? fallback.id : null);
   }
 
   // R22 · Live sync of rail labels when the editor mutates
@@ -4229,6 +4359,17 @@ class OfficeApp {
       if (systemPromptVal) override.systemPrompt = systemPromptVal;
       if (skillsVal) override.skills = skillsVal.split(',').map(s => s.trim()).filter(Boolean);
       if (workdirVal) override.workingDir = workdirVal;
+      // R23 · Per-member caps + spawn delay. Parse as numbers, drop
+      // invalid / zero / negative values so the backend treats them
+      // as "use defaults".
+      const maxCostRaw = parseFloat(document.getElementById(`spawn-maxcost-${member.id}`)?.value || '');
+      if (Number.isFinite(maxCostRaw) && maxCostRaw > 0) override.maxCostUSD = maxCostRaw;
+      const maxTurnsRaw = parseInt(document.getElementById(`spawn-maxturns-${member.id}`)?.value || '', 10);
+      if (Number.isFinite(maxTurnsRaw) && maxTurnsRaw > 0) override.maxTurns = maxTurnsRaw;
+      const delayRaw = parseInt(document.getElementById(`spawn-spawndelay-${member.id}`)?.value || '', 10);
+      if (Number.isFinite(delayRaw) && delayRaw > 0) {
+        override.spawnDelayMs = Math.min(delayRaw, 60000);
+      }
       return override;
     });
 
@@ -4238,6 +4379,10 @@ class OfficeApp {
     try {
       const mission = document.getElementById('spawnMission')?.value?.trim() || '';
       const perpetualMode = document.getElementById('spawnPerpetualMode')?.checked ?? true;
+      // R23 · Team daily cap override. Blank / 0 / invalid = omit so
+      // the backend preserves the global Settings value.
+      const dailyCapRaw = parseFloat(document.getElementById('spawnDailyCapUSD')?.value || '');
+      const dailyCapUSD = (Number.isFinite(dailyCapRaw) && dailyCapRaw > 0) ? dailyCapRaw : undefined;
       const data = await this.postJson('/api/office/spawn-team', {
         workingDir,
         mission,
@@ -4248,6 +4393,7 @@ class OfficeApp {
         telegramIntervalMin,
         newProject,
         projectName,
+        dailyCapUSD,
       });
 
       if (data.success) {
