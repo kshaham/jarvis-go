@@ -29,11 +29,6 @@ type SessionConfig struct {
 	NiceConfig    NiceConfig
 	ProviderEnv   map[string]string
 
-	// MaxCostUSD is an optional per-session spending cap. When > 0, the
-	// session emits EventCostExceeded and stops once totalCostUSD >= cap.
-	// Zero means unlimited.
-	MaxCostUSD float64
-
 	// MaxTurnsPerSession is an optional per-session turn-count cap. When
 	// > 0, the session emits EventTurnCapReached and stops once the
 	// cumulative NumTurns from the SDK crosses the ceiling. Zero means
@@ -107,15 +102,6 @@ type EventTokens struct {
 	Model string
 }
 func (EventTokens) eventType() string { return "tokens" }
-
-// EventCostExceeded fires when a session's cumulative cost hits its
-// per-session MaxCostUSD cap. The session is stopped after this event.
-type EventCostExceeded struct {
-	Cost   float64
-	CapUSD float64
-}
-
-func (EventCostExceeded) eventType() string { return "costExceeded" }
 
 // EventTurnCapReached fires when a session's cumulative NumTurns hits
 // its per-session MaxTurnsPerSession cap. The session is stopped after

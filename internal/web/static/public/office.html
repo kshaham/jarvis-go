@@ -825,13 +825,11 @@
               <p class="settings-hint">ON: Agents continuously find new work, write tests, refactor, and improve beyond the goal. OFF: Agents complete assigned tasks then stop.</p>
             </div>
 
-            <!-- R23 · Team-wide daily spend cap override -->
-            <div class="spawn-config-section">
-              <label class="spawn-config-label" for="spawnDailyCapUSD">Team daily spend cap (USD)</label>
-              <input type="number" class="spawn-config-input" id="spawnDailyCapUSD"
-                min="0" step="0.50" placeholder="e.g. 25.00 — leave blank to keep current global cap">
-              <p class="settings-hint">Applied the moment the team spawns. When the team crosses this, every active SDK session is stopped (R18). Leave blank to inherit the global Settings value.</p>
-            </div>
+            <!-- R23's team daily spend cap field was removed in R24.
+                 Subscription plans (Z.AI Coding, Claude sub) are
+                 quota-based, not dollar-based; the SDK reports $0
+                 for subscription turns so a $ cap was inert. -->
+
 
             <div class="spawn-config-section">
               <label class="spawn-config-label">Default Provider/Model for All</label>

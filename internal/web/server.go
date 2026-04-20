@@ -456,9 +456,11 @@ func (s *Server) setupRouter() chi.Router {
 		TailFileStreams:         make(map[string]func()),
 		ActivePlanOrchestrators: make(map[string]string),
 	}
-	// Spending threshold tracking is private to the handler package; the
-	// map must be initialized before any RecordDailyStats call.
-	h.InitSpendingTracker()
+	// R24 · Spending enforcement was removed (subscription plans don't
+	// benefit from dollar caps). Daily stats are still recorded for
+	// the informational cost widget, but no threshold tracker init
+	// is needed.
+
 	// Build the scheduler runner with an executor closure that has access
 	// to the fully-initialized handler context (spawn flow, spending checks,
 	// workingDir resolver).
@@ -780,8 +782,10 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/code-printer/estimate", h.CodePrinterPrint)
 				r.Post("/code-printer/save-images", h.CodePrinterPreview)
 
-				// Spending daily cap setter (PUT; GET status is in the read-only group).
-				r.Put("/spending/cap", h.SetSpendingCap)
+				// R24 · PUT /spending/cap removed. Cost caps are not
+				// a useful signal on subscription plans. The GET
+				// /spending/status route remains in the read-only
+				// group for the informational header widget.
 
 				// Scheduler mutations.
 				r.Post("/scheduler/jobs", h.CreateSchedulerJob)

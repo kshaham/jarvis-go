@@ -48,12 +48,11 @@ type memberOverride struct {
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 	WorkingDir   string   `json:"workingDir,omitempty"`
-	// R23 · Per-member caps from the spawn modal. 0 means "use the
-	// team-wide default" (defaultMaxTurnsPerSession for turns; no cap
-	// for cost). Honored by spawnAgentSession when building the SDK
-	// session config.
-	MaxCostUSD float64 `json:"maxCostUSD,omitempty"`
-	MaxTurns   int     `json:"maxTurns,omitempty"`
+	// R23 · Per-member turn cap from the spawn modal. 0 means "use the
+	// team-wide default" (defaultMaxTurnsPerSession). R24 · The
+	// MaxCostUSD counterpart was removed — subscription-plan users
+	// have no meaningful dollar signal.
+	MaxTurns int `json:"maxTurns,omitempty"`
 	// R23 · Operator-controlled stagger. When > 0, the outer spawn
 	// loop sleeps this many ms AFTER creating this member's session
 	// before moving to the next. Useful to avoid auth bottlenecks
@@ -77,12 +76,8 @@ type spawnTeamRequest struct {
 	// computed server-side and the caller's value is ignored.
 	NewProject  bool   `json:"newProject"`
 	ProjectName string `json:"projectName"`
-	// R23 · Team-wide daily spend cap applied at spawn time by
-	// writing to the same settings key the /api/spending/cap endpoint
-	// uses. 0 (or omitted) means "leave the existing cap unchanged" —
-	// operators who don't want to touch the cap can leave the field
-	// blank and the global value set in Settings stays in effect.
-	DailyCapUSD float64 `json:"dailyCapUSD,omitempty"`
+	// R23's DailyCapUSD field was removed in R24 — see the package
+	// comment in spending.go for the reasoning.
 }
 
 // projectNameRe constrains the slug an operator can supply for the "New
@@ -515,8 +510,9 @@ func (ctx *Context) OfficeHealth(w http.ResponseWriter, r *http.Request) {
 // office manager, and broadcasts session:created events.
 // spawnAgentSession creates either an SDK or PTY session for a team member.
 // Returns the sessionID and mode used, or empty string on failure.
-// R23 · The optional `ov` carries per-member caps (MaxCostUSD,
-// MaxTurns) from the spawn modal. When nil, the legacy defaults apply.
+// R23 · The optional `ov` carries per-member MaxTurns from the spawn
+// modal. R24 removed the MaxCostUSD counterpart. When nil, defaults
+// apply (defaultMaxTurnsPerSession).
 func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool, ov *memberOverride) (string, string) {
 	if trySDK {
 		agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
@@ -563,18 +559,12 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		if agentToken != "" {
 			agentEnv["JARVIS_AGENT_TOKEN"] = agentToken
 		}
-		// R23 · Apply per-member caps if the operator set them in the
-		// spawn modal. 0 falls back to the legacy defaults: a
-		// 100-turn ceiling and no cost cap.
+		// R23 · Apply per-member turn cap if the operator set it.
+		// R24 removed the per-member cost cap — subscription plans
+		// (Z.AI, Claude sub) make dollar caps meaningless.
 		maxTurns := defaultMaxTurnsPerSession
-		var maxCost float64
-		if ov != nil {
-			if ov.MaxTurns > 0 {
-				maxTurns = ov.MaxTurns
-			}
-			if ov.MaxCostUSD > 0 {
-				maxCost = ov.MaxCostUSD
-			}
+		if ov != nil && ov.MaxTurns > 0 {
+			maxTurns = ov.MaxTurns
 		}
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
@@ -587,7 +577,6 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 				SystemPrompt:       kickstart,
 				McpServers:         mcpServers,
 				MaxTurnsPerSession: maxTurns,
-				MaxCostUSD:         maxCost,
 			},
 		)
 		if err != nil {
@@ -645,12 +634,6 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 // spawnTeamRequest. Extracted from OfficeSpawnTeam so ConciergeSpawnTeam can
 // call it directly without re-marshalling and rewriting r.Body.
 func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamRequest) {
-	// Refuse new team spawns when today's spending cap is reached.
-	if ctx.IsSpendingFrozen() {
-		request.WriteCodedError(w, http.StatusTooManyRequests, request.ErrCodeSpendingFrozen,
-			"daily spending cap reached; new team spawns are frozen until the cap is raised or the day rolls over")
-		return
-	}
 
 	// New-project flow: validate the slug, create /app/workspace/<name>
 	// if it doesn't exist, seed a CLAUDE.md with design defaults, and
@@ -892,17 +875,8 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	// Determine session mode: SDK (default for agents) or PTY (fallback)
 	useSDK := true // Use SDK mode by default for office agents
 
-	// R23 · Team-wide daily cap from the spawn modal overrides the
-	// global settings value. Applied once per spawn, before any agent
-	// starts so the first turn that hits the cap triggers the R18
-	// enforcement path immediately.
-	if req.DailyCapUSD > 0 && ctx.StateStore != nil {
-		ctx.StateStore.UpdateSettings(map[string]interface{}{
-			spendingCapSettingKey: req.DailyCapUSD,
-		})
-		slog.Info("Applied per-team daily spend cap from spawn modal",
-			"dailyCapUSD", req.DailyCapUSD)
-	}
+	// R23's team-wide daily cap write was removed in R24 — operator
+	// uses subscription plans where the $ cap is meaningless.
 
 	for i, member := range members {
 		// Use member-specific provider env if overridden, else apply default with allocated sonnet

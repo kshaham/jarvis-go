@@ -209,13 +209,6 @@ func (ctx *Context) GetSession(w http.ResponseWriter, r *http.Request) {
 
 // CreateSession creates a new session.
 func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
-	// Refuse new work when today's spending cap is reached. Running sessions
-	// continue; the operator must raise the cap or wait for midnight.
-	if ctx.IsSpendingFrozen() {
-		request.WriteCodedError(w, http.StatusTooManyRequests, request.ErrCodeSpendingFrozen,
-			"daily spending cap reached; new sessions are frozen until the cap is raised or the day rolls over")
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	var req request.CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -560,9 +553,10 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 				},
 			})
 			// Record dollar cost + token delta in daily stats so the
-			// spending widget and caps have accurate data.
+			// informational spending widget has current data. R24 · The
+			// checkSpendingThresholds enforcement was removed; daily
+			// stats are kept purely for the header readout.
 			ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
-			ctx.checkSpendingThresholds()
 			// Per-agent accumulation: if this session is attached to an
 			// office agent, record the turn so the agent card + insights
 			// panel can render cost/token totals without a new endpoint.
@@ -653,7 +647,6 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				"cost": e.Cost,
 			})
 			ctx.StateStore.RecordDailyStats(e.Input, e.Output, e.Model)
-			ctx.checkSpendingThresholds()
 			// Per-agent accumulation for office UI (cost bars, sparklines).
 			if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 				agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
@@ -670,13 +663,6 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 			if ctx.OfficeManager != nil {
 				ctx.OfficeManager.ObserveAgentToolInvocation(sessionID, e.Name, e.ResultHash)
 			}
-		case pty.EventCostExceeded:
-			broker.Broadcast("session:costExceeded", map[string]interface{}{
-				"id":      sessionID,
-				"cost":    e.Cost,
-				"cap":     e.CapUSD,
-				"message": "Session stopped: per-session cost cap reached",
-			})
 		case pty.EventTurnCapReached:
 			// R18 · Bridge the per-session turn cap into an office SSE
 			// event so the dashboard agent card can flash + flag the

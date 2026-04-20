@@ -64,12 +64,6 @@ type Context struct {
 	// ActivePlanOrchestrators tracks active plan generation session IDs.
 	ActivePlanOrchestrators   map[string]string // orchestratorID -> sessionID
 	ActivePlanOrchestratorsMu sync.RWMutex
-
-	// Spending threshold tracking: remembers which daily-cost alert levels
-	// (50/75/90/100%) have been broadcast today so we don't spam SSE.
-	spendingMu              sync.Mutex
-	spendingDay             string       // YYYY-MM-DD
-	spendingThresholdsFired map[int]bool // threshold -> fired this day
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,

@@ -724,18 +724,9 @@ class OfficeApp {
       }
     });
 
-    // R18 · Team crossed its daily spending cap — every SDK session was
-    // stopped. Banner + activity feed entry; dashboard otherwise stays
-    // functional so the operator can raise the cap from Settings.
-    this.eventSource.addEventListener('office:dailyCapHit', (e) => {
-      const data = this.safeParseSSE(e);
-      if (!data) return;
-      const cost = typeof data.todayCost === 'number' ? data.todayCost.toFixed(2) : '?';
-      const cap = typeof data.dailyCap === 'number' ? data.dailyCap.toFixed(2) : '?';
-      const stopped = Array.isArray(data.stoppedAgents) ? data.stoppedAgents.length : 0;
-      this.addActivityEntry('system', `Daily cap reached $${cost}/$${cap} — stopped ${stopped} agent${stopped === 1 ? '' : 's'}`);
-      this.showNotification(`Daily cap $${cap} reached ($${cost}) — ${stopped} agent${stopped === 1 ? '' : 's'} stopped`, 'error');
-    });
+    // R24 · R18's office:dailyCapHit listener was removed along with
+    // the rest of the dollar-cap machinery. Runaway defense still
+    // lives in the turn-cap + wedged-stop events below.
 
     // R19 · An SDK session was wedged in "working" state past the
     // configured timeout (default 20 min) with no tool activity. The
@@ -3982,20 +3973,16 @@ class OfficeApp {
                 value="${this.escapeAttr((member.skills || []).join(', '))}"
                 placeholder="office-protocols, headless-browser, ...">
             </div>
-            <!-- R23 · Per-member caps. Leave blank / 0 to use team defaults. -->
-            <div class="spawn-editor-field">
-              <label for="spawn-maxcost-${safeId}">Max cost (USD)</label>
-              <input class="spawn-config-input" type="number" id="spawn-maxcost-${safeId}"
-                min="0" step="0.10" placeholder="0 = no cap"
-                value="${member.maxCostUSD ? member.maxCostUSD : ''}">
-            </div>
+            <!-- R23 · Per-member turn cap. R24 · The maxCostUSD
+                 field was removed — subscription plans make a
+                 dollar cap meaningless. -->
             <div class="spawn-editor-field">
               <label for="spawn-maxturns-${safeId}">Max turns</label>
               <input class="spawn-config-input" type="number" id="spawn-maxturns-${safeId}"
                 min="0" step="1" placeholder="0 = team default (100)"
                 value="${member.maxTurns ? member.maxTurns : ''}">
             </div>
-            <div class="spawn-editor-field span-2">
+            <div class="spawn-editor-field">
               <label for="spawn-spawndelay-${safeId}">Spawn delay (ms after this agent)</label>
               <input class="spawn-config-input" type="number" id="spawn-spawndelay-${safeId}"
                 min="0" step="250" max="60000" placeholder="0 = no delay"
@@ -4359,11 +4346,9 @@ class OfficeApp {
       if (systemPromptVal) override.systemPrompt = systemPromptVal;
       if (skillsVal) override.skills = skillsVal.split(',').map(s => s.trim()).filter(Boolean);
       if (workdirVal) override.workingDir = workdirVal;
-      // R23 · Per-member caps + spawn delay. Parse as numbers, drop
-      // invalid / zero / negative values so the backend treats them
-      // as "use defaults".
-      const maxCostRaw = parseFloat(document.getElementById(`spawn-maxcost-${member.id}`)?.value || '');
-      if (Number.isFinite(maxCostRaw) && maxCostRaw > 0) override.maxCostUSD = maxCostRaw;
+      // R23 · Per-member turn cap + spawn delay. Drop invalid /
+      // zero / negative values so the backend treats them as
+      // "use defaults". R24 removed the maxCostUSD counterpart.
       const maxTurnsRaw = parseInt(document.getElementById(`spawn-maxturns-${member.id}`)?.value || '', 10);
       if (Number.isFinite(maxTurnsRaw) && maxTurnsRaw > 0) override.maxTurns = maxTurnsRaw;
       const delayRaw = parseInt(document.getElementById(`spawn-spawndelay-${member.id}`)?.value || '', 10);
@@ -4379,10 +4364,8 @@ class OfficeApp {
     try {
       const mission = document.getElementById('spawnMission')?.value?.trim() || '';
       const perpetualMode = document.getElementById('spawnPerpetualMode')?.checked ?? true;
-      // R23 · Team daily cap override. Blank / 0 / invalid = omit so
-      // the backend preserves the global Settings value.
-      const dailyCapRaw = parseFloat(document.getElementById('spawnDailyCapUSD')?.value || '');
-      const dailyCapUSD = (Number.isFinite(dailyCapRaw) && dailyCapRaw > 0) ? dailyCapRaw : undefined;
+      // R23's dailyCapUSD payload was removed in R24 — operator uses
+      // subscription plans where dollar caps don't apply.
       const data = await this.postJson('/api/office/spawn-team', {
         workingDir,
         mission,
@@ -4393,7 +4376,6 @@ class OfficeApp {
         telegramIntervalMin,
         newProject,
         projectName,
-        dailyCapUSD,
       });
 
       if (data.success) {

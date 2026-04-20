@@ -25,11 +25,6 @@ const maxCloneCount = 20
 // clones are parallel workers, not snapshots.
 // POST /api/sessions/{id}/clone?count=N
 func (ctx *Context) CloneSession(w http.ResponseWriter, r *http.Request) {
-	if ctx.IsSpendingFrozen() {
-		request.WriteCodedError(w, http.StatusTooManyRequests, request.ErrCodeSpendingFrozen,
-			"daily spending cap reached; clone refused until the cap is raised or the day rolls over")
-		return
-	}
 	id := chi.URLParam(r, "id")
 	source, ok := ctx.SessionManager.GetSession(id)
 	if !ok {

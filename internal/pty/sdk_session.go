@@ -42,9 +42,8 @@ type SDKSession struct {
 	totalInputTokens   int64
 	totalOutputTokens  int64
 	totalCostUSD       float64
-	maxCostUSD         float64 // per-session spending cap; 0 = unlimited
-	maxTurnsPerSession int     // per-session turn-count cap; 0 = unlimited
-	turnCapFired       bool    // so EventTurnCapReached only fires once
+	maxTurnsPerSession int  // per-session turn-count cap; 0 = unlimited
+	turnCapFired       bool // so EventTurnCapReached only fires once
 
 	// Buffers
 	terminalBuffer *BufferAccumulator
@@ -111,7 +110,6 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		providerEnv:    config.ProviderEnv,
 		systemPrompt:   config.SystemPrompt,
 		mcpServers:     config.McpServers,
-		maxCostUSD:         config.MaxCostUSD,
 		maxTurnsPerSession: config.MaxTurnsPerSession,
 		outputObservers: make(map[int]func(string)),
 		activeTools:     make(map[string]bool),
@@ -296,7 +294,6 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 				s.status = StatusIdle
 				s.activeTools = make(map[string]bool)
 				currentCost := s.totalCostUSD
-				capUSD := s.maxCostUSD
 				// Best-effort model name: pick the key with the largest usage
 				// out of ModelUsages. Multi-model turns are rare; in the common
 				// single-model case this returns the only entry.
@@ -326,33 +323,18 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 				})
 				s.emitEvent(EventIdle{})
 
-				// R21 code review: if both caps trip on the same turn
-				// (e.g. an expensive multi-step turn that also crosses
-				// the turn ceiling), we used to emit BOTH
-				// EventCostExceeded and EventTurnCapReached plus two
-				// concurrent go s.Stop() calls. Stop() is idempotent so
-				// the double-stop was harmless, but the dashboard got
-				// two different stop banners for one event. Cost cap
-				// takes precedence — operator cares more about "ran
-				// out of money" than "ran out of turns" when both hit
-				// the same turn. After either fires, skip the other.
-				stoppedThisTurn := false
-
-				// Per-session cost cap enforcement. Emits EventCostExceeded
-				// and stops the session asynchronously so we can finish
-				// emitting the current turn's events first.
-				if capUSD > 0 && currentCost >= capUSD {
-					s.emitEvent(EventCostExceeded{Cost: currentCost, CapUSD: capUSD})
-					slog.Warn("SDK session hit cost cap; stopping", "session", s.ID, "cost", currentCost, "cap", capUSD)
-					go s.Stop()
-					stoppedThisTurn = true
-				}
-
-				// Per-session turn-count cap enforcement. Mirrors the cost
-				// path above. Guards with turnCapFired so we emit exactly
-				// once even if the goroutine Stop() takes a moment to
-				// wind the session down.
-				if !stoppedThisTurn && turnCap > 0 && !turnCapAlreadyFired && event.Result.NumTurns >= turnCap {
+				// R24 · Per-session cost cap removed. Operator uses
+				// subscription plans (Z.AI Coding, Claude sub) where
+				// dollar-reported cost is always $0 and irrelevant.
+				// Turn cap below remains as the primary runaway
+				// defense — it's quota-agnostic and fires on usage,
+				// not billing.
+				//
+				// Per-session turn-count cap enforcement. Guards with
+				// turnCapFired so we emit exactly once even if the
+				// goroutine Stop() takes a moment to wind the session
+				// down.
+				if turnCap > 0 && !turnCapAlreadyFired && event.Result.NumTurns >= turnCap {
 					s.mu.Lock()
 					s.turnCapFired = true
 					s.mu.Unlock()

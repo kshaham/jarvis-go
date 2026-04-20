@@ -15069,7 +15069,9 @@ class JarvisApp {
 
   /**
    * Poll the spending status endpoint and refresh the header cost widget.
-   * Light request; piggy-backed on the existing system stats poll.
+   * R24 · Display-only now — the cap/frozen/percentUsed fields are
+   * gone from the response. Widget shows "today's reported spend"
+   * without any enforcement implication.
    */
   async fetchSpendingStatus() {
     try {
@@ -15080,43 +15082,9 @@ class JarvisApp {
       if (!el) return;
       const cost = data.todayCostUSD || 0;
       el.textContent = `$${cost.toFixed(2)}`;
-      let state = 'ok';
-      if (data.dailyCapUSD > 0) {
-        if (data.percentUsed >= 90) state = 'critical';
-        else if (data.percentUsed >= 75) state = 'warn';
-        el.title = `Today: $${cost.toFixed(4)} of $${data.dailyCapUSD.toFixed(2)} cap (${data.percentUsed.toFixed(0)}%)${data.frozen ? ' — FROZEN' : ''}`;
-      } else {
-        el.title = `Today's estimated spend: $${cost.toFixed(4)} (no cap set)`;
-      }
-      el.dataset.state = state;
+      el.title = `Today's reported spend: $${cost.toFixed(4)}`;
+      el.dataset.state = 'ok';
     } catch (_) { /* non-critical */ }
-  }
-
-  /**
-   * Open a small prompt to set the daily spending cap. Minimal UI --
-   * a dedicated settings pane could replace this later.
-   */
-  async openSpendingSettings() {
-    const cur = await fetch('/api/spending/status').then(r => r.json()).catch(() => ({}));
-    const answer = window.prompt(
-      `Daily spending cap (USD). Set 0 to disable.\nCurrent: $${(cur.dailyCapUSD || 0).toFixed(2)}, today: $${(cur.todayCostUSD || 0).toFixed(4)}`,
-      String(cur.dailyCapUSD || 0),
-    );
-    if (answer === null) return;
-    const value = parseFloat(answer);
-    if (isNaN(value) || value < 0) { this.showNotification?.('Invalid cap value', 'warning'); return; }
-    try {
-      const res = await fetch('/api/spending/cap', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken || '' },
-        body: JSON.stringify({ dailyCapUSD: value }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      this.showToast?.('Spending cap updated', 'success');
-      this.fetchSpendingStatus();
-    } catch (err) {
-      this.showNotification?.('Failed to update cap', 'error');
-    }
   }
 
   updateSystemStatsDisplay(stats) {

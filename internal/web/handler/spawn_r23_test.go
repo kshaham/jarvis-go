@@ -1,14 +1,13 @@
 package handler
 
-// R23 · Smoke tests for the new spawn-modal payload fields. Full
-// end-to-end spawn exercises dependencies (SessionManager, provider
-// env, template loading) that aren't practical to stand up in a unit
-// test — these focus on the pure-function surface R23 added:
-//   - memberOverride JSON decode for maxCostUSD / maxTurns /
-//     spawnDelayMs
-//   - spawnTeamRequest JSON decode for dailyCapUSD
+// R23 · Smoke tests for the spawn-modal payload fields that survived
+// R24's removal of dollar-based caps. Covers:
+//   - memberOverride JSON decode for maxTurns / spawnDelayMs
 //   - firstNonEmpty helper used when synthesizing override-only
 //     members into TeamTemplateMember stubs
+//
+// R24 removed: memberOverride.MaxCostUSD + spawnTeamRequest.DailyCapUSD
+// and their corresponding assertions.
 
 import (
 	"encoding/json"
@@ -20,16 +19,12 @@ func TestMemberOverride_DecodesR23Fields(t *testing.T) {
 		"id": "lead-1",
 		"provider": "claude-api",
 		"model": "claude-opus-4-7",
-		"maxCostUSD": 1.5,
 		"maxTurns": 50,
 		"spawnDelayMs": 750
 	}`
 	var ov memberOverride
 	if err := json.Unmarshal([]byte(body), &ov); err != nil {
 		t.Fatalf("unmarshal: %v", err)
-	}
-	if ov.MaxCostUSD != 1.5 {
-		t.Errorf("MaxCostUSD: got %v, want 1.5", ov.MaxCostUSD)
 	}
 	if ov.MaxTurns != 50 {
 		t.Errorf("MaxTurns: got %d, want 50", ov.MaxTurns)
@@ -40,15 +35,10 @@ func TestMemberOverride_DecodesR23Fields(t *testing.T) {
 }
 
 func TestMemberOverride_OmittedR23FieldsZero(t *testing.T) {
-	// Modal sends no cap fields when operator leaves them blank —
-	// backend should see zero values and honor the defaults.
 	body := `{"id":"worker-1","provider":"claude-subscription","model":"sonnet"}`
 	var ov memberOverride
 	if err := json.Unmarshal([]byte(body), &ov); err != nil {
 		t.Fatalf("unmarshal: %v", err)
-	}
-	if ov.MaxCostUSD != 0 {
-		t.Errorf("MaxCostUSD should default to 0, got %v", ov.MaxCostUSD)
 	}
 	if ov.MaxTurns != 0 {
 		t.Errorf("MaxTurns should default to 0, got %d", ov.MaxTurns)
@@ -58,25 +48,38 @@ func TestMemberOverride_OmittedR23FieldsZero(t *testing.T) {
 	}
 }
 
-func TestSpawnTeamRequest_DecodesDailyCapUSD(t *testing.T) {
-	body := `{"workingDir":"/tmp","dailyCapUSD":25.5}`
-	var req spawnTeamRequest
-	if err := json.Unmarshal([]byte(body), &req); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+// R24 regression guard · Legacy clients may still send maxCostUSD /
+// dailyCapUSD in the JSON payload. With the fields removed from the
+// structs, json.Unmarshal should silently ignore them (DisallowUnknown
+// is not set on the decoder). Verify the request decodes cleanly.
+func TestR24_LegacyCostFieldsIgnored(t *testing.T) {
+	body := `{
+		"id": "lead-1",
+		"provider": "claude-api",
+		"model": "sonnet",
+		"maxCostUSD": 2.5,
+		"maxTurns": 80
+	}`
+	var ov memberOverride
+	if err := json.Unmarshal([]byte(body), &ov); err != nil {
+		t.Fatalf("should ignore maxCostUSD, got err: %v", err)
 	}
-	if req.DailyCapUSD != 25.5 {
-		t.Errorf("DailyCapUSD: got %v, want 25.5", req.DailyCapUSD)
+	if ov.MaxTurns != 80 {
+		t.Errorf("MaxTurns: got %d, want 80", ov.MaxTurns)
 	}
 }
 
-func TestSpawnTeamRequest_OmittedDailyCapIsZero(t *testing.T) {
-	body := `{"workingDir":"/tmp"}`
+func TestR24_LegacyDailyCapIgnored(t *testing.T) {
+	body := `{"workingDir":"/tmp","dailyCapUSD":25.5,"mission":"hi"}`
 	var req spawnTeamRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+		t.Fatalf("should ignore dailyCapUSD, got err: %v", err)
 	}
-	if req.DailyCapUSD != 0 {
-		t.Errorf("DailyCapUSD should default to 0 (meaning leave global cap unchanged), got %v", req.DailyCapUSD)
+	if req.WorkingDir != "/tmp" {
+		t.Errorf("WorkingDir: got %q, want /tmp", req.WorkingDir)
+	}
+	if req.Mission != "hi" {
+		t.Errorf("Mission: got %q, want hi", req.Mission)
 	}
 }
 

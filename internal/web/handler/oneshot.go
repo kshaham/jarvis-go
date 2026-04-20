@@ -35,12 +35,6 @@ type oneShotRequest struct {
 //
 // POST /api/sessions/one-shot
 func (ctx *Context) OneShotSession(w http.ResponseWriter, r *http.Request) {
-	if ctx.IsSpendingFrozen() {
-		request.WriteCodedError(w, http.StatusTooManyRequests, request.ErrCodeSpendingFrozen,
-			"daily spending cap reached; one-shot refused until the cap is raised or the day rolls over")
-		return
-	}
-
 	var req oneShotRequest
 	if !request.DecodeAndValidate(w, r, &req) {
 		return

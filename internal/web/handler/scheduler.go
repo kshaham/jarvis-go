@@ -212,9 +212,6 @@ func BuildSchedulerExecutor(ctx *Context) scheduler.ExecutorFunc {
 }
 
 func executeSpawnTeamJob(execCtx context.Context, ctx *Context, job *scheduler.Job) (string, error) {
-	if ctx.IsSpendingFrozen() {
-		return "", fmt.Errorf("daily spending cap reached; spawn_team skipped")
-	}
 	var cfg spawnTeamRequest
 	if err := json.Unmarshal(job.Config, &cfg); err != nil {
 		return "", fmt.Errorf("invalid spawn_team config: %w", err)
@@ -239,9 +236,6 @@ func executeSpawnTeamJob(execCtx context.Context, ctx *Context, job *scheduler.J
 }
 
 func executeOneShotJob(execCtx context.Context, ctx *Context, job *scheduler.Job) (string, error) {
-	if ctx.IsSpendingFrozen() {
-		return "", fmt.Errorf("daily spending cap reached; one_shot skipped")
-	}
 	var cfg oneShotRequest
 	if err := json.Unmarshal(job.Config, &cfg); err != nil {
 		return "", fmt.Errorf("invalid one_shot config: %w", err)
