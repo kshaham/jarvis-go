@@ -458,6 +458,17 @@ class OfficeApp {
         if (data.bugTasks) this.bugTasks = data.bugTasks;
         if (data.taskQueues) this.taskQueues = data.taskQueues;
         this.updateWrapUpButton(data.wrapUp && data.wrapUp.active);
+        // R25 · Sync pause banner on every state refresh. Covers the
+        // case where a page reload lands on a paused team — we want
+        // the banner visible immediately without waiting for an SSE.
+        if (data.paused) {
+          this.state.paused = true;
+          this.state.pauseReason = (data.pause && data.pause.reason) || '';
+        } else {
+          this.state.paused = false;
+          this.state.pauseReason = '';
+        }
+        this._updatePauseBanner();
       }
     } catch (err) {
       console.error('Failed to fetch office state:', err);
@@ -727,6 +738,54 @@ class OfficeApp {
     // R24 · R18's office:dailyCapHit listener was removed along with
     // the rest of the dollar-cap machinery. Runaway defense still
     // lives in the turn-cap + wedged-stop events below.
+
+    // R25 · Team lifecycle events. Pause/Resume flip the top-of-
+    // dashboard banner; Agent restart is informational (the card
+    // SessionID silently rekeys via office:memberUpdated on the
+    // next turn). Workdir bump is a toast so the operator sees it
+    // took effect; snapshots are user-initiated so acks are toasts.
+    this.eventSource.addEventListener('office:teamPaused', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      this.state.paused = true;
+      this.state.pauseReason = data.reason || '';
+      this._updatePauseBanner();
+      this.addActivityEntry('system', `Team paused${data.reason ? ': ' + data.reason : ''}`);
+    });
+    this.eventSource.addEventListener('office:teamResumed', () => {
+      this.state.paused = false;
+      this.state.pauseReason = '';
+      this._updatePauseBanner();
+      this.addActivityEntry('system', 'Team resumed');
+    });
+    this.eventSource.addEventListener('office:agentWorkdirChanged', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || data.sessionId || 'Agent';
+      this.addActivityEntry('system', `${who} working directory bumped to ${data.workingDir}`);
+    });
+    this.eventSource.addEventListener('office:agentRestarted', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = data.agentName || 'Agent';
+      this.addActivityEntry('system', `${who} restarted in place (${data.reason || 'operator'})`);
+      this.showNotification(`${who} restarted`, 'success');
+    });
+    this.eventSource.addEventListener('office:snapshotCreated', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      this.addActivityEntry('system', `Snapshot "${data.name}" saved (${data.memberCount} members)`);
+    });
+    this.eventSource.addEventListener('office:snapshotRestored', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      this.addActivityEntry('system', `Snapshot "${data.name}" restored`);
+    });
+    this.eventSource.addEventListener('office:snapshotDeleted', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      this.addActivityEntry('system', `Snapshot "${data.name}" deleted`);
+    });
 
     // R19 · An SDK session was wedged in "working" state past the
     // configured timeout (default 20 min) with no tool activity. The
@@ -1553,6 +1612,12 @@ class OfficeApp {
         </button>
         <button class="agent-quick-btn" onclick="event.stopPropagation(); office.navigateToSessionDirect('${member.sessionId}')" title="Terminal">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </button>
+        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.bumpAgentWorkdir('${member.sessionId}')" title="Change working directory">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 3h10v9H3z"/></svg>
+        </button>
+        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.restartAgent('${member.sessionId}')" title="Restart agent in place (keep memory + tasks)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 18 5.3L23 10"/></svg>
         </button>
         <button class="agent-quick-btn agent-quick-btn--danger" onclick="event.stopPropagation(); office.killAgent('${member.sessionId}')" title="Kill agent">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
@@ -3366,6 +3431,189 @@ class OfficeApp {
       }
     } catch {
       this.showNotification(`Failed to inject prompt to ${name}`, 'error');
+    }
+  }
+
+  // R25 · Bump an agent's working directory mid-run. The SDK
+  // session's cwd doesn't change; the server injects a redirect
+  // prompt telling the agent to `cd <new>` on the next turn.
+  async bumpAgentWorkdir(sessionId) {
+    const member = this.state.members.find(m => m.sessionId === sessionId);
+    const name = member ? member.name : 'Agent';
+    const wd = window.prompt(`New working directory for ${name}:`, '');
+    if (!wd || !wd.trim()) return;
+    const reason = window.prompt(`Reason (optional):`, '') || '';
+    try {
+      const data = await this.postJson('/api/office/agent/workdir', {
+        sessionId, workingDir: wd.trim(), reason: reason.trim(),
+      });
+      if (data && data.workingDir) {
+        this.showNotification(`${name} redirected to ${data.workingDir}`, 'success');
+      } else {
+        this.showNotification(`Failed to bump workdir for ${name}`, 'error');
+      }
+    } catch {
+      this.showNotification(`Failed to bump workdir for ${name}`, 'error');
+    }
+  }
+
+  // R25 · Restart an agent in place. Stops the session and attaches
+  // a fresh one; memory + learnings + task queue survive.
+  async restartAgent(sessionId) {
+    const member = this.state.members.find(m => m.sessionId === sessionId);
+    const name = member ? member.name : 'Agent';
+    if (!window.confirm(`Restart ${name} in place?\n\nKeeps memory, tasks, and learnings. Only the SDK session resets.`)) return;
+    const reason = window.prompt(`Reason (optional):`, '') || '';
+    try {
+      const data = await this.postJson('/api/office/agent/restart', {
+        sessionId, reason: reason.trim(),
+      });
+      if (data && data.sessionId) {
+        this.showNotification(`Restarted ${name}`, 'success');
+      } else {
+        this.showNotification(`Failed to restart ${name}`, 'error');
+      }
+    } catch {
+      this.showNotification(`Failed to restart ${name}`, 'error');
+    }
+  }
+
+  // R25 · Pause / resume team automation. No-op per-agent SDK
+  // sessions; just gates the recovery ticker + auto-standup.
+  async toggleTeamPause() {
+    const paused = !!(this.state && this.state.paused);
+    if (paused) {
+      try {
+        await this.postJson('/api/office/resume', {});
+        this.showNotification('Team resumed', 'success');
+      } catch {
+        this.showNotification('Failed to resume team', 'error');
+      }
+      return;
+    }
+    const reason = window.prompt('Pause reason (optional):', '') || '';
+    try {
+      await this.postJson('/api/office/pause', { reason: reason.trim() });
+      this.showNotification('Team paused', 'info');
+    } catch {
+      this.showNotification('Failed to pause team', 'error');
+    }
+  }
+
+  // R25 · Snapshot / restore helpers. Dashboard surfaces these via
+  // a Snapshots entry in the operator menu (see office.html).
+  async createTeamSnapshot() {
+    const name = window.prompt('Snapshot name (letters, numbers, _, - — max 64 chars):', '');
+    if (!name || !name.trim()) return;
+    try {
+      const data = await this.postJson('/api/office/snapshots', { name: name.trim() });
+      if (data && data.name) {
+        this.showNotification(`Snapshot "${data.name}" saved (${data.memberCount} members)`, 'success');
+      } else {
+        this.showNotification('Failed to create snapshot', 'error');
+      }
+    } catch (err) {
+      this.showNotification(`Snapshot failed: ${err.message || 'unknown error'}`, 'error');
+    }
+  }
+
+  async listTeamSnapshots() {
+    try {
+      const res = await fetch('/api/office/snapshots');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data.snapshots) ? data.snapshots : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async restoreTeamSnapshot(name) {
+    if (!name) return;
+    if (!window.confirm(`Restore snapshot "${name}"? The current team must be shut down first if it's still running.`)) return;
+    try {
+      const res = await fetch(`/api/office/snapshots/${encodeURIComponent(name)}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken || '' },
+        body: '{}',
+      });
+      const data = await this.parseJsonResponse(res);
+      if (data && data.restored) {
+        this.showNotification(`Restored "${data.restored}" (${data.memberCount} members, ${data.seededTasks} tasks)`, 'success');
+      } else {
+        this.showNotification(`Restore failed: ${data?.error || 'unknown'}`, 'error');
+      }
+    } catch (err) {
+      this.showNotification(`Restore failed: ${err.message || 'unknown'}`, 'error');
+    }
+  }
+
+  // R25 · Pause banner + button label sync. Called on every
+  // paused/resumed event and on office-state refresh.
+  _updatePauseBanner() {
+    const banner = document.getElementById('teamPauseBanner');
+    const text = document.getElementById('teamPauseText');
+    const pauseBtn = document.getElementById('btnTeamPause');
+    const paused = !!(this.state && this.state.paused);
+    if (banner) banner.classList.toggle('hidden', !paused);
+    if (text) {
+      const reason = (this.state && this.state.pauseReason) || '';
+      text.textContent = reason ? `Team paused — ${reason}` : 'Team paused';
+    }
+    if (pauseBtn) pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+  }
+
+  // R25 · Snapshots modal open + populate.
+  async openSnapshotsModal() {
+    const modal = document.getElementById('snapshotsModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    await this.renderSnapshotsList();
+  }
+  closeSnapshotsModal() {
+    const modal = document.getElementById('snapshotsModal');
+    if (modal) modal.classList.add('hidden');
+  }
+  async renderSnapshotsList() {
+    const list = document.getElementById('snapshotsList');
+    if (!list) return;
+    const snapshots = await this.listTeamSnapshots();
+    if (snapshots.length === 0) {
+      list.innerHTML = `<div class="snapshots-empty">No snapshots yet. Click "Snapshot current team" to save the running team.</div>`;
+      return;
+    }
+    list.innerHTML = snapshots.map(s => {
+      const safe = this.escapeAttr(s.name);
+      const when = s.createdAt ? this.timeAgo(new Date(s.createdAt).getTime()) : '';
+      return `<div class="snapshot-row">
+        <div class="snapshot-row-main">
+          <div class="snapshot-row-name">${this.escapeHtml(s.name)}</div>
+          <div class="snapshot-row-meta">${s.memberCount || 0} members · saved ${this.escapeHtml(when)}</div>
+          ${s.teamMission ? `<div class="snapshot-row-mission">${this.escapeHtml(String(s.teamMission).slice(0, 140))}</div>` : ''}
+        </div>
+        <div class="snapshot-row-actions">
+          <button class="panel-btn" onclick="office.restoreTeamSnapshot('${safe}').then(() => office.renderSnapshotsList())">Restore</button>
+          <button class="panel-btn panel-btn-danger" onclick="office.deleteTeamSnapshot('${safe}').then(() => office.renderSnapshotsList())">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async deleteTeamSnapshot(name) {
+    if (!name) return;
+    if (!window.confirm(`Delete snapshot "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/office/snapshots/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': this.csrfToken || '' },
+      });
+      if (res.ok) {
+        this.showNotification(`Deleted snapshot "${name}"`, 'info');
+      } else {
+        this.showNotification(`Delete failed`, 'error');
+      }
+    } catch {
+      this.showNotification(`Delete failed`, 'error');
     }
   }
 

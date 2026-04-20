@@ -1135,6 +1135,202 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 	ok(w, nil)
 }
 
+// OfficePauseTeam freezes team automation — no auto-standup, no
+// stuck-agent recovery nudges, no idle replenishment. In-flight
+// turns still complete; pause means "no new input", not "suspend
+// mid-step". Idempotent. R25.
+func (ctx *Context) OfficePauseTeam(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength > 0 {
+		_ = request.DecodeAndValidateMax(w, r, &req, 1<<12)
+	}
+	wasPaused := ctx.OfficeManager.SetPaused(true, req.Reason)
+	paused, since, reason := ctx.OfficeManager.PauseSnapshot()
+	ctx.SSEBroker.Broadcast("office:teamPaused", map[string]interface{}{
+		"paused":       paused,
+		"since":        since.UnixMilli(),
+		"reason":       reason,
+		"wasPaused":    wasPaused,
+	})
+	slog.Info("team paused", "reason", reason, "wasPaused", wasPaused)
+	ok(w, map[string]interface{}{"paused": true, "reason": reason})
+}
+
+// OfficeListSnapshots returns summaries of every saved snapshot.
+// GET /api/office/snapshots. R25.
+func (ctx *Context) OfficeListSnapshots(w http.ResponseWriter, r *http.Request) {
+	snaps, err := office.ListSnapshots()
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if snaps == nil {
+		snaps = []office.SnapshotSummary{}
+	}
+	ok(w, map[string]interface{}{"snapshots": snaps})
+}
+
+// OfficeCreateSnapshot captures the current team state to a named
+// snapshot. POST /api/office/snapshots {name}. R25.
+func (ctx *Context) OfficeCreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !request.DecodeAndValidateMax(w, r, &req, 1<<12) {
+		return
+	}
+	if err := office.ValidateSnapshotName(req.Name); err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Snapshot current workingDir from any live SDK session so the
+	// restore handler can rehydrate the same path. All agents share
+	// the team working dir, so any session gives us the answer.
+	workingDir := ""
+	if ctx.SessionManager != nil {
+		roster := ctx.OfficeManager.GetRoster()
+		for _, a := range roster {
+			if sdk, ok := ctx.SessionManager.GetSDKSession(a.SessionID); ok {
+				workingDir = sdk.WorkingDir
+				break
+			}
+		}
+	}
+
+	snap, err := ctx.OfficeManager.CreateSnapshot(req.Name, workingDir)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx.SSEBroker.Broadcast("office:snapshotCreated", map[string]interface{}{
+		"name":        snap.Name,
+		"createdAt":   snap.CreatedAt.UnixMilli(),
+		"memberCount": len(snap.Members),
+	})
+	slog.Info("team snapshot created", "name", snap.Name, "members", len(snap.Members))
+	ok(w, map[string]interface{}{
+		"name":        snap.Name,
+		"createdAt":   snap.CreatedAt.UnixMilli(),
+		"memberCount": len(snap.Members),
+	})
+}
+
+// OfficeDeleteSnapshot removes a saved snapshot.
+// DELETE /api/office/snapshots/{name}. R25.
+func (ctx *Context) OfficeDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := office.DeleteSnapshot(name); err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx.SSEBroker.Broadcast("office:snapshotDeleted", map[string]interface{}{"name": name})
+	slog.Info("team snapshot deleted", "name", name)
+	ok(w, map[string]interface{}{"deleted": name})
+}
+
+// OfficeRestoreSnapshot spawns a fresh team from a saved snapshot.
+// The team must NOT already be spawned (operator shuts down first).
+// Post-spawn, persisted task queues are seeded back onto the
+// matching agents by configID. POST /api/office/snapshots/{name}/restore. R25.
+func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
+	if ctx.OfficeManager.IsTeamSpawned() {
+		request.WriteError(w, http.StatusConflict,
+			"team is already spawned; shut down the current team before restoring a snapshot")
+		return
+	}
+	name := chi.URLParam(r, "name")
+	snap, err := office.LoadSnapshot(name)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(snap.Members) == 0 {
+		request.WriteError(w, http.StatusBadRequest, "snapshot has no members")
+		return
+	}
+	if snap.WorkingDir == "" {
+		request.WriteError(w, http.StatusBadRequest, "snapshot has no workingDir")
+		return
+	}
+
+	// Rebuild a synthetic spawn request from the snapshot. We route
+	// through spawnTeamFromRequest so all the existing spawn plumbing
+	// (allowlist validation, template resolve, session creation)
+	// runs unchanged.
+	overrides := make([]memberOverride, 0, len(snap.Members))
+	for _, m := range snap.Members {
+		ov := memberOverride{
+			ID:           m.ConfigID,
+			Name:         m.Config.Name,
+			Role:         m.Config.Role,
+			Tier:         m.Config.Tier,
+			Color:        m.Config.Color,
+			Personality:  m.Config.Personality,
+			SystemPrompt: m.Config.SystemPrompt,
+			Skills:       m.Config.Skills,
+		}
+		overrides = append(overrides, ov)
+	}
+	perpetual := snap.PerpetualMode
+	req := spawnTeamRequest{
+		WorkingDir:      snap.WorkingDir,
+		Mission:         snap.TeamMission,
+		MemberOverrides: overrides,
+		PerpetualMode:   &perpetual,
+	}
+
+	// spawnTeamFromRequest writes its own response — we can't read
+	// its result directly, so use a buffering writer to see if it
+	// succeeded before broadcasting + seeding queues.
+	rec := &scheduledResponseWriter{}
+	ctx.spawnTeamFromRequest(rec, req)
+	if rec.status >= 400 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(rec.status)
+		_, _ = w.Write(rec.body.Bytes())
+		return
+	}
+
+	// Seed the task queues onto freshly-spawned agents by configID.
+	// Memory + learnings are per-configID on disk so they rehydrate
+	// automatically from BuildKickstartPrompt without our help.
+	seeded := ctx.OfficeManager.ApplyPostSpawnTaskQueues(snap)
+
+	// Restore pause state if the snapshot was paused.
+	if snap.Paused {
+		ctx.OfficeManager.SetPaused(true, snap.PauseReason)
+		ctx.SSEBroker.Broadcast("office:teamPaused", map[string]interface{}{
+			"paused": true, "reason": snap.PauseReason,
+		})
+	}
+
+	ctx.SSEBroker.Broadcast("office:snapshotRestored", map[string]interface{}{
+		"name":          snap.Name,
+		"memberCount":   len(snap.Members),
+		"seededTasks":   seeded,
+	})
+	slog.Info("team snapshot restored",
+		"name", snap.Name, "members", len(snap.Members), "seededTasks", seeded)
+	ok(w, map[string]interface{}{
+		"restored":    snap.Name,
+		"memberCount": len(snap.Members),
+		"seededTasks": seeded,
+	})
+}
+
+// OfficeResumeTeam lifts the pause flag. Idempotent. R25.
+func (ctx *Context) OfficeResumeTeam(w http.ResponseWriter, r *http.Request) {
+	wasPaused := ctx.OfficeManager.SetPaused(false, "")
+	ctx.SSEBroker.Broadcast("office:teamResumed", map[string]interface{}{
+		"wasPaused": wasPaused,
+	})
+	slog.Info("team resumed", "wasPaused", wasPaused)
+	ok(w, map[string]interface{}{"paused": false})
+}
+
 // ---------------------------------------------------------------------------
 // Concierge handlers (Gemini Live voice assistant)
 // ---------------------------------------------------------------------------

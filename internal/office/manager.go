@@ -54,6 +54,13 @@ type Manager struct {
 	wrapUpStartedAt    time.Time
 	autoStandupEnabled bool
 	curiosityEnabled   bool
+	// R25 · When paused, the recovery ticker skips nudging, replenishment,
+	// auto-standup, and auto-brainstorms. In-flight agent turns complete
+	// normally — pause is "no new input", not "suspend mid-step". Unpause
+	// restores normal behavior without requiring a respawn.
+	paused        bool
+	pausedAt      time.Time
+	pauseReason   string
 	teamMission        string
 	// Daily USD spend budget for the whole team. 0 = unset / no budget.
 	// Purely a UI signal — used by the header budget pill and the
@@ -338,6 +345,50 @@ func (m *Manager) abortMeetingsFacilitatedBy(sessionID, facilitatorName, reason 
 // and returns a user-facing "meeting aborted" fallback instead of
 // treating it as a real response.
 const meetingAbortedSentinel = "__OFFICE_MEETING_ABORTED__"
+
+// ReassignSessionID rekeys an existing agent to a new session ID
+// without losing its memory, task queue, learnings, or any other
+// AgentState fields. Used by R25's in-place restart: the operator
+// can kill + respawn one agent's SDK session while keeping the
+// institutional knowledge intact.
+//
+// Also releases any file locks owned by the old session ID (they'd
+// otherwise stay keyed on the dead session) and updates the configIndex
+// so GetAgentByConfig keeps returning the same AgentState.
+//
+// Returns true if the reassignment happened. false means the old
+// session wasn't registered (nothing to reassign) or the new session
+// ID was already taken (shouldn't happen with UUID v4s; guard anyway).
+func (m *Manager) ReassignSessionID(oldSessionID, newSessionID string) bool {
+	if oldSessionID == "" || newSessionID == "" || oldSessionID == newSessionID {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	agent, ok := m.agents[oldSessionID]
+	if !ok {
+		return false
+	}
+	if _, collides := m.agents[newSessionID]; collides {
+		return false
+	}
+	agent.SessionID = newSessionID
+	m.agents[newSessionID] = agent
+	delete(m.agents, oldSessionID)
+	if agent.Config != nil {
+		m.configIndex[agent.ConfigID] = newSessionID
+	}
+	// Move file locks owned by the old session to the new one so
+	// the restart doesn't drop the agent's in-progress exclusivity
+	// on files it was editing.
+	for path, lock := range m.fileLocks {
+		if lock.Owner == oldSessionID {
+			lock.Owner = newSessionID
+			m.fileLocks[path] = lock
+		}
+	}
+	return true
+}
 
 // UnregisterAgent removes a team member.
 func (m *Manager) UnregisterAgent(sessionID string) {
@@ -801,6 +852,42 @@ func (m *Manager) SetWrappingUp(v bool) {
 	} else {
 		m.wrapUpStartedAt = time.Time{}
 	}
+}
+
+// R25 · Pause / resume team-level automation. When paused, the
+// recovery ticker short-circuits (no stuck-detection nudges, no
+// idle-replenishment prompts, no auto-standup, no auto-brainstorm).
+// In-flight agent turns still complete — pause is "no new input",
+// not "suspend mid-turn". Returns the previous state so handlers
+// can distinguish idempotent calls from state changes.
+func (m *Manager) SetPaused(v bool, reason string) (wasPaused bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	wasPaused = m.paused
+	m.paused = v
+	if v {
+		m.pausedAt = time.Now()
+		m.pauseReason = reason
+	} else {
+		m.pausedAt = time.Time{}
+		m.pauseReason = ""
+	}
+	return
+}
+
+// IsPaused returns whether the team is currently paused.
+func (m *Manager) IsPaused() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.paused
+}
+
+// PauseSnapshot returns the current pause state + metadata for
+// inclusion in the office-state payload.
+func (m *Manager) PauseSnapshot() (paused bool, since time.Time, reason string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.paused, m.pausedAt, m.pauseReason
 }
 
 // SetPerpetualMode sets whether agents should continuously find new work.
@@ -1945,6 +2032,11 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	teamSpawned := m.teamSpawned
 	wrappingUp := m.wrappingUp
 	perpetualMode := m.perpetualMode
+	// R25 · Pause state so the dashboard can show a banner + gate
+	// operator-affordances (e.g. Pause button flips to Resume).
+	paused := m.paused
+	pausedSince := m.pausedAt
+	pauseReason := m.pauseReason
 	m.mu.RUnlock()
 
 	roster := m.GetRoster()
@@ -1991,6 +2083,14 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		wrapUp = status
 	}
 
+	var pauseBlock interface{}
+	if paused {
+		pauseBlock = map[string]interface{}{
+			"since":  pausedSince.UnixMilli(),
+			"reason": pauseReason,
+		}
+	}
+
 	return map[string]interface{}{
 		"members":           members,
 		"standupActive":     standupActive,
@@ -2000,6 +2100,8 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"fileLocks":         locks,
 		"teamSpawned":       teamSpawned,
 		"perpetualMode":     perpetualMode,
+		"paused":            paused,
+		"pause":             pauseBlock,
 		"whiteboardNotes":   whiteboardNotes,
 		"bugTasks":          bugTasks,
 		"taskQueues":        taskQueues,

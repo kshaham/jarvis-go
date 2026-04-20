@@ -122,11 +122,22 @@
         <button class="hdr-btn hdr-btn-primary" id="btnSpawnTeam" onclick="office.spawnTeam()">Spawn Team</button>
         <button class="hdr-btn" id="btnStandup" onclick="office.startStandup()">Standup</button>
         <button class="hdr-btn" id="btnWrapUp" onclick="office.wrapUpAll()">Wrap Up</button>
+        <!-- R25 · Team lifecycle controls -->
+        <button class="hdr-btn" id="btnTeamPause" onclick="office.toggleTeamPause()">Pause</button>
+        <button class="hdr-btn" id="btnSnapshots" onclick="office.openSnapshotsModal()">Snapshots</button>
         <button class="hdr-btn" id="btnSaveAsTemplate" onclick="office.openSaveTeamAsTemplate()">Save as Template</button>
         <button class="hdr-btn hdr-btn-danger" id="btnShutdownTeam" onclick="office.shutdownTeam()">Shut Down</button>
         <a href="/" class="hdr-btn">Sessions</a>
       </div>
     </header>
+
+    <!-- R25 · Team paused banner. Hidden by default; toggled by
+         _updatePauseBanner() on office:teamPaused / teamResumed. -->
+    <div class="team-pause-banner hidden" id="teamPauseBanner" role="status">
+      <span class="team-pause-dot"></span>
+      <span id="teamPauseText">Team paused</span>
+      <button class="team-pause-resume" onclick="office.toggleTeamPause()">Resume</button>
+    </div>
 
     <!-- Stats Bar -->
     <div class="office-stats-bar">
@@ -729,6 +740,25 @@
   </div>
 
   <!-- Spawn Team Config Modal -->
+  <!-- R25 · Snapshots modal. Lists saved snapshots + lets operator
+       create / restore / delete. Restore requires the current team
+       to be shut down first; server enforces. -->
+  <div class="member-modal-overlay hidden" id="snapshotsModal" role="dialog" aria-modal="true" aria-labelledby="snapshotsTitle" onclick="if(event.target===this)office.closeSnapshotsModal()">
+    <div class="member-modal snapshots-modal">
+      <button class="modal-close" onclick="office.closeSnapshotsModal()" aria-label="Close">&times;</button>
+      <div class="snapshots-header">
+        <div>
+          <h2 class="spawn-config-title" id="snapshotsTitle">Team Snapshots</h2>
+          <p class="spawn-config-subtitle">Save the current team for later resume, or restore a saved team.</p>
+        </div>
+        <button class="panel-btn panel-btn-primary" id="btnSnapshotCreate" onclick="office.createTeamSnapshot()">Snapshot current team</button>
+      </div>
+      <div class="snapshots-list" id="snapshotsList">
+        <!-- Populated by renderSnapshotsList() -->
+      </div>
+    </div>
+  </div>
+
   <div class="member-modal-overlay hidden" id="spawnConfigModal" role="dialog" aria-modal="true" aria-labelledby="spawnConfigTitle" onclick="if(event.target===this)office.closeSpawnConfigModal()">
     <div class="member-modal spawn-config-modal">
       <button class="modal-close" onclick="office.closeSpawnConfigModal()" aria-label="Close">&times;</button>

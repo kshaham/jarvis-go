@@ -817,6 +817,7 @@ func (s *Server) setupRouter() chi.Router {
 				// Read-only office endpoints (no CSRF)
 				r.Get("/status", h.OfficeStatus)
 				r.Get("/templates", h.OfficeTemplates)
+				r.Get("/snapshots", h.OfficeListSnapshots) // R25 · read-only snapshot list
 				r.Get("/health", h.OfficeHealth)
 				r.Get("/settings", h.OfficeGetSettings)
 				r.Get("/auto-standup", h.OfficeGetAutoStandup)
@@ -869,6 +870,15 @@ func (s *Server) setupRouter() chi.Router {
 					// R18 · surgical agent controls for operators
 					r.Post("/agent/kill", h.OfficeAgentKill)
 					r.Post("/agent/inject", h.OfficeAgentInjectPrompt)
+					// R25 · lifecycle controls
+					r.Post("/agent/workdir", h.OfficeAgentBumpWorkdir)
+					r.Post("/agent/restart", h.OfficeAgentRestart)
+					r.Post("/pause", h.OfficePauseTeam)
+					r.Post("/resume", h.OfficeResumeTeam)
+					// R25 · snapshot + restore
+					r.Post("/snapshots", h.OfficeCreateSnapshot)
+					r.Delete("/snapshots/{name}", h.OfficeDeleteSnapshot)
+					r.Post("/snapshots/{name}/restore", h.OfficeRestoreSnapshot)
 					r.Post("/standup", h.OfficePostStandup)
 					r.Post("/standup/user-message", h.OfficePostStandupUserMessage)
 					r.Put("/member/{sessionId}/personality", h.OfficePutMemberPersonality)

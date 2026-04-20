@@ -181,9 +181,14 @@ func (m *Manager) startAutoStandup() {
 				m.mu.RLock()
 				enabled := m.autoStandupEnabled
 				standupActive := m.standup != nil && m.standup.Active
+				paused := m.paused
 				m.mu.RUnlock()
 
 				if !enabled || standupActive {
+					return
+				}
+				// R25 · Auto-standup is gated on pause too.
+				if paused {
 					return
 				}
 
@@ -720,6 +725,13 @@ func (m *Manager) checkForWedgedWorkingAgents() {
 // checkForStuckAgents iterates over all registered agents and attempts
 // recovery for those that have been inactive too long after receiving a prompt.
 func (m *Manager) checkForStuckAgents() {
+	// R25 · Paused team doesn't get recovery nudges. Agents that
+	// look stuck mid-pause are just idling per the operator's
+	// intent — not worth the recovery prompt (which would wake
+	// them back up mid-pause).
+	if m.IsPaused() {
+		return
+	}
 	now := time.Now()
 
 	m.mu.RLock()
@@ -998,6 +1010,9 @@ func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDurat
 func (m *Manager) CheckForIdleAgents() {
 	if m.IsWrappingUp() {
 		return // Don't assign new work during wrap-up
+	}
+	if m.IsPaused() {
+		return // R25 · Paused team doesn't get replenishment prompts.
 	}
 	if !m.IsPerpetualMode() {
 		return // Goal mode: don't force-replenish, agents stop when tasks are done
