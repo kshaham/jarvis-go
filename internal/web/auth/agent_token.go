@@ -65,8 +65,18 @@ func (m *AgentTokenManager) loadOrCreate() {
 	m.token = encoded
 	m.mu.Unlock()
 
-	if err := os.WriteFile(m.path, []byte(encoded), 0600); err != nil {
-		slog.Error("Failed to persist agent token", "error", err)
+	// R26 state review: atomic write (temp + rename) so a crash
+	// mid-write can't leave the token file truncated. A truncated
+	// token invalidates every in-flight agent session on the next
+	// boot, which is avoidable.
+	tmp := m.path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(encoded), 0600); err != nil {
+		slog.Error("Failed to persist agent token (write tmp)", "error", err)
+		return
+	}
+	if err := os.Rename(tmp, m.path); err != nil {
+		_ = os.Remove(tmp)
+		slog.Error("Failed to persist agent token (rename)", "error", err)
 		return
 	}
 	slog.Info("Generated new agent token", "path", m.path)

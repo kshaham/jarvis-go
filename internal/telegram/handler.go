@@ -332,14 +332,29 @@ func (h *Handler) handleMessage(msg *Message) {
 	chatID := strconv.FormatInt(msg.Chat.ID, 10)
 
 	// Chat ID verification: only process messages from the configured chat.
+	// R26 security review: previously the check short-circuited when
+	// ChatID was empty, so any user who discovered the bot token during
+	// initial setup could issue commands. Now: RequireChatIDVerify=true
+	// with an empty ChatID is treated as "not configured yet" and
+	// rejects all traffic.
 	settings := h.settings.Get()
-	if settings.RequireChatIDVerify && settings.ChatID != "" && chatID != settings.ChatID {
-		slog.Warn("[telegram/handler] message from unauthorized chat",
-			"chatID", chatID, "expectedChatID", settings.ChatID)
-		h.queue.Enqueue(chatID,
-			"Not authorized. This bot is configured for a specific chat. Check your Telegram settings in Jarvis.",
-			nil)
-		return
+	if settings.RequireChatIDVerify {
+		if settings.ChatID == "" {
+			slog.Warn("[telegram/handler] message received but chat ID not yet configured",
+				"chatID", chatID)
+			h.queue.Enqueue(chatID,
+				"Not authorized. The bot owner needs to configure a chat ID in Jarvis settings before this bot accepts commands.",
+				nil)
+			return
+		}
+		if chatID != settings.ChatID {
+			slog.Warn("[telegram/handler] message from unauthorized chat",
+				"chatID", chatID, "expectedChatID", settings.ChatID)
+			h.queue.Enqueue(chatID,
+				"Not authorized. This bot is configured for a specific chat. Check your Telegram settings in Jarvis.",
+				nil)
+			return
+		}
 	}
 
 	text := strings.TrimSpace(msg.Text)
@@ -392,6 +407,27 @@ func (h *Handler) handleMessage(msg *Message) {
 
 // handleCallbackQuery processes an inline keyboard button press.
 func (h *Handler) handleCallbackQuery(query *CallbackQuery) {
+	// R26 security review: enforce the same chat-ID allowlist
+	// handleMessage uses. Without this gate, any Telegram user who
+	// can reach the bot could answer permission prompts for the
+	// operator's active session by guessing a short session ID.
+	// A blank expected ChatID means the operator hasn't configured
+	// one yet — refuse all callbacks until they do, rather than
+	// defaulting to "anyone allowed."
+	settings := h.settings.Get()
+	if settings.RequireChatIDVerify {
+		chatID := ""
+		if query.Message != nil {
+			chatID = strconv.FormatInt(query.Message.Chat.ID, 10)
+		}
+		if settings.ChatID == "" || chatID != settings.ChatID {
+			slog.Warn("[telegram/handler] callback from unauthorized chat",
+				"chatID", chatID, "expectedChatID", settings.ChatID)
+			h.answerCallbackQuery(query.ID, "Not authorized.")
+			return
+		}
+	}
+
 	action, params := ParseCallbackData(query.Data)
 	if action == "" {
 		h.answerCallbackQuery(query.ID, "Invalid callback data")

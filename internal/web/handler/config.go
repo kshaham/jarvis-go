@@ -83,14 +83,57 @@ func (ctx *Context) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetSettings returns the current settings.
-// GET /api/settings
+// GetSettings returns the current settings with API keys and other
+// sensitive values masked. GET /api/settings.
+//
+// R26 security review: the raw settings map carries claudeApiKey /
+// zaiApiKey / telegram.token in plaintext. Returning the full map
+// leaks those secrets to any authenticated browser session AND to
+// any agent that passes AuthWithAgentToken. Mask them with the same
+// helper GetSettingsAccounts uses so the operator can still see
+// "something is configured" without leaking impersonable material.
 func (ctx *Context) GetSettings(w http.ResponseWriter, r *http.Request) {
-	settings := ctx.StateStore.GetSettings()
+	raw := ctx.StateStore.GetSettings()
+	settings := MaskSensitiveSettings(raw)
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success":  true,
 		"settings": settings,
 	})
+}
+
+// MaskSensitiveSettings returns a shallow copy of the settings map
+// with known secret fields redacted via maskSecret. Known fields:
+//   - claudeApiKey, zaiApiKey (top-level)
+//   - telegram.token (nested map)
+//
+// Non-secret fields pass through unchanged. Caller owns the returned
+// map; the original is not mutated. Exported so the SSE init closure
+// in internal/web/server.go can reuse the same redaction list.
+func MaskSensitiveSettings(raw map[string]interface{}) map[string]interface{} {
+	if raw == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(raw))
+	for k, v := range raw {
+		out[k] = v
+	}
+	if _, ok := out["claudeApiKey"]; ok {
+		out["claudeApiKey"] = maskSecret(out["claudeApiKey"])
+	}
+	if _, ok := out["zaiApiKey"]; ok {
+		out["zaiApiKey"] = maskSecret(out["zaiApiKey"])
+	}
+	if tg, ok := out["telegram"].(map[string]interface{}); ok {
+		tgCopy := make(map[string]interface{}, len(tg))
+		for k, v := range tg {
+			tgCopy[k] = v
+		}
+		if _, tok := tgCopy["token"]; tok {
+			tgCopy["token"] = maskSecret(tgCopy["token"])
+		}
+		out["telegram"] = tgCopy
+	}
+	return out
 }
 
 // UpdateSettings updates the settings.

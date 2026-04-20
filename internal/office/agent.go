@@ -418,6 +418,27 @@ func (a *AgentState) SetSDKWorking(working bool) {
 	a.mu.Unlock()
 }
 
+// SetWorktreePath updates the agent's working-directory bookkeeping
+// under the agent mutex and returns the previous value. R26
+// concurrency review: WorktreePath was being written raw by the
+// workdir-bump handler, racing with any goroutine reading it.
+func (a *AgentState) SetWorktreePath(path string) (previous string) {
+	a.mu.Lock()
+	previous = a.WorktreePath
+	a.WorktreePath = path
+	a.mu.Unlock()
+	return
+}
+
+// GetWorktreePath returns the agent's current working-directory
+// bookkeeping under the agent mutex. Paired with SetWorktreePath to
+// keep the field data-race-free across goroutines.
+func (a *AgentState) GetWorktreePath() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.WorktreePath
+}
+
 // SetProvider records the LLM provider + model string the agent was spawned
 // with. Safe to call from the spawn handler; read back by BuildMemberPayload.
 func (a *AgentState) SetProvider(provider, model string) {

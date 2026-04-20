@@ -59,9 +59,17 @@ func (m *Manager) GetLocks() []*FileLock {
 			delete(m.fileLocks, path)
 		}
 	}
+	// R26 concurrency review: deep copies so callers don't race
+	// with writers mutating lock.Owner (ReassignSessionID) or
+	// lock.ExpiresAt. Matches the R21 pattern for GetMeetings /
+	// the R26 fix for GetBugTasks.
 	result := make([]*FileLock, 0, len(m.fileLocks))
 	for _, lock := range m.fileLocks {
-		result = append(result, lock)
+		if lock == nil {
+			continue
+		}
+		copied := *lock
+		result = append(result, &copied)
 	}
 	return result
 }

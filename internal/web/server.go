@@ -198,13 +198,18 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 			srv.handlerCtx.RespawnMu.RUnlock()
 		}
 
+		// R26 security review: the SSE init payload is received by every
+		// authenticated client AND by spawned agent sessions (via
+		// AuthWithAgentToken). Feeding them the raw settings map leaked
+		// claudeApiKey / zaiApiKey / telegram.token. Mask via the same
+		// helper GET /api/settings uses.
 		return map[string]interface{}{
 			"type":          "init",
 			"sessions":      sessionList,
 			"scheduledRuns": []interface{}{},
 			"respawnStatus": respawnStatus,
 			"version":       "0.2.0-go",
-			"settings":      stateStore.GetSettings(),
+			"settings":      handler.MaskSensitiveSettings(stateStore.GetSettings()),
 			"config":        stateStore.GetConfig(),
 			"globalStats": map[string]interface{}{
 				"sessionCount": len(sessionList),
@@ -411,6 +416,14 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.notificationsRouter.Stop()
 	}
 	s.telegramHandler.Stop()
+	// R26 state review: AppState.save() debounces writes through a
+	// 500ms timer. Without an explicit Flush on shutdown, any setting
+	// / token-stats update from the last half-second is lost on a
+	// clean SIGTERM. Flush is safe to call multiple times and no-op
+	// when the debounce is idle.
+	if s.stateStore != nil {
+		s.stateStore.Flush()
+	}
 	return s.httpServer.Shutdown(ctx)
 }
 
@@ -492,9 +505,16 @@ func (s *Server) setupRouter() chi.Router {
 	}
 
 	// Prometheus metrics at the standard /metrics path (outside /api so
-	// scrape configs don't need a custom path). No auth: firewall / reverse
-	// proxy is expected to restrict access to internal networks.
-	r.Handle("/metrics", metrics.Handler())
+	// scrape configs don't need a custom path). R26 security review:
+	// previously unauthenticated — deployments without a reverse proxy
+	// leaked goroutine / heap / session counts to the public internet.
+	// Now behind the same auth middleware as /debug/pprof. Prometheus
+	// scrapers can hit it with a session cookie or an agent token;
+	// per-scrape auth is a single HMAC check so cost is negligible.
+	r.Route("/metrics", func(r chi.Router) {
+		r.Use(mw.AuthWithAgentToken(s.authManager, s.agentTokenMgr))
+		r.Handle("/", metrics.Handler())
+	})
 
 	// pprof mounted inside an authenticated subtree so heap/goroutine
 	// profiles only flow to logged-in operators. Idle endpoints are
@@ -524,8 +544,10 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/auth/status", h.GetAuthStatus)
 			r.Post("/auth/setup", h.AuthSetup)
 			r.Post("/auth/login", h.AuthLogin)
-			r.Post("/auth/logout", h.AuthLogout)
-			r.Post("/auth/change-password", h.AuthChangePassword)
+			// R26 security review: /auth/logout and /auth/change-password
+			// used to live here. Both are mutating, state-changing POSTs
+			// that need CSRF protection — moved below to the authenticated
+			// CSRF-protected group.
 			// Telegram webhook (auth via secret in URL path)
 			r.Post("/telegram/webhook/{secret}", s.telegramHandler.WebhookHandler)
 
@@ -673,6 +695,13 @@ func (s *Server) setupRouter() chi.Router {
 			// Mutating routes (CSRF required)
 			r.Group(func(r chi.Router) {
 				r.Use(mw.CSRF(s.csrfStore))
+
+				// R26 · Auth lifecycle mutations require CSRF just like
+				// any other state-changing POST. A cross-site request
+				// without the token cannot forcibly log the operator
+				// out or bounce their password.
+				r.Post("/auth/logout", h.AuthLogout)
+				r.Post("/auth/change-password", h.AuthChangePassword)
 
 				// Session CRUD
 				r.Post("/sessions", h.CreateSession)

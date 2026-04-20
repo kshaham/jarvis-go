@@ -205,8 +205,11 @@ func (ctx *Context) OfficeAgentBumpWorkdir(w http.ResponseWriter, r *http.Reques
 		agentName = agent.Config.Name
 	}
 
-	previous := agent.WorktreePath
-	agent.WorktreePath = resolved
+	// R26 concurrency review: WorktreePath is a shared field on
+	// AgentState; writing it raw races with any other goroutine
+	// reading it. SetWorktreePath wraps the update in the agent
+	// mutex and returns the prior value atomically.
+	previous := agent.SetWorktreePath(resolved)
 
 	sessions := ctx.OfficeManager.Sessions()
 	if sessions == nil {
@@ -277,7 +280,8 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	if workingDir == "" {
 		// Fallback: agent.WorktreePath is set by R25's workdir bump
 		// and by spawnAgentSession. Either way it's a safe fallback.
-		workingDir = agent.WorktreePath
+		// R26 · Read under the agent mutex (see SetWorktreePath).
+		workingDir = agent.GetWorktreePath()
 	}
 	if workingDir == "" {
 		request.WriteError(w, http.StatusInternalServerError,

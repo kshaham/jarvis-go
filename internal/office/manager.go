@@ -785,9 +785,17 @@ func (m *Manager) StartMeeting(meetingType string, participants []string) *Meeti
 func (m *Manager) GetBugTasks() []*BugTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	// R26 concurrency review: deep copies so callers iterating /
+	// serializing the result don't race with writers mutating
+	// BugTask.Status / AssignedTo (UpdateBugTask, sweepOrphanedBugs).
+	// Matches the R21 pattern applied to GetMeetings.
 	result := make([]*BugTask, 0, len(m.bugTasks))
 	for _, bt := range m.bugTasks {
-		result = append(result, bt)
+		if bt == nil {
+			continue
+		}
+		copied := *bt
+		result = append(result, &copied)
 	}
 	return result
 }
@@ -1051,8 +1059,13 @@ func (m *Manager) SetTeamMission(s string) {
 	os.MkdirAll(dir, 0o755)
 	tmpFile := filepath.Join(dir, "team-mission.txt.tmp")
 	targetFile := filepath.Join(dir, "team-mission.txt")
-	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o644); err == nil {
-		os.Rename(tmpFile, targetFile)
+	// R26 state review: log rename errors + clean up the temp file
+	// so a full-disk or cross-device failure doesn't orphan files.
+	if err := os.WriteFile(tmpFile, []byte(trimmed), 0o644); err != nil {
+		slog.Warn("failed to persist team mission (write tmp)", "err", err)
+	} else if err := os.Rename(tmpFile, targetFile); err != nil {
+		slog.Warn("failed to persist team mission (rename)", "err", err)
+		_ = os.Remove(tmpFile)
 	}
 
 	// Broadcast to frontend
@@ -1166,8 +1179,12 @@ func (m *Manager) SetTeamDailyBudget(v float64) {
 	_ = os.MkdirAll(dir, 0o755)
 	tmpFile := filepath.Join(dir, "team-daily-budget.txt.tmp")
 	targetFile := filepath.Join(dir, "team-daily-budget.txt")
-	if err := os.WriteFile(tmpFile, []byte(strconv.FormatFloat(v, 'f', -1, 64)), 0o644); err == nil {
-		_ = os.Rename(tmpFile, targetFile)
+	// R26 state review: log rename errors + clean up temp.
+	if err := os.WriteFile(tmpFile, []byte(strconv.FormatFloat(v, 'f', -1, 64)), 0o644); err != nil {
+		slog.Warn("failed to persist team daily budget (write tmp)", "err", err)
+	} else if err := os.Rename(tmpFile, targetFile); err != nil {
+		slog.Warn("failed to persist team daily budget (rename)", "err", err)
+		_ = os.Remove(tmpFile)
 	}
 }
 
@@ -2331,14 +2348,19 @@ func (m *Manager) AppendMissionInsight(insight string) {
 	m.mu.Unlock()
 
 	// Persist to disk and broadcast (same logic as SetTeamMission but avoids double-lock race).
+	// R26 state review: log rename errors + clean up temp file on
+	// failure so a full-disk condition doesn't orphan files.
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
 		dir := filepath.Join(homeDir, ".jarvis", "office-memory")
 		os.MkdirAll(dir, 0o755)
 		tmp := filepath.Join(dir, "team-mission.txt.tmp")
 		target := filepath.Join(dir, "team-mission.txt")
-		if err := os.WriteFile(tmp, []byte(updated), 0o644); err == nil {
-			os.Rename(tmp, target)
+		if err := os.WriteFile(tmp, []byte(updated), 0o644); err != nil {
+			slog.Warn("failed to persist mission insight (write tmp)", "err", err)
+		} else if err := os.Rename(tmp, target); err != nil {
+			slog.Warn("failed to persist mission insight (rename)", "err", err)
+			_ = os.Remove(tmp)
 		}
 	}
 	m.broadcast("office:missionUpdated", map[string]interface{}{"mission": updated})
@@ -2522,9 +2544,14 @@ func (m *Manager) PersistMetrics() {
 	tmpFile := filepath.Join(dir, "metrics.json.tmp")
 	targetFile := filepath.Join(dir, "metrics.json")
 	if err := os.WriteFile(tmpFile, data, 0o644); err != nil {
+		slog.Warn("failed to persist metrics (write tmp)", "err", err)
 		return
 	}
-	os.Rename(tmpFile, targetFile)
+	// R26 state review: log rename errors + clean up the temp file.
+	if err := os.Rename(tmpFile, targetFile); err != nil {
+		slog.Warn("failed to persist metrics (rename)", "err", err)
+		_ = os.Remove(tmpFile)
+	}
 }
 
 // LoadPersistedMetrics restores metrics counters from disk if available.
