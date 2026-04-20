@@ -758,92 +758,138 @@
       </div>
 
       <!-- Step 2: Configure & Spawn -->
-      <div id="spawnStep2" class="hidden">
+      <!--
+        R22 · Redesigned as a three-tab workspace so operators can see
+        team-level settings, per-member editors, and the pre-spawn
+        summary without stacking them into one long scroll.
+        Tabs: Team (mission/workdir/mode/defaults/telegram)
+              Members (master-detail, list rail + editor pane)
+              Review (summary + member grid + final spawn button)
+      -->
+      <div id="spawnStep2" class="hidden spawn-step2-v2">
         <div class="spawn-step2-header">
           <button class="panel-btn" onclick="office.showTemplateStep()">Back</button>
-          <div>
+          <div class="spawn-step2-heading">
             <h2 class="spawn-config-title" id="spawnStep2Title">Configure Team</h2>
             <p class="spawn-config-subtitle" id="spawnStep2Subtitle"></p>
           </div>
-        </div>
-
-        <div class="spawn-config-section">
-          <label class="spawn-config-label">Team Mission / Goal</label>
-          <textarea id="spawnMission" class="spawn-config-input" rows="3"
-            placeholder="Describe what the team should accomplish..."></textarea>
-          <p class="settings-hint">The team lead will use this to assign tasks and coordinate the team.</p>
-        </div>
-
-        <div class="spawn-config-section">
-          <div class="spawn-mode-toggle" role="radiogroup" aria-label="Working directory mode">
-            <label class="spawn-mode-option">
-              <input type="radio" name="spawnMode" value="existing" checked onchange="office._updateSpawnMode()">
-              <span>Existing folder</span>
-            </label>
-            <label class="spawn-mode-option">
-              <input type="radio" name="spawnMode" value="new" onchange="office._updateSpawnMode()">
-              <span>New project</span>
-            </label>
-          </div>
-
-          <div id="spawnExistingMode">
-            <label class="spawn-config-label">Working Directory</label>
-            <input type="text" class="spawn-config-input" id="spawnWorkingDir" placeholder="/path/to/project">
-          </div>
-
-          <div id="spawnNewProjectMode" class="hidden">
-            <label class="spawn-config-label">Project name (folder)</label>
-            <input type="text" class="spawn-config-input" id="spawnProjectName" placeholder="my-new-app" pattern="[a-zA-Z0-9_\-]{1,64}" autocomplete="off">
-            <p class="settings-hint">Creates <code>/app/workspace/&lt;name&gt;</code> and seeds a CLAUDE.md with design defaults. Letters, numbers, underscores, hyphens only.</p>
+          <div class="spawn-tabs" role="tablist" aria-label="Spawn team sections">
+            <button class="spawn-tab active" role="tab" aria-selected="true" id="spawnTabBtnTeam"
+              data-tab="team" onclick="office.setSpawnTab('team')">Team</button>
+            <button class="spawn-tab" role="tab" aria-selected="false" id="spawnTabBtnMembers"
+              data-tab="members" onclick="office.setSpawnTab('members')">Members <span class="spawn-tab-count" id="spawnTabMemberCount">0</span></button>
+            <button class="spawn-tab" role="tab" aria-selected="false" id="spawnTabBtnReview"
+              data-tab="review" onclick="office.setSpawnTab('review')">Review</button>
           </div>
         </div>
 
-        <div class="spawn-config-section">
-          <label class="spawn-config-label" style="display:flex;align-items:center;gap:10px;cursor:pointer">
-            <input type="checkbox" id="spawnPerpetualMode" checked style="width:16px;height:16px;accent-color:#3b82f6">
-            <span>Perpetual Improvement Mode</span>
-          </label>
-          <p class="settings-hint" style="margin-top:4px">ON: Agents continuously find new work, write tests, refactor, and improve beyond the goal. OFF: Agents complete assigned tasks then stop.</p>
-        </div>
+        <!-- TAB: Team-level settings -->
+        <div class="spawn-tab-panel active" role="tabpanel" id="spawnTabTeam" aria-labelledby="spawnTabBtnTeam">
+          <div class="spawn-tab-scroll">
+            <div class="spawn-config-section">
+              <label class="spawn-config-label">Team Mission / Goal</label>
+              <textarea id="spawnMission" class="spawn-config-input" rows="4"
+                placeholder="Describe what the team should accomplish..."></textarea>
+              <p class="settings-hint">The team lead will use this to assign tasks and coordinate the team.</p>
+            </div>
 
-        <div class="spawn-config-section">
-          <label class="spawn-config-label">Default Provider/Model for All</label>
-          <div class="spawn-config-row">
-            <select class="spawn-config-select" id="spawnDefaultProvider" onchange="office.updateSpawnDefaults()"></select>
-            <select class="spawn-config-select" id="spawnDefaultModel" onchange="office.updateSpawnDefaultModel()"></select>
-            <button class="panel-btn" onclick="office.applySpawnDefaultsToAll()">Apply All</button>
-          </div>
-        </div>
+            <div class="spawn-config-section">
+              <div class="spawn-mode-toggle" role="radiogroup" aria-label="Working directory mode">
+                <label class="spawn-mode-option">
+                  <input type="radio" name="spawnMode" value="existing" checked onchange="office._updateSpawnMode()">
+                  <span>Existing folder</span>
+                </label>
+                <label class="spawn-mode-option">
+                  <input type="radio" name="spawnMode" value="new" onchange="office._updateSpawnMode()">
+                  <span>New project</span>
+                </label>
+              </div>
 
-        <div class="spawn-config-members" id="spawnConfigMembers"></div>
+              <div id="spawnExistingMode">
+                <label class="spawn-config-label">Working Directory</label>
+                <input type="text" class="spawn-config-input" id="spawnWorkingDir" placeholder="/path/to/project">
+              </div>
 
-        <!-- Telegram Updates -->
-        <div class="spawn-config-section" id="spawnTelegramSection" style="display:none">
-          <label class="spawn-config-label">Telegram Updates</label>
-          <div style="margin-top:4px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="spawnTelegramEnabled" />
-              <span>Enable Telegram updates from team leader</span>
-            </label>
-            <p class="settings-hint">Requires Telegram to be configured in Settings.</p>
-          </div>
-          <div id="spawnTelegramOptions" class="hidden" style="margin-top:8px">
-            <div>
-              <label>Update interval</label>
-              <select id="spawnTelegramInterval" class="spawn-config-select">
-                <option value="30">Every 30 min</option>
-                <option value="60" selected>Every 60 min</option>
-                <option value="120">Every 2 hours</option>
-                <option value="240">Every 4 hours</option>
-              </select>
+              <div id="spawnNewProjectMode" class="hidden">
+                <label class="spawn-config-label">Project name (folder)</label>
+                <input type="text" class="spawn-config-input" id="spawnProjectName" placeholder="my-new-app" pattern="[a-zA-Z0-9_\-]{1,64}" autocomplete="off">
+                <p class="settings-hint">Creates <code>/app/workspace/&lt;name&gt;</code> and seeds a CLAUDE.md with design defaults. Letters, numbers, underscores, hyphens only.</p>
+              </div>
+            </div>
+
+            <div class="spawn-config-section">
+              <label class="spawn-config-label spawn-inline-check">
+                <input type="checkbox" id="spawnPerpetualMode" checked>
+                <span>Perpetual Improvement Mode</span>
+              </label>
+              <p class="settings-hint">ON: Agents continuously find new work, write tests, refactor, and improve beyond the goal. OFF: Agents complete assigned tasks then stop.</p>
+            </div>
+
+            <div class="spawn-config-section">
+              <label class="spawn-config-label">Default Provider/Model for All</label>
+              <div class="spawn-config-row">
+                <select class="spawn-config-select" id="spawnDefaultProvider" onchange="office.updateSpawnDefaults()"></select>
+                <select class="spawn-config-select" id="spawnDefaultModel" onchange="office.updateSpawnDefaultModel()"></select>
+                <button class="panel-btn" onclick="office.applySpawnDefaultsToAll()">Apply to all</button>
+              </div>
+              <p class="settings-hint">Overrides each member's provider+model. Individual members can still be edited on the Members tab.</p>
+            </div>
+
+            <div class="spawn-config-section" id="spawnTelegramSection" style="display:none">
+              <label class="spawn-config-label">Telegram Updates</label>
+              <label class="spawn-inline-check">
+                <input type="checkbox" id="spawnTelegramEnabled" />
+                <span>Enable Telegram updates from team leader</span>
+              </label>
+              <p class="settings-hint">Requires Telegram to be configured in Settings.</p>
+              <div id="spawnTelegramOptions" class="hidden">
+                <label class="spawn-config-label">Update interval</label>
+                <select id="spawnTelegramInterval" class="spawn-config-select">
+                  <option value="30">Every 30 min</option>
+                  <option value="60" selected>Every 60 min</option>
+                  <option value="120">Every 2 hours</option>
+                  <option value="240">Every 4 hours</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="spawn-config-actions">
-          <button class="panel-btn" onclick="office.closeSpawnConfigModal()">Cancel</button>
-          <button class="panel-btn panel-btn-primary" id="btnSpawnConfirm" onclick="office.confirmSpawnTeam()">Spawn Team</button>
+        <!-- TAB: Members (master-detail) -->
+        <div class="spawn-tab-panel" role="tabpanel" id="spawnTabMembers" aria-labelledby="spawnTabBtnMembers">
+          <div class="spawn-members-split">
+            <aside class="spawn-members-rail" aria-label="Team roster">
+              <ol id="spawnMembersList" class="spawn-members-list"></ol>
+              <p class="spawn-members-rail-hint">Select a member to edit their configuration.</p>
+            </aside>
+            <section class="spawn-member-editor" id="spawnMemberEditor" aria-live="polite">
+              <!-- Populated by renderSpawnMemberEditor() -->
+            </section>
+          </div>
         </div>
+
+        <!-- TAB: Review + Spawn -->
+        <div class="spawn-tab-panel" role="tabpanel" id="spawnTabReview" aria-labelledby="spawnTabBtnReview">
+          <div class="spawn-tab-scroll">
+            <div class="spawn-review-summary" id="spawnReviewSummary">
+              <!-- Populated by renderSpawnReview() -->
+            </div>
+            <h3 class="spawn-review-heading">Team members</h3>
+            <div class="spawn-review-grid" id="spawnReviewGrid">
+              <!-- Populated by renderSpawnReview() -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Persistent footer across tabs -->
+        <footer class="spawn-config-actions">
+          <button class="panel-btn" onclick="office.closeSpawnConfigModal()">Cancel</button>
+          <div class="spawn-config-actions-right">
+            <button class="panel-btn" id="spawnPrevTabBtn" onclick="office.advanceSpawnTab(-1)">&larr; Back</button>
+            <button class="panel-btn panel-btn-primary" id="spawnNextTabBtn" onclick="office.advanceSpawnTab(1)">Next &rarr;</button>
+            <button class="panel-btn panel-btn-primary hidden" id="btnSpawnConfirm" onclick="office.confirmSpawnTeam()">Spawn Team</button>
+          </div>
+        </footer>
       </div>
     </div>
   </div>

@@ -3703,6 +3703,17 @@ class OfficeApp {
     this.populateModelSelect(document.getElementById('spawnDefaultModel'), defaultProvider, defaultModel);
 
     this.renderSpawnMemberRows(defaultProvider, defaultModel);
+    // R22 · New tabbed layout entrypoint. renderSpawnMemberRows still
+    // owns the per-member editor markup (keyed by spawn-*-${id}) so
+    // confirmSpawnTeam can read them unchanged; we additionally
+    // render the rail + auto-select the first member and reset the
+    // tab state to "Team".
+    this._renderSpawnMemberRail();
+    const firstId = (this._currentMembers && this._currentMembers[0] && this._currentMembers[0].id) || null;
+    if (firstId) this.selectSpawnMember(firstId);
+    this.setSpawnTab('team');
+    const modalShell = document.querySelector('#spawnConfigModal .spawn-config-modal');
+    if (modalShell) modalShell.classList.add('spawn-modal-wide');
 
     document.getElementById('spawnStep1').classList.add('hidden');
     document.getElementById('spawnStep2').classList.remove('hidden');
@@ -3742,6 +3753,10 @@ class OfficeApp {
     const progStep2 = document.getElementById('spawnProgressStep2');
     if (progStep1) progStep1.classList.add('active');
     if (progStep2) progStep2.classList.remove('active');
+    // R22 · Narrow the modal shell when returning to Step 1 so the
+    // template picker doesn't sit inside a 1100px container.
+    const modalShell = document.querySelector('#spawnConfigModal .spawn-config-modal');
+    if (modalShell) modalShell.classList.remove('spawn-modal-wide');
   }
 
   getDefaultModelForProvider(provider, settings) {
@@ -3760,6 +3775,11 @@ class OfficeApp {
     const s2 = document.getElementById('spawnProgressStep2');
     if (s1) s1.classList.add('active');
     if (s2) s2.classList.remove('active');
+    // R22 · Drop the wide-shell class + reset tab state so a future
+    // Step 1 render (template picker) uses the default 620px width.
+    const modalShell = document.querySelector('#spawnConfigModal .spawn-config-modal');
+    if (modalShell) modalShell.classList.remove('spawn-modal-wide');
+    this._currentSpawnTab = 'team';
   }
 
   // R16 · Toggle visibility of the two working-dir input groups depending
@@ -3832,73 +3852,314 @@ class OfficeApp {
     this.populateModelSelect(modelSelect, provider, models.length > 0 ? models[0].value : '');
   }
 
-  renderSpawnMemberRows(defaultProvider, defaultModel) {
-    const container = document.getElementById('spawnConfigMembers');
-    const membersInfo = this._currentMembers || OfficeApp.TEAM_MEMBERS_INFO;
-    const avatarColors = {
-      blue: 'var(--session-blue, #3b82f6)',
-      purple: 'var(--session-purple, #a855f7)',
-      pink: 'var(--session-pink, #ec4899)',
-      green: 'var(--session-green, #22c55e)',
-      orange: 'var(--session-orange, #f97316)',
-      yellow: 'var(--session-yellow, #eab308)',
-      red: 'var(--session-red, #ef4444)',
+  // Palette for member avatars — shared by the editor pane, the rail
+  // list, and the review grid so color assignments stay consistent
+  // across all three views.
+  static get SPAWN_AVATAR_COLORS() {
+    return {
+      blue:   '#3b82f6',
+      purple: '#a855f7',
+      pink:   '#ec4899',
+      green:  '#22c55e',
+      orange: '#f97316',
+      yellow: '#eab308',
+      red:    '#ef4444',
     };
+  }
 
+  renderSpawnMemberRows(defaultProvider, defaultModel) {
+    // R22 · Editor markup is rendered into #spawnMemberEditor inside
+    // the Members tab. All member editor forms are mounted at once
+    // (keyed by spawn-*-${id}) so confirmSpawnTeam can read any of
+    // them regardless of which is currently visible; selectSpawnMember
+    // toggles display. This keeps the submit flow 100% compatible
+    // with the pre-R22 code path.
+    const container = document.getElementById('spawnMemberEditor');
+    if (!container) return;
+    const membersInfo = this._currentMembers || OfficeApp.TEAM_MEMBERS_INFO;
+    const avatarColors = OfficeApp.SPAWN_AVATAR_COLORS;
     const colorOptions = Object.keys(avatarColors).map(c =>
       `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`
     ).join('');
-
-    const tierOptions = `<option value="strategic">Lead</option><option value="worker">Worker</option>`;
+    const providers = [
+      { value: 'claude-subscription', label: 'Claude Subscription' },
+      { value: 'claude-api',          label: 'Claude API' },
+      { value: 'zai-glm',             label: 'Z.AI GLM' },
+    ];
 
     container.innerHTML = membersInfo.map(member => {
-      const bgColor = avatarColors[member.color] || 'var(--text-dim)';
-      const initial = member.name[0];
+      const bgColor = avatarColors[member.color] || '#7F8C9E';
+      const initial = (member.name || '?')[0];
       const safeId = this.escapeAttr(member.id);
-
-      const providers = [
-        { value: 'claude-subscription', label: 'Claude Sub' },
-        { value: 'claude-api', label: 'Claude API' },
-        { value: 'zai-glm', label: 'Z.AI GLM' },
-      ];
       const providerOptions = providers.map(p =>
         `<option value="${p.value}"${p.value === defaultProvider ? ' selected' : ''}>${p.label}</option>`
       ).join('');
-
       const models = OfficeApp.PROVIDER_MODELS[defaultProvider] || [];
       const modelOptions = models.map(m =>
         `<option value="${m.value}"${m.value === defaultModel ? ' selected' : ''}>${m.label}</option>`
       ).join('');
+      const tierOpts = `
+        <option value="strategic"${member.tier === 'strategic' ? ' selected' : ''}>Lead</option>
+        <option value="worker"${member.tier === 'worker' ? ' selected' : ''}>Worker</option>`;
+      const colorOpts = colorOptions.replace(
+        `value="${member.color}"`,
+        `value="${member.color}" selected`
+      );
 
-      return `<div class="spawn-member-card">
-        <div class="spawn-member-card-header">
-          <div class="spawn-member-avatar" style="background: ${bgColor}">${initial}</div>
-          <div class="spawn-member-info">
-            <div class="spawn-member-name">${this.escapeHtml(member.name)}</div>
-            <div class="spawn-member-role">${this.escapeHtml(member.role)}</div>
+      return `<div class="spawn-member-editor-form" data-spawn-member-id="${safeId}" hidden>
+        <div class="spawn-editor-header">
+          <div class="spawn-member-avatar" style="background: ${bgColor}">${this.escapeHtml(initial)}</div>
+          <div>
+            <h3 class="spawn-editor-title" data-spawn-member-name-display>${this.escapeHtml(member.name || '')}</h3>
+            <p class="spawn-editor-subtitle" data-spawn-member-role-display>${this.escapeHtml(member.role || '')}</p>
           </div>
         </div>
-        <div class="spawn-member-card-fields">
-          <input type="text" id="spawn-name-${safeId}" value="${this.escapeAttr(member.name)}" placeholder="Name">
-          <input type="text" id="spawn-role-${safeId}" value="${this.escapeAttr(member.role)}" placeholder="Role">
-          <select id="spawn-tier-${safeId}">${tierOptions.replace(`value="${member.tier}"`, `value="${member.tier}" selected`)}</select>
-          <select id="spawn-color-${safeId}">${colorOptions.replace(`value="${member.color}"`, `value="${member.color}" selected`)}</select>
-          <input type="text" id="spawn-emoji-${safeId}" value="${member.emoji || ''}" placeholder="Emoji" maxlength="4" style="width:60px">
-          <select class="spawn-config-select" id="spawn-provider-${safeId}" onchange="office.updateMemberProvider('${safeId}')">${providerOptions}</select>
-          <select class="spawn-config-select" id="spawn-model-${safeId}">${modelOptions}</select>
+
+        <div class="spawn-editor-grid">
+          <div class="spawn-editor-field">
+            <label for="spawn-name-${safeId}">Name</label>
+            <input class="spawn-config-input" type="text" id="spawn-name-${safeId}"
+              value="${this.escapeAttr(member.name || '')}" placeholder="Name"
+              oninput="office._syncSpawnRail('${safeId}', 'name', this.value)">
+          </div>
+          <div class="spawn-editor-field">
+            <label for="spawn-role-${safeId}">Role</label>
+            <input class="spawn-config-input" type="text" id="spawn-role-${safeId}"
+              value="${this.escapeAttr(member.role || '')}" placeholder="Role"
+              oninput="office._syncSpawnRail('${safeId}', 'role', this.value)">
+          </div>
+          <div class="spawn-editor-field">
+            <label for="spawn-tier-${safeId}">Tier</label>
+            <select class="spawn-config-select" id="spawn-tier-${safeId}"
+              onchange="office._syncSpawnRail('${safeId}', 'tier', this.value)">${tierOpts}</select>
+          </div>
+          <div class="spawn-editor-field">
+            <label for="spawn-color-${safeId}">Color</label>
+            <select class="spawn-config-select" id="spawn-color-${safeId}"
+              onchange="office._syncSpawnRail('${safeId}', 'color', this.value)">${colorOpts}</select>
+          </div>
+          <div class="spawn-editor-field">
+            <label for="spawn-emoji-${safeId}">Emoji</label>
+            <input class="spawn-config-input" type="text" id="spawn-emoji-${safeId}"
+              value="${this.escapeAttr(member.emoji || '')}" placeholder="Emoji" maxlength="4">
+          </div>
+          <div class="spawn-editor-field">
+            <label for="spawn-provider-${safeId}">Provider</label>
+            <select class="spawn-config-select" id="spawn-provider-${safeId}"
+              onchange="office.updateMemberProvider('${safeId}')">${providerOptions}</select>
+          </div>
+          <div class="spawn-editor-field span-2">
+            <label for="spawn-model-${safeId}">Model</label>
+            <select class="spawn-config-select" id="spawn-model-${safeId}">${modelOptions}</select>
+          </div>
         </div>
-        <div class="spawn-member-soul">
-          <details>
-            <summary>Soul / Personality</summary>
-            <textarea id="spawn-personality-${safeId}" rows="2" placeholder="Agent personality/character...">${this.escapeHtml(member.personality || '')}</textarea>
-            <textarea id="spawn-systemprompt-${safeId}" rows="2" placeholder="Role-specific system prompt...">${this.escapeHtml(member.systemPrompt || '')}</textarea>
-          </details>
-          <details>
-            <summary>Advanced</summary>
-            <input type="text" id="spawn-workdir-${safeId}" placeholder="Per-agent working directory (optional)" style="width:100%;margin-top:4px;background:#18181b;border:1px solid #27272a;border-radius:4px;color:#e4e4e7;padding:4px 6px;font-size:12px;box-sizing:border-box">
-            <input type="text" id="spawn-skills-${safeId}" value="${(member.skills || []).join(', ')}" placeholder="Skills (comma-separated)" style="width:100%;margin-top:4px;background:#18181b;border:1px solid #27272a;border-radius:4px;color:#e4e4e7;padding:4px 6px;font-size:12px;box-sizing:border-box">
-          </details>
-        </div>
+
+        <section class="spawn-editor-section">
+          <h4 class="spawn-editor-section-title">Soul / Personality</h4>
+          <div class="spawn-editor-field" style="margin-bottom:8px">
+            <label for="spawn-personality-${safeId}">Personality</label>
+            <textarea class="spawn-config-input" id="spawn-personality-${safeId}" rows="4"
+              placeholder="Agent personality/character...">${this.escapeHtml(member.personality || '')}</textarea>
+          </div>
+          <div class="spawn-editor-field">
+            <label for="spawn-systemprompt-${safeId}">System prompt</label>
+            <textarea class="spawn-config-input" id="spawn-systemprompt-${safeId}" rows="6"
+              placeholder="Role-specific system prompt...">${this.escapeHtml(member.systemPrompt || '')}</textarea>
+          </div>
+        </section>
+
+        <section class="spawn-editor-section">
+          <h4 class="spawn-editor-section-title">Advanced</h4>
+          <div class="spawn-editor-grid">
+            <div class="spawn-editor-field span-2">
+              <label for="spawn-workdir-${safeId}">Working directory (optional)</label>
+              <input class="spawn-config-input" type="text" id="spawn-workdir-${safeId}"
+                placeholder="Overrides the team working directory for this agent">
+            </div>
+            <div class="spawn-editor-field span-2">
+              <label for="spawn-skills-${safeId}">Skills (comma-separated)</label>
+              <input class="spawn-config-input" type="text" id="spawn-skills-${safeId}"
+                value="${this.escapeAttr((member.skills || []).join(', '))}"
+                placeholder="office-protocols, headless-browser, ...">
+            </div>
+          </div>
+        </section>
+      </div>`;
+    }).join('');
+
+    if (membersInfo.length === 0) {
+      container.innerHTML = `<div class="spawn-editor-empty">No members on this template.</div>`;
+    }
+  }
+
+  // R22 · Renders the left-hand rail listing all members. Clicking
+  // an item calls selectSpawnMember(id). Rail entries reflect live
+  // edits via _syncSpawnRail so renaming a member in the editor
+  // updates the rail label immediately.
+  _renderSpawnMemberRail() {
+    const rail = document.getElementById('spawnMembersList');
+    if (!rail) return;
+    const members = this._currentMembers || [];
+    const colors = OfficeApp.SPAWN_AVATAR_COLORS;
+    rail.innerHTML = members.map(m => {
+      const bg = colors[m.color] || '#7F8C9E';
+      const safeId = this.escapeAttr(m.id);
+      const initial = (m.name || '?')[0];
+      const tierLabel = m.tier === 'strategic' ? 'LEAD' : 'WORKER';
+      const tierClass = m.tier === 'strategic' ? 'tier-strategic' : '';
+      return `<li>
+        <button class="spawn-member-list-item" data-spawn-rail-id="${safeId}"
+          onclick="office.selectSpawnMember('${safeId}')">
+          <span class="spawn-member-avatar" style="background:${bg}">${this.escapeHtml(initial)}</span>
+          <span class="spawn-member-label">
+            <span class="name" data-rail-name>${this.escapeHtml(m.name || m.id)}</span>
+            <span class="role" data-rail-role>${this.escapeHtml(m.role || '')}</span>
+          </span>
+          <span class="spawn-member-tier-chip ${tierClass}" data-rail-tier>${tierLabel}</span>
+        </button>
+      </li>`;
+    }).join('');
+    const count = document.getElementById('spawnTabMemberCount');
+    if (count) count.textContent = String(members.length);
+  }
+
+  // R22 · Live sync of rail labels when the editor mutates
+  // name/role/tier/color. Keeps the master-detail view coherent
+  // without a full re-render on every keystroke.
+  _syncSpawnRail(memberId, field, value) {
+    const rail = document.querySelector(`[data-spawn-rail-id="${CSS.escape(memberId)}"]`);
+    if (!rail) return;
+    if (field === 'name') {
+      const el = rail.querySelector('[data-rail-name]');
+      if (el) el.textContent = value || memberId;
+      const editor = document.querySelector(`[data-spawn-member-id="${CSS.escape(memberId)}"] [data-spawn-member-name-display]`);
+      if (editor) editor.textContent = value || memberId;
+    } else if (field === 'role') {
+      const el = rail.querySelector('[data-rail-role]');
+      if (el) el.textContent = value || '';
+      const editor = document.querySelector(`[data-spawn-member-id="${CSS.escape(memberId)}"] [data-spawn-member-role-display]`);
+      if (editor) editor.textContent = value || '';
+    } else if (field === 'tier') {
+      const chip = rail.querySelector('[data-rail-tier]');
+      if (chip) {
+        chip.textContent = value === 'strategic' ? 'LEAD' : 'WORKER';
+        chip.classList.toggle('tier-strategic', value === 'strategic');
+      }
+    } else if (field === 'color') {
+      const bg = OfficeApp.SPAWN_AVATAR_COLORS[value] || '#7F8C9E';
+      const railAvatar = rail.querySelector('.spawn-member-avatar');
+      if (railAvatar) railAvatar.style.background = bg;
+      const editorAvatar = document.querySelector(`[data-spawn-member-id="${CSS.escape(memberId)}"] .spawn-editor-header .spawn-member-avatar`);
+      if (editorAvatar) editorAvatar.style.background = bg;
+    }
+  }
+
+  // R22 · Show one editor form at a time and highlight the
+  // matching rail item.
+  selectSpawnMember(memberId) {
+    const editorForms = document.querySelectorAll('[data-spawn-member-id]');
+    editorForms.forEach(f => {
+      f.hidden = f.dataset.spawnMemberId !== memberId;
+    });
+    document.querySelectorAll('[data-spawn-rail-id]').forEach(btn => {
+      btn.classList.toggle('selected', btn.dataset.spawnRailId === memberId);
+    });
+    this._selectedSpawnMemberId = memberId;
+  }
+
+  // R22 · Tab switching. Shows the matching panel, updates aria +
+  // footer controls. The footer's Next/Back buttons only navigate
+  // between tabs; the Spawn button replaces Next on the Review tab.
+  setSpawnTab(tabName) {
+    const order = ['team', 'members', 'review'];
+    const idx = order.indexOf(tabName);
+    if (idx < 0) return;
+    this._currentSpawnTab = tabName;
+
+    document.querySelectorAll('.spawn-tab').forEach(btn => {
+      const match = btn.dataset.tab === tabName;
+      btn.classList.toggle('active', match);
+      btn.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    ['team', 'members', 'review'].forEach(t => {
+      const panel = document.getElementById('spawnTab' + t[0].toUpperCase() + t.slice(1));
+      if (panel) panel.classList.toggle('active', t === tabName);
+    });
+
+    const prevBtn = document.getElementById('spawnPrevTabBtn');
+    const nextBtn = document.getElementById('spawnNextTabBtn');
+    const spawnBtn = document.getElementById('btnSpawnConfirm');
+    if (prevBtn) prevBtn.classList.toggle('hidden', idx === 0);
+    if (nextBtn) nextBtn.classList.toggle('hidden', idx === order.length - 1);
+    if (spawnBtn) spawnBtn.classList.toggle('hidden', idx !== order.length - 1);
+
+    if (tabName === 'review') this.renderSpawnReview();
+  }
+
+  advanceSpawnTab(delta) {
+    const order = ['team', 'members', 'review'];
+    const idx = order.indexOf(this._currentSpawnTab || 'team');
+    const nextIdx = Math.max(0, Math.min(order.length - 1, idx + delta));
+    this.setSpawnTab(order[nextIdx]);
+  }
+
+  // R22 · Summary view rendered into the Review tab on entry. Pulls
+  // live values from the DOM so any in-progress edits are reflected
+  // without having to refresh after every keystroke.
+  renderSpawnReview() {
+    const summary = document.getElementById('spawnReviewSummary');
+    const grid = document.getElementById('spawnReviewGrid');
+    if (!summary || !grid) return;
+
+    const mission = (document.getElementById('spawnMission')?.value || '').trim();
+    const spawnMode = document.querySelector('input[name="spawnMode"]:checked')?.value || 'existing';
+    const workdir = spawnMode === 'new'
+      ? '/app/workspace/' + (document.getElementById('spawnProjectName')?.value || '…')
+      : (document.getElementById('spawnWorkingDir')?.value || '');
+    const perpetual = document.getElementById('spawnPerpetualMode')?.checked ? 'On' : 'Off';
+    const defProvider = document.getElementById('spawnDefaultProvider')?.value || '';
+    const defModel = document.getElementById('spawnDefaultModel')?.value || '';
+    const members = this._currentMembers || [];
+
+    summary.innerHTML = `
+      <div class="spawn-review-cell" style="grid-column: span 2">
+        <span class="k">Mission</span>
+        <span class="v mission">${this.escapeHtml(mission || '(none set)')}</span>
+      </div>
+      <div class="spawn-review-cell">
+        <span class="k">Working dir</span>
+        <span class="v" title="${this.escapeAttr(workdir)}">${this.escapeHtml(workdir || '(not set)')}</span>
+      </div>
+      <div class="spawn-review-cell">
+        <span class="k">Perpetual</span>
+        <span class="v">${perpetual}</span>
+      </div>
+      <div class="spawn-review-cell">
+        <span class="k">Default LLM</span>
+        <span class="v">${this.escapeHtml(defProvider)} / ${this.escapeHtml(defModel)}</span>
+      </div>
+      <div class="spawn-review-cell">
+        <span class="k">Members</span>
+        <span class="v">${members.length}</span>
+      </div>
+    `;
+
+    const colors = OfficeApp.SPAWN_AVATAR_COLORS;
+    grid.innerHTML = members.map(m => {
+      // Read LIVE values from the editor inputs so renames/tier
+      // changes show up in the review summary.
+      const name = document.getElementById(`spawn-name-${m.id}`)?.value || m.name || m.id;
+      const role = document.getElementById(`spawn-role-${m.id}`)?.value || m.role || '';
+      const color = document.getElementById(`spawn-color-${m.id}`)?.value || m.color;
+      const provider = document.getElementById(`spawn-provider-${m.id}`)?.value || '';
+      const model = document.getElementById(`spawn-model-${m.id}`)?.value || '';
+      const bg = colors[color] || '#7F8C9E';
+      return `<div class="spawn-review-card">
+        <span class="spawn-member-avatar" style="background:${bg}">${this.escapeHtml((name || '?')[0])}</span>
+        <span style="min-width:0;display:flex;flex-direction:column;gap:1px">
+          <span class="name">${this.escapeHtml(name)}</span>
+          <span class="meta">${this.escapeHtml(role)} · ${this.escapeHtml(provider)}/${this.escapeHtml(model)}</span>
+        </span>
       </div>`;
     }).join('');
   }
