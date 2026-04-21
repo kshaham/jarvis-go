@@ -51,6 +51,13 @@ type SessionConfig struct {
 	// R31 uses this for the onboarding router + critical rules that
 	// every teammate sees.
 	AppendSystemPrompt string
+	// OmitSkipPermissions drops the --dangerously-skip-permissions
+	// flag from the claude CLI spawn (ModeClaude only). Default zero
+	// value = false = keep the flag (existing behaviour). Auth
+	// sessions set this true because the Claude CLI refuses the flag
+	// when running as root ("cannot be used with root/sudo privileges
+	// for security reasons") and exits immediately, breaking /login.
+	OmitSkipPermissions bool
 }
 
 type NiceConfig struct {

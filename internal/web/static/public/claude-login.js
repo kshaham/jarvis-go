@@ -150,9 +150,11 @@
         }
 
         // Spawn a Claude PTY (mode: 'claude') so the CLI starts directly
-        // with its /login prompt visible. Previously this created a bash
-        // shell where the user had to know to type `claude` first --
-        // confusing for a fresh user.
+        // with its /login prompt visible. omitSkipPermissions=true is
+        // REQUIRED: Claude CLI refuses --dangerously-skip-permissions
+        // when running as root ("cannot be used with root/sudo
+        // privileges for security reasons") and exits immediately,
+        // which kills the /login flow before the user can complete it.
         const createRes = await fetch('/api/sessions', {
           method: 'POST',
           headers,
@@ -160,7 +162,8 @@
             name: 'Claude Authentication',
             mode: 'claude',
             workingDir: '/home/jarvis',
-            provider: 'claude-subscription'
+            provider: 'claude-subscription',
+            omitSkipPermissions: true
           })
         });
 

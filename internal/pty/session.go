@@ -85,6 +85,11 @@ type Session struct {
 
 	// Active tool tracking
 	activeTools map[string]bool
+
+	// Spawn option. When true, the Claude CLI is spawned without
+	// --dangerously-skip-permissions so interactive /login works.
+	// Required because the CLI refuses that flag as root.
+	omitSkipPermissions bool
 }
 
 // NewSession creates a new session (does not start it).
@@ -108,8 +113,9 @@ func NewSession(config SessionConfig) *Session {
 		events:         make(chan SessionEvent, eventChannelSize),
 		done:           make(chan struct{}),
 		idleReset:      make(chan struct{}, 1),
-		providerEnv:    config.ProviderEnv,
-		niceConfig:     config.NiceConfig,
+		providerEnv:         config.ProviderEnv,
+		niceConfig:          config.NiceConfig,
+		omitSkipPermissions: config.OmitSkipPermissions,
 	}
 }
 
@@ -138,7 +144,16 @@ func (s *Session) Start(ctx context.Context) error {
 		if lookErr != nil {
 			claudePath = "claude" // fallback to PATH resolution
 		}
-		cmd = exec.CommandContext(sessionCtx, claudePath, "--dangerously-skip-permissions")
+		// Auth sessions (omitSkipPermissions=true) need the flag
+		// dropped -- Claude CLI refuses --dangerously-skip-permissions
+		// when running as root and exits immediately, which kills the
+		// /login flow. Regular "new Claude session" button users keep
+		// the flag so tool-call prompts don't interrupt the loop.
+		claudeArgs := []string{}
+		if !s.omitSkipPermissions {
+			claudeArgs = append(claudeArgs, "--dangerously-skip-permissions")
+		}
+		cmd = exec.CommandContext(sessionCtx, claudePath, claudeArgs...)
 	case ModeShell:
 		cmd = exec.CommandContext(sessionCtx, "bash", "-l", "-i")
 	default:

@@ -279,10 +279,11 @@ func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
 	session, err := ctx.SessionManager.CreateSession(
 		context.Background(),
 		pty.SessionConfig{
-			WorkingDir:  workingDir,
-			Mode:        mode,
-			Name:        req.Name,
-			ProviderEnv: providerEnv,
+			WorkingDir:          workingDir,
+			Mode:                mode,
+			Name:                req.Name,
+			ProviderEnv:         providerEnv,
+			OmitSkipPermissions: req.OmitSkipPermissions,
 		},
 	)
 	if err != nil {
