@@ -2079,6 +2079,26 @@ This is a graceful shutdown. Take the time to finish cleanly, but do not begin a
 		"sessionIds":     notifiedSessionIDs,
 		"cancelledTasks": cancelledTasks,
 	})
+
+	// R33 · Fire-and-forget structured wrap-up report. Generates a
+	// markdown post-mortem into ~/.jarvis/office-memory/reports/ and
+	// broadcasts office:reportGenerated when done. Failures are
+	// logged but do not roll back the wrap-up response -- operators
+	// can always retry via POST /api/office/reports/generate.
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("panic in wrap-up report generator", "panic", rec)
+			}
+		}()
+		meta, err := office.GenerateWrapUpReport(mgr, "wrap-up", "")
+		if err != nil {
+			slog.Error("auto-generate wrap-up report failed", "err", err)
+			return
+		}
+		ctx.SSEBroker.Broadcast("office:reportGenerated", meta)
+		slog.Info("wrap-up report generated", "filename", meta.Filename, "bytes", meta.SizeBytes)
+	}()
 }
 
 // OfficePostWrapUpCancel cancels a wrap-up.

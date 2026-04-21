@@ -580,13 +580,36 @@
           <div class="panel-header">
             <h2 class="panel-title">Reports</h2>
             <div class="report-export-actions">
-              <button class="panel-btn" id="btnCopyReport" onclick="office.exportReportMarkdown()" title="Copy the report as markdown">Copy markdown</button>
-              <button class="panel-btn" id="btnDownloadReport" onclick="office.downloadReportMarkdown()" title="Download as .md">Download .md</button>
+              <button class="panel-btn" id="btnCopyReport" onclick="office.exportReportMarkdown()" title="Copy the live dashboard report as markdown">Copy markdown</button>
+              <button class="panel-btn" id="btnDownloadReport" onclick="office.downloadReportMarkdown()" title="Download the live dashboard report as .md">Download .md</button>
+              <button class="panel-btn panel-btn-primary" onclick="office.generateSavedReport()" title="Generate a structured wrap-up report on the server">Generate saved report</button>
               <button class="panel-btn" onclick="office.renderReportDashboard()">Refresh</button>
+            </div>
+          </div>
+          <!-- R33 · Server-generated wrap-up reports persisted to disk.
+               Distinct from the in-browser "Copy/Download .md" above: this
+               list persists across sessions and carries backend-only data
+               (agent memory, learnings, handoff history). -->
+          <div class="saved-reports-section">
+            <h3 class="saved-reports-title">Saved Wrap-Up Reports</h3>
+            <div class="saved-reports-list" id="savedReportsList">
+              <div class="saved-reports-empty">Loading saved reports…</div>
             </div>
           </div>
           <div class="report-dashboard" id="reportContent">
             <div class="metrics-loading">Loading report...</div>
+          </div>
+        </div>
+
+        <!-- R33 · Saved-report viewer modal -->
+        <div class="modal hidden" id="savedReportModal" role="dialog" aria-labelledby="savedReportModalTitle">
+          <div class="modal-overlay" onclick="office.closeSavedReportModal()"></div>
+          <div class="modal-content saved-report-modal-content">
+            <div class="modal-header">
+              <h3 class="modal-title" id="savedReportModalTitle">Wrap-up report</h3>
+              <button class="modal-close" onclick="office.closeSavedReportModal()" aria-label="Close">&times;</button>
+            </div>
+            <pre class="saved-report-body" id="savedReportBody"></pre>
           </div>
         </div>
 

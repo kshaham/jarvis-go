@@ -5563,6 +5563,91 @@ p, .agent-card-task, .agent-activity-item {
 
 /* ========== Feature: Reports Tab ========== */
 
+/* R33 · Saved wrap-up reports list. Distinct from the live
+   dashboard below; these rows hang above the dashboard inside the
+   same panel so operators see both at once. */
+.saved-reports-section {
+  padding: 16px 20px 0;
+}
+.saved-reports-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0 0 8px 0;
+}
+.saved-reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.saved-reports-empty {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-default);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.1);
+}
+.saved-report-row {
+  padding: 8px 12px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.saved-report-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.saved-report-ts {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.saved-report-trigger {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  background: #172554;
+  color: #93c5fd;
+}
+.saved-report-trigger-manual { background: #1e293b; color: #cbd5e1; }
+.saved-report-trigger-wrap-up { background: #052e16; color: #86efac; }
+.saved-report-size { margin-left: auto; }
+.saved-report-mission {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.saved-report-actions { display: flex; gap: 6px; }
+.saved-report-modal-content {
+  max-width: 900px;
+  width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+.saved-report-body {
+  overflow: auto;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.2);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  border-radius: 0 0 8px 8px;
+}
+
 .report-dashboard {
   flex: 1;
   overflow-y: auto;

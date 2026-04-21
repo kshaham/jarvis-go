@@ -634,6 +634,18 @@ class OfficeApp {
       this.addActivityEntry('handoff', `handoff expired: "${data.handoff.taskTitle}" (receiver left roster)`);
       this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
     });
+    // R33 · Saved wrap-up report generated (auto on wrap-up or via
+    // POST /api/office/reports/generate). Refresh the list if the
+    // Reports tab is open; otherwise just silently update memory.
+    this.eventSource.addEventListener('office:reportGenerated', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data || !data.filename) return;
+      this.addActivityEntry('system', `Wrap-up report generated: ${data.filename}`);
+      if (this.activeTab === 'reports') {
+        this._scheduleRender(() => this.fetchAndRenderSavedReports(), 'savedReports', 200);
+      }
+    });
+
     // R32 · sender-initiated cancel (closes R29 carry-over).
     this.eventSource.addEventListener('office:handoffCancelled', (e) => {
       const data = this.safeParseSSE(e);
@@ -2123,7 +2135,10 @@ class OfficeApp {
     if (tab === 'activity') this.renderActivity();
     if (tab === 'metrics') this.fetchAndRenderMetrics();
     if (tab === 'settings') this.fetchOfficeSettings();
-    if (tab === 'reports') this.renderReportDashboard();
+    if (tab === 'reports') {
+      this.renderReportDashboard();
+      this.fetchAndRenderSavedReports();
+    }
     if (tab === 'timeline') this.renderTimeline();
     if (tab === 'insights') this.renderInsights();
     if (tab === 'meetings') this.renderMeetings();
@@ -7102,6 +7117,96 @@ class OfficeApp {
     // Release the blob URL after a tick so the browser commits the download.
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     this.showToast('Report downloaded', 'success');
+  }
+
+  // R33 · Saved wrap-up reports (server-side persisted).
+  //
+  // Distinct from the in-browser live report above: saved reports
+  // live in ~/.jarvis/office-memory/reports/, are generated on
+  // wrap-up or via `generateSavedReport()`, and carry backend-only
+  // data (agent memory, learnings, full handoff log) that the
+  // client-side report can't see.
+
+  async fetchAndRenderSavedReports() {
+    const list = document.getElementById('savedReportsList');
+    if (!list) return;
+    try {
+      const res = await fetch('/api/office/reports');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      this._renderSavedReports(data.reports || []);
+    } catch (err) {
+      console.error('fetch saved reports:', err);
+      list.innerHTML = `<div class="saved-reports-empty">Failed to load saved reports.</div>`;
+    }
+  }
+
+  _renderSavedReports(reports) {
+    const list = document.getElementById('savedReportsList');
+    if (!list) return;
+    if (!reports.length) {
+      list.innerHTML = `<div class="saved-reports-empty">No saved reports yet. A report is generated automatically when you wrap up the team, or you can create one now with <strong>Generate saved report</strong>.</div>`;
+      return;
+    }
+    const rows = reports.map(r => {
+      const ts = r.generatedAt ? new Date(r.generatedAt).toLocaleString() : r.filename;
+      const trigger = this.escapeHtml(r.trigger || 'manual');
+      const mission = this.escapeHtml(r.teamMission || '');
+      const size = this._formatBytes(r.sizeBytes || 0);
+      const href = '/api/office/reports/' + encodeURIComponent(r.filename);
+      return `<div class="saved-report-row">
+        <div class="saved-report-meta">
+          <span class="saved-report-ts">${this.escapeHtml(ts)}</span>
+          <span class="saved-report-trigger saved-report-trigger-${trigger}">${trigger}</span>
+          <span class="saved-report-size">${size}</span>
+        </div>
+        ${mission ? `<div class="saved-report-mission">${mission}</div>` : ''}
+        <div class="saved-report-actions">
+          <button class="btn btn-sm" onclick="office.viewSavedReport('${this.escapeAttr(r.filename)}')">View</button>
+          <a class="btn btn-sm" href="${href}" download="${this.escapeAttr(r.filename)}">Download</a>
+        </div>
+      </div>`;
+    }).join('');
+    list.innerHTML = rows;
+  }
+
+  _formatBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  async generateSavedReport() {
+    try {
+      await this.postJson('/api/office/reports/generate', { trigger: 'manual' });
+      this.showToast('Saved report generated', 'success');
+      await this.fetchAndRenderSavedReports();
+    } catch (err) {
+      console.error('generate saved report:', err);
+      this.showToast('Failed to generate report: ' + (err.message || err), 'error');
+    }
+  }
+
+  async viewSavedReport(filename) {
+    const modal = document.getElementById('savedReportModal');
+    const body = document.getElementById('savedReportBody');
+    const title = document.getElementById('savedReportModalTitle');
+    if (!modal || !body) return;
+    title.textContent = filename;
+    body.textContent = 'Loading…';
+    modal.classList.remove('hidden');
+    try {
+      const res = await fetch('/api/office/reports/' + encodeURIComponent(filename));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      body.textContent = await res.text();
+    } catch (err) {
+      body.textContent = 'Failed to load: ' + (err.message || err);
+    }
+  }
+
+  closeSavedReportModal() {
+    const modal = document.getElementById('savedReportModal');
+    if (modal) modal.classList.add('hidden');
   }
 
   _renderExperimentHistory(experiments) {

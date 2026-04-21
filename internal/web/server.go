@@ -885,6 +885,9 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/dev-instances", h.OfficeGetDevInstances)
 				// R29 · handoff visibility (read-only)
 				r.Get("/handoffs", h.OfficeListHandoffs)
+				// R33 · wrap-up / post-mortem reports (read-only).
+				r.Get("/reports", h.OfficeListReports)
+				r.Get("/reports/{filename}", h.OfficeGetReport)
 
 				// Mutating office endpoints (CSRF required)
 				r.Group(func(r chi.Router) {
@@ -908,6 +911,8 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/code-graph/impact", h.OfficePostCodeGraphImpact)
 					r.Post("/wrap-up", h.OfficePostWrapUp)
 					r.Post("/wrap-up/cancel", h.OfficePostWrapUpCancel)
+					// R33 · on-demand wrap-up report generation.
+					r.Post("/reports/generate", h.OfficeGenerateReport)
 					// R18 · surgical agent controls for operators
 					r.Post("/agent/kill", h.OfficeAgentKill)
 					r.Post("/agent/inject", h.OfficeAgentInjectPrompt)
