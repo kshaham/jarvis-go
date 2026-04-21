@@ -232,6 +232,69 @@ func TestHandoff_StaleSweepReceiverAlive(t *testing.T) {
 	}
 }
 
+// R32 · sender-initiated cancel. Task returns to sender's queue in
+// in_progress state; audit entry records HandoffCancelled.
+func TestHandoff_SenderCancels(t *testing.T) {
+	m, vex, bolt, task := setupTeamForHandoff(t)
+
+	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "nevermind"); err != nil {
+		t.Fatalf("initiate: %v", err)
+	}
+	if task.Status != TaskHandoffPending || task.Handoff == nil {
+		t.Fatal("precondition: task should be handoff_pending with non-nil Handoff")
+	}
+
+	h, err := m.CancelHandoff(vex.SessionID, task.ID)
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if h.Status != HandoffCancelled {
+		t.Errorf("expected status=cancelled, got %s", h.Status)
+	}
+	if task.Status != TaskInProgress {
+		t.Errorf("expected task back to in_progress, got %s", task.Status)
+	}
+	if task.Handoff != nil {
+		t.Error("handoff pointer should be cleared")
+	}
+	// Audit store should contain the cancelled entry.
+	history := m.GetHandoffHistory()
+	found := false
+	for _, e := range history {
+		if e.TaskID == task.ID && e.Status == HandoffCancelled {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("audit store missing the cancelled entry")
+	}
+	// Task stays with sender.
+	if len(vex.GetTasks()) != 1 || len(bolt.GetTasks()) != 0 {
+		t.Errorf("task should still be on sender; vex=%d bolt=%d",
+			len(vex.GetTasks()), len(bolt.GetTasks()))
+	}
+}
+
+func TestHandoff_CancelByNonSender_Forbidden(t *testing.T) {
+	m, vex, bolt, task := setupTeamForHandoff(t)
+	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "x"); err != nil {
+		t.Fatalf("initiate: %v", err)
+	}
+	// Bolt (the receiver, not the sender) tries to cancel.
+	_, err := m.CancelHandoff(bolt.SessionID, task.ID)
+	if err == nil {
+		t.Fatal("expected error when non-sender cancels")
+	}
+	if !strings.Contains(err.Error(), "not your handoff") {
+		t.Errorf("expected 'not your handoff', got %v", err)
+	}
+	// Sanity: task remains handoff_pending.
+	if task.Status != TaskHandoffPending {
+		t.Errorf("task should still be handoff_pending; got %s", task.Status)
+	}
+}
+
 func TestHandoff_IncomingHandoffsFor(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
 	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {

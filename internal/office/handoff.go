@@ -35,10 +35,11 @@ import (
 type HandoffStatus string
 
 const (
-	HandoffPending  HandoffStatus = "pending"
-	HandoffAccepted HandoffStatus = "accepted"
-	HandoffRejected HandoffStatus = "rejected"
-	HandoffExpired  HandoffStatus = "expired"
+	HandoffPending   HandoffStatus = "pending"
+	HandoffAccepted  HandoffStatus = "accepted"
+	HandoffRejected  HandoffStatus = "rejected"
+	HandoffExpired   HandoffStatus = "expired"
+	HandoffCancelled HandoffStatus = "cancelled" // R32 · sender retracted before resolution
 )
 
 // HandoffSource tags a task's Source field once the task has been
@@ -85,6 +86,7 @@ const (
 	EventHandoffAccepted  = "office:handoffAccepted"
 	EventHandoffRejected  = "office:handoffRejected"
 	EventHandoffExpired   = "office:handoffExpired"
+	EventHandoffCancelled = "office:handoffCancelled" // R32 · sender retracted
 )
 
 // handoffStore is the Manager's persistent audit log for handoffs.
@@ -381,6 +383,47 @@ func (m *Manager) RejectHandoff(receiverSessionID, taskID, reason string) (*Hand
 		return nil, fmt.Errorf("not your handoff")
 	}
 	return m.finishReject(h, task, sender, receiver, reason)
+}
+
+// CancelHandoff retracts a pending handoff initiated by the caller.
+// Ownership is enforced by resolveHandoffPair's requireFromSession
+// argument: only the sender of the pending handoff can cancel it.
+// On success the task returns to in_progress, the handoff pointer
+// clears, and an audit entry with status=cancelled is persisted.
+// No chat message -- the sender doesn't need to notify themself.
+// R32 · closes the R29 "cancel-pending-handoff by sender" carry-over.
+func (m *Manager) CancelHandoff(senderSessionID, taskID string) (*HandoffRequest, error) {
+	h, task, sender, _, err := m.resolveHandoffPair(taskID, senderSessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	sender.mu.Lock()
+	task.Handoff = nil
+	task.Status = TaskInProgress
+	senderName := ""
+	if sender.Config != nil {
+		senderName = sender.Config.Name
+	}
+	task.ProgressLog = append(task.ProgressLog, TaskProgressEntry{
+		Timestamp: time.Now(),
+		Note:      fmt.Sprintf("[handoff cancelled by %s]", senderName),
+	})
+	if len(task.ProgressLog) > taskProgressLogCap {
+		task.ProgressLog = task.ProgressLog[len(task.ProgressLog)-taskProgressLogCap:]
+	}
+	sender.mu.Unlock()
+
+	h.Status = HandoffCancelled
+	h.ResolvedAt = time.Now()
+	h.RejectReason = "cancelled by sender"
+	m.ensureHandoffStore().append(*h)
+
+	m.auditLog("office:handoffCancelled", sender.SessionID, senderName, map[string]interface{}{
+		"taskId": h.TaskID, "to": h.ToSessionID, "toName": h.ToName,
+	})
+	m.broadcast(EventHandoffCancelled, map[string]interface{}{"handoff": h})
+	return h, nil
 }
 
 // ForceAcceptHandoff is the operator-auth variant. Bypasses the

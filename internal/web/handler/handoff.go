@@ -84,6 +84,29 @@ func (ctx *Context) OfficeAgentHandoffAccept(w http.ResponseWriter, r *http.Requ
 	ok(w, map[string]interface{}{"handoff": h})
 }
 
+// OfficeAgentHandoffCancel retracts a pending handoff. Only the
+// sender of the handoff can call this; resolveHandoffPair inside
+// CancelHandoff enforces the ownership check and returns "not your
+// handoff" -> 403 otherwise.
+// POST /api/office/task/handoff/cancel
+func (ctx *Context) OfficeAgentHandoffCancel(w http.ResponseWriter, r *http.Request) {
+	var req handoffResolveRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
+	if agent == nil {
+		request.WriteError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	h, err := ctx.OfficeManager.CancelHandoff(req.SessionID, req.TaskID)
+	if err != nil {
+		request.WriteError(w, statusForHandoffError(err), err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{"handoff": h})
+}
+
 // OfficeAgentHandoffReject rejects a pending handoff.
 // POST /api/office/task/handoff/reject
 func (ctx *Context) OfficeAgentHandoffReject(w http.ResponseWriter, r *http.Request) {

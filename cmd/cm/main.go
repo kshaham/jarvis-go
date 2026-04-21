@@ -235,7 +235,7 @@ func handleDiscover(args []string) {
 
 func handleTask(args []string) {
 	if len(args) < 1 {
-		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage|handoff|handoff-accept|handoff-reject> ...")
+		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage|handoff|handoff-accept|handoff-reject|handoff-cancel> ...")
 	}
 	subcmd := args[0]
 	subargs := args[1:]
@@ -376,6 +376,17 @@ func handleTask(args []string) {
 			"reason":    reason,
 		})
 		fmt.Printf("Handoff of task %s rejected.\n", subargs[0])
+
+	// R32 · sender-initiated cancel. Retract a pending handoff before
+	// the receiver accepts or rejects. Only the original sender can
+	// cancel (server returns 403 otherwise).
+	case "handoff-cancel":
+		requireArgs(subargs, 1, "cm task handoff-cancel <taskId>")
+		post("/api/office/agent/task/handoff/cancel", map[string]interface{}{
+			"sessionId": sessionID,
+			"taskId":    subargs[0],
+		})
+		fmt.Printf("Handoff of task %s cancelled; task is back on your queue.\n", subargs[0])
 
 	default:
 		fatal("Unknown task subcommand: " + subcmd)
@@ -912,6 +923,7 @@ Commands:
   task handoff <taskId> <toConfigId> <context>   Hand work over mid-task
   task handoff-accept <taskId>        Accept an incoming handoff
   task handoff-reject <taskId> <reason>          Decline an incoming handoff
+  task handoff-cancel <taskId>        Retract your own pending handoff
   lock <filePath>                     Lock a file before editing
   unlock <filePath>                   Unlock after committing
   locks                               List active file locks

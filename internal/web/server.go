@@ -589,6 +589,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/task/handoff", h.OfficeAgentHandoffInitiate)
 				r.Post("/task/handoff/accept", h.OfficeAgentHandoffAccept)
 				r.Post("/task/handoff/reject", h.OfficeAgentHandoffReject)
+				// R32 · sender-initiated cancel (carry-over from R29).
+				r.Post("/task/handoff/cancel", h.OfficeAgentHandoffCancel)
 				r.Post("/brainstorm/response", h.OfficeAgentBrainstormResponse)
 				r.Post("/leader-tasks/response", h.OfficeAgentLeaderTasksResponse)
 				r.Post("/reflection/response", h.OfficeAgentReflectionResponse)

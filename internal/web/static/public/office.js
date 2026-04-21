@@ -634,6 +634,14 @@ class OfficeApp {
       this.addActivityEntry('handoff', `handoff expired: "${data.handoff.taskTitle}" (receiver left roster)`);
       this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
     });
+    // R32 · sender-initiated cancel (closes R29 carry-over).
+    this.eventSource.addEventListener('office:handoffCancelled', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data || !data.handoff) return;
+      this.addActivityEntry('handoff', `${data.handoff.fromName || 'agent'} cancelled handoff of "${data.handoff.taskTitle}"`);
+      this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
+      if (this.activeTab === 'agents') this._scheduleRender(() => this.renderAgentCards(), 'agents', 200);
+    });
 
     this.eventSource.addEventListener('office:meetingStarted', (e) => {
       const data = this.safeParseSSE(e);
@@ -5136,19 +5144,72 @@ class OfficeApp {
     const kanban = document.getElementById('kanbanBoard');
     const graph = document.getElementById('taskGraphWrap');
     const hideDone = document.getElementById('taskGraphHideDone');
+    const download = document.getElementById('taskGraphDownload');
+    // querySelector on .task-view-chip hits every chip including the
+    // download button -- only set `active` based on the data-task-view
+    // attribute (which only the kanban/graph chips carry).
     document.querySelectorAll('.task-view-chip').forEach(el => {
+      if (!el.dataset.taskView) return;
       el.classList.toggle('active', el.dataset.taskView === view);
     });
     if (view === 'graph') {
       if (kanban) kanban.classList.add('hidden');
       if (graph) graph.classList.remove('hidden');
       if (hideDone) hideDone.classList.remove('hidden');
+      if (download) download.classList.remove('hidden');
       this.fetchAndRenderTaskGraph();
     } else {
       if (kanban) kanban.classList.remove('hidden');
       if (graph) graph.classList.add('hidden');
       if (hideDone) hideDone.classList.add('hidden');
+      if (download) download.classList.add('hidden');
     }
+  }
+
+  // R32 · Graph export. Clones the live SVG, inlines computed styles
+  // per element (so the downloaded file renders without the
+  // dashboard's CSS), serializes to XML, and triggers a Blob download.
+  exportTaskGraphSvg() {
+    const svg = document.getElementById('taskGraphSvg');
+    if (!svg) return;
+    const clone = svg.cloneNode(true);
+    // Copy computed style into each element so the file renders
+    // correctly outside the dashboard's CSS.
+    const inlineStyles = (live, clonedEl) => {
+      const cs = window.getComputedStyle(live);
+      // Only properties that affect visual output -- avoid flooding the
+      // file with every single CSS property (there are ~350).
+      const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray',
+        'opacity', 'font-family', 'font-size', 'font-weight'];
+      const decls = [];
+      for (const p of props) {
+        const v = cs.getPropertyValue(p);
+        if (v && v !== 'none' && v !== 'normal') decls.push(p + ':' + v);
+      }
+      if (decls.length) clonedEl.setAttribute('style', decls.join(';'));
+    };
+    const liveNodes = svg.querySelectorAll('*');
+    const clonedNodes = clone.querySelectorAll('*');
+    for (let i = 0; i < liveNodes.length && i < clonedNodes.length; i++) {
+      inlineStyles(liveNodes[i], clonedNodes[i]);
+    }
+    // Also set a background so SVG renders well on a light viewer.
+    clone.setAttribute('style', 'background:#0a0a0a');
+
+    const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const filename = `task-graph-${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}.svg`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   setGraphHideCompleted(hide) {

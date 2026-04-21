@@ -136,6 +136,38 @@ func TestOfficeListHandoffs_PendingAndHistory(t *testing.T) {
 	}
 }
 
+func TestHandoffCancel_HappyPath(t *testing.T) {
+	ctx, vex, bolt, task := seedHandoffTeam(t)
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	rec := postJSON(t, ctx.OfficeAgentHandoffCancel, "/api/office/task/handoff/cancel", map[string]interface{}{
+		"sessionId": vex.SessionID,
+		"taskId":    task.ID,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if task.Handoff != nil {
+		t.Error("handoff should be cleared after cancel")
+	}
+}
+
+func TestHandoffCancel_WrongSender(t *testing.T) {
+	ctx, vex, bolt, task := seedHandoffTeam(t)
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// bolt (the receiver) tries to cancel -- should fail with 403.
+	rec := postJSON(t, ctx.OfficeAgentHandoffCancel, "/api/office/task/handoff/cancel", map[string]interface{}{
+		"sessionId": bolt.SessionID,
+		"taskId":    task.ID,
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandoffForceReject_Operator(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
 	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
