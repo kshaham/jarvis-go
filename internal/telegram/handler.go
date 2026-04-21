@@ -45,6 +45,11 @@ type Handler struct {
 	pendingMu           sync.Mutex
 	pendingInteractions map[string]*PendingInteraction // shortID -> interaction
 
+	// R35 · Pending lead replies awaiting forward. One entry per
+	// lead session ID; overwritten on concurrent /ask to the same
+	// lead. Swept every interaction-cleanup tick.
+	leadReply *leadReplyState
+
 	// Runtime-only linked sessions. Not persisted -- cleared on restart.
 	linkedSessions map[string]string // chatID -> sessionID
 	unsubscribers  map[string]func() // chatID -> unsubscribe output observer
@@ -81,6 +86,7 @@ func NewHandler(bot *Bot, settingsStore *SettingsStore, server ServerBridge) *Ha
 		pendingInteractions: make(map[string]*PendingInteraction),
 		linkedSessions:      make(map[string]string),
 		unsubscribers:       make(map[string]func()),
+		leadReply:           newLeadReplyState(),
 	}
 
 	h.commands = NewCommandRouter(h, server)
@@ -169,10 +175,36 @@ func (h *Handler) Stop() {
 
 // SetOfficeBridge sets the office bridge for leader reply routing.
 // Called after office.Manager is created, since the office depends on the handler.
+//
+// R35 · Also installs the lead-reply callback so the handler can
+// forward the lead's next assistant response back to Telegram after
+// a /lead or /ask prompt. Passing nil clears both.
 func (h *Handler) SetOfficeBridge(bridge OfficeBridge) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.officeBridge = bridge
+	h.mu.Unlock()
+	if bridge == nil {
+		return
+	}
+	bridge.SetLeadReplyCallback(func(sessionID, text string) {
+		h.tryForwardLeadReply(sessionID, text)
+	})
+}
+
+// getOfficeBridge returns the installed OfficeBridge under the
+// handler's read lock. Used by commands that need to resolve lead
+// agents / forward replies. Returns nil when no bridge is set.
+func (h *Handler) getOfficeBridge() OfficeBridge {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.officeBridge
+}
+
+// StandupCompleteEnabled reports whether the operator has opted into
+// the R35 end-of-standup Telegram push. Checked by the office
+// notifier before sending the summary.
+func (h *Handler) StandupCompleteEnabled() bool {
+	return h.settings.Get().Notifications.StandupComplete
 }
 
 // IsConnected returns true if the handler is started and the bot is connected.
@@ -677,13 +709,19 @@ func (h *Handler) interactionCleanupLoop(ctx context.Context) {
 func (h *Handler) cleanupExpiredInteractions() {
 	now := time.Now()
 	h.pendingMu.Lock()
-	defer h.pendingMu.Unlock()
-
 	for shortID, interaction := range h.pendingInteractions {
 		if now.After(interaction.ExpiresAt) {
 			slog.Debug("[telegram/handler] expired pending interaction",
 				"shortID", shortID, "type", interaction.Type)
 			delete(h.pendingInteractions, shortID)
+		}
+	}
+	h.pendingMu.Unlock()
+
+	// R35 · Sweep lead-reply expectations on the same tick.
+	if h.leadReply != nil {
+		if dropped := h.leadReply.sweepExpired(); dropped > 0 {
+			slog.Debug("[telegram/handler] expired lead-reply entries", "dropped", dropped)
 		}
 	}
 }

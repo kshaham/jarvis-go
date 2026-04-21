@@ -1,6 +1,7 @@
 package office
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -167,6 +168,11 @@ type AgentState struct {
 
 	// Personality override
 	PersonalityOverride *PersonalityOverride
+
+	// R35 · Per-turn assistant-text buffer. Accumulated from
+	// EventOutput, flushed on EventIdle, forwarded to Telegram when
+	// a /lead or /ask prompt is waiting on a reply from this session.
+	turnTextBuf strings.Builder
 
 	// Cost + token aggregation, fed by the SSE event forwarder on every
 	// pty.EventTokens. Enables per-agent spend and token displays in the
@@ -353,6 +359,44 @@ func (a *AgentState) SetTaskProgress(taskID string, progress string) bool {
 		}
 	}
 	return false
+}
+
+// turnTextBufCap bounds the per-agent turn-text buffer so a runaway
+// assistant message can't balloon memory. 128 KB is far beyond any
+// reasonable single turn's final text output but well under the cost
+// of letting it grow unchecked.
+const turnTextBufCap = 128 * 1024
+
+// AppendTurnText buffers a chunk of assistant text for the current
+// turn. Called by the SDK event forwarder on every pty.EventOutput
+// so the full turn's text is available at EventIdle for forwarding
+// to Telegram (R35 lead-reply flow). Hard-caps at turnTextBufCap to
+// bound memory; overflow is silently dropped (rare; the truncation
+// pill in renderLeadReply covers this case for users).
+func (a *AgentState) AppendTurnText(s string) {
+	if s == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.turnTextBuf.Len()+len(s) > turnTextBufCap {
+		remaining := turnTextBufCap - a.turnTextBuf.Len()
+		if remaining > 0 {
+			a.turnTextBuf.WriteString(s[:remaining])
+		}
+		return
+	}
+	a.turnTextBuf.WriteString(s)
+}
+
+// FlushTurnText returns the accumulated turn text and clears the
+// buffer. Called by the SDK forwarder on every pty.EventIdle.
+func (a *AgentState) FlushTurnText() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.turnTextBuf.String()
+	a.turnTextBuf.Reset()
+	return s
 }
 
 // RecordTurnUsage accumulates token + cost from a single turn. Called from

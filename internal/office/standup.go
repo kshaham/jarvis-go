@@ -3,6 +3,7 @@ package office
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -265,6 +266,15 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 		// Persist to disk.
 		m.persistStandup(standupID, participants, transcript, standupStartedAt)
 		m.metrics.TotalStandupsComplete.Add(1)
+
+		// R35 · Push one-line summary to Telegram so operators see
+		// the progress beat without opening the dashboard. Respects
+		// the StandupComplete notification preference inside the
+		// notifier implementation; this call is a cheap no-op when
+		// disconnected.
+		if m.telegramNotifier != nil && m.telegramNotifier.IsConnected() {
+			m.telegramNotifier.NotifyStandupComplete(buildTelegramStandupSummary(standupID, participants, transcript))
+		}
 
 		// Trigger leader task assignment by notifying strategic-tier agents.
 		m.triggerLeaderTaskAssignment(standupID, participants, transcript)
@@ -727,4 +737,58 @@ func (m *Manager) injectTaskQueue(agent *AgentState, tasks []*Task, sessions Ses
 		"agentName": agent.Config.Name,
 		"taskCount": len(tasks),
 	})
+}
+
+// buildTelegramStandupSummary renders the end-of-standup summary
+// pushed to Telegram after a standup finalises. Kept compact --
+// header + one line per agent truncated to 200 chars of their
+// response -- so it fits comfortably under Telegram's 4096 char
+// cap even for 10-agent teams. R35.
+func buildTelegramStandupSummary(standupID string, participants []string, transcript []StandupMessage) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>📋 Standup complete</b> (%d agents)\n",
+		len(participants))
+
+	// One-liner per agent from their status_report message. Fallback
+	// "(no response)" when the agent timed out.
+	reported := map[string]string{}
+	for _, msg := range transcript {
+		if msg.Type != "status_report" {
+			continue
+		}
+		if msg.SpeakerName == "" {
+			continue
+		}
+		// First line of the response, truncated.
+		line := msg.Content
+		if idx := strings.IndexByte(line, '\n'); idx > 0 {
+			line = line[:idx]
+		}
+		if len(line) > 200 {
+			line = line[:199] + "…"
+		}
+		reported[msg.SpeakerName] = strings.TrimSpace(line)
+	}
+
+	// Participants are session IDs in the transcript record; derive
+	// speaker names by walking the transcript too, since the sessionID
+	// list doesn't carry names. Collect unique ordered speakers.
+	seen := map[string]bool{}
+	for _, msg := range transcript {
+		if msg.Type != "status_report" {
+			continue
+		}
+		if seen[msg.SpeakerName] {
+			continue
+		}
+		seen[msg.SpeakerName] = true
+		line := reported[msg.SpeakerName]
+		if line == "" {
+			line = "(no response)"
+		}
+		fmt.Fprintf(&b, "• <b>%s</b>: %s\n",
+			html.EscapeString(msg.SpeakerName),
+			html.EscapeString(line))
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

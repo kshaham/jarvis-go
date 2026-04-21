@@ -21,6 +21,10 @@ type Settings struct {
 	ForwardOutputToChat bool              `json:"forwardOutputToChat"`
 	WebhookSecret       string            `json:"webhookSecret"`
 	Notifications       NotificationPrefs `json:"notifications"`
+	// R35 · LeadSessionID pins a specific session as "the lead" for
+	// the /lead + /ask Telegram commands. Empty = auto-resolve (first
+	// strategic-tier agent). Honored via OfficeBridge.GetLeadAgentInfo.
+	LeadSessionID string `json:"leadSessionId,omitempty"`
 }
 
 // NotificationPrefs controls which event types trigger Telegram notifications.
@@ -37,6 +41,10 @@ type NotificationPrefs struct {
 	Elicitation      bool `json:"elicitation"`
 	RespawnBlocked   bool `json:"respawnBlocked"`
 	PlanApproval     bool `json:"planApproval"`
+	// R35 · Push a one-line summary to Telegram when an office standup
+	// finalises. Default true (StandupComplete is a high-signal
+	// progress beat operators want).
+	StandupComplete bool `json:"standupComplete"`
 }
 
 // DefaultSettings returns production-safe defaults matching the Node.js implementation.
@@ -65,6 +73,7 @@ func DefaultSettings() Settings {
 			Elicitation:      true,
 			RespawnBlocked:   true,
 			PlanApproval:     true,
+			StandupComplete:  true,
 		},
 	}
 }

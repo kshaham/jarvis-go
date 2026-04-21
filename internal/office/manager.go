@@ -100,6 +100,12 @@ type Manager struct {
 	handoffOnce sync.Once
 	handoff     *handoffStore
 
+	// R35 · Lead-reply callback for the Telegram two-way chat.
+	// Installed by the Telegram handler; invoked on every SDK
+	// turn-complete text event so the handler can forward the
+	// lead's response to a pending chat.
+	leadReplyCb func(sessionID, text string)
+
 	// Telegram integration
 	telegramNotifier   TelegramNotifier
 	telegramEnabled    bool

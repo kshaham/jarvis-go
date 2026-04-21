@@ -114,6 +114,18 @@ func (a *officeTelegramAdapter) IsConnected() bool {
 	return a.handler != nil && a.handler.IsConnected()
 }
 
+// NotifyStandupComplete pushes the end-of-standup summary to the
+// configured chat if the StandupComplete preference is enabled.
+// R35 · closes a visible observability gap in the two-way chat flow.
+func (a *officeTelegramAdapter) NotifyStandupComplete(summary string) {
+	if !a.IsConnected() {
+		return
+	}
+	if a.handler.StandupCompleteEnabled() {
+		a.handler.SendFormattedMessage(a.chatID, summary, nil)
+	}
+}
+
 // telegramNotifyAdapter bridges notifications.TelegramSender to the existing
 // *telegram.Handler. Per-route chat IDs are configured on the ChannelSpec,
 // not the adapter, so one telegram handler services any number of routes

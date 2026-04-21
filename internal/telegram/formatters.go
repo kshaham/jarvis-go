@@ -161,7 +161,13 @@ func FormatHelpMessage() string {
 /output - Flush output buffer
 /stop - Stop linked session
 /spawn_agent &lt;task&gt; - Spawn new agent
-/stop_agent &lt;id&gt; - Stop an agent`
+/stop_agent &lt;id&gt; - Stop an agent
+
+<b>Team lead (office)</b>
+/lead - Show the lead agent's status
+/lead &lt;msg&gt; - Send prompt to the lead (reply auto-forwarded)
+/ask &lt;msg&gt; - Alias of /lead &lt;msg&gt;
+/lead_status - Always show status (args ignored)`
 }
 
 // humanDuration formats a duration in a human-readable way.

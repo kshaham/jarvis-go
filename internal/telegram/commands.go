@@ -69,6 +69,20 @@ func (cr *CommandRouter) HandleCommand(chatID, text string) {
 		cr.cmdSpawnAgent(chatID, args)
 	case "/stop_agent":
 		cr.cmdStopAgent(chatID, args)
+	// R35 · Two-way chat with the team lead.
+	// /lead         -> status
+	// /lead <text>  -> prompt (alias /ask / /prompt)
+	// /lead_status  -> always status (explicit, args ignored)
+	case "/lead":
+		if strings.TrimSpace(args) == "" {
+			cr.cmdLeadStatus(chatID)
+		} else {
+			cr.cmdAskLead(chatID, args)
+		}
+	case "/lead_status":
+		cr.cmdLeadStatus(chatID)
+	case "/ask", "/prompt":
+		cr.cmdAskLead(chatID, args)
 	default:
 		cr.handler.queue.Enqueue(chatID,
 			fmt.Sprintf("Unknown command: %s\nUse /help for available commands.", html.EscapeString(command)),
@@ -367,4 +381,73 @@ func (cr *CommandRouter) resolveSessionID(id string) string {
 	}
 
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// R35 · Lead-agent commands
+// ---------------------------------------------------------------------------
+
+// cmdLeadStatus renders a snapshot of the lead agent's current state
+// (active task, progress log, cost). Routed by `/lead` (no args) and
+// explicit `/lead_status`.
+func (cr *CommandRouter) cmdLeadStatus(chatID string) {
+	bridge := cr.handler.getOfficeBridge()
+	if bridge == nil || !bridge.IsTeamActive() {
+		cr.handler.queue.Enqueue(chatID,
+			"No team is currently running. Spawn one from the Jarvis dashboard to get a lead agent.",
+			nil)
+		return
+	}
+	pinned := cr.handler.settings.Get().LeadSessionID
+	body, ok := bridge.GetLeadStatusText(pinned)
+	if !ok {
+		cr.handler.queue.Enqueue(chatID,
+			"No strategic-tier agent is currently running. Spawn a team with at least one strategic member.",
+			nil)
+		return
+	}
+	cr.handler.queue.Enqueue(chatID, body, nil)
+}
+
+// cmdAskLead injects a prompt into the lead agent's session and
+// registers an expectation so the lead's NEXT assistant response is
+// forwarded back to this chat. Routed by /lead <text> / /ask <text>
+// / /prompt <text>.
+func (cr *CommandRouter) cmdAskLead(chatID, prompt string) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		cr.handler.queue.Enqueue(chatID,
+			"Usage: /lead <message>  or  /ask <message>\nInjects the prompt into the lead agent's session and forwards their next response back here.",
+			nil)
+		return
+	}
+	bridge := cr.handler.getOfficeBridge()
+	if bridge == nil || !bridge.IsTeamActive() {
+		cr.handler.queue.Enqueue(chatID,
+			"No team is currently running. Spawn one from the Jarvis dashboard first.",
+			nil)
+		return
+	}
+	pinned := cr.handler.settings.Get().LeadSessionID
+	leadSID, leadName := bridge.GetLeadAgentInfo(pinned)
+	if leadSID == "" {
+		cr.handler.queue.Enqueue(chatID,
+			"No strategic-tier agent is currently running. Spawn a team with at least one strategic member.",
+			nil)
+		return
+	}
+	formatted := fmt.Sprintf("[Operator via Telegram]: %s\n\nReply in one message when done; your reply will be forwarded back to Telegram automatically.", prompt)
+	if !cr.server.SendToSession(leadSID, formatted) {
+		cr.handler.queue.Enqueue(chatID,
+			fmt.Sprintf("Failed to inject prompt into %s. Session may be busy or in an incompatible mode.", html.EscapeString(leadName)),
+			nil)
+		return
+	}
+	cr.handler.leadReply.expect(leadSID, chatID, leadName)
+	cr.handler.queue.Enqueue(chatID,
+		fmt.Sprintf("✅ Sent to <b>%s</b>. I'll forward their response here when they finish the turn (10-min window).",
+			html.EscapeString(leadName)),
+		nil)
+	slog.Info("[telegram/commands] operator prompted lead via Telegram",
+		"chatID", chatID, "leadSID", leadSID, "leadName", leadName, "promptLen", len(prompt))
 }

@@ -5,6 +5,7 @@ import (
 	"html"
 	"log/slog"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,10 @@ type TelegramNotifier interface {
 	SendOfficeUpdate(text string)
 	// IsConnected returns whether Telegram is configured and active.
 	IsConnected() bool
+	// NotifyStandupComplete pushes the end-of-standup summary to the
+	// configured chat when the StandupComplete preference is enabled.
+	// R35 · closes a visible gap in the two-way chat flow.
+	NotifyStandupComplete(summary string)
 }
 
 // PendingLeaderQuery tracks a leader clarification request waiting for a
@@ -334,4 +339,136 @@ func (m *Manager) IsTeamActive() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.teamSpawned
+}
+
+// ---------------------------------------------------------------------------
+// R35 · Lead-agent resolver + status text + reply callback
+// ---------------------------------------------------------------------------
+
+// GetLeadAgentInfo resolves the current "lead" for Telegram routing.
+// Priority:
+//  1. Pinned `pinnedSessionID` if that session is still in the roster.
+//  2. First strategic-tier agent by ConfigID (deterministic).
+//  3. Empty strings -> no eligible lead.
+// Implements part of the telegram.OfficeBridge contract.
+func (m *Manager) GetLeadAgentInfo(pinnedSessionID string) (string, string) {
+	if pinnedSessionID != "" {
+		if a := m.GetAgent(pinnedSessionID); a != nil {
+			return a.SessionID, agentDisplayName(a)
+		}
+	}
+	// Auto-resolve: first strategic-tier agent, sorted for stability.
+	roster := m.GetRoster()
+	candidates := make([]*AgentState, 0, len(roster))
+	for _, a := range roster {
+		if a.Config != nil && a.Config.Tier == "strategic" {
+			candidates = append(candidates, a)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", ""
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].ConfigID < candidates[j].ConfigID
+	})
+	return candidates[0].SessionID, agentDisplayName(candidates[0])
+}
+
+// GetLeadStatusText renders the HTML-escaped Telegram message body
+// describing the lead's current state. Keeps construction in the
+// office package so telegram doesn't need to know task / agent
+// shapes. ok=false means there's no eligible lead.
+func (m *Manager) GetLeadStatusText(pinnedSessionID string) (string, bool) {
+	sid, name := m.GetLeadAgentInfo(pinnedSessionID)
+	if sid == "" {
+		return "", false
+	}
+	a := m.GetAgent(sid)
+	if a == nil {
+		return "", false
+	}
+	var b strings.Builder
+	role := ""
+	tier := ""
+	if a.Config != nil {
+		role = a.Config.Role
+		tier = a.Config.Tier
+	}
+	fmt.Fprintf(&b, "<b>%s</b> (%s", html.EscapeString(name), html.EscapeString(role))
+	if tier != "" {
+		fmt.Fprintf(&b, ", %s tier", html.EscapeString(tier))
+	}
+	b.WriteString(")\n")
+	fmt.Fprintf(&b, "<code>%s</code>\n\n", html.EscapeString(shortSessionID(a.SessionID)))
+
+	active := a.ActiveTask()
+	pending := a.PendingTaskCount()
+	if active != nil {
+		fmt.Fprintf(&b, "▶ <b>%s</b>\n", html.EscapeString(truncateForSnippet(active.Title, 120)))
+		fmt.Fprintf(&b, "status: %s", html.EscapeString(string(active.Status)))
+		if !active.StartedAt.IsZero() {
+			fmt.Fprintf(&b, " · running %s", html.EscapeString(formatDuration(time.Since(active.StartedAt))))
+		}
+		b.WriteString("\n")
+		// Last 3 progress-log notes, newest first.
+		log := active.ProgressLog
+		if len(log) > 3 {
+			log = log[len(log)-3:]
+		}
+		if len(log) > 0 {
+			b.WriteString("\nRecent progress:\n")
+			for i := len(log) - 1; i >= 0; i-- {
+				fmt.Fprintf(&b, "• %s\n", html.EscapeString(truncateForSnippet(log[i].Note, 160)))
+			}
+		}
+	} else {
+		b.WriteString("<i>No active task.</i>\n")
+	}
+
+	fmt.Fprintf(&b, "\n%d pending task%s · $%.4f so far",
+		pending, pluralS(pending), a.TotalCostUSD)
+	return b.String(), true
+}
+
+// SetLeadReplyCallback installs (or clears) the callback invoked
+// when any agent session finishes a turn with assistant text. The
+// Telegram handler uses this to forward the lead's next response
+// after an operator-initiated /ask or /lead prompt. Thread-safe;
+// nil clears.
+func (m *Manager) SetLeadReplyCallback(fn func(sessionID, text string)) {
+	m.mu.Lock()
+	m.leadReplyCb = fn
+	m.mu.Unlock()
+}
+
+// DispatchLeadReply invokes the registered callback if any. Called
+// by the SDK session event forwarder on every turn-complete text
+// event. Cheap no-op when nothing is registered.
+func (m *Manager) DispatchLeadReply(sessionID, text string) {
+	m.mu.RLock()
+	fn := m.leadReplyCb
+	m.mu.RUnlock()
+	if fn == nil {
+		return
+	}
+	fn(sessionID, text)
+}
+
+// agentDisplayName returns the agent's Config.Name, falling back to
+// the ConfigID when no config / name is set.
+func agentDisplayName(a *AgentState) string {
+	if a == nil {
+		return ""
+	}
+	if a.Config != nil && a.Config.Name != "" {
+		return a.Config.Name
+	}
+	return a.ConfigID
+}
+
+func shortSessionID(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
 }

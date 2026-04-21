@@ -169,6 +169,27 @@ type OfficeBridge interface {
 
 	// IsTeamActive returns true if a team is currently spawned and running.
 	IsTeamActive() bool
+
+	// R35 · Lead-agent helpers for the two-way Telegram chat. All
+	// return primitives to avoid cross-importing office types.
+	//
+	// GetLeadAgentInfo resolves the "current lead": returns the
+	// configured pin if alive, otherwise the first strategic-tier
+	// agent in deterministic roster order, otherwise empty strings.
+	// displayName falls back to the configID.
+	GetLeadAgentInfo(pinnedSessionID string) (sessionID, displayName string)
+
+	// GetLeadStatusText returns a pre-rendered HTML-escaped string
+	// describing the lead's current task / cost / recent progress.
+	// Office renders it so telegram doesn't need to know task/agent
+	// shapes. ok=false means there's no eligible lead.
+	GetLeadStatusText(pinnedSessionID string) (rendered string, ok bool)
+
+	// SetLeadReplyCallback installs a callback fired when ANY agent
+	// session finishes a turn with assistant text. The Telegram
+	// handler uses this to forward the lead's next response after an
+	// operator-initiated prompt. nil clears the callback.
+	SetLeadReplyCallback(fn func(sessionID, text string))
 }
 
 // ---------------------------------------------------------------------------

@@ -606,6 +606,12 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				// and is cleared on Idle (turn boundary) below.
 				if ctx.OfficeManager != nil {
 					ctx.OfficeManager.ObserveAgentOutput(sessionID, e.Data)
+					// R35 · Buffer per-turn assistant text so the
+					// forwarder can dispatch it at the turn boundary
+					// (EventIdle below) for Telegram lead-reply forwarding.
+					if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
+						agent.AppendTurnText(e.Data)
+					}
 				}
 			case pty.EventIdle:
 				broker.Broadcast("session:idle", map[string]interface{}{"id": sessionID})
@@ -615,6 +621,13 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 					agent.SetSDKWorking(false)
 					agent.SetEventsDropped(session.DroppedEvents())
+					// R35 · Flush the turn-text buffer and dispatch to
+					// any registered lead-reply callback (Telegram
+					// handler). No-op when the callback is nil or the
+					// sessionID has no pending reply waiting.
+					if text := agent.FlushTurnText(); text != "" {
+						ctx.OfficeManager.DispatchLeadReply(sessionID, text)
+					}
 					// R20 · Loop detection is scoped to a single turn —
 					// legitimate multi-turn work often rebuilds/re-runs
 					// the same commands, which would otherwise look like
