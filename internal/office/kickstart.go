@@ -135,6 +135,7 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	b.WriteString("  cm skill read office-protocols\n\n")
 	b.WriteString("Critical reminders:\n")
 	b.WriteString("- Every task: `cm task ack <id>` -> `cm task start <id>` -> `cm task progress <id> \"...\"` -> `cm task complete <id> --summary \"<2-3 sentence handoff>\"`\n")
+	b.WriteString("- Handing work over mid-task: `cm task handoff <id> <targetConfigId> \"<one-paragraph context>\"`. The receiver accepts with `cm task handoff-accept <id>` or declines with `cm task handoff-reject <id> \"<reason>\"`. Hand off when the next step is someone else's specialty AND you want the same task ID (continuous in Timeline). Complete instead when the work is done. Don't hand off to dodge effort -- operators see rejection rates per agent.\n")
 	b.WriteString("- Never push to remote, never switch branches -- you live on `agent/<your-id>`.\n")
 	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
 	b.WriteString("- Your bash output is auto-compressed by rtk (60-90%% fewer tokens on git / build / test / cat / docker / etc.). Failures fall back to raw output automatically. Prefix a command with `rtk --raw` if you need the unfiltered stream for one invocation. Full reference: `cm skill read rtk`.\n")

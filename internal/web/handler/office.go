@@ -2277,15 +2277,21 @@ func (ctx *Context) OfficeAgentMessage(w http.ResponseWriter, r *http.Request) {
 	ok(w, nil)
 }
 
-// OfficeAgentGetTasks returns tasks for the requesting agent.
+// OfficeAgentGetTasks returns tasks for the requesting agent, plus
+// any incoming handoffs awaiting accept/reject. R29 adds
+// `incomingHandoffs` to the payload so an agent polling its queue
+// sees what peers are trying to hand them without a second request.
 func (ctx *Context) OfficeAgentGetTasks(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("sessionId")
 	agent := ctx.OfficeManager.GetAgentAndTouch(sessionID)
 	if agent == nil {
-		ok(w, map[string]interface{}{"tasks": []interface{}{}})
+		ok(w, map[string]interface{}{"tasks": []interface{}{}, "incomingHandoffs": []interface{}{}})
 		return
 	}
-	ok(w, map[string]interface{}{"tasks": agent.GetTasks()})
+	ok(w, map[string]interface{}{
+		"tasks":            agent.GetTasks(),
+		"incomingHandoffs": ctx.OfficeManager.IncomingHandoffsFor(sessionID),
+	})
 }
 
 // OfficeAgentTaskStart marks a task as in-progress.

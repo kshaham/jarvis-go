@@ -583,6 +583,10 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/task-progress", h.OfficeAgentTaskProgress)
 				r.Post("/task/self-add", h.OfficeAgentTaskSelfAdd)
 				r.Post("/task/triage", h.OfficeAgentTaskTriage)
+				// R29 · Structured handoffs.
+				r.Post("/task/handoff", h.OfficeAgentHandoffInitiate)
+				r.Post("/task/handoff/accept", h.OfficeAgentHandoffAccept)
+				r.Post("/task/handoff/reject", h.OfficeAgentHandoffReject)
 				r.Post("/brainstorm/response", h.OfficeAgentBrainstormResponse)
 				r.Post("/leader-tasks/response", h.OfficeAgentLeaderTasksResponse)
 				r.Post("/reflection/response", h.OfficeAgentReflectionResponse)
@@ -873,6 +877,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/member/{sessionId}/personality", h.OfficeGetMemberPersonality)
 				r.Get("/telegram-config", h.OfficeGetTelegramConfig)
 				r.Get("/dev-instances", h.OfficeGetDevInstances)
+				// R29 · handoff visibility (read-only)
+				r.Get("/handoffs", h.OfficeListHandoffs)
 
 				// Mutating office endpoints (CSRF required)
 				r.Group(func(r chi.Router) {
@@ -899,6 +905,10 @@ func (s *Server) setupRouter() chi.Router {
 					// R18 · surgical agent controls for operators
 					r.Post("/agent/kill", h.OfficeAgentKill)
 					r.Post("/agent/inject", h.OfficeAgentInjectPrompt)
+					// R29 · operator force-resolve stuck handoffs when
+					// the receiver is unresponsive.
+					r.Post("/handoffs/force-accept", h.OfficeHandoffForceAccept)
+					r.Post("/handoffs/force-reject", h.OfficeHandoffForceReject)
 					// R25 · lifecycle controls
 					r.Post("/agent/workdir", h.OfficeAgentBumpWorkdir)
 					r.Post("/agent/restart", h.OfficeAgentRestart)

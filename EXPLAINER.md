@@ -136,11 +136,13 @@ When a Jarvis team is spawned, here is what happens:
 
 5. **File coordination.** Before editing a shared file, a team member "locks" it so no one else can modify it at the same time. When they finish, they release the lock.
 
-6. **Messaging.** Team members can send direct messages to each other, ask questions, request help, and hand off tasks.
+6. **Messaging.** Team members can send direct messages to each other, ask questions, and request help.
 
-7. **Reflection.** After completing a task, each member reflects on what they learned and adds it to their personal knowledge base.
+7. **Structured handoffs.** Mid-task, a team member can explicitly hand work to a named teammate with a short context payload ("here is what I found, this is why it's their specialty"). The receiver sees the incoming handoff in their task queue and must accept or reject. Accept moves the task (same ID, same history) to the new owner in in-progress state. Reject sends the task back to the sender along with a chat message explaining why. Every handoff is audited -- the dashboard shows pending handoffs, accept/reject counts per agent, and an activity-feed entry for each transition. Operators can force-resolve a stuck handoff when the receiver is unresponsive.
 
-8. **Wrap-up.** When you call "end of day," the team finishes what they are working on, commits their code, saves their memory, and shuts down cleanly.
+8. **Reflection.** After completing a task, each member reflects on what they learned and adds it to their personal knowledge base.
+
+9. **Wrap-up.** When you call "end of day," the team finishes what they are working on, commits their code, saves their memory, and shuts down cleanly.
 
 ---
 

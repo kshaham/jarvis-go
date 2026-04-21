@@ -95,6 +95,11 @@ type Manager struct {
 
 	events chan OfficeEvent
 
+	// R29 · Handoff audit log. Lazily initialised on first resolve so
+	// tests that reset HOME don't need a global-state dance.
+	handoffOnce sync.Once
+	handoff     *handoffStore
+
 	// Telegram integration
 	telegramNotifier   TelegramNotifier
 	telegramEnabled    bool

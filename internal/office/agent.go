@@ -21,12 +21,13 @@ type TeamMemberConfig struct {
 type TaskStatus string
 
 const (
-	TaskPending      TaskStatus = "pending"
-	TaskAcknowledged TaskStatus = "acknowledged"
-	TaskInProgress   TaskStatus = "in_progress"
-	TaskCompleted    TaskStatus = "completed"
-	TaskFailed       TaskStatus = "failed"
-	TaskBlocked      TaskStatus = "blocked"
+	TaskPending         TaskStatus = "pending"
+	TaskAcknowledged    TaskStatus = "acknowledged"
+	TaskInProgress      TaskStatus = "in_progress"
+	TaskCompleted       TaskStatus = "completed"
+	TaskFailed          TaskStatus = "failed"
+	TaskBlocked         TaskStatus = "blocked"
+	TaskHandoffPending  TaskStatus = "handoff_pending" // R29 · waiting on receiver accept/reject
 )
 
 // TaskProgressEntry is a single timestamped progress update on a task.
@@ -52,10 +53,15 @@ type Task struct {
 	AssignedAt         time.Time           `json:"assignedAt"`
 	StartedAt          time.Time           `json:"startedAt,omitempty"`
 	CompletedAt        time.Time           `json:"completedAt,omitempty"`
-	Source             string              `json:"source"` // "leader", "self", "bug"
+	Source             string              `json:"source"` // "leader", "self", "bug", "reassigned", "handoff"
 	BlockedBy          []string            `json:"blockedBy,omitempty"`
 	BlockerDescription string              `json:"blockerDescription,omitempty"`
 	ProgressLog        []TaskProgressEntry `json:"progressLog,omitempty"`
+	// R29 · Set when the current owner has initiated a handoff. Cleared
+	// on accept/reject. Task.Status is TaskHandoffPending while this
+	// pointer is non-nil and the task physically stays in the sender's
+	// queue until accepted.
+	Handoff *HandoffRequest `json:"handoff,omitempty"`
 }
 
 // TaskQueue holds a list of tasks for an agent.

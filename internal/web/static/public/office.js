@@ -603,6 +603,38 @@ class OfficeApp {
       if (data) this.handleTaskQueueUpdated(data);
     });
 
+    // R29 · Structured handoff events. On any of them, re-fetch the
+    // affected task queues so pending-handoff pills + incoming banners
+    // stay in sync. Also surface a notification so operators see the
+    // flow without staring at the Timeline.
+    this.eventSource.addEventListener('office:handoffInitiated', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data || !data.handoff) return;
+      this.addActivityEntry('handoff', `${data.handoff.fromName || 'agent'} → ${data.handoff.toName || 'agent'}: ${data.handoff.taskTitle}`);
+      this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
+      if (this.activeTab === 'agents') this._scheduleRender(() => this.renderAgentCards(), 'agents', 200);
+    });
+    this.eventSource.addEventListener('office:handoffAccepted', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data || !data.handoff) return;
+      this.addActivityEntry('handoff', `${data.handoff.toName || 'agent'} accepted "${data.handoff.taskTitle}"`);
+      this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
+      if (this.activeTab === 'agents') this._scheduleRender(() => this.renderAgentCards(), 'agents', 200);
+    });
+    this.eventSource.addEventListener('office:handoffRejected', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data || !data.handoff) return;
+      this.addActivityEntry('handoff', `${data.handoff.toName || 'agent'} declined "${data.handoff.taskTitle}"${data.handoff.rejectReason ? ': ' + data.handoff.rejectReason : ''}`);
+      this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
+      if (this.activeTab === 'agents') this._scheduleRender(() => this.renderAgentCards(), 'agents', 200);
+    });
+    this.eventSource.addEventListener('office:handoffExpired', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data || !data.handoff) return;
+      this.addActivityEntry('handoff', `handoff expired: "${data.handoff.taskTitle}" (receiver left roster)`);
+      this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
+    });
+
     this.eventSource.addEventListener('office:meetingStarted', (e) => {
       const data = this.safeParseSSE(e);
       if (data) this.handleMeetingStarted(data);
@@ -5235,19 +5267,64 @@ class OfficeApp {
       for (const queue of taskQueues) {
         if (queue.tasks.length === 0) continue;
         html += `<div class="task-queue-agent">${this.escapeHtml(queue.agentName)}</div>`;
-        html += queue.tasks.map(t => `
+        html += queue.tasks.map(t => {
+          // R29 · Render handoff pill + operator force-resolve controls
+          // when a task is handoff_pending. The click target of the card
+          // still opens the detail modal — buttons stop propagation.
+          const isHandoff = t.status === 'handoff_pending' && t.handoff;
+          const handoffPill = isHandoff
+            ? `<span class="task-status status-pill--handoff">→ ${this.escapeHtml(t.handoff.toName || 'agent')}</span>`
+            : `<span class="task-status task-status-${t.status}">${t.status}</span>`;
+          const handoffCtx = isHandoff && t.handoff.context
+            ? `<div class="task-card-handoff-ctx">${this.escapeHtml(t.handoff.context)}</div>`
+            : '';
+          const handoffControls = isHandoff
+            ? `<div class="task-card-handoff-actions">
+                <button class="btn-handoff-accept" onclick="event.stopPropagation(); office.forceAcceptHandoff('${this.escapeAttr(t.id)}')">Force accept</button>
+                <button class="btn-handoff-reject" onclick="event.stopPropagation(); office.forceRejectHandoff('${this.escapeAttr(t.id)}')">Force reject</button>
+              </div>`
+            : '';
+          return `
           <div class="task-card priority-${t.priority} task-card-clickable" onclick="office.openTaskDetail('${this.escapeAttr(queue.sessionId)}','${this.escapeAttr(t.id)}')">
             <div class="task-card-header">
               <span class="task-priority">${t.priority.toUpperCase()}</span>
-              <span class="task-status task-status-${t.status}">${t.status}</span>
+              ${handoffPill}
             </div>
             <div class="task-card-desc">${this.escapeHtml(t.title)}</div>
+            ${handoffCtx}
+            ${handoffControls}
           </div>
-        `).join('');
+        `;}).join('');
       }
     }
 
     list.innerHTML = html;
+  }
+
+  // R29 · Operator-only handoff controls. Used when the receiving
+  // agent is unresponsive — the operator decides whether to hand the
+  // task off (accept) or send it back to the sender (reject).
+  async forceAcceptHandoff(taskId) {
+    if (!confirm('Force-accept this handoff? Task will move to the receiver as if they had accepted it.')) return;
+    try {
+      await this.postJson('/api/office/handoffs/force-accept', { taskId });
+      this.fetchAndRenderTasks();
+    } catch (err) {
+      console.error('force-accept handoff failed:', err);
+      this.showNotification('Force-accept failed: ' + (err.message || err), 'error');
+    }
+  }
+
+  async forceRejectHandoff(taskId) {
+    const reason = prompt('Reason for rejecting this handoff?', 'operator override');
+    if (reason === null) return;
+    try {
+      await this.postJson('/api/office/handoffs/force-reject', { taskId, reason: reason || 'operator override' });
+      this.fetchAndRenderTasks();
+    } catch (err) {
+      console.error('force-reject handoff failed:', err);
+      this.showNotification('Force-reject failed: ' + (err.message || err), 'error');
+    }
   }
 
   async resolveBugTask(taskId) {

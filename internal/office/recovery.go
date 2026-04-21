@@ -101,6 +101,10 @@ func (m *Manager) StartIdleMonitoring() {
 				m.checkForCuriousAgents()
 				m.checkForReflectionOpportunity()
 				m.checkBlockedTasksForLeaderTriage()
+				// R29 · Auto-reject pending handoffs whose receiver has
+				// left the roster. Threshold can be overridden via
+				// ~/.jarvis/office-memory/handoff-stale-seconds.txt.
+				m.SweepStaleHandoffs(loadHandoffStaleThreshold())
 				m.PersistMetrics()
 				m.maybeTriggerWaterCoolerChat()
 				// Ping the announced dev URL; after 3 consecutive failures

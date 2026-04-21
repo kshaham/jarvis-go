@@ -201,7 +201,7 @@ func handleDiscover(args []string) {
 
 func handleTask(args []string) {
 	if len(args) < 1 {
-		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage> ...")
+		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage|handoff|handoff-accept|handoff-reject> ...")
 	}
 	subcmd := args[0]
 	subargs := args[1:]
@@ -309,6 +309,39 @@ func handleTask(args []string) {
 			"toSessionId": subargs[1], "reason": strings.Join(subargs[2:], " "),
 		})
 		fmt.Printf("Task %s triaged to %s.\n", subargs[0], subargs[1])
+
+	// R29 · Structured agent-to-agent handoff.
+	case "handoff":
+		requireArgs(subargs, 3, "cm task handoff <taskId> <toConfigId> <context...>")
+		post("/api/office/agent/task/handoff", map[string]interface{}{
+			"sessionId":  sessionID,
+			"taskId":     subargs[0],
+			"toConfigId": subargs[1],
+			"context":    strings.Join(subargs[2:], " "),
+		})
+		fmt.Printf("Handoff of task %s to %s initiated. They accept with `cm task handoff-accept %s` or reject with `cm task handoff-reject %s \"<reason>\"`.\n",
+			subargs[0], subargs[1], subargs[0], subargs[0])
+
+	case "handoff-accept":
+		requireArgs(subargs, 1, "cm task handoff-accept <taskId>")
+		post("/api/office/agent/task/handoff/accept", map[string]interface{}{
+			"sessionId": sessionID,
+			"taskId":    subargs[0],
+		})
+		fmt.Printf("Handoff accepted. Task %s is now yours.\n", subargs[0])
+
+	case "handoff-reject":
+		requireArgs(subargs, 1, "cm task handoff-reject <taskId> [<reason>]")
+		reason := ""
+		if len(subargs) > 1 {
+			reason = strings.Join(subargs[1:], " ")
+		}
+		post("/api/office/agent/task/handoff/reject", map[string]interface{}{
+			"sessionId": sessionID,
+			"taskId":    subargs[0],
+			"reason":    reason,
+		})
+		fmt.Printf("Handoff of task %s rejected.\n", subargs[0])
 
 	default:
 		fatal("Unknown task subcommand: " + subcmd)
@@ -842,6 +875,9 @@ Commands:
   task list                           List your task queue
   task self-add <title> <desc>        Add self-generated task
   task triage <taskId> <to> <reason>  Triage to another agent
+  task handoff <taskId> <toConfigId> <context>   Hand work over mid-task
+  task handoff-accept <taskId>        Accept an incoming handoff
+  task handoff-reject <taskId> <reason>          Decline an incoming handoff
   lock <filePath>                     Lock a file before editing
   unlock <filePath>                   Unlock after committing
   locks                               List active file locks
