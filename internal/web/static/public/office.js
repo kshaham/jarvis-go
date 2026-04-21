@@ -5112,10 +5112,291 @@ class OfficeApp {
       this.state.fileLocks = lockData.success ? lockData.locks : [];
       this.renderTasks();
       this.renderKanbanBoard();
+      // R30 · If the graph view is currently active, refresh the
+      // dependency graph on the same tick. Cheap — one extra GET
+      // that shares the tasks we just queued above.
+      if (this._taskView === 'graph') this.fetchAndRenderTaskGraph();
     } catch (err) {
       if (err && err.name === 'AbortError') return;
       console.error('Failed to fetch tasks:', err);
     }
+  }
+
+  // ========== R30 · Task dependency graph ==========
+  //
+  // View toggle state + layout. The graph shares the Tasks tab with
+  // the kanban — only one is visible at a time. Layout is computed
+  // from the backend's topological depth + agent attribution.
+
+  setTaskView(view) {
+    if (view !== 'kanban' && view !== 'graph') return;
+    this._taskView = view;
+    const kanban = document.getElementById('kanbanBoard');
+    const graph = document.getElementById('taskGraphWrap');
+    const hideDone = document.getElementById('taskGraphHideDone');
+    document.querySelectorAll('.task-view-chip').forEach(el => {
+      el.classList.toggle('active', el.dataset.taskView === view);
+    });
+    if (view === 'graph') {
+      if (kanban) kanban.classList.add('hidden');
+      if (graph) graph.classList.remove('hidden');
+      if (hideDone) hideDone.classList.remove('hidden');
+      this.fetchAndRenderTaskGraph();
+    } else {
+      if (kanban) kanban.classList.remove('hidden');
+      if (graph) graph.classList.add('hidden');
+      if (hideDone) hideDone.classList.add('hidden');
+    }
+  }
+
+  setGraphHideCompleted(hide) {
+    this._graphHideCompleted = hide;
+    this.renderTaskGraph(this._lastGraphData);
+  }
+
+  async fetchAndRenderTaskGraph() {
+    try {
+      const res = await fetch('/api/office/task-graph');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      this._lastGraphData = data;
+      this.renderTaskGraph(data);
+    } catch (err) {
+      console.error('Failed to fetch task graph:', err);
+    }
+  }
+
+  renderTaskGraph(data) {
+    if (!data) return;
+    const svg = document.getElementById('taskGraphSvg');
+    const empty = document.getElementById('taskGraphEmpty');
+    const banner = document.getElementById('taskGraphCycleBanner');
+    if (!svg || !empty || !banner) return;
+
+    // Cycle banner.
+    if (data.cycleDetected && data.cycleNodeIds && data.cycleNodeIds.length) {
+      banner.classList.remove('hidden');
+      banner.textContent = `Cycle detected in: ${data.cycleNodeIds.join(' → ')}. Resolve via the task detail modal or cm task blocked.`;
+    } else {
+      banner.classList.add('hidden');
+      banner.textContent = '';
+    }
+
+    // Apply the hide-completed filter.
+    const hideDone = this._graphHideCompleted !== false; // default true
+    let nodes = (data.nodes || []).slice();
+    if (hideDone) {
+      // Keep a completed task if any dependent (forward edge) exists,
+      // since it anchors an in-flight chain.
+      const hasDependent = new Set();
+      for (const n of nodes) {
+        for (const b of (n.blockedBy || [])) hasDependent.add(b);
+      }
+      nodes = nodes.filter(n => n.status !== 'completed' || hasDependent.has(n.id));
+    }
+
+    // Count edges to decide empty state.
+    let edgeCount = 0;
+    for (const n of nodes) edgeCount += (n.blockedBy || []).length;
+
+    if (nodes.length === 0 || edgeCount === 0) {
+      empty.classList.remove('hidden');
+      svg.innerHTML = '';
+      svg.setAttribute('viewBox', '0 0 100 100');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    // Layer nodes by depth.
+    const byDepth = new Map();
+    for (const n of nodes) {
+      const d = n.depth || 0;
+      if (!byDepth.has(d)) byDepth.set(d, []);
+      byDepth.get(d).push(n);
+    }
+    const depths = Array.from(byDepth.keys()).sort((a, b) => a - b);
+
+    // Geometry.
+    const NODE_W = 180;
+    const NODE_H = 48;
+    const COL_GAP = 64;
+    const ROW_GAP = 14;
+    const PAD = 24;
+
+    // Stable per-agent colour. Reuse the member accent if available.
+    const agentColor = (sessionId) => {
+      const m = (this.state && this.state.members) ? this.state.members.find(x => x.sessionId === sessionId) : null;
+      return (m && m.color) || '#6366f1';
+    };
+
+    // Position nodes: column = depth, row = sort within column.
+    const pos = new Map();
+    let maxRow = 0;
+    depths.forEach((d, colIdx) => {
+      const col = byDepth.get(d);
+      col.sort((a, b) => {
+        if ((a.agentName || '') !== (b.agentName || '')) return (a.agentName || '').localeCompare(b.agentName || '');
+        const pr = { high: 0, medium: 1, low: 2 };
+        const pa = pr[a.priority] ?? 3;
+        const pb = pr[b.priority] ?? 3;
+        if (pa !== pb) return pa - pb;
+        return a.id.localeCompare(b.id);
+      });
+      col.forEach((n, rowIdx) => {
+        pos.set(n.id, {
+          x: PAD + colIdx * (NODE_W + COL_GAP),
+          y: PAD + rowIdx * (NODE_H + ROW_GAP),
+        });
+        if (rowIdx > maxRow) maxRow = rowIdx;
+      });
+    });
+
+    const width = PAD + depths.length * (NODE_W + COL_GAP);
+    const height = PAD * 2 + (maxRow + 1) * (NODE_H + ROW_GAP);
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+
+    // Build edges first (drawn underneath nodes). Direction is
+    // prereq → dependent, so we iterate dependents' blockedBy lists.
+    const critSet = new Set((data.criticalPath || []));
+    const edgeFrags = [];
+    const arrowFrags = [];
+    const visibleIds = new Set(nodes.map(n => n.id));
+    for (const n of nodes) {
+      for (const prereqId of (n.blockedBy || [])) {
+        if (!pos.has(prereqId) || !pos.has(n.id)) continue;
+        if (!visibleIds.has(prereqId) || !visibleIds.has(n.id)) continue;
+        const a = pos.get(prereqId);
+        const b = pos.get(n.id);
+        const x1 = a.x + NODE_W;
+        const y1 = a.y + NODE_H / 2;
+        const x2 = b.x;
+        const y2 = b.y + NODE_H / 2;
+        const mx = x1 + (x2 - x1) / 2;
+        const path = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+        const prereqNode = nodes.find(x => x.id === prereqId);
+        const isBlocking = (n.status === 'in_progress' || n.status === 'blocked')
+          && prereqNode && prereqNode.status !== 'completed';
+        const isCrit = critSet.has(prereqId) && critSet.has(n.id);
+        const classes = ['task-graph-edge'];
+        if (isBlocking) classes.push('blocking');
+        if (isCrit) classes.push('on-critical');
+        edgeFrags.push(
+          `<path class="${classes.join(' ')}" d="${path}" data-from="${this.escapeAttr(prereqId)}" data-to="${this.escapeAttr(n.id)}"${n.blockerDescription ? ` data-tooltip="${this.escapeAttr(n.blockerDescription)}"` : ''}/>`
+        );
+        // Arrow head.
+        const arrowSize = 5;
+        const ah = `${x2},${y2} ${x2 - arrowSize},${y2 - arrowSize} ${x2 - arrowSize},${y2 + arrowSize}`;
+        arrowFrags.push(
+          `<polygon class="task-graph-edge-arrow${isBlocking ? ' blocking' : ''}" points="${ah}" fill="${isBlocking ? '#ef4444' : '#52525b'}"/>`
+        );
+      }
+    }
+
+    // Build nodes.
+    const nodeFrags = [];
+    for (const n of nodes) {
+      const p = pos.get(n.id);
+      if (!p) continue;
+      const cls = ['task-graph-node', `status-${n.status || 'pending'}`];
+      if (n.onCriticalPath) cls.push('on-critical');
+      if (data.cycleDetected && data.cycleNodeIds && data.cycleNodeIds.includes(n.id)) cls.push('cycle');
+      const color = n.unknown ? '#52525b' : agentColor(n.sessionId);
+      const title = this.escapeHtml(this._truncateTaskTitle(n.title || n.id, 28));
+      const critGlyph = n.onCriticalPath ? ' 🔥' : '';
+      const meta = n.unknown ? 'missing' : (n.agentName || '');
+      const onclickAttr = n.unknown
+        ? ''
+        : ` onclick="office.openTaskDetail('${this.escapeAttr(n.sessionId)}','${this.escapeAttr(n.id)}')"`;
+      nodeFrags.push(`
+        <g class="${cls.join(' ')}${n.unknown ? '' : ' task-graph-node-click'}" data-id="${this.escapeAttr(n.id)}" transform="translate(${p.x},${p.y})"${onclickAttr}>
+          <rect width="${NODE_W}" height="${NODE_H}" rx="6" ry="6"/>
+          <rect class="task-graph-node-band" x="0" y="0" width="4" height="${NODE_H}" fill="${color}" rx="2" ry="2"/>
+          <text class="task-graph-node-title" x="12" y="18">${title}${critGlyph}</text>
+          <text class="task-graph-node-meta" x="12" y="36">${this.escapeHtml(meta)} · ${this.escapeHtml(n.status || '')}</text>
+        </g>`);
+    }
+
+    svg.innerHTML = edgeFrags.join('') + arrowFrags.join('') + nodeFrags.join('');
+
+    // Hook hover to lowlight non-connected nodes + edges. Cheap DOM
+    // traversal — task counts stay bounded by team size, so doing it
+    // on every mouseenter is fine.
+    const reach = this._buildGraphReach(nodes);
+    svg.querySelectorAll('.task-graph-node').forEach(el => {
+      el.addEventListener('mouseenter', () => this._graphHoverEnter(el.dataset.id, reach));
+      el.addEventListener('mouseleave', () => this._graphHoverLeave());
+    });
+  }
+
+  _truncateTaskTitle(s, max) {
+    if (!s) return '';
+    return s.length > max ? s.substring(0, max - 1) + '…' : s;
+  }
+
+  // _buildGraphReach returns maps of ancestors + descendants for every
+  // node, keyed by node ID. Used for the hover-highlight behaviour so
+  // the visual "reachable" set is computed once per render instead of
+  // on every mouseenter.
+  _buildGraphReach(nodes) {
+    const forward = new Map(); // id → Set(dependents)
+    const backward = new Map(); // id → Set(prereqs)
+    for (const n of nodes) {
+      if (!backward.has(n.id)) backward.set(n.id, new Set());
+      for (const b of (n.blockedBy || [])) {
+        if (!forward.has(b)) forward.set(b, new Set());
+        forward.get(b).add(n.id);
+        backward.get(n.id).add(b);
+      }
+    }
+    const ancestors = new Map();
+    const descendants = new Map();
+    const walk = (graph, start) => {
+      const out = new Set();
+      const stack = [start];
+      while (stack.length) {
+        const cur = stack.pop();
+        const next = graph.get(cur);
+        if (!next) continue;
+        for (const v of next) {
+          if (!out.has(v)) { out.add(v); stack.push(v); }
+        }
+      }
+      return out;
+    };
+    for (const n of nodes) {
+      ancestors.set(n.id, walk(backward, n.id));
+      descendants.set(n.id, walk(forward, n.id));
+    }
+    return { ancestors, descendants };
+  }
+
+  _graphHoverEnter(id, reach) {
+    const svg = document.getElementById('taskGraphSvg');
+    if (!svg) return;
+    const keep = new Set([id]);
+    (reach.ancestors.get(id) || new Set()).forEach(x => keep.add(x));
+    (reach.descendants.get(id) || new Set()).forEach(x => keep.add(x));
+    svg.querySelectorAll('.task-graph-node').forEach(el => {
+      const nid = el.dataset.id;
+      el.classList.toggle('lowlight', !keep.has(nid));
+      el.classList.toggle('highlight', nid === id);
+    });
+    svg.querySelectorAll('.task-graph-edge').forEach(el => {
+      const from = el.dataset.from, to = el.dataset.to;
+      const visible = keep.has(from) && keep.has(to);
+      el.classList.toggle('lowlight', !visible);
+    });
+  }
+
+  _graphHoverLeave() {
+    const svg = document.getElementById('taskGraphSvg');
+    if (!svg) return;
+    svg.querySelectorAll('.lowlight, .highlight').forEach(el => {
+      el.classList.remove('lowlight');
+      el.classList.remove('highlight');
+    });
   }
 
   // ---- Tasks filter bar (Round 7 E1) ----

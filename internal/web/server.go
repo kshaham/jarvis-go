@@ -857,6 +857,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/whiteboard", h.OfficeGetWhiteboard)
 				r.Get("/task-queues", h.OfficeGetTaskQueues)
 				r.Get("/task-queues/{sessionId}", h.OfficeGetTaskQueueBySession)
+				// R30 · dependency DAG for the Tasks tab graph view.
+				r.Get("/task-graph", h.OfficeGetTaskGraph)
 				r.Get("/bug-tasks", h.OfficeGetBugTasks)
 				r.Get("/file-locks", h.OfficeGetFileLocks)
 				r.Get("/messages", h.OfficeGetMessages)

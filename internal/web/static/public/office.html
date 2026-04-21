@@ -314,6 +314,13 @@
         <div class="tab-panel hidden" id="panel-tasks" role="tabpanel">
           <div class="panel-header">
             <h2 class="panel-title">Tasks</h2>
+            <div class="task-view-toggle" role="tablist" aria-label="Tasks view">
+              <button class="task-view-chip active" data-task-view="kanban" onclick="office.setTaskView('kanban')">Kanban</button>
+              <button class="task-view-chip" data-task-view="graph" onclick="office.setTaskView('graph')">Graph</button>
+              <label class="task-view-option hidden" id="taskGraphHideDone">
+                <input type="checkbox" checked onchange="office.setGraphHideCompleted(this.checked)"> Hide completed
+              </label>
+            </div>
           </div>
           <div class="task-filter-bar" id="taskFilterBar">
             <input type="text" class="task-filter-search" id="taskFilterSearch" placeholder="Search tasks…" oninput="office._onTaskFilterInput(this.value)">
@@ -367,6 +374,16 @@
                 <span class="kanban-col-count" id="kanbanDoneCount">0</span>
               </div>
               <div class="kanban-cards" id="kanbanDone"></div>
+            </div>
+          </div>
+          <!-- R30 · Graph view: SVG dependency DAG. Hidden until view toggle flips. -->
+          <div class="task-graph-wrap hidden" id="taskGraphWrap">
+            <div class="task-graph-cycle-banner hidden" id="taskGraphCycleBanner"></div>
+            <div class="task-graph-scroll" id="taskGraphScroll">
+              <svg class="task-graph-svg" id="taskGraphSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+            </div>
+            <div class="task-graph-empty hidden" id="taskGraphEmpty">
+              No dependencies yet &mdash; tasks aren't blocking each other. Add prereqs by marking a task blocked in the detail modal, or via <span class="t-mono">cm task blocked &lt;id&gt; &lt;reason&gt;</span>.
             </div>
           </div>
           <div class="tasks-list-section">
