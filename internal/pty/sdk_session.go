@@ -79,6 +79,9 @@ type SDKSession struct {
 	providerEnv  map[string]string
 	systemPrompt string
 	mcpServers   map[string]any
+	// model is the specific Claude model ID to force via claude.WithModel.
+	// Empty = let ANTHROPIC_DEFAULT_*_MODEL env vars / CLI default pick.
+	model string
 
 	// Output observers
 	outputObservers   map[int]func(string)
@@ -110,6 +113,7 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		providerEnv:        config.ProviderEnv,
 		systemPrompt:       config.SystemPrompt,
 		mcpServers:         config.McpServers,
+		model:              config.Model,
 		maxTurnsPerSession: config.MaxTurnsPerSession,
 		outputObservers:    make(map[int]func(string)),
 		activeTools:        make(map[string]bool),
@@ -133,9 +137,11 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	// Build SDK options for persistent session.
-	// Empty model string lets ANTHROPIC_DEFAULT_*_MODEL env vars take effect.
+	// Per-member model override wins (e.g. claude-opus-4-7 picked in
+	// the spawn modal). Empty string falls back to the SDK's own
+	// default, which also respects ANTHROPIC_DEFAULT_*_MODEL env vars.
 	opts := []claude.Option{
-		claude.WithModel(""),
+		claude.WithModel(s.model),
 		claude.WithCWD(s.WorkingDir),
 		claude.WithBypassPermissions(),
 		claude.WithIncludePartialMessages(),

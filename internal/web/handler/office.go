@@ -566,6 +566,15 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		if ov != nil && ov.MaxTurns > 0 {
 			maxTurns = ov.MaxTurns
 		}
+		// Per-member model override. Priority: spawn-modal override >
+		// template-pinned member.Model > empty (SDK default). Previously
+		// this value was dropped on the floor for claude-subscription /
+		// claude-api providers — only Z.AI honored it via env vars —
+		// which is why picking "Opus 4.7" for the lead had no effect.
+		memberModel := member.Model
+		if ov != nil && ov.Model != "" {
+			memberModel = ov.Model
+		}
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
 			pty.SessionConfig{
@@ -576,6 +585,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 				ProviderEnv:        agentEnv,
 				SystemPrompt:       kickstart,
 				McpServers:         mcpServers,
+				Model:              memberModel,
 				MaxTurnsPerSession: maxTurns,
 			},
 		)

@@ -40,6 +40,10 @@ type SessionConfig struct {
 	// SDK mode fields (only used when Mode == ModeClaudeSDK)
 	SystemPrompt string         // Initial system prompt (kickstart)
 	McpServers   map[string]any // MCP server configurations
+	// Model is the specific Claude model ID (e.g. "claude-opus-4-7").
+	// Empty string = let Claude CLI / ANTHROPIC_DEFAULT_*_MODEL env pick
+	// the default. Honored by ModeClaudeSDK via claude.WithModel.
+	Model string
 }
 
 type NiceConfig struct {
