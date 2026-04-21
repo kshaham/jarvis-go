@@ -5561,6 +5561,109 @@ p, .agent-card-task, .agent-activity-item {
   font-size: 12px;
 }
 
+/* R36 · Task labels + cost-by-label chart. */
+.task-label-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid #334155;
+}
+.task-label-pill--small {
+  font-size: 9px;
+  padding: 1px 5px;
+}
+.task-label-pill-x {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+}
+.task-label-pill-x:hover { color: #fca5a5; }
+.task-card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+.task-modal-labels {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-default);
+}
+.task-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+  min-height: 22px;
+}
+.task-label-addrow {
+  display: flex;
+  gap: 6px;
+}
+.task-label-input {
+  flex: 1;
+  padding: 4px 8px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.cost-by-label-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cost-by-label-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 80px 140px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.cost-by-label-name {
+  color: var(--text-secondary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cost-by-label-bar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+  height: 14px;
+}
+.cost-by-label-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  border-radius: 3px;
+  transition: width 200ms ease;
+}
+.cost-by-label-cost {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  text-align: right;
+}
+.cost-by-label-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.cost-by-label-more {
+  margin-top: 6px;
+  text-align: center;
+}
+
 /* R34 · Browser health pill (Settings tab header) + task-detail
    thumbnail grid for screenshot attachments. */
 .settings-header-indicators {

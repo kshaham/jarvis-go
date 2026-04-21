@@ -2399,6 +2399,10 @@ class OfficeApp {
         <div class="insight-card-title">Blocked tasks</div>
         <div id="blockerLeaderboard"></div>
       </div>
+      <div class="insight-card" style="grid-column:1/-1">
+        <div class="insight-card-title">Cost by label</div>
+        <div id="costByLabel"></div>
+      </div>
     `;
     // Populate the dynamic panels. All safe to run in parallel.
     this._updateBudgetPill();
@@ -2410,6 +2414,44 @@ class OfficeApp {
     if (st) this._renderStageTimings(st);
     const bl = document.getElementById('blockerLeaderboard');
     if (bl) this._renderBlockerLeaderboard(bl, queuesData);
+    const cbl = document.getElementById('costByLabel');
+    if (cbl) this._renderCostByLabel(cbl);
+  }
+
+  // R36 · Cost-by-label chart. Fetches the rollup and renders a top-8
+  // bar chart + the full table. Empty state when no tasks have
+  // labels yet.
+  async _renderCostByLabel(root) {
+    try {
+      const res = await fetch('/api/office/labels/rollups');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const rollups = (data && Array.isArray(data.rollups)) ? data.rollups : [];
+      if (!rollups.length) {
+        root.innerHTML = `<div class="insights-empty" style="padding:4px">No labelled tasks yet. Add labels with <span class="t-mono">cm task self-add ... --label &lt;name&gt;</span> or from the task detail modal.</div>`;
+        return;
+      }
+      const top = rollups.slice(0, 8);
+      const maxCost = Math.max(0.0001, ...top.map(r => r.totalCostUSD || 0));
+      const bars = top.map(r => {
+        const pct = Math.round(((r.totalCostUSD || 0) / maxCost) * 100);
+        return `
+          <div class="cost-by-label-row">
+            <div class="cost-by-label-name" title="${this._escapeAttr(r.label)}">${this._escapeHtml(r.label)}</div>
+            <div class="cost-by-label-bar-track">
+              <div class="cost-by-label-bar-fill" style="width:${pct}%"></div>
+            </div>
+            <div class="cost-by-label-cost">$${(r.totalCostUSD || 0).toFixed(4)}</div>
+            <div class="cost-by-label-meta">${r.completed}/${r.taskCount} done${r.inFlight ? ' · ' + r.inFlight + ' in flight' : ''}</div>
+          </div>`;
+      }).join('');
+      root.innerHTML = `
+        <div class="cost-by-label-grid">${bars}</div>
+        ${rollups.length > 8 ? `<div class="cost-by-label-more t-meta">+${rollups.length - 8} more labels</div>` : ''}`;
+    } catch (err) {
+      console.error('cost-by-label:', err);
+      root.innerHTML = `<div class="insights-empty" style="padding:4px">Failed to load cost-by-label.</div>`;
+    }
   }
 
   // Build a 2-3 sentence narrative summary for the top of Insights.
@@ -2709,6 +2751,7 @@ class OfficeApp {
         ${ts}
         ${blocker}
         <div class="task-modal-field" style="margin-top:10px;color:#a1a1aa">${this._escapeHtml(t.description || '')}</div>
+        <div class="task-modal-labels" id="taskModalLabels">${this._renderTaskLabelsEditor(sessionId, taskId, t.labels || [])}</div>
         <div id="taskModalScreenshots" class="task-modal-screenshots"></div>
         ${progress}
       `;
@@ -2755,6 +2798,70 @@ class OfficeApp {
   closeTaskDetail() {
     const modal = document.getElementById('taskDetailModal');
     if (modal) modal.classList.add('hidden');
+  }
+
+  // ========== R36 · Labels editor on task detail modal ==========
+
+  _renderTaskLabelsEditor(sessionId, taskId, labels) {
+    const sid = this._escapeAttr(sessionId);
+    const tid = this._escapeAttr(taskId);
+    const pills = (labels || []).map(l => `
+      <span class="task-label-pill">
+        ${this._escapeHtml(l)}
+        <button class="task-label-pill-x" onclick="office._removeTaskLabel('${sid}','${tid}','${this._escapeAttr(l)}')" title="Remove label">×</button>
+      </span>`).join('');
+    return `
+      <div class="task-modal-field"><strong>Labels:</strong></div>
+      <div class="task-label-row" id="taskLabelRow-${tid}">${pills}</div>
+      <div class="task-label-addrow">
+        <input type="text" class="task-label-input" id="taskLabelInput-${tid}"
+               placeholder="add label (lowercase, - allowed)"
+               onkeydown="if(event.key==='Enter'){office._addTaskLabelFromInput('${sid}','${tid}');event.preventDefault();}">
+        <button class="btn btn-sm" onclick="office._addTaskLabelFromInput('${sid}','${tid}')">Add</button>
+      </div>`;
+  }
+
+  async _addTaskLabelFromInput(sessionId, taskId) {
+    const input = document.getElementById('taskLabelInput-' + taskId);
+    if (!input) return;
+    const val = (input.value || '').trim();
+    if (!val) return;
+    try {
+      const resp = await this.postJson('/api/office/agent/task/labels', {
+        sessionId, taskId, add: [val],
+      });
+      input.value = '';
+      if (resp && Array.isArray(resp.labels)) {
+        this._refreshTaskLabelRow(sessionId, taskId, resp.labels);
+      }
+    } catch (err) {
+      this.showToast('Failed to add label: ' + (err.message || err), 'error');
+    }
+  }
+
+  async _removeTaskLabel(sessionId, taskId, label) {
+    try {
+      const resp = await this.postJson('/api/office/agent/task/labels', {
+        sessionId, taskId, remove: [label],
+      });
+      if (resp && Array.isArray(resp.labels)) {
+        this._refreshTaskLabelRow(sessionId, taskId, resp.labels);
+      }
+    } catch (err) {
+      this.showToast('Failed to remove label: ' + (err.message || err), 'error');
+    }
+  }
+
+  _refreshTaskLabelRow(sessionId, taskId, labels) {
+    const row = document.getElementById('taskLabelRow-' + taskId);
+    if (!row) return;
+    const sid = this._escapeAttr(sessionId);
+    const tid = this._escapeAttr(taskId);
+    row.innerHTML = (labels || []).map(l => `
+      <span class="task-label-pill">
+        ${this._escapeHtml(l)}
+        <button class="task-label-pill-x" onclick="office._removeTaskLabel('${sid}','${tid}','${this._escapeAttr(l)}')" title="Remove label">×</button>
+      </span>`).join('');
   }
 
   _taskTimestamps(t) {
@@ -5698,6 +5805,9 @@ class OfficeApp {
                 <button class="btn-handoff-reject" onclick="event.stopPropagation(); office.forceRejectHandoff('${this.escapeAttr(t.id)}')">Force reject</button>
               </div>`
             : '';
+          const labelPills = (t.labels && t.labels.length)
+            ? `<div class="task-card-labels">${t.labels.map(l => `<span class="task-label-pill task-label-pill--small">${this.escapeHtml(l)}</span>`).join('')}</div>`
+            : '';
           return `
           <div class="task-card priority-${t.priority} task-card-clickable" onclick="office.openTaskDetail('${this.escapeAttr(queue.sessionId)}','${this.escapeAttr(t.id)}')">
             <div class="task-card-header">
@@ -5705,6 +5815,7 @@ class OfficeApp {
               ${handoffPill}
             </div>
             <div class="task-card-desc">${this.escapeHtml(t.title)}</div>
+            ${labelPills}
             ${handoffCtx}
             ${handoffControls}
           </div>

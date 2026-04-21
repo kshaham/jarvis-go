@@ -63,6 +63,21 @@ type Task struct {
 	// pointer is non-nil and the task physically stays in the sender's
 	// queue until accepted.
 	Handoff *HandoffRequest `json:"handoff,omitempty"`
+
+	// R36 · Free-form labels for cost-by-feature rollups. Validated
+	// via ValidateTaskLabel (lowercase alphanumeric + '-', ≤40 chars,
+	// ≤10 per task).
+	Labels []string `json:"labels,omitempty"`
+	// R36 · Cost / turn snapshots captured at the transitions into
+	// TaskInProgress (start) and TaskCompleted/TaskFailed (final
+	// delta). FinalCostUSD = agent.TotalCostUSD at completion minus
+	// StartCostUSD; same for turns. Attribution is approximate when
+	// an agent runs concurrent tasks -- SDK sessions serialize turns
+	// so this rarely matters in practice.
+	StartCostUSD   float64 `json:"startCostUSD,omitempty"`
+	StartTurnCount int64   `json:"startTurnCount,omitempty"`
+	FinalCostUSD   float64 `json:"finalCostUSD,omitempty"`
+	FinalTurnCount int64   `json:"finalTurnCount,omitempty"`
 }
 
 // TaskQueue holds a list of tasks for an agent.
@@ -320,9 +335,23 @@ func (a *AgentState) UpdateTaskStatus(taskID string, status TaskStatus) bool {
 			now := time.Now()
 			if status == TaskInProgress && t.StartedAt.IsZero() {
 				t.StartedAt = now
+				// R36 · Snapshot agent cost + turn count for
+				// per-task rollups. The delta against these at
+				// completion feeds the cost-by-label view in
+				// Insights. Cheap under the already-held mutex.
+				t.StartCostUSD = a.TotalCostUSD
+				t.StartTurnCount = a.TurnCount
 			}
 			if status == TaskCompleted || status == TaskFailed {
 				t.CompletedAt = now
+				// R36 · Final delta. If the task never entered
+				// TaskInProgress (direct pending->failed), the
+				// Start* zero values mean FinalCostUSD == current
+				// cumulative -- close enough to "nothing tracked"
+				// that a downstream filter on (StartedAt.IsZero())
+				// can drop it from aggregates.
+				t.FinalCostUSD = a.TotalCostUSD - t.StartCostUSD
+				t.FinalTurnCount = a.TurnCount - t.StartTurnCount
 			}
 			// Reclaim per-task side-channel state whenever the task leaves
 			// TaskInProgress. Previously only the auto-complete path in

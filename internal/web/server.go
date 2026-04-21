@@ -604,6 +604,8 @@ func (s *Server) setupRouter() chi.Router {
 				// R34 · agent uploads a visual-verification screenshot
 				// that operators see in the task detail modal.
 				r.Post("/task/screenshot", h.OfficeAgentTaskScreenshot)
+				// R36 · agent adds/removes labels on a task.
+				r.Post("/task/labels", h.OfficeAgentTaskLabels)
 				r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)
 				r.Post("/dev-instance", h.OfficeAgentPostDevInstance)
 				r.Delete("/dev-instance", h.OfficeAgentDeleteDevInstance)
@@ -893,6 +895,9 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/reports/{filename}", h.OfficeGetReport)
 				// R34 · headless-shell sibling container health probe.
 				r.Get("/browser/health", h.OfficeBrowserHealth)
+				// R36 · task labels + cost-by-feature rollups (read-only).
+				r.Get("/labels", h.OfficeGetLabels)
+				r.Get("/labels/rollups", h.OfficeGetLabelRollups)
 				// R34 · task screenshot attachments (operator-visible
 				// evidence for UI-keyword tasks).
 				r.Get("/task-screenshots/{filename}", h.OfficeGetTaskScreenshot)

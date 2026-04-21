@@ -261,7 +261,7 @@ func handleDiscover(args []string) {
 
 func handleTask(args []string) {
 	if len(args) < 1 {
-		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage|handoff|handoff-accept|handoff-reject|handoff-cancel> ...")
+		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage|handoff|handoff-accept|handoff-reject|handoff-cancel|label> ...")
 	}
 	subcmd := args[0]
 	subargs := args[1:]
@@ -364,15 +364,59 @@ func handleTask(args []string) {
 		printJSON(result)
 
 	case "self-add":
-		requireArgs(subargs, 2, "cm task self-add <title> <description> [priority]")
-		priority := "medium"
-		if len(subargs) > 2 {
-			priority = subargs[2]
+		// R36 · Accept repeated --label flags. parseArgsAndFlags
+		// overwrites on repeat, so scan manually for --label pairs
+		// while letting it handle the rest (positional + priority).
+		var labels []string
+		filtered := make([]string, 0, len(subargs))
+		for i := 0; i < len(subargs); i++ {
+			if subargs[i] == "--label" && i+1 < len(subargs) {
+				labels = append(labels, subargs[i+1])
+				i++
+				continue
+			}
+			filtered = append(filtered, subargs[i])
 		}
-		post("/api/office/agent/task/self-add", map[string]interface{}{
-			"sessionId": sessionID, "title": subargs[0], "description": subargs[1], "priority": priority,
-		})
-		fmt.Printf("Self-generated task added: %s\n", subargs[0])
+		positional, _ := parseArgsAndFlags(filtered)
+		fields := strings.Fields(positional)
+		if len(fields) < 2 {
+			fatal("cm task self-add <title> <description> [priority] [--label <name>]...")
+		}
+		priority := "medium"
+		if len(fields) > 2 {
+			priority = fields[2]
+		}
+		body := map[string]interface{}{
+			"sessionId": sessionID, "title": fields[0], "description": fields[1], "priority": priority,
+		}
+		if len(labels) > 0 {
+			body["labels"] = labels
+		}
+		post("/api/office/agent/task/self-add", body)
+		fmt.Printf("Self-generated task added: %s\n", fields[0])
+
+	// R36 · cm task label add/remove <taskId> <label>
+	case "label":
+		if len(subargs) < 3 {
+			fatal("Usage: cm task label <add|remove> <taskId> <label>")
+		}
+		action := subargs[0]
+		taskID := subargs[1]
+		label := subargs[2]
+		body := map[string]interface{}{
+			"sessionId": sessionID,
+			"taskId":    taskID,
+		}
+		switch action {
+		case "add":
+			body["add"] = []string{label}
+		case "remove":
+			body["remove"] = []string{label}
+		default:
+			fatal("Usage: cm task label <add|remove> <taskId> <label>")
+		}
+		post("/api/office/agent/task/labels", body)
+		fmt.Printf("Label %q %sed on task %s.\n", label, action, taskID)
 
 	case "triage":
 		requireArgs(subargs, 3, "cm task triage <taskId> <toSessionId> <reason>")
@@ -987,7 +1031,10 @@ Commands:
   task progress <taskId> <note>       Report task progress
   task blocked <taskId> <reason>      Report blocker
   task list                           List your task queue
-  task self-add <title> <desc>        Add self-generated task
+  task self-add <title> <desc> [--label <name>]...
+                                      Add self-generated task with optional labels
+  task label add|remove <taskId> <label>
+                                      Edit labels on an existing task
   task triage <taskId> <to> <reason>  Triage to another agent
   task handoff <taskId> <toConfigId> <context>   Hand work over mid-task
   task handoff-accept <taskId>        Accept an incoming handoff

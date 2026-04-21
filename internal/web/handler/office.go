@@ -183,10 +183,14 @@ type agentTaskProgressRequest struct {
 }
 
 type agentTaskSelfAddRequest struct {
-	SessionID   string `json:"sessionId"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
+	SessionID   string   `json:"sessionId"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Priority    string   `json:"priority"`
+	// R36 · Optional labels applied on task creation. Each entry
+	// normalised + validated; invalid entries return 400 so the
+	// operator / agent learns about the typo immediately.
+	Labels []string `json:"labels,omitempty"`
 }
 
 type agentTaskTriageRequest struct {
@@ -2538,32 +2542,56 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
-	if agent != nil {
-		task := &office.Task{
-			ID:          uuid.New().String(),
-			Title:       req.Title,
-			Description: req.Description,
-			Priority:    req.Priority,
-			Status:      office.TaskPending,
-			AssignedAt:  time.Now(),
-			Source:      "self",
-		}
-		agent.AddTask(task)
-
-		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
-			"sessionId": req.SessionID,
-			"taskId":    task.ID,
-			"status":    string(office.TaskPending),
-			"title":     req.Title,
-		})
-		ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
-			"sessionId": req.SessionID,
-		})
-		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
-		}
+	if agent == nil {
+		ok(w, nil)
+		return
 	}
-	ok(w, nil)
+	// R36 · Validate labels BEFORE creating the task so invalid
+	// input yields a clean 400 instead of a half-created task.
+	normLabels := make([]string, 0, len(req.Labels))
+	seen := make(map[string]bool, len(req.Labels))
+	for _, raw := range req.Labels {
+		l := office.NormalizeTaskLabel(raw)
+		if err := office.ValidateTaskLabel(l); err != nil {
+			request.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if seen[l] {
+			continue
+		}
+		seen[l] = true
+		normLabels = append(normLabels, l)
+	}
+	if len(normLabels) > office.TaskLabelMaxPerTask {
+		request.WriteError(w, http.StatusBadRequest,
+			fmt.Sprintf("too many labels: %d (max %d)", len(normLabels), office.TaskLabelMaxPerTask))
+		return
+	}
+	task := &office.Task{
+		ID:          uuid.New().String(),
+		Title:       req.Title,
+		Description: req.Description,
+		Priority:    req.Priority,
+		Status:      office.TaskPending,
+		AssignedAt:  time.Now(),
+		Source:      "self",
+		Labels:      normLabels,
+	}
+	agent.AddTask(task)
+
+	ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+		"sessionId": req.SessionID,
+		"taskId":    task.ID,
+		"status":    string(office.TaskPending),
+		"title":     req.Title,
+	})
+	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
+		"sessionId": req.SessionID,
+	})
+	if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+		ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+	}
+	ok(w, map[string]interface{}{"taskId": task.ID})
 }
 
 // slotFromQuery returns the slot name for a dev-instance request. Empty
