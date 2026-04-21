@@ -44,6 +44,13 @@ type SessionConfig struct {
 	// Empty string = let Claude CLI / ANTHROPIC_DEFAULT_*_MODEL env pick
 	// the default. Honored by ModeClaudeSDK via claude.WithModel.
 	Model string
+	// AppendSystemPrompt is stable cross-agent boilerplate appended to
+	// Claude's system prompt via claude.WithAppendSystemPrompt. Content
+	// must be byte-for-byte identical across calls that should share
+	// Anthropic's ephemeral cache (5-min TTL, 90% discount on hits).
+	// R31 uses this for the onboarding router + critical rules that
+	// every teammate sees.
+	AppendSystemPrompt string
 }
 
 type NiceConfig struct {

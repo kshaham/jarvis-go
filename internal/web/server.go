@@ -568,6 +568,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/memory", h.OfficeAgentGetMemory)
 				r.Get("/memory/section", h.OfficeAgentGetMemorySection)
 				r.Get("/memory/query", h.OfficeAgentGetMemoryQuery)
+				// R31 · lazy-load onboarding topics (protocols, browser, etc).
+				r.Get("/onboarding", h.OfficeAgentOnboarding)
 				r.Get("/dev-instance", h.OfficeAgentGetDevInstance)
 				r.Get("/dev-instance/all", h.OfficeAgentGetDevInstanceAll)
 				r.Get("/dev-credentials", h.OfficeAgentGetDevCredentials)

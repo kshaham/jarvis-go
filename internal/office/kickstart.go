@@ -11,42 +11,34 @@ import (
 // `cm memory` commands so the agent can pull what they need on demand.
 const memoryInjectMaxChars = 1500
 
-// BuildKickstartPrompt generates the kickstart prompt for a team member
-// session. The prompt is intentionally short -- the full team protocol
-// lives in the `office-protocols` skill, which the agent reads on first
-// use via `cm skill read`. This keeps the per-spawn context cost low so
-// long-running agents have headroom for actual work.
+// BuildKickstartPrompt generates the per-agent kickstart -- the turn-1
+// prompt sent via Session.Send(). Keep it lean: identity, project
+// context, previous-work memory, learnings, teammate insights,
+// personality, role. Stable cross-agent boilerplate (protocols,
+// browser, dev-instance, context-budget) is NOT here -- it lives in
+// BuildStableSystemPrompt which goes through claude.WithAppendSystemPrompt
+// so Anthropic's ephemeral cache can discount it 90% on reuse.
 //
-// The prompt sections are:
-//
-//  1. Header (name + role)
-//  2. Team mission, if set
-//  3. Capped previous-work memory + cm memory pointers
-//  4. Distilled learnings (small)
-//  5. Compact teammate findings (one line per peer)
-//  6. Identity + working dir
-//  7. Context budget reminder (5 lines)
-//  8. Personality
-//  9. Suggested skills for role (names + 1-line descriptions)
-//  10. Team relationships
-//  11. One-paragraph protocol pointer to `office-protocols` skill
-//  12. Headless browser pointer to `headless-browser` skill
-//  13. Optional RALPH or goal-focused mode block
-//  14. Role-specific SystemPrompt
+// R31 · Per-role trim: worker tier skips the leader-task-assignment
+// and leader-dev-instance blocks entirely; those stay reachable via
+// `cm onboard dev-lead` for the few leaders who need them.
 func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string, perpetualMode bool) string {
 	var b strings.Builder
 
-	// 1. Header
+	// Header
 	fmt.Fprintf(&b, "# %s - %s\n\n", config.Name, config.Role)
 
-	// 2. Team mission
+	// Team mission -- duplicated briefly here even though the stable
+	// prefix also carries it, because the kickstart often gets replayed
+	// in isolation (debug tooling, session clone) and the mission is
+	// the single highest-signal context line.
 	if teamMission != "" {
 		b.WriteString("## Team Mission\n")
 		b.WriteString(teamMission)
 		b.WriteString("\n\nAlign your work with this mission. Look for ways to go above and beyond.\n\n")
 	}
 
-	// 2b. Project context (CLAUDE.md / README.md / ARCHITECTURE.md). Cached
+	// Project context (CLAUDE.md / README.md / ARCHITECTURE.md). Cached
 	// per-workingDir so a team spawn only pays the file I/O once.
 	if projectCtx := BuildProjectContext(workingDir); projectCtx != "" {
 		b.WriteString("## Project Context\n")
@@ -54,148 +46,125 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 		b.WriteString("\n\n")
 	}
 
-	// 3. Previous-work memory (capped + deduplicated to cut redundant
-	// learnings that accumulate across respawns).
+	// Previous-work memory (capped + deduplicated)
 	if agentMemory != "" {
 		dedupedMemory := deduplicateMemory(agentMemory)
 		b.WriteString("## Previous Work Memory\n")
 		if len(dedupedMemory) > memoryInjectMaxChars {
 			b.WriteString(dedupedMemory[:memoryInjectMaxChars])
-			b.WriteString("\n... (truncated -- use `cm memory section <name>` or `cm memory query <kw>` for the rest)\n\n")
+			b.WriteString("\n... (truncated -- `cm onboard memory` for commands to pull the rest)\n\n")
 		} else {
 			b.WriteString(dedupedMemory)
 			b.WriteString("\n\n")
 		}
-		b.WriteString("Update memory as you work:\n")
-		b.WriteString("  cm memory section <name> \"<content>\"   # overwrite a section\n")
-		b.WriteString("  cm memory append \"<entry>\"             # append to notes\n")
-		b.WriteString("  cm memory query <keyword>               # search across sections\n\n")
 	}
 
-	// 4. Distilled learnings (existing helper, already small)
+	// Distilled learnings
 	if learnings := BuildLearningsPromptSection(config.ID); learnings != "" {
 		b.WriteString("## Learned Knowledge\n")
 		b.WriteString(learnings)
-		b.WriteString("\nReflect on new lessons via `cm reflect \"<lesson>\" --category <technique|pitfall>`. Read `cm skill read office-reflection` for the format.\n\n")
+		b.WriteString("\n")
 	}
 
-	// 5. Compact teammate findings (one line per peer)
+	// Teammate findings (compact)
 	if cross := BuildCrossAgentContextCompact(config.ID); cross != "" {
 		b.WriteString("## Teammate Insights\n")
 		b.WriteString(cross)
 		b.WriteString("\n")
 	}
 
-	// 6. Identity
+	// Identity
 	b.WriteString("## Identity\n")
 	fmt.Fprintf(&b, "You are %s, the %s on an autonomous AI development team in a Jarvis session.\n", config.Name, config.Role)
 	fmt.Fprintf(&b, "Working directory: %s\n\n", workingDir)
 
-	// 7. Context Budget reminder
-	b.WriteString("## Context Budget (CRITICAL)\n")
-	b.WriteString("Your context is finite. As you work:\n")
-	b.WriteString("- Write findings to memory the moment you have them (`cm memory section`, `cm memory append`)\n")
-	b.WriteString("- Search code, do not browse it (`cm skill read office-focused-search`)\n")
-	b.WriteString("- At ~70% context full: offload working state to memory, then `/compact`\n")
-	b.WriteString("- Full discipline: `cm skill read office-context-budget`\n\n")
-
-	// 8. Personality (skip if empty)
+	// Personality
 	if config.Personality != "" {
 		b.WriteString("## Personality\n")
 		b.WriteString(config.Personality)
 		b.WriteString("\n\n")
 	}
 
-	// 9. Suggested skills for role
-	b.WriteString("## Suggested Skills (read on demand)\n")
-	if len(config.Skills) > 0 {
-		b.WriteString("Custom skills: ")
-		b.WriteString(strings.Join(config.Skills, ", "))
-		b.WriteString("\n")
-	}
-	b.WriteString(BuildSuggestedSkillsSection(config.Role))
-	b.WriteString("\n")
-
-	// 10. Team relationships
-	b.WriteString("## Team\n")
+	// Team relationships -- short. Full roster and messaging help moves
+	// to the stable prefix.
 	team := filterTeammates(config.ID, teammates)
 	if len(team) > 0 {
+		b.WriteString("## Team\n")
 		fmt.Fprintf(&b, "You work with %d teammates:\n", len(team))
 		for _, tm := range team {
 			fmt.Fprintf(&b, "- %s (%s)\n", tm.Name, tm.Role)
 		}
-	} else {
-		b.WriteString("You are currently working solo.\n")
-	}
-	b.WriteString("\nTeam messages arrive as `[Team Message from <name>]: <content>`. Use `cm roster` for sessionIds, `cm message <sessionId> \"...\"` to reply.\n\n")
-
-	// 11. Team protocols pointer (replaces ~95 lines of static content)
-	b.WriteString("## Team Protocols\n")
-	b.WriteString("The full team protocol -- task lifecycle, git workflow, standups, brainstorms, leader assignment, debugging, and verification -- lives in the `office-protocols` skill. Read it now and re-read any section when you forget a step:\n")
-	b.WriteString("  cm skill read office-protocols\n\n")
-	b.WriteString("Critical reminders:\n")
-	b.WriteString("- Every task: `cm task ack <id>` -> `cm task start <id>` -> `cm task progress <id> \"...\"` -> `cm task complete <id> --summary \"<2-3 sentence handoff>\"`\n")
-	b.WriteString("- Handing work over mid-task: `cm task handoff <id> <targetConfigId> \"<one-paragraph context>\"`. The receiver accepts with `cm task handoff-accept <id>` or declines with `cm task handoff-reject <id> \"<reason>\"`. Hand off when the next step is someone else's specialty AND you want the same task ID (continuous in Timeline). Complete instead when the work is done. Don't hand off to dodge effort -- operators see rejection rates per agent.\n")
-	b.WriteString("- Never push to remote, never switch branches -- you live on `agent/<your-id>`.\n")
-	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
-	b.WriteString("- Your bash output is auto-compressed by rtk (60-90%% fewer tokens on git / build / test / cat / docker / etc.). Failures fall back to raw output automatically. Prefix a command with `rtk --raw` if you need the unfiltered stream for one invocation. Full reference: `cm skill read rtk`.\n")
-	b.WriteString("- Before starting a task a teammate might have touched, run `cm knowledge search <keywords>` -- it searches every agent's memory + learnings + standups + whiteboard at once, recency-ranked. Saves hours on duplicate work. See `cm skill read office-knowledge-search`.\n\n")
-
-	// 12. Headless browser pointer
-	b.WriteString("## Headless Browser\n")
-	b.WriteString("A real Chromium runs as a sibling container at `ws://headless-shell:9222` (env: `$EXPECT_BROWSER_WS_ENDPOINT`, `$HEADLESS_BROWSER_HOST`). Three pre-installed CLIs drive it over CDP: `browser-screenshot <url> [out.png]` for one-shot PNG captures, `expect-cli -m \"<natural-language test>\" -y` for UI flow assertions, and `puppeteer-core` in Node for custom scripts. Full reference: `cm skill read headless-browser`.\n")
-	b.WriteString("Run a fresh browser verification BEFORE marking complete any task that touches user-visible behavior -- this covers frontend/UI work AND any QA sign-off on a feature rendered in the browser. Capture the PNG, then Read it to confirm the expected state; a screenshot you didn't look at is not evidence.\n\n")
-
-	// 12b. Team dev instance pointer — every agent learns to check the
-	// team dev URL + creds before running browser verification. The lead
-	// announces one dev server per slot; fullstack teams can have several
-	// (e.g. "frontend" + "api"). Default slot is "app".
-	b.WriteString("## Team Dev Instance\n")
-	b.WriteString("The team may run one or more shared dev instances of whatever app you're building. Before any browser verification, run `cm dev url` (default \"app\" slot) or `cm dev url <slot>` (for named slots like `frontend` or `api`). `cm dev list` shows every running slot. If empty, the lead hasn't started one yet -- ask them, or fall back to the Jarvis office URL itself for dashboard verification. Never spin up your own competing dev server on an already-held port.\n")
-	b.WriteString("If the dev instance requires login (admin pages, auth-gated flows), run `cm dev creds` -- the lead posts developer credentials there as a free-text blob (e.g. `admin@dev.local / password123`). Paste those into your browser-driver script or expect-cli test instead of being blocked at the login screen.\n")
-	b.WriteString("**Strong rule:** any task whose title mentions UI / frontend / page / button / modal / layout / styling / css / design / screenshot / visual / Expo / React-Native MUST cite the browser verification in your `cm task complete --summary`. Example: \"Screenshotted at /tmp/signup.png -- confirmed the new copy and disabled state\". A summary for a UI-keyword task that says only \"implemented X\" will trigger a dashboard warning.\n")
-	b.WriteString("Full reference: `cm skill read team-dev-instance`.\n\n")
-
-	// 13. Work mode
-	if perpetualMode {
-		b.WriteString("## Work Mode: RALPH (perpetual)\n")
-		b.WriteString("You must NEVER be idle. After completing any task: `cm task list` -> `cm skill search <topic>` -> `cm reflect \"<lesson>\"` -> `cm task self-add ...` -> start the next task.\n")
-		b.WriteString("If you have no tasks: hunt TODOs, write missing tests, refactor for clarity, or improve docs. Avoid duplicate work -- check `git log --oneline -20` and `cm roster` first.\n")
-		b.WriteString("Full RALPH protocol: `cm skill read office-protocols`.\n\n")
-	} else {
-		b.WriteString("## Work Mode: Goal-Focused\n")
-		b.WriteString("Complete assigned tasks thoroughly. When done, run `cm task list` to verify, review your work, commit, then wait for the next standup. Do not invent work beyond the mission scope.\n\n")
+		b.WriteString("\n")
 	}
 
 	// Leader-specific (only strategic-tier agents)
 	if config.Tier == "strategic" {
-		b.WriteString("## Leader Task Assignment (strategic tier)\n")
-		b.WriteString("After standup you receive a `[LEADER TASK ASSIGNMENT]` prompt. Analyze each member's report, create 2-4 actionable tasks per teammate, respond with `cm leader-tasks respond \"TASKS_FOR:<id>\\n- [HIGH] title | description\\n...\"`. Route tasks to the right teammate by role. Full protocol: `cm skill read office-protocols`.\n")
-		if team := filterTeammates(config.ID, teammates); len(team) > 0 {
+		b.WriteString("## Leader Task Assignment\n")
+		b.WriteString("After standup you receive a `[LEADER TASK ASSIGNMENT]` prompt. Analyze each member's report, create 2-4 actionable tasks per teammate, respond with `cm leader-tasks respond \"TASKS_FOR:<id>\\n- [HIGH] title | description\\n...\"`. Route tasks to the right teammate by role.\n")
+		if len(team) > 0 {
 			b.WriteString("Routing:\n")
 			for _, tm := range team {
 				fmt.Fprintf(&b, "- %s tasks -> %s (%s)\n", tm.Role, tm.Name, tm.ID)
 			}
 		}
-		b.WriteString("\n")
-
-		// Leader responsibility for the team dev instance. Placed in the
-		// strategic block so only leads get the "you start the server"
-		// instruction; workers get the "check cm dev url" reminder above.
-		b.WriteString("## Leader: Team Dev Instance\n")
-		b.WriteString("If the team's mission involves building or improving a web app, start a dev instance of it in the team's working directory after your first standup. Bind the dev server to `0.0.0.0` (not `localhost`), pick a free port in 3000-3999, then capture its PID and announce:\n")
-		b.WriteString("  `nohup npm run dev -- --host 0.0.0.0 --port 3001 > /tmp/dev.log 2>&1 & cm dev announce http://jarvis:3001 --pid $!`\n")
-		b.WriteString("Passing `--pid` lets Jarvis SIGTERM the *full process tree* automatically if you die or the team wraps up -- no orphaned servers racing next team's ports.\n")
-		b.WriteString("**Fullstack teams:** run multiple slots, e.g. `cm dev announce http://jarvis:3001 --name frontend --pid $FRONT_PID` AND `cm dev announce http://jarvis:8080 --name api --pid $API_PID`. `cm dev list` shows the full map. Port conflicts across slots return 409 -- pick a different port.\n")
-		b.WriteString("**Expo / React-Native teams:** use `expo start --web --host 0.0.0.0 --port 19006` to get a browser-screenshottable build of the app; announce `http://jarvis:19006`. Web mode covers most RN components; truly-native modules (Haptics, NativeModules) won't render.\n")
-		b.WriteString("If the app requires login, also run `cm dev creds set \"admin@dev.local / password123\"` (optional `--name <slot>`) so teammates can get past the login screen. On wrap-up, `cm dev clear --all` handles every slot. Full reference: `cm skill read team-dev-instance`.\n\n")
+		b.WriteString("\nFor the full dev-instance startup runbook (web apps, Expo, fullstack slots): `cm onboard dev-lead`.\n\n")
 	}
 
-	// 14. Your Role
+	// Work mode
+	if perpetualMode {
+		b.WriteString("## Work Mode: RALPH (perpetual)\n")
+		b.WriteString("You must NEVER be idle. After completing any task: `cm task list` -> `cm skill search <topic>` -> `cm reflect \"<lesson>\"` -> `cm task self-add ...` -> start the next task.\n")
+		b.WriteString("If you have no tasks: hunt TODOs, write missing tests, refactor for clarity, or improve docs. Avoid duplicate work -- check `git log --oneline -20` and `cm roster` first.\n\n")
+	} else {
+		b.WriteString("## Work Mode: Goal-Focused\n")
+		b.WriteString("Complete assigned tasks thoroughly. When done, run `cm task list` to verify, review your work, commit, then wait for the next standup. Do not invent work beyond the mission scope.\n\n")
+	}
+
+	// Role (SystemPrompt) -- last, highest-signal, role-unique.
 	b.WriteString("## Your Role\n")
 	b.WriteString(config.SystemPrompt)
 
 	return prependBudgetWarning(b.String(), config.Name)
+}
+
+// BuildStableSystemPrompt returns the cacheable prefix that gets
+// handed to claude.WithAppendSystemPrompt. Content identical across
+// every agent on a team + stable across respawns within a team:
+// onboarding router + critical rules + team mission. Anthropic's
+// ephemeral cache auto-breakpoints on system prompts above ~1k
+// tokens and charges 10% on cache hits (5-min TTL), so the 2nd agent
+// through 5th agent on a single spawn pay ~10% of this block.
+//
+// Tier-aware: strategic agents get the dev-lead topic listed in the
+// router; workers don't.
+func BuildStableSystemPrompt(tier, teamMission string) string {
+	var b strings.Builder
+	b.WriteString("# Jarvis Team Operating Context\n\n")
+	b.WriteString("You are part of an autonomous multi-agent team coordinated by Jarvis. The sections below are shared across every teammate and every turn -- they do not change mid-session. Anthropic's prompt cache discounts this prefix on subsequent turns, so its size is not a per-turn concern.\n\n")
+
+	if teamMission != "" {
+		b.WriteString("## Team Mission\n")
+		b.WriteString(teamMission)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("## Lazy-load Reference\n")
+	b.WriteString(onboardingRouterLines(tier))
+	b.WriteString("\nThe kickstart you receive after this prompt is lean on purpose. For any protocol, tool, or dev-instance question that isn't covered inline, run the matching `cm onboard` command -- it prints the full reference so you only pay for the tokens you actually use.\n\n")
+
+	b.WriteString("## Critical Rules\n")
+	b.WriteString("- Task lifecycle: `cm task ack <id>` -> `cm task start <id>` -> `cm task progress <id> \"...\"` -> `cm task complete <id> --summary \"<2-3 sentence handoff>\"`. Never skip ack or start.\n")
+	b.WriteString("- Handoff mid-task: `cm task handoff <id> <targetConfigId> \"<context>\"`. Receiver accepts/rejects. Not for dodging work.\n")
+	b.WriteString("- Never push to remote, never switch branches -- you live on `agent/<your-id>`.\n")
+	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
+	b.WriteString("- Before duplicating work: `cm knowledge search <keywords>` -- searches every teammate's memory + learnings + standups + whiteboard.\n")
+	b.WriteString("- Before any browser verification: `cm dev url` (and `cm dev creds` if login-gated). Don't spin up competing dev servers.\n")
+	b.WriteString("- Keep memory fresh: `cm memory section <name> \"<content>\"` / `cm memory append \"<entry>\"`. At ~70% context run `/compact` after saving state to memory.\n\n")
+
+	b.WriteString("## Team Messaging\n")
+	b.WriteString("Team messages arrive as `[Team Message from <name>]: <content>`. Reply with `cm message <sessionId> \"...\"`. `cm roster` lists sessionIds.\n")
+
+	return b.String()
 }
 
 // estimatedTokens gives a rough token count for budget estimation. Claude's

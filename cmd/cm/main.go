@@ -114,6 +114,13 @@ func main() {
 	case "knowledge", "know":
 		handleKnowledge(args)
 
+	// R31 · Onboarding reference -- print a topic's full content on
+	// demand so the kickstart doesn't have to ship it. Topics:
+	// protocols, browser, dev-instance, dev-lead (strategic only),
+	// context-budget, skills, memory.
+	case "onboard", "onboarding":
+		handleOnboard(args)
+
 	// Help
 	case "help", "--help", "-h":
 		printUsage()
@@ -123,6 +130,33 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+func handleOnboard(args []string) {
+	if len(args) < 1 {
+		fatal("Usage: cm onboard <topic>\nTopics: protocols, browser, dev-instance, dev-lead, context-budget, skills, memory")
+	}
+	topic := args[0]
+	// Plain-text endpoint -- bypass the JSON-expecting `get` helper.
+	requireEnv()
+	req, err := http.NewRequest("GET",
+		fmt.Sprintf("%s/api/office/agent/onboarding?sessionId=%s&topic=%s",
+			apiURL, url.QueryEscape(sessionID), url.QueryEscape(topic)),
+		nil)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	addAgentAuth(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(body)))
+	}
+	fmt.Println(string(body))
 }
 
 func handleStandup(args []string) {
@@ -893,6 +927,9 @@ Commands:
                                       Team-wide search: all memory + learnings
                                       + standups + whiteboard, recency-ranked
   knowledge tail [--limit N]          Rolling tail of recent team knowledge
+  onboard <topic>                     Lazy-load reference: protocols, browser,
+                                      dev-instance, dev-lead (lead only),
+                                      context-budget, skills, memory
   dev announce <url> [--name <s>] [--pid <n>]
                                       Lead: announce dev URL for slot s (default "app")
   dev announce <url> --force          Allow localhost URL (headless-shell won't reach it)

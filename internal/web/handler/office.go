@@ -575,6 +575,13 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		if ov != nil && ov.Model != "" {
 			memberModel = ov.Model
 		}
+		// R31 · Stable cross-agent prefix rides on the system prompt so
+		// Anthropic's ephemeral cache (5-min TTL, 90% off cache hits)
+		// can discount it across every teammate + every turn. Content
+		// must be byte-for-byte identical per tier so cache lookups
+		// hit; BuildStableSystemPrompt is deterministic for a given
+		// (tier, mission) pair.
+		stablePrefix := office.BuildStableSystemPrompt(member.Tier, req.Mission)
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
 			pty.SessionConfig{
@@ -586,6 +593,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 				SystemPrompt:       kickstart,
 				McpServers:         mcpServers,
 				Model:              memberModel,
+				AppendSystemPrompt: stablePrefix,
 				MaxTurnsPerSession: maxTurns,
 			},
 		)

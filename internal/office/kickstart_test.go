@@ -6,10 +6,11 @@ import (
 )
 
 // Maximum acceptable kickstart prompt length for a default office-7
-// spawn. Before the slim-down it was ~16500 chars; the goal of the
-// refactor is to keep it under this ceiling so long-running agents
-// have headroom in their context window.
-const kickstartMaxChars = 12000
+// spawn. Before R31's router refactor it was ~13k chars; the kickstart
+// now ships only per-agent-unique content (identity, memory, role) and
+// delegates boilerplate to the append-system-prompt (cacheable) + the
+// `cm onboard <topic>` CLI. Tight ceiling to catch regressions.
+const kickstartMaxChars = 7000
 
 // makeOffice7Team builds a representative office-7 lineup for size tests.
 func makeOffice7Team() []*TeamMemberConfig {
@@ -48,17 +49,70 @@ func TestKickstartPromptUnderSizeLimit(t *testing.T) {
 			t.Errorf("kickstart for %s (%s) is %d chars, exceeds limit of %d",
 				member.Name, member.Role, len(got), kickstartMaxChars)
 		}
-		// Sanity: the prompt must still mention the role and the protocol
-		// pointer so agents know where to find the rest.
+		// Sanity: the prompt must still mention the role. The protocol
+		// and context-budget pointers moved to BuildStableSystemPrompt
+		// (see TestStableSystemPromptCoversBoilerplate).
 		if !strings.Contains(got, member.Role) {
 			t.Errorf("kickstart for %s missing role text", member.Name)
 		}
-		if !strings.Contains(got, "office-protocols") {
-			t.Errorf("kickstart for %s missing office-protocols pointer", member.Name)
+	}
+}
+
+// R31 · Workers should skip the leader-task-assignment + leader
+// dev-instance blocks entirely. Strategic agents keep them.
+func TestKickstartWorkerTrimsLeaderBlocks(t *testing.T) {
+	team := makeOffice7Team()
+	strategic := team[0] // Max, Engineering Manager
+	worker := team[2]    // Nova, UI/UX Designer
+	stratKickstart := BuildKickstartPrompt(strategic, "/tmp/x", team, "", "", true)
+	workerKickstart := BuildKickstartPrompt(worker, "/tmp/x", team, "", "", true)
+
+	if !strings.Contains(stratKickstart, "Leader Task Assignment") {
+		t.Error("strategic kickstart should contain Leader Task Assignment block")
+	}
+	if strings.Contains(workerKickstart, "Leader Task Assignment") {
+		t.Error("worker kickstart should NOT contain Leader Task Assignment block")
+	}
+	if strings.Contains(workerKickstart, "cm onboard dev-lead") {
+		t.Error("worker kickstart should NOT reference cm onboard dev-lead")
+	}
+
+	// And worker kickstart should be meaningfully smaller.
+	if len(workerKickstart) >= len(stratKickstart) {
+		t.Errorf("expected worker kickstart (%d) < strategic (%d)",
+			len(workerKickstart), len(stratKickstart))
+	}
+}
+
+// R31 · Stable prefix carries the cross-agent boilerplate. Anthropic's
+// prompt cache auto-breakpoints on system prompts above ~1k tokens
+// and gives 90%% discount on cache hits, so the 2nd-Nth agent on a
+// team spawn pay ~10%% of this prefix.
+func TestStableSystemPromptCoversBoilerplate(t *testing.T) {
+	for _, tier := range []string{"strategic", "worker"} {
+		got := BuildStableSystemPrompt(tier, "Ship the Q2 initiative.")
+		for _, mustHave := range []string{
+			"Team Mission",
+			"Lazy-load Reference",
+			"cm onboard",
+			"protocols",
+			"memory",
+			"cm task ack",
+			"agent/<your-id>",
+		} {
+			if !strings.Contains(got, mustHave) {
+				t.Errorf("stable prefix for %s missing %q", tier, mustHave)
+			}
 		}
-		if !strings.Contains(got, "Context Budget") {
-			t.Errorf("kickstart for %s missing Context Budget reminder", member.Name)
-		}
+	}
+	// dev-lead only appears for strategic.
+	strat := BuildStableSystemPrompt("strategic", "")
+	worker := BuildStableSystemPrompt("worker", "")
+	if !strings.Contains(strat, "dev-lead") {
+		t.Error("strategic stable prefix should mention dev-lead topic")
+	}
+	if strings.Contains(worker, "dev-lead") {
+		t.Error("worker stable prefix should NOT mention dev-lead topic")
 	}
 }
 

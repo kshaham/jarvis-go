@@ -82,6 +82,11 @@ type SDKSession struct {
 	// model is the specific Claude model ID to force via claude.WithModel.
 	// Empty = let ANTHROPIC_DEFAULT_*_MODEL env vars / CLI default pick.
 	model string
+	// appendSystemPrompt is the stable (cacheable) boilerplate passed
+	// to claude.WithAppendSystemPrompt. Anthropic's ephemeral cache
+	// auto-breakpoints here; content must be byte-for-byte identical
+	// across sessions to share the cache.
+	appendSystemPrompt string
 
 	// Output observers
 	outputObservers   map[int]func(string)
@@ -114,6 +119,7 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		systemPrompt:       config.SystemPrompt,
 		mcpServers:         config.McpServers,
 		model:              config.Model,
+		appendSystemPrompt: config.AppendSystemPrompt,
 		maxTurnsPerSession: config.MaxTurnsPerSession,
 		outputObservers:    make(map[int]func(string)),
 		activeTools:        make(map[string]bool),
@@ -146,6 +152,13 @@ func (s *SDKSession) Start(ctx context.Context) error {
 		claude.WithBypassPermissions(),
 		claude.WithIncludePartialMessages(),
 		claude.WithSettingSources(claude.SettingSourceUser),
+	}
+	// R31 · Stable cross-agent prefix goes into the system prompt so
+	// Anthropic's ephemeral cache can discount it on subsequent calls.
+	// Only attach when non-empty so SDK default behavior is preserved
+	// for callers that don't opt in.
+	if s.appendSystemPrompt != "" {
+		opts = append(opts, claude.WithAppendSystemPrompt(s.appendSystemPrompt))
 	}
 
 	if len(s.providerEnv) > 0 {

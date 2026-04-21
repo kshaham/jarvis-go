@@ -338,24 +338,22 @@ func TestBuildKickstartPrompt_ContainsSections(t *testing.T) {
 
 	prompt := BuildKickstartPrompt(config, "/home/project", teammates, "", "", true)
 
-	// The kickstart was deliberately slimmed -- protocol bodies live in
-	// the office-protocols skill now and are read on demand. We assert
-	// the structural sections that survived plus the pointers to the
-	// extracted protocol skill.
+	// R31 · Kickstart was slimmed again. Per-agent unique content
+	// (identity, personality, team relationships, role) stays here;
+	// cross-agent boilerplate (protocols, context-budget, headless
+	// browser, suggested skills) moved to BuildStableSystemPrompt +
+	// `cm onboard <topic>`. Assert the unique content lives here;
+	// protocols / onboarding coverage is tested separately in
+	// TestStableSystemPromptCoversBoilerplate.
 	sections := []string{
 		"# Vex - Frontend Engineer",
 		"## Identity",
 		"/home/project",
 		"## Personality",
 		"Creative and detail-oriented.",
-		"## Suggested Skills (read on demand)",
 		"## Team",
 		"Bolt (Backend Engineer)",
 		"Sage (Senior Architect)",
-		"## Context Budget",
-		"## Team Protocols",
-		"office-protocols",
-		"## Headless Browser",
 		"## Work Mode: RALPH",
 		"## Your Role",
 		"Build beautiful UIs.",
@@ -364,6 +362,20 @@ func TestBuildKickstartPrompt_ContainsSections(t *testing.T) {
 	for _, section := range sections {
 		if !strings.Contains(prompt, section) {
 			t.Errorf("expected prompt to contain %q", section)
+		}
+	}
+
+	// Boilerplate that moved OUT of the kickstart should NOT appear
+	// inline (agents fetch it via `cm onboard` or it rides on the
+	// system prompt via BuildStableSystemPrompt).
+	for _, moved := range []string{
+		"## Suggested Skills",
+		"## Context Budget",
+		"## Headless Browser",
+		"## Team Dev Instance",
+	} {
+		if strings.Contains(prompt, moved) {
+			t.Errorf("boilerplate %q should have moved out of the kickstart body", moved)
 		}
 	}
 }
