@@ -35,6 +35,28 @@ services:
       retries: 3
       start_period: 10s
 
+  # R34 · Visual verification profile. Uncomment BOTH the headless-shell
+  # service below AND the "target: runtime-browser" override above to
+  # give agents browser-screenshot + a sibling Chromium container.
+  # Start with: docker compose --profile browser up -d
+  # See README.md "Visual verification" section for the full flow.
+  #
+  # headless-shell:
+  #   image: chromedp/headless-shell:stable
+  #   container_name: headless-shell
+  #   restart: unless-stopped
+  #   profiles: ["browser"]
+  #   # Jarvis reaches it via the DNS name `headless-shell` on the
+  #   # compose network; no need to publish the port.
+  #   expose:
+  #     - "9222"
+  #   shm_size: 1gb
+  #   command:
+  #     - --remote-debugging-address=0.0.0.0
+  #     - --remote-debugging-port=9222
+  #     - --disable-gpu
+  #     - --no-sandbox
+
   # Uncomment to scrape jarvis metrics into a local Prometheus.
   # prometheus:
   #   image: prom/prometheus:latest

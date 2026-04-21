@@ -110,6 +110,36 @@ docker compose up -d
 
 The container exposes port **3555** by default. See `docker-compose.yml` for volume mounts — workspaces, Claude credentials, skills, and configuration are all mounted from the host.
 
+### Visual verification (optional)
+
+Agents verify UI changes by taking screenshots of a shared dev instance
+via a sibling `chromedp/headless-shell` container. Two things are
+required:
+
+1. **Build the browser-enabled image**: `docker build --target=runtime-browser -t jarvis-browser .`
+   The `runtime-browser` stage extends the default runtime with
+   Node.js + `puppeteer-core` + `/usr/local/bin/browser-screenshot`.
+   Without this stage, `browser-screenshot` is a phantom command.
+2. **Start the sibling headless-shell container**: uncomment the
+   `headless-shell` service in `docker-compose.yml` and run
+   `docker compose --profile browser up -d`. Jarvis reaches it on
+   the compose network at `ws://headless-shell:9222`.
+
+Flow: a lead agent starts a dev server and runs
+`cm dev announce http://jarvis:<port> --pid $!`. Workers fetch the
+URL with `cm dev url` (optionally `--probe` for a live HEAD check),
+screenshot with `browser-screenshot <url> /tmp/out.png`, and attach
+the image to the task via `cm task complete <id> --summary "..."
+--screenshot /tmp/out.png`. Operators see the screenshot inline on
+the Tasks tab. The `GET /api/office/browser/health` endpoint
+exposes the headless-shell's reachability + version for dashboard
+indicators.
+
+The production jarvis container we run internally ships a richer
+image (custom `expect-cli` etc.) built outside this repo. The
+repo's `runtime-browser` stage is a minimal reproduction — enough
+to give cloners a working flow.
+
 ### Environment Variables
 
 | Variable | Description | Default |

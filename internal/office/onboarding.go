@@ -110,9 +110,16 @@ A real Chromium runs as a sibling container at ws://headless-shell:9222 (env: $E
 
 Full reference: cm skill read headless-browser.
 
-Run a fresh browser verification BEFORE marking complete any task that touches user-visible behavior -- this covers frontend/UI work AND any QA sign-off on a feature rendered in the browser. Capture the PNG, then Read it to confirm the expected state; a screenshot you didn't look at is not evidence.
+Recommended flow:
 
-**Strong rule:** any task whose title mentions UI / frontend / page / button / modal / layout / styling / css / design / screenshot / visual / Expo / React-Native MUST cite the browser verification in your cm task complete --summary. Example: "Screenshotted at /tmp/signup.png -- confirmed the new copy and disabled state". A summary for a UI-keyword task that says only "implemented X" will trigger a dashboard warning.
+1. ` + "`cm dev url --probe`" + ` -- get the team dev URL and confirm it's reachable right now (the --probe flag HEADs the URL and prints status on stderr).
+2. ` + "`browser-screenshot $(cm dev url) /tmp/after.png`" + ` -- capture the PNG.
+3. Use the Read tool on /tmp/after.png -- a screenshot you didn't look at is not evidence.
+4. ` + "`cm task complete <id> --summary \"...\" --screenshot /tmp/after.png`" + ` -- attach the image to the task. Operators see the thumbnail in the Tasks tab.
+
+If browser-screenshot fails with "Protocol error" or can't reach the host, check the browser-health pill in the Settings tab (or the operator can surface it). The sibling container may be down.
+
+**Strong rule:** any task whose title mentions UI / frontend / page / button / modal / layout / styling / css / design / screenshot / visual / Expo / React-Native MUST carry visual verification. Either cite the path in your --summary ("Screenshotted at /tmp/signup.png -- confirmed the new copy") OR attach the PNG via --screenshot. An attached image trumps a text citation and suppresses the dashboard warning.
 `
 }
 

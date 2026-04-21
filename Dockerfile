@@ -47,7 +47,43 @@ ENV JARVIS_LOG_LEVEL=info \
 ENTRYPOINT ["/usr/local/bin/jarvis"]
 CMD ["web"]
 
-# --- Stage 3: runtime-scratch (SDK-only, no PTY support) ---------------------
+# --- Stage 3: runtime-browser (runtime + Node + scripts for visual verification) --
+# Extends the default runtime with Node.js + puppeteer-core + the
+# repo's browser-screenshot.mjs helper so agents can take screenshots
+# against a sibling chromedp/headless-shell container. Build with
+# --target=runtime-browser and pair with the `headless-shell` service
+# in docker-compose.yml (commented-out profile). R34 · Aligns the
+# repo's default image with what the production jarvis container
+# provides; without this stage `browser-screenshot` is a phantom
+# command in a clone.
+FROM runtime AS runtime-browser
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+# Install puppeteer-core globally so browser-screenshot.mjs can
+# resolve it. Pinned to a major for reproducibility; update on
+# review.
+RUN npm install -g puppeteer-core@23.0.0 2>&1 | tail -20
+# Copy the repo script + wrapper to a canonical location on PATH.
+COPY scripts/browser-screenshot.mjs /usr/local/bin/browser-screenshot.mjs
+RUN printf '#!/bin/sh\nexec /usr/bin/node /usr/local/bin/browser-screenshot.mjs "$@"\n' > /usr/local/bin/browser-screenshot && \
+    chmod +x /usr/local/bin/browser-screenshot && \
+    printf '#!/bin/sh\necho "expect-cli is not installed in this image. The production jarvis container ships a custom expect-cli binary; this stage only ships browser-screenshot. See DEPLOYMENT.md." >&2\nexit 2\n' > /usr/local/bin/expect-cli && \
+    chmod +x /usr/local/bin/expect-cli
+# Default env vars for the sibling browser container -- override
+# in compose if your headless-shell lives elsewhere.
+ENV EXPECT_BROWSER_WS_ENDPOINT=ws://headless-shell:9222 \
+    HEADLESS_BROWSER_HOST=headless-shell \
+    HEADLESS_BROWSER_PORT=9222
+USER jarvis
+ENTRYPOINT ["/usr/local/bin/jarvis"]
+CMD ["web"]
+
+# --- Stage 4: runtime-scratch (SDK-only, no PTY support) ---------------------
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime-scratch
 COPY --from=builder /out/jarvis      /usr/local/bin/jarvis
 COPY --from=builder /out/cm          /usr/local/bin/cm

@@ -617,6 +617,14 @@
         <div class="tab-panel hidden" id="panel-settings" role="tabpanel">
           <div class="panel-header">
             <h2 class="panel-title">Settings</h2>
+            <div class="settings-header-indicators">
+              <!-- R34 · Headless-shell sibling container health. Polled
+                   every 60s while the Settings tab is active. -->
+              <span class="browser-health-pill" id="browserHealthPill" title="Checking…">
+                <span class="browser-health-dot" id="browserHealthDot"></span>
+                <span class="browser-health-label" id="browserHealthLabel">browser: checking</span>
+              </span>
+            </div>
           </div>
           <div class="settings-panel" id="settingsPanel">
             <div class="settings-search-wrap">

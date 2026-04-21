@@ -2410,9 +2410,16 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 		agent.UpdateTaskStatus(req.TaskID, office.TaskCompleted)
 
 		// Soft screenshot gate (R15 F8). Fire only for UI-keyword titles
-		// when the summary lacks browser-verification evidence.
-		if taskTitle != "" && uiKeywordRe.MatchString(taskTitle) && !verificationEvidenceRe.MatchString(req.Result) {
-			warning = "UI-tagged task completed without explicit visual verification evidence in the summary. Did you run browser-screenshot against the dev URL? Cite the path (e.g. '/tmp/after.png') or the tool name ('expect-cli passed') in your --summary."
+		// when the summary lacks browser-verification evidence AND no
+		// attached screenshot exists for this task. R34 added the
+		// office.HasTaskScreenshot check so agents that upload a real
+		// PNG via `cm task complete --screenshot <path>` don't get the
+		// warning even if their summary text is sparse -- an attached
+		// image is stronger evidence than a text citation.
+		if taskTitle != "" && uiKeywordRe.MatchString(taskTitle) &&
+			!verificationEvidenceRe.MatchString(req.Result) &&
+			!office.HasTaskScreenshot(req.TaskID) {
+			warning = "UI-tagged task completed without explicit visual verification evidence in the summary. Did you run browser-screenshot against the dev URL? Cite the path (e.g. '/tmp/after.png') in your --summary, or upload the PNG via `cm task complete <id> --screenshot <path>` so operators see the evidence in the dashboard."
 			ctx.SSEBroker.Broadcast("office:uiTaskMissingScreenshot", map[string]interface{}{
 				"sessionId": req.SessionID,
 				"taskId":    req.TaskID,

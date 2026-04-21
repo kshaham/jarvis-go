@@ -601,6 +601,9 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/memory", h.OfficeAgentPostMemory)
 				r.Post("/memory/append", h.OfficeAgentPostMemoryAppend)
 				r.Post("/memory/section", h.OfficeAgentPostMemorySection)
+				// R34 · agent uploads a visual-verification screenshot
+				// that operators see in the task detail modal.
+				r.Post("/task/screenshot", h.OfficeAgentTaskScreenshot)
 				r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)
 				r.Post("/dev-instance", h.OfficeAgentPostDevInstance)
 				r.Delete("/dev-instance", h.OfficeAgentDeleteDevInstance)
@@ -888,6 +891,11 @@ func (s *Server) setupRouter() chi.Router {
 				// R33 · wrap-up / post-mortem reports (read-only).
 				r.Get("/reports", h.OfficeListReports)
 				r.Get("/reports/{filename}", h.OfficeGetReport)
+				// R34 · headless-shell sibling container health probe.
+				r.Get("/browser/health", h.OfficeBrowserHealth)
+				// R34 · task screenshot attachments (operator-visible
+				// evidence for UI-keyword tasks).
+				r.Get("/task-screenshots/{filename}", h.OfficeGetTaskScreenshot)
 
 				// Mutating office endpoints (CSRF required)
 				r.Group(func(r chi.Router) {

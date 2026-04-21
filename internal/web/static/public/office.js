@@ -634,6 +634,20 @@ class OfficeApp {
       this.addActivityEntry('handoff', `handoff expired: "${data.handoff.taskTitle}" (receiver left roster)`);
       this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 200);
     });
+    // R34 · Agent uploaded a task screenshot via
+    // `cm task complete --screenshot`. Maintain an in-memory index
+    // keyed by taskId so the task detail modal can render thumbnails.
+    this.eventSource.addEventListener('office:taskScreenshotAttached', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data || !data.taskId || !data.filename) return;
+      if (!this._taskScreenshotIndex) this._taskScreenshotIndex = {};
+      if (!this._taskScreenshotIndex[data.taskId]) this._taskScreenshotIndex[data.taskId] = [];
+      if (!this._taskScreenshotIndex[data.taskId].includes(data.filename)) {
+        this._taskScreenshotIndex[data.taskId].push(data.filename);
+      }
+      this.addActivityEntry('task', `Evidence attached to task ${data.taskId}: ${data.filename}`);
+    });
+
     // R33 · Saved wrap-up report generated (auto on wrap-up or via
     // POST /api/office/reports/generate). Refresh the list if the
     // Reports tab is open; otherwise just silently update memory.
@@ -2134,7 +2148,12 @@ class OfficeApp {
     if (tab === 'tasks') this.fetchAndRenderTasks();
     if (tab === 'activity') this.renderActivity();
     if (tab === 'metrics') this.fetchAndRenderMetrics();
-    if (tab === 'settings') this.fetchOfficeSettings();
+    if (tab === 'settings') {
+      this.fetchOfficeSettings();
+      this.startBrowserHealthPoll();
+    } else {
+      this.stopBrowserHealthPoll();
+    }
     if (tab === 'reports') {
       this.renderReportDashboard();
       this.fetchAndRenderSavedReports();
@@ -2690,11 +2709,47 @@ class OfficeApp {
         ${ts}
         ${blocker}
         <div class="task-modal-field" style="margin-top:10px;color:#a1a1aa">${this._escapeHtml(t.description || '')}</div>
+        <div id="taskModalScreenshots" class="task-modal-screenshots"></div>
         ${progress}
       `;
+      // R34 · If agents uploaded a screenshot via `cm task complete
+      // --screenshot`, render thumbnails so operators see real
+      // evidence instead of just a text citation. Fire-and-forget --
+      // failure just hides the section.
+      this._loadTaskScreenshots(taskId);
     } catch (err) {
       body.innerHTML = '<div class="task-modal-loading">Failed to load task.</div>';
     }
+  }
+
+  // R34 · Fetch the task-screenshots directory index via a grep-able
+  // per-task list. There's no dedicated listing endpoint today, so
+  // we piggyback on the SSE payload and keep an in-memory index.
+  // For the happy path, the task detail modal also accepts a direct
+  // filename list from the progress log if we've observed it there.
+  async _loadTaskScreenshots(taskId) {
+    const el = document.getElementById('taskModalScreenshots');
+    if (!el) return;
+    // Prefer the in-memory index populated by the SSE listener; fall
+    // back to empty. Operators refresh the modal by reopening it.
+    const index = this._taskScreenshotIndex || {};
+    const filenames = index[taskId] || [];
+    if (!filenames.length) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = `
+      <div class="task-modal-screenshots-header">
+        <strong>Visual verification</strong>
+        <span class="task-modal-screenshots-hint">${filenames.length} screenshot${filenames.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="task-modal-screenshot-grid">
+        ${filenames.map(fn => `
+          <a class="task-modal-screenshot-link" href="/api/office/task-screenshots/${encodeURIComponent(fn)}" target="_blank" rel="noopener">
+            <img class="task-modal-screenshot-thumb" src="/api/office/task-screenshots/${encodeURIComponent(fn)}" alt="${this._escapeAttr(fn)}" loading="lazy" />
+          </a>
+        `).join('')}
+      </div>`;
   }
 
   closeTaskDetail() {
@@ -7207,6 +7262,49 @@ class OfficeApp {
   closeSavedReportModal() {
     const modal = document.getElementById('savedReportModal');
     if (modal) modal.classList.add('hidden');
+  }
+
+  // ========== R34 · Browser health indicator (Settings tab) ==========
+
+  startBrowserHealthPoll() {
+    this.pollBrowserHealth();
+    if (this._browserHealthTimer) return;
+    this._browserHealthTimer = setInterval(() => this.pollBrowserHealth(), 60000);
+  }
+
+  stopBrowserHealthPoll() {
+    if (this._browserHealthTimer) {
+      clearInterval(this._browserHealthTimer);
+      this._browserHealthTimer = null;
+    }
+  }
+
+  async pollBrowserHealth() {
+    const pill = document.getElementById('browserHealthPill');
+    const dot = document.getElementById('browserHealthDot');
+    const label = document.getElementById('browserHealthLabel');
+    if (!pill || !dot || !label) return;
+    try {
+      const res = await fetch('/api/office/browser/health');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (data.ok) {
+        pill.classList.remove('browser-health-pill--down');
+        pill.classList.add('browser-health-pill--up');
+        label.textContent = 'browser: ready';
+        pill.title = `${data.browserVersion || 'ok'} · ${data.latencyMs}ms · ${data.host}:${data.port}`;
+      } else {
+        pill.classList.add('browser-health-pill--down');
+        pill.classList.remove('browser-health-pill--up');
+        label.textContent = 'browser: unreachable';
+        pill.title = `${data.error || 'unreachable'} · ${data.host}:${data.port}`;
+      }
+    } catch (err) {
+      pill.classList.add('browser-health-pill--down');
+      pill.classList.remove('browser-health-pill--up');
+      label.textContent = 'browser: error';
+      pill.title = err.message || String(err);
+    }
   }
 
   _renderExperimentHistory(experiments) {

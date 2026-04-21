@@ -10,6 +10,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -130,6 +131,31 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+// uploadTaskScreenshot reads a PNG / JPEG / WebP from disk,
+// base64-encodes it, and POSTs to the task-screenshot endpoint.
+// R34 · Evidence attachment for `cm task complete --screenshot`.
+func uploadTaskScreenshot(taskID, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	// Very small mime sniff based on the file signature -- avoids
+	// requiring the caller to pass the mime type.
+	mime := "image/png"
+	if len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		mime = "image/jpeg"
+	} else if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		mime = "image/webp"
+	}
+	post("/api/office/agent/task/screenshot", map[string]interface{}{
+		"sessionId":  sessionID,
+		"taskId":     taskID,
+		"mimeType":   mime,
+		"dataBase64": base64.StdEncoding.EncodeToString(data),
+	})
+	return nil
 }
 
 func handleOnboard(args []string) {
@@ -260,6 +286,18 @@ func handleTask(args []string) {
 		summary := flags["summary"]
 		if summary == "" && len(fields) > 1 {
 			summary = strings.Join(fields[1:], " ")
+		}
+		// R34 · Optional --screenshot <path> uploads a PNG/JPEG/WebP
+		// to the server as concrete visual evidence. The server's
+		// soft-gate suppresses the "UI task missing verification"
+		// warning when an attachment is present. Upload BEFORE the
+		// complete call so the gate sees the attachment.
+		if sPath := flags["screenshot"]; sPath != "" {
+			if err := uploadTaskScreenshot(taskID, sPath); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: --screenshot upload failed (%v); continuing with complete\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "attached screenshot %s to task %s\n", sPath, taskID)
+			}
 		}
 		// Append the summary to memory section task_history BEFORE marking
 		// the task complete, so a failure on the complete call still leaves
@@ -526,18 +564,49 @@ func handleDev(args []string) {
 	switch args[0] {
 	case "url":
 		// Positional slot name, optional — defaults to "app".
+		// --probe flag triggers a client-side HEAD request against
+		// the returned URL so the agent sees live reachability
+		// instead of relying on the 30s health-tick cache.
 		slot := "app"
-		if len(args) > 1 && !strings.HasPrefix(args[1], "--") {
-			slot = args[1]
-		}
-		result := get("/api/office/agent/dev-instance?name=" + url.QueryEscape(slot))
-		if m, ok := result.(map[string]interface{}); ok {
-			if u, ok := m["url"].(string); ok {
-				fmt.Println(u)
-				return
+		probe := false
+		for _, a := range args[1:] {
+			if a == "--probe" {
+				probe = true
+				continue
+			}
+			if !strings.HasPrefix(a, "--") {
+				slot = a
 			}
 		}
-		fmt.Println("")
+		result := get("/api/office/agent/dev-instance?name=" + url.QueryEscape(slot))
+		var devURL string
+		if m, ok := result.(map[string]interface{}); ok {
+			devURL, _ = m["url"].(string)
+		}
+		if devURL == "" {
+			fmt.Println("")
+			return
+		}
+		fmt.Println(devURL)
+		if probe {
+			probeClient := &http.Client{Timeout: 5 * time.Second}
+			req, err := http.NewRequest(http.MethodHead, devURL, nil)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "probe: build request: %v\n", err)
+				return
+			}
+			resp, err := probeClient.Do(req)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "probe: %v (dev server may be down; ask the lead to respawn)\n", err)
+				return
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 500 {
+				fmt.Fprintf(os.Stderr, "probe: HTTP %d -- dev server reachable but erroring\n", resp.StatusCode)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "probe: HTTP %d -- ready to screenshot\n", resp.StatusCode)
+		}
 	case "list":
 		result := get("/api/office/agent/dev-instance/all")
 		printJSON(result)
@@ -913,7 +982,7 @@ Commands:
   reflect <learning> --category <cat> Submit post-task reflection
   discover <summary> --findings ...   Report curiosity findings
   task start|ack <taskId>             Manage task lifecycle
-  task complete <taskId> --summary "<2-3 sentence handoff>"
+  task complete <taskId> --summary "<2-3 sentence handoff>" [--screenshot <path>]
                                       Mark complete (summary appended to memory.task_history)
   task progress <taskId> <note>       Report task progress
   task blocked <taskId> <reason>      Report blocker
@@ -945,7 +1014,7 @@ Commands:
   dev announce <url> [--name <s>] [--pid <n>]
                                       Lead: announce dev URL for slot s (default "app")
   dev announce <url> --force          Allow localhost URL (headless-shell won't reach it)
-  dev url [<slot>]                    Print URL for slot (default "app"; empty if none)
+  dev url [<slot>] [--probe]          Print URL for slot (default "app"; empty if none). --probe HEADs the URL and prints live status on stderr.
   dev list                            JSON dump of every dev slot (url, pid, health, creds)
   dev clear [<slot>]                  Lead: clear one slot (SIGTERMs PID tree)
   dev clear --all                     Lead: wipe every dev slot (e.g. before wrap-up)

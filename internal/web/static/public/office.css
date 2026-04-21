@@ -5561,6 +5561,75 @@ p, .agent-card-task, .agent-activity-item {
   font-size: 12px;
 }
 
+/* R34 · Browser health pill (Settings tab header) + task-detail
+   thumbnail grid for screenshot attachments. */
+.settings-header-indicators {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.browser-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-default);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: default;
+}
+.browser-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #52525b;
+  transition: background 120ms ease;
+}
+.browser-health-pill--up .browser-health-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.5); }
+.browser-health-pill--up .browser-health-label { color: #86efac; }
+.browser-health-pill--down .browser-health-dot { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.5); }
+.browser-health-pill--down .browser-health-label { color: #fca5a5; }
+
+.task-modal-screenshots {
+  margin-top: 12px;
+}
+.task-modal-screenshots-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: #e4e4e7;
+}
+.task-modal-screenshots-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.task-modal-screenshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+.task-modal-screenshot-link {
+  display: block;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  transition: border-color 120ms ease;
+}
+.task-modal-screenshot-link:hover { border-color: #3b82f6; }
+.task-modal-screenshot-thumb {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-height: 180px;
+  object-fit: contain;
+  background: #000;
+}
+
 /* ========== Feature: Reports Tab ========== */
 
 /* R33 · Saved wrap-up reports list. Distinct from the live
