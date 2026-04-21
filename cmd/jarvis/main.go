@@ -41,8 +41,28 @@ func configureLogging() {
 	slog.SetDefault(slog.New(handler))
 }
 
+// scrubInheritedAuthEnv removes ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN
+// from the Jarvis process's environment at startup so they can't leak
+// into child PTY / SDK sessions via os.Environ() and silently override
+// subscription-auth credentials. When the operator picks
+// `claude-subscription` provider, the child must see no auth env vars
+// so the Claude CLI reads ~/.claude/.credentials.json itself.
+// Jarvis never reads these vars for its own purposes (verified by grep
+// of the tree), so unsetting is safe. API-key and Z.AI modes still
+// work because those set their own env via ProviderEnv on the child,
+// independent of the parent's environment.
+func scrubInheritedAuthEnv() {
+	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} {
+		if os.Getenv(k) != "" {
+			slog.Warn("unsetting inherited auth env var to prevent subscription-auth shadowing", "key", k)
+			_ = os.Unsetenv(k)
+		}
+	}
+}
+
 func main() {
 	configureLogging()
+	scrubInheritedAuthEnv()
 
 	if len(os.Args) < 2 {
 		printUsage()

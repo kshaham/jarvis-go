@@ -149,11 +149,16 @@
           headers['X-CSRF-Token'] = token;
         }
 
+        // Spawn a Claude PTY (mode: 'claude') so the CLI starts directly
+        // with its /login prompt visible. Previously this created a bash
+        // shell where the user had to know to type `claude` first --
+        // confusing for a fresh user.
         const createRes = await fetch('/api/sessions', {
           method: 'POST',
           headers,
           body: JSON.stringify({
             name: 'Claude Authentication',
+            mode: 'claude',
             workingDir: '/home/jarvis',
             provider: 'claude-subscription'
           })
