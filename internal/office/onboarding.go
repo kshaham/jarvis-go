@@ -190,7 +190,12 @@ func onboardingSkills(cfg *TeamMemberConfig) string {
 	if cfg != nil {
 		role = cfg.Role
 	}
-	b.WriteString(BuildSuggestedSkillsSection(role))
+	// P11.2.7 · For the legacy `GetOnboardingTopic` path (currently
+	// test-only; no production caller) pass eccEnabled=true so the
+	// behaviour matches pre-Phase-11. When a real caller wires this
+	// up, plumb the spawn-time `disableEcc` flag through and pass
+	// `!disableEcc` here.
+	b.WriteString(BuildSuggestedSkillsSection(role, true))
 	b.WriteString("\n")
 	b.WriteString("Read any of them with `cm skill read <name>`. Search by keyword with `cm skill search <kw>`.\n")
 	return b.String()
@@ -208,7 +213,7 @@ Your memory persists across respawns and is indexed for cross-agent search. Oper
 
 Sections are free-form names (e.g. "current_focus", "decisions", "blockers"). Keep them short and current; the kickstart only ships the first 1500 chars of your memory, so a bloated section means less room for teammate insights on the next respawn.
 
-Full discipline: cm skill read office-memory.
+Full discipline: cm skill read office-memory-discipline.
 `
 }
 

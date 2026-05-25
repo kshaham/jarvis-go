@@ -212,6 +212,10 @@ Every agent can search the team's combined knowledge in one query: memory files,
 
 Agent shell commands like `git`, `go build`, `docker`, and `pnpm` often produce verbose output that burns context for no benefit (progress bars, timestamp noise, repeated "unchanged" lines). Jarvis compresses those outputs automatically -- typically a 60–90% reduction -- while preserving errors and the parts the agent actually needs to reason about. Compression is fully transparent to the agent and falls back to raw output when the compressor is uncertain.
 
+### Automated Code Review on Completion
+
+Any task labelled `needs-review` triggers an adversarial code review when the agent marks it complete. The review runs as a separate Claude session against the diff and reports back as a structured set of findings (severity, file, line, description) that show up in the task detail view and in the activity feed. Use it for high-stakes changes where you want a second pair of eyes before merging, without breaking the agent's flow to ask for one.
+
 ---
 
 ## 5. The Learning System
@@ -395,6 +399,8 @@ Beyond the stop-and-start buttons, Jarvis exposes a full lifecycle surface so th
 - **Team Snapshots** -- save a named snapshot of the team's configuration, mission, member list, per-member tasks, whiteboard notes, perpetual-mode state, and pause state to a single file. Restore it later, even after a full shutdown or server restart, and the team spawns back with the same shape. Memory and learnings are already on disk keyed by member role, so they rehydrate automatically -- the agents truly resume, they do not start over. This is how Friday afternoon pairings become Monday morning continuations.
 - **In-Place Agent Restart** -- swap a fresh AI session onto an agent without losing anything that matters. The agent's memory, learnings, scores, task queue, whiteboard, and file locks carry over. The restart takes seconds. Use it when an agent's context window fills up with irrelevant history and you want them starting each thought with a clean slate but all their project knowledge intact.
 - **Working Directory Bump** -- redirect one agent to a different part of the codebase mid-run. The agent keeps working but focuses on a new subdirectory. Useful when priorities shift (move a QA agent from `/api` to `/frontend`) without spawning anyone new.
+- **Fork-Mode Snapshot Restore** -- restoring a snapshot in fork mode keeps the original team running and spawns a parallel team that resumes each agent's Claude transcript via `claude --fork-session`. Useful when a teammate is stuck on a hard problem: leave them on the original thread, fork a copy to experiment with a different approach, and merge the winner back. Members without a captured session ID start fresh in the fork; the rest pick up exactly where they left off.
+- **Tool Policy** -- a per-team allow/deny matrix enforced before every tool call. The default policy blocks the obvious (`rm -rf /`, `sudo`, `curl | sh`, writes to `/etc` / `/usr` / `~/.ssh/`). Operators can tighten or loosen it from the Settings page. The check fires inside Claude's PreToolUse hook, so a denied call returns a structured rejection to the agent rather than silently dropping work.
 
 ### Guardrails Against Runaway Agents
 
@@ -476,6 +482,10 @@ When you open Jarvis, you see:
 **The Meetings Tab** -- a browser for past meetings. Two panes: on the left, a chronological list of every completed standup and brainstorm with date, type, and participant count. On the right, the selected meeting's full transcript with speaker labels and timestamps. You can revisit a meeting from three weeks ago and see exactly what was said.
 
 **The Settings Panel** -- change the team mission, spawn or shut down teams, adjust monitoring intervals, manage snapshots, and configure integrations.
+
+### React Beta Dashboard
+
+A second dashboard at `/office-v2` is being built incrementally. Same data, same SSE stream, cleaner stack (React + Tailwind + Tanstack Query). Opt-in until parity with the classic dashboard is reached -- the classic UI at `/office` stays canonical in the meantime. If the React bundle hasn't been built yet on your install, `/office-v2` shows a styled placeholder page with the build command instead of erroring out.
 
 ### Warning Signals on Every Agent Card
 
@@ -609,6 +619,14 @@ You get maximum throughput at minimum quota cost, and the allocation is complete
 ### Per-Member Spawn Delay
 
 On a large team with a subscription plan, kicking off eight agents in the same second can trip the provider's concurrent-authentication rate limit. The spawn modal exposes a per-member "spawn delay" knob so you can stagger startup by a few seconds per agent -- enough to smooth through the limit without slowing the overall deployment noticeably.
+
+### Extra Skills and Tools via the ECC Bundle
+
+Jarvis vendors a curated subset of the [ECC](https://github.com/affaan-m/ECC) project -- 22 additional skills (deep-research, e2e-testing, security-review, mcp-server-patterns, and more), four code-review subagents the team's `Task` tool can dispatch on demand (`code-architect`, `security-reviewer`, `pr-test-analyzer`, `code-simplifier`), three slash commands (`/security-scan`, `/test-coverage`, `/refactor-clean`), and three MCP servers attached to every agent session: **context7** for live library documentation lookup, **sequential-thinking** for structured chain-of-thought reasoning on hard problems, and **shadcn** for UI component discovery. Opt the whole bundle out per team via `disableEcc`. See `docs/ECC.md` for the full inventory.
+
+### PR-Linked Sessions
+
+When you spawn a team to work on a specific GitHub PR, you can tie the spawn to a PR number. Future `claude --from-pr <number>` invocations resume the same office team rather than starting from scratch -- useful for "I'll come back to this tomorrow" workflows where the in-flight thread, file locks, and accumulated context need to survive the gap.
 
 ### Custom Teams
 

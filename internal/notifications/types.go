@@ -14,6 +14,11 @@ const (
 	ChannelTelegram = "telegram"
 	ChannelWebhook  = "webhook"
 	ChannelLog      = "log"
+	// ChannelExpoPush delivers via Expo's hosted push service. Target is an
+	// ExponentPushToken[xxx] obtained from expo-notifications. Mobile devices
+	// register themselves via POST /api/notifications/devices, which creates
+	// a per-device Route so the existing dispatcher handles subscription.
+	ChannelExpoPush = "expo"
 )
 
 // MatchRule decides whether an event should fire a route. EventPattern is

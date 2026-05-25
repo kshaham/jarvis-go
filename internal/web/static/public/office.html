@@ -12,6 +12,9 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="office.css">
+  <link rel="stylesheet" href="css/design-tokens.css">
+  <link rel="stylesheet" href="css/command-palette.css">
+  <link rel="stylesheet" href="css/activity-strip.css">
 </head>
 <body>
   <!-- Ambient dot-matrix background field (Round 11 · DESIGN.md). Pure CSS,
@@ -99,10 +102,6 @@
         </div>
       </div>
       <div class="office-header-right">
-        <div class="budget-pill hidden" id="budgetPill" data-tier="ok" title="Today's spend vs. daily budget">
-          <span class="budget-pill-label t-meta">Today</span>
-          <span class="budget-pill-value t-mono" id="budgetPillValue">$0.00 / $0</span>
-        </div>
         <button class="hdr-btn hdr-btn-add" id="btnQuickAddTask" onclick="office.openQuickAddModal()" title="Quick-add task (t)" aria-label="Quick-add task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
@@ -226,6 +225,10 @@
         <button class="nav-icon" data-tab="reports" onclick="office.switchTab('reports')" title="Reports (g r)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
         </button>
+        <button class="nav-icon" data-tab="knowledge" onclick="office.switchTab('knowledge')" title="Knowledge (g w)">
+          <!-- Book-with-spark glyph: the team's accumulating library. -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M4 17a3 3 0 0 1 3-3h11"/><path d="M19 4l1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></svg>
+        </button>
         <button class="nav-icon" data-tab="settings" onclick="office.switchTab('settings')" title="Settings (g g)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
@@ -267,6 +270,50 @@
               <span class="t-meta">Throughput</span>
               <span class="t-mono team-overview-primary" id="teamOverviewThroughput">0</span>
               <span class="team-overview-sub t-meta">tasks done</span>
+            </div>
+          </div>
+
+          <!-- P13.4 · Activity strip. Three rolling-window widgets that
+               complement the per-session team-overview above. Populated
+               by office.js _renderActivityStrip() on SSE-driven refresh. -->
+          <div class="activity-strip hidden" id="activityStrip" aria-label="Office activity">
+            <div class="activity-widget" data-widget="cost">
+              <div class="activity-widget-header">
+                <span class="activity-widget-label">Cost · 7d</span>
+                <span class="activity-widget-value ds-tabular" id="activityCost7d">$0.00</span>
+              </div>
+              <div class="activity-widget-sub">
+                <span class="ds-tabular" id="activityCostToday">$0.00 today</span>
+                <span class="ds-tabular" id="activityCostAvg">$0.00 avg/day</span>
+              </div>
+              <svg class="activity-widget-spark" id="activityCostSpark" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+            <div class="activity-widget" data-widget="throughput">
+              <div class="activity-widget-header">
+                <span class="activity-widget-label">Throughput · 24h</span>
+                <span class="activity-widget-value ds-tabular" id="activityThroughput24h">0</span>
+              </div>
+              <div class="activity-widget-sub">
+                <span class="ds-tabular" id="activityThroughputCompleted">0 done</span>
+                <span class="ds-tabular" id="activityThroughputBlocked">0 blocked</span>
+              </div>
+              <svg class="activity-widget-spark" id="activityThroughputSpark" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+            <div class="activity-widget" data-widget="health">
+              <div class="activity-widget-header">
+                <span class="activity-widget-label">Agent health</span>
+                <span class="activity-widget-value ds-tabular" id="activityHealthTotal">0</span>
+              </div>
+              <div class="activity-widget-bars" id="activityHealthBars" role="img" aria-label="Status distribution">
+                <span class="activity-health-bar" data-status="working" style="--w:0%"></span>
+                <span class="activity-health-bar" data-status="idle" style="--w:0%"></span>
+                <span class="activity-health-bar" data-status="meeting" style="--w:0%"></span>
+                <span class="activity-health-bar" data-status="stuck" style="--w:0%"></span>
+              </div>
+              <div class="activity-widget-sub">
+                <span class="activity-health-legend" data-status="working"><i></i> <span id="activityHealthWorking">0</span> working</span>
+                <span class="activity-health-legend" data-status="stuck"><i></i> <span id="activityHealthStuck">0</span> stuck</span>
+              </div>
             </div>
           </div>
 
@@ -613,6 +660,72 @@
           </div>
         </div>
 
+        <!-- Knowledge Tab — PageIndex-backed self-improvement library.
+             Surfaces ledger stats + promotion list + one-click revoke.
+             All data comes from /api/knowledge/* endpoints. -->
+        <div class="tab-panel hidden" id="panel-knowledge" role="tabpanel">
+          <div class="panel-header">
+            <h2 class="panel-title">Knowledge</h2>
+            <div class="report-export-actions">
+              <button class="panel-btn" onclick="office.renderKnowledge()">Refresh</button>
+            </div>
+          </div>
+
+          <!-- Library stats row. Each tile shows a count + brief
+               description. Populated by renderKnowledgeStats. -->
+          <div class="knowledge-stats" id="knowledgeStats">
+            <div class="knowledge-stat-tile">
+              <div class="knowledge-stat-value" id="kStatExperiences">—</div>
+              <div class="knowledge-stat-label">Experiences</div>
+            </div>
+            <div class="knowledge-stat-tile">
+              <div class="knowledge-stat-value" id="kStatWorkflows">—</div>
+              <div class="knowledge-stat-label">Workflows</div>
+            </div>
+            <div class="knowledge-stat-tile">
+              <div class="knowledge-stat-value" id="kStatPromoted">—</div>
+              <div class="knowledge-stat-label">Auto-promoted</div>
+            </div>
+            <div class="knowledge-stat-tile">
+              <div class="knowledge-stat-value" id="kStatRevoked">—</div>
+              <div class="knowledge-stat-label">Revoked</div>
+            </div>
+            <div class="knowledge-stat-tile" title="PageIndex MCP gives agents lazy tree-search retrieval into the library">
+              <div class="knowledge-stat-value" id="kStatMcp">—</div>
+              <div class="knowledge-stat-label">PageIndex MCP</div>
+            </div>
+          </div>
+
+          <!-- Promotion ledger table. Operator can one-click revoke
+               any row; that hits POST /api/knowledge/revoke which
+               stamps the ledger + removes the on-disk SKILL.md.
+               Empty when nothing has been cited yet. -->
+          <div class="knowledge-section">
+            <h3 class="knowledge-section-title">Promotion ledger</h3>
+            <p class="knowledge-section-hint">Tracks which library
+              docs have been cited by agents (reuse count) and the
+              average outcome of those tasks. Auto-promotion fires
+              at reuse ≥ 5 + avg outcome ≥ 0.75.</p>
+            <div class="knowledge-table-wrap">
+              <table class="knowledge-table" id="knowledgeLedgerTable">
+                <thead>
+                  <tr>
+                    <th>Path</th>
+                    <th>Reuse</th>
+                    <th>Avg outcome</th>
+                    <th>Last used</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="knowledgeLedgerBody">
+                  <tr><td colspan="6" class="knowledge-empty">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- Settings Tab -->
         <div class="tab-panel hidden" id="panel-settings" role="tabpanel">
           <div class="panel-header">
@@ -642,11 +755,6 @@
                 <span class="char-count" id="missionCharCount">0 / 1000</span>
               </div>
               <p class="settings-hint">Agents re-evaluate their work in real-time when you change this.</p>
-              <label class="settings-field" style="margin-top:12px">
-                <span>Daily budget (USD)</span>
-                <input type="number" class="settings-number" id="settingTeamDailyBudget" min="0" max="10000" step="1" value="0" onchange="office.updateSetting('teamDailyBudget')" placeholder="0 = off">
-              </label>
-              <p class="settings-hint">Shows a progress pill in the header. Set to 0 to hide.</p>
             </div>
             <div class="settings-section">
               <div class="settings-section-title">Auto-Standup</div>
@@ -1175,6 +1283,11 @@
   </div>
 
   <script src="office.js"></script>
+  <script src="js/office-widgets.js"></script>
+  <script src="js/office-tasks.js"></script>
+  <script src="js/office-modals.js"></script>
+  <script src="js/office-agents.js"></script>
   <script src="concierge.js"></script>
+  <script src="js/command-palette.js"></script>
 </body>
 </html>

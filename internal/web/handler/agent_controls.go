@@ -16,7 +16,6 @@ import (
 	"net/http"
 
 	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/teamtemplates"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
 
@@ -74,47 +73,52 @@ func (ctx *Context) OfficeAgentKill(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "sessionId is required")
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
-	agentName := req.SessionID
-	if agent != nil && agent.Config != nil {
-		agentName = agent.Config.Name
-	}
-
-	// R21 code review (third pass): claim the stop-broadcast slot
-	// before doing work. If checkForWedgedWorkingAgents raced us and
-	// already fired office:agentIdleStopped, we still stop the
-	// session + unregister, but skip the duplicate office:agentKilled
-	// toast so the dashboard doesn't show both reasons for one stop.
-	mayBroadcast := agent != nil && agent.ClaimStopBroadcast()
-
-	// Stop the underlying session. Try SDK first (most agents); fall
-	// through to PTY for the handful of legacy sessions.
-	sm := ctx.SessionManager
-	if sm != nil {
-		if _, ok := sm.GetSDKSession(req.SessionID); ok {
-			_ = sm.StopSDKSession(req.SessionID)
-		} else if _, ok := sm.GetSession(req.SessionID); ok {
-			_ = sm.StopSession(context.Background(), req.SessionID)
-		}
-	}
-
-	// Unregister from the office — triggers task reassignment + dev
-	// instance cleanup via HandleAgentDeath if this was the last lead.
-	ctx.OfficeManager.UnregisterAgent(req.SessionID)
-
-	reason := req.Reason
-	if reason == "" {
-		reason = "operator"
-	}
-	if mayBroadcast {
+	result := ctx.OfficeManager.KillAgent(req.SessionID, req.Reason, ctx.stopAgentSessionByID)
+	if result.MayBroadcast {
 		ctx.SSEBroker.Broadcast("office:agentKilled", map[string]interface{}{
 			"sessionId": req.SessionID,
-			"agentName": agentName,
-			"reason":    reason,
+			"agentName": result.AgentName,
+			"reason":    result.Reason,
 		})
 	}
-	slog.Info("agent killed by operator", "session", req.SessionID, "name", agentName, "reason", reason, "broadcast", mayBroadcast)
+	slog.Info("agent killed by operator", "session", req.SessionID, "name", result.AgentName, "reason", result.Reason, "broadcast", result.MayBroadcast)
 	ok(w, map[string]interface{}{"stopped": req.SessionID})
+}
+
+// stopAgentSessionByID implements office.StopAgentSessionFunc. Tries
+// SDK first (modern path) and falls through to PTY for legacy
+// sessions. No-op when SessionManager is nil (test environments).
+func (ctx *Context) stopAgentSessionByID(sessionID string) {
+	sm := ctx.SessionManager
+	if sm == nil {
+		return
+	}
+	if _, ok := sm.GetSDKSession(sessionID); ok {
+		_ = sm.StopSDKSession(sessionID)
+		return
+	}
+	if _, ok := sm.GetSession(sessionID); ok {
+		_ = sm.StopSession(context.Background(), sessionID)
+	}
+}
+
+// writeSessionPrompt implements office.SessionPromptFunc. Tries the
+// PTY session first (legacy), then the SDK session, returning true
+// only when one of them accepted the write. Used by the wrap-up
+// fan-out + any other code that needs to push a prompt to a single
+// agent regardless of session kind.
+func (ctx *Context) writeSessionPrompt(sessionID, prompt string) bool {
+	sm := ctx.SessionManager
+	if sm == nil {
+		return false
+	}
+	if s, found := sm.GetSession(sessionID); found {
+		return s.WriteInkPrompt(prompt)
+	}
+	if sdk, found := sm.GetSDKSession(sessionID); found {
+		return sdk.WriteInkPrompt(prompt)
+	}
+	return false
 }
 
 // OfficeAgentInjectPrompt sends a corrective prompt to one agent. The
@@ -261,31 +265,28 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	if agent.Config == nil {
-		request.WriteError(w, http.StatusInternalServerError, "agent has no config (cannot rebuild kickstart)")
+	member, err := office.BuildRestartTemplateMember(agent)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	agentName := agent.Config.Name
 
 	// Snapshot the working dir from the live SDK session before we
 	// stop it — the spawn helper needs it to build the fresh session
-	// at the same path.
-	workingDir := ""
+	// at the same path. Falls back to agent.WorktreePath when no SDK
+	// session lookup is available.
+	sdkWorkingDir := ""
 	sm := ctx.SessionManager
 	if sm != nil {
 		if sdk, ok := sm.GetSDKSession(req.SessionID); ok {
-			workingDir = sdk.WorkingDir
+			sdkWorkingDir = sdk.WorkingDir
 		}
 	}
-	if workingDir == "" {
-		// Fallback: agent.WorktreePath is set by R25's workdir bump
-		// and by spawnAgentSession. Either way it's a safe fallback.
-		// R26 · Read under the agent mutex (see SetWorktreePath).
-		workingDir = agent.GetWorktreePath()
-	}
+	workingDir := office.ResolveRestartWorkingDir(agent, sdkWorkingDir)
 	if workingDir == "" {
 		request.WriteError(w, http.StatusInternalServerError,
-			"cannot determine working directory for restart")
+			office.ErrRestartWorkingDirUnknown.Error())
 		return
 	}
 
@@ -297,30 +298,22 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 		_ = sm.StopSDKSession(req.SessionID)
 	}
 
-	// Build a synthetic spawn request for this single member. Only
-	// the fields spawnAgentSession actually reads are populated.
-	member := teamtemplates.TeamTemplateMember{
-		ID:           agent.ConfigID,
-		Name:         agent.Config.Name,
-		Role:         agent.Config.Role,
-		Tier:         agent.Config.Tier,
-		Color:        agent.Config.Color,
-		Personality:  agent.Config.Personality,
-		SystemPrompt: agent.Config.SystemPrompt,
-		Skills:       agent.Config.Skills,
-	}
-	// Mission: use the current team mission so the restarted agent
-	// has the same macro-goal its teammates have.
-	mission := ctx.OfficeManager.GetTeamMission()
 	spawnReq := spawnTeamRequest{
 		WorkingDir: workingDir,
-		Mission:    mission,
+		Mission:    ctx.OfficeManager.GetTeamMission(),
 	}
-	teamConfigs := buildCurrentTeamConfigs(ctx)
+	teamConfigs := ctx.OfficeManager.SnapshotRosterAsTeamMemberConfigs()
 	perpetual := ctx.OfficeManager.IsPerpetualMode()
 	envVars := ctx.getProviderEnvVars()
 
-	newSessionID, mode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, true, nil)
+	// Respawn path: never opt into hooks-mode here. The previous
+	// session already had its .claude/settings.local.json wired (or
+	// not) when the team was first spawned; redoing it for a single
+	// agent would race with the still-running process and the new
+	// session would see a stale URL pointed at the old sessionID.
+	// Operators wanting to flip an agent into hooks mode mid-team
+	// should kill the team and respawn.
+	newSessionID, mode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, true, nil, spawnAgentSpec{})
 	if newSessionID == "" {
 		request.WriteError(w, http.StatusInternalServerError, "failed to create replacement session")
 		return
@@ -357,19 +350,4 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 		"sessionId":    newSessionID,
 		"oldSessionId": req.SessionID,
 	})
-}
-
-// buildCurrentTeamConfigs snapshots the current team's
-// TeamMemberConfig list, used by spawnAgentSession when building the
-// new kickstart so the restarted agent knows who their teammates are.
-func buildCurrentTeamConfigs(ctx *Context) []*office.TeamMemberConfig {
-	roster := ctx.OfficeManager.GetRoster()
-	out := make([]*office.TeamMemberConfig, 0, len(roster))
-	for _, a := range roster {
-		if a == nil || a.Config == nil {
-			continue
-		}
-		out = append(out, a.Config)
-	}
-	return out
 }

@@ -78,6 +78,69 @@ func sendWebhook(ctx context.Context, client *http.Client, spec ChannelSpec, d D
 	return nil
 }
 
+// expoPushEndpoint is the public Expo push API. No auth required: the
+// ExponentPushToken in spec.Target itself authenticates the recipient.
+// Documented at https://docs.expo.dev/push-notifications/sending-notifications/.
+const expoPushEndpoint = "https://exp.host/--/api/v2/push/send"
+
+// sendExpoPush dispatches a single notification through Expo's push
+// service. Routing logic (which events go to which device tokens) is
+// the same as for every other channel -- this function only knows how
+// to translate one Dispatch into one Expo push payload.
+//
+// Failures are not retried; transient errors are logged and the
+// dispatcher's metric increments accordingly. Devices with stale or
+// revoked tokens get a "DeviceNotRegistered" response which the caller
+// can wire into auto-cleanup later (Phase 2 leaves the row in place).
+func sendExpoPush(ctx context.Context, client *http.Client, spec ChannelSpec, d Dispatch) error {
+	if spec.Target == "" {
+		return fmt.Errorf("expo push target (token) is empty")
+	}
+	title := fmt.Sprintf("[%s] %s", d.Event, d.RouteName)
+	body := payloadSummary(d.Data)
+	if body == "" {
+		body = "Tap to open jarvis-mobile."
+	}
+	payload := []map[string]interface{}{
+		{
+			"to":       spec.Target,
+			"title":    title,
+			"body":     body,
+			"sound":    "default",
+			"priority": "high",
+			"data": map[string]interface{}{
+				"event":     d.Event,
+				"route":     d.RouteName,
+				"routeId":   d.RouteID,
+				"timestamp": d.Timestamp,
+				"payload":   d.Data,
+			},
+		},
+	}
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal expo push payload: %w", err)
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, webhookTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, "POST", expoPushEndpoint, bytes.NewReader(buf))
+	if err != nil {
+		return fmt.Errorf("build expo push request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("expo push request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("expo push returned HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // sendLog emits a structured slog entry. Useful for piping to external log
 // aggregators (Loki, CloudWatch) without a separate webhook.
 func sendLog(spec ChannelSpec, d Dispatch) error {

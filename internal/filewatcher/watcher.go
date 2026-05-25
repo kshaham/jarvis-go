@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 type fileStat struct {
@@ -76,7 +78,7 @@ func New(ctx context.Context, maxWatches int) (*Watcher, error) {
 		lastStats:    make(map[string]fileStat),
 	}
 
-	go w.eventLoop()
+	safego.Go("filewatcher.eventLoop", w.eventLoop)
 
 	return w, nil
 }
@@ -177,7 +179,7 @@ func (w *Watcher) switchToFallback() {
 		return
 	}
 	w.fallbackMode = true
-	go w.pollLoop()
+	safego.Go("filewatcher.pollLoop", w.pollLoop)
 }
 
 func (w *Watcher) pollLoop() {

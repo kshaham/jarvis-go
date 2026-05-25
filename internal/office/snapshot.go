@@ -43,6 +43,13 @@ type SnapshotMemberEntry struct {
 	Config     TeamMemberConfig `json:"config"`
 	Tasks      []*Task          `json:"tasks,omitempty"`
 	Whiteboard *WhiteboardNote  `json:"whiteboard,omitempty"`
+	// ClaudeSessionID (R3.5) is the underlying Claude-side session ID
+	// pulled from SDKSession.ClaudeSessionID() at snapshot time. When
+	// non-empty, the operator can restore the snapshot in "fork" mode
+	// which resumes this session via --resume <id> --fork-session so
+	// the new agent inherits the transcript without colliding with
+	// any still-running original.
+	ClaudeSessionID string `json:"claudeSessionId,omitempty"`
 }
 
 // TeamSnapshot is the root snapshot record.
@@ -87,7 +94,12 @@ func ValidateSnapshotName(name string) error {
 // CreateSnapshot captures the current team state into a named JSON
 // file under ~/.jarvis/office-memory/snapshots/<name>.json. Fails
 // fast if the team isn't spawned (nothing to snapshot).
-func (m *Manager) CreateSnapshot(name, workingDir string) (*TeamSnapshot, error) {
+//
+// claudeSessionIDsByConfigID is an optional configID -> Claude
+// session ID map sourced from the live SDK sessions; embedded into
+// each member entry so R3.5 fork-restore can resume the transcript.
+// Pass nil for the legacy "no resume info" behaviour.
+func (m *Manager) CreateSnapshot(name, workingDir string, claudeSessionIDsByConfigID map[string]string) (*TeamSnapshot, error) {
 	if err := ValidateSnapshotName(name); err != nil {
 		return nil, err
 	}
@@ -125,6 +137,11 @@ func (m *Manager) CreateSnapshot(name, workingDir string) (*TeamSnapshot, error)
 		if wb, ok := whiteboard[a.SessionID]; ok && wb != nil {
 			copied := *wb
 			entry.Whiteboard = &copied
+		}
+		if claudeSessionIDsByConfigID != nil {
+			if cid, ok := claudeSessionIDsByConfigID[a.ConfigID]; ok {
+				entry.ClaudeSessionID = cid
+			}
 		}
 		members = append(members, entry)
 	}

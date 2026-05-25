@@ -111,6 +111,12 @@ func (m *Manager) StartIdleMonitoring() {
 				// the health checker auto-clears the slot so teammates
 				// stop being pointed at a dead server.
 				m.CheckDevInstanceHealth()
+				// Knowledge-library self-improvement sweep. Gated by
+				// memifyInterval (~6h) so the disk walk + workflow
+				// writes only fire a few times a day. Auto-promotes
+				// high-reuse workflows to ~/.claude/skills/ via the
+				// existing WriteSharedSkill path.
+				m.maybeRunMemify()
 			}()
 
 			if tickCount%5 == 0 {

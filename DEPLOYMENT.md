@@ -7,10 +7,45 @@ persistent state under `~/.jarvis/` (or a bind-mounted equivalent).
 
 ---
 
+## 0. Prerequisites + install bundled skills
+
+### Runtime prerequisites
+
+| Required | Used for |
+|---|---|
+| Claude Code CLI on PATH | every agent session (SDK + PTY modes both shell to `claude`) |
+| `screen` binary | PTY-mode sessions only — install with `apt install screen` / `brew install screen` |
+| Writable `~/.jarvis/` (or bind-mounted equivalent) | persistent state |
+| Writable `~/.claude/skills/` (or `JARVIS_SKILLS_DIR`) | shared skill library |
+
+| Optional | Used for |
+|---|---|
+| Node 18+ (`npx` on PATH) | ECC MCP servers (context7, sequential-thinking, shadcn). Skip if you set `disableEcc: true` per team. |
+| `codegraph` binary on PATH | extra symbol-graph MCP per agent. Skip if you set `disableCodegraph: true` per team. |
+| `chromedp`-compatible Chrome | visual verification flow (`browserEnabled: true` per team). |
+
+### Install bundled skills (one-time, all deployment modes)
+
+The team templates and agent onboarding reference ~54 curated skills
+that ship in `./skills/`. Install them into `~/.claude/skills/` (the
+location agents resolve at runtime) before starting jarvis:
+
+```bash
+./scripts/install-skills.sh              # symlink, skip existing
+./scripts/install-skills.sh --copy       # copy (use if jarvis runs in a container that can't follow host symlinks)
+./scripts/install-skills.sh --force      # overwrite stale installs
+./scripts/install-skills.sh --target /opt/claude/skills   # custom location
+```
+
+For Docker / systemd installs run this on the host (or inside the
+container) before bringing jarvis up. Skipping is non-fatal but
+degrades agent prompt quality.
+
 ## 1. Docker Compose (fastest)
 
 ```bash
 git clone <your-fork> && cd jarvis-go
+./scripts/install-skills.sh
 docker compose up -d
 open http://127.0.0.1:3555
 ```
@@ -91,6 +126,23 @@ Logs live in the journal: `journalctl -u jarvis -f`.
 (`ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, etc.). If your
 workflow needs looser isolation (e.g., agents compiling against system
 libraries), selectively relax those directives and document why.
+
+### Optional: build the React island
+
+The classic dashboard at `/office` runs on every build. The newer React
+dashboard at `/office-v2` is opt-in — without a build, the route serves
+a styled placeholder pointing operators back here.
+
+```bash
+cd internal/web/spa
+npm install          # one-time
+npm run build        # → ../static/public/react/
+```
+
+The build output is embedded automatically via the existing
+`//go:embed all:public` directive — restart jarvis after building and
+`/office-v2` will serve the React shell instead of the placeholder. See
+`internal/web/spa/README.md` for the full dev workflow.
 
 ---
 
@@ -242,7 +294,33 @@ and restarting. This is rarely needed but documented so operators can.
 (`text`, `json`) are read at startup. Change them and restart — runtime
 toggling is a follow-up feature.
 
-## 9. Troubleshooting
+## 9. Mobile app access
+
+The Expo app at `claudeman/jarvis-mobile/` authenticates via per-device
+bearer tokens. The flow:
+
+1. The operator (you) sets the server URL in the app — `http://192.168.x.x:3555`
+   for LAN or `https://jarvis.your-domain.com` behind your reverse proxy.
+2. The app POSTs the operator password to `/api/auth/mobile/login` with a
+   `deviceName`. The server returns a 64-hex token + `deviceId` + `expiresAt`
+   (default 90 days). Same per-IP rate limiting as the browser login.
+3. The token lives in iOS Keychain / Android Keystore. Every subsequent
+   request carries `Authorization: Bearer <token>`. Bearer-auth requests
+   are accepted on every existing `/api/office/*` route alongside session
+   cookies, and skip CSRF.
+4. Revoke a token from the device with `POST /api/auth/mobile/logout`, or
+   server-side with `DELETE /api/auth/mobile/tokens/{deviceId}` (e.g. lost
+   phone). `GET /api/auth/mobile/tokens` lists registered devices.
+
+Tokens are persisted to `~/.jarvis/mobile-tokens.json` (`0600`, atomic write).
+Only the SHA-256 hash of each raw token is stored; the raw value is shown
+to the client exactly once at issue time.
+
+When publishing the server to the public internet, terminate TLS at your
+reverse proxy (see §4) — mobile clients should never connect over plain
+HTTP outside the LAN.
+
+## 10. Troubleshooting
 
 - **`X-Request-ID` header appears in every response** — use this to correlate
   a frontend error to a specific log line. `grep` the journal for the ID.
@@ -256,3 +334,10 @@ toggling is a follow-up feature.
   Upgrade.
 - **`/debug/pprof/*` returns 401** — that's correct. Log in first (session
   cookie), then hit the endpoint with the same cookie.
+- **ECC MCPs (context7, sequential-thinking, shadcn) missing from agent sessions** —
+  check `which npx`. The Node detection is cached at boot; if you install
+  Node after starting jarvis, restart the daemon to pick it up. See
+  `docs/ECC.md` for the activation log lines to grep.
+- **`/office-v2` shows the "React bundle not built" placeholder** — run
+  `cd internal/web/spa && npm install && npm run build`, then restart
+  jarvis. The classic UI at `/office` keeps working in the meantime.

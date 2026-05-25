@@ -1,0 +1,194 @@
+/* P13.3 · Command palette (⌘K) styles. Consumes design tokens
+ * from css/design-tokens.css. Stand-alone — no dependencies on
+ * office.css or styles.css, so it works on every page that loads
+ * this stylesheet + the design tokens. */
+
+.cmdk-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh var(--ds-space-4) var(--ds-space-4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ds-duration-fast) var(--ds-ease-out);
+}
+
+.cmdk-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cmdk-panel {
+  width: 100%;
+  max-width: 640px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--ds-hairline-strong);
+  border-radius: var(--ds-radius-xl);
+  box-shadow: var(--ds-elev-4);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  transform: translateY(-8px);
+  transition: transform var(--ds-duration-normal) var(--ds-ease-out);
+}
+
+.cmdk-backdrop.open .cmdk-panel {
+  transform: translateY(0);
+}
+
+.cmdk-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-4) var(--ds-space-5);
+  border-bottom: 1px solid var(--ds-hairline);
+}
+
+.cmdk-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+}
+
+.cmdk-input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--text-primary);
+  font-family: var(--ui-stack);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+}
+
+.cmdk-input::placeholder {
+  color: var(--text-faint);
+}
+
+.cmdk-kbd-hint {
+  flex-shrink: 0;
+  font-family: var(--mono-stack);
+  font-size: var(--ds-text-xs);
+  color: var(--text-faint);
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-hairline);
+  border-radius: var(--ds-radius-xs);
+  padding: 2px 6px;
+}
+
+.cmdk-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--ds-space-2);
+  min-height: 0;
+}
+
+.cmdk-empty {
+  padding: var(--ds-space-8) var(--ds-space-5);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--ds-text-sm);
+}
+
+.cmdk-group-header {
+  padding: var(--ds-space-3) var(--ds-space-3) var(--ds-space-1);
+  font-size: var(--ds-text-xs);
+  letter-spacing: var(--ds-tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.cmdk-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-radius: var(--ds-radius-sm);
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: var(--ds-text-base);
+  user-select: none;
+  transition: background-color var(--ds-duration-fast) var(--ds-ease-out);
+}
+
+.cmdk-item:hover,
+.cmdk-item.active {
+  background: var(--ds-surface-3);
+}
+
+.cmdk-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmdk-item-hint {
+  flex-shrink: 0;
+  font-family: var(--mono-stack);
+  font-size: var(--ds-text-xs);
+  color: var(--text-muted);
+}
+
+.cmdk-item-shortcut {
+  flex-shrink: 0;
+  font-family: var(--mono-stack);
+  font-size: var(--ds-text-xs);
+  color: var(--text-faint);
+  padding: 1px 6px;
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-2);
+}
+
+.cmdk-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ds-space-2) var(--ds-space-5);
+  border-top: 1px solid var(--ds-hairline);
+  font-size: var(--ds-text-xs);
+  color: var(--text-faint);
+}
+
+.cmdk-footer-keys {
+  display: flex;
+  gap: var(--ds-space-3);
+}
+
+.cmdk-footer-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
+
+.cmdk-footer-key kbd {
+  font-family: var(--mono-stack);
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-hairline);
+  border-radius: var(--ds-radius-xs);
+  padding: 1px 5px;
+  font-size: 10px;
+}
+
+@media (max-width: 600px) {
+  .cmdk-backdrop {
+    padding-top: 6vh;
+  }
+  .cmdk-panel {
+    max-width: none;
+    max-height: 80vh;
+  }
+  .cmdk-input-wrap {
+    padding: var(--ds-space-3) var(--ds-space-4);
+  }
+}

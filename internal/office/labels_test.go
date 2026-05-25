@@ -1,9 +1,83 @@
 package office
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestNormalizeAndValidateLabels_EmptyInputEmptySlice(t *testing.T) {
+	got, err := NormalizeAndValidateLabels(nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("len=%d want 0", len(got))
+	}
+}
+
+func TestNormalizeAndValidateLabels_LowercasesAndTrims(t *testing.T) {
+	got, err := NormalizeAndValidateLabels([]string{"  Needs-Review  ", "BUG"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 || got[0] != "needs-review" || got[1] != "bug" {
+		t.Errorf("normalisation wrong: %+v", got)
+	}
+}
+
+func TestNormalizeAndValidateLabels_DedupesAfterNormalisation(t *testing.T) {
+	// Three inputs that all normalise to the same label.
+	got, err := NormalizeAndValidateLabels([]string{"bug", "BUG", "  Bug  "})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 || got[0] != "bug" {
+		t.Errorf("expected dedupe to [bug], got %+v", got)
+	}
+}
+
+func TestNormalizeAndValidateLabels_InvalidLabelReturnsError(t *testing.T) {
+	// Empty after trim → ValidateTaskLabel returns "label is empty".
+	_, err := NormalizeAndValidateLabels([]string{"valid", "   "})
+	if err == nil {
+		t.Fatal("expected error for empty-after-trim label")
+	}
+	if errors.Is(err, ErrTooManyTaskLabels) {
+		t.Error("should not return ErrTooManyTaskLabels for per-label validation error")
+	}
+}
+
+func TestNormalizeAndValidateLabels_OverCapReturnsSentinel(t *testing.T) {
+	// Build a list of TaskLabelMaxPerTask+1 unique labels.
+	raw := make([]string, TaskLabelMaxPerTask+1)
+	for i := range raw {
+		raw[i] = "label-" + string(rune('a'+i))
+	}
+	_, err := NormalizeAndValidateLabels(raw)
+	if !errors.Is(err, ErrTooManyTaskLabels) {
+		t.Errorf("expected ErrTooManyTaskLabels, got %v", err)
+	}
+}
+
+func TestNormalizeAndValidateLabels_DupesUnderCapStillFit(t *testing.T) {
+	// TaskLabelMaxPerTask+5 labels, but all duplicates → dedupe
+	// brings it well under the cap. Should NOT error.
+	raw := make([]string, TaskLabelMaxPerTask+5)
+	for i := range raw {
+		raw[i] = "needs-review"
+	}
+	got, err := NormalizeAndValidateLabels(raw)
+	if err != nil {
+		t.Errorf("dedupe-under-cap should not error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("len=%d want 1", len(got))
+	}
+}
 
 func TestValidateTaskLabel(t *testing.T) {
 	cases := []struct {

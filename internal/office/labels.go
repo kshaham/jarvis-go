@@ -40,6 +40,45 @@ func NormalizeTaskLabel(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// ErrTooManyTaskLabels is returned by NormalizeAndValidateLabels
+// when the deduped label set exceeds TaskLabelMaxPerTask. Caller
+// (handler) maps this to 400.
+var ErrTooManyTaskLabels = fmt.Errorf("too many labels (max %d)", TaskLabelMaxPerTask)
+
+// NormalizeAndValidateLabels takes a raw operator-supplied label
+// list (from a JSON request body) and returns a deduped, lowercased,
+// trimmed, individually-validated slice. Returns:
+//   - validation error from ValidateTaskLabel when any single label
+//     fails (handler returns 400 with the error text);
+//   - ErrTooManyTaskLabels when the deduped set exceeds
+//     TaskLabelMaxPerTask;
+//   - the canonical slice + nil otherwise.
+//
+// Empty input yields an empty slice (not nil) so the caller can
+// assign to Task.Labels without a guard.
+//
+// Pure helper — no I/O, no globals. Used by task-self-add and the
+// labels editor endpoint.
+func NormalizeAndValidateLabels(raw []string) ([]string, error) {
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for _, r := range raw {
+		l := NormalizeTaskLabel(r)
+		if err := ValidateTaskLabel(l); err != nil {
+			return nil, err
+		}
+		if seen[l] {
+			continue
+		}
+		seen[l] = true
+		out = append(out, l)
+	}
+	if len(out) > TaskLabelMaxPerTask {
+		return nil, ErrTooManyTaskLabels
+	}
+	return out, nil
+}
+
 // ValidateTaskLabel returns a descriptive error or nil. The string
 // should already be normalized via NormalizeTaskLabel.
 func ValidateTaskLabel(s string) error {

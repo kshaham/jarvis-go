@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -17,8 +17,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/claudeman/jarvis-go/internal/library"
 	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/pty"
+	"github.com/claudeman/jarvis-go/internal/office/spawnpayload"
+	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/claudeman/jarvis-go/internal/strs"
 	"github.com/claudeman/jarvis-go/internal/teamtemplates"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
@@ -35,62 +38,34 @@ func safeName(name string) bool {
 // Request types
 // ---------------------------------------------------------------------------
 
-type memberOverride struct {
-	ID           string   `json:"id"`
-	Provider     string   `json:"provider"`
-	Model        string   `json:"model"`
-	Name         string   `json:"name,omitempty"`
-	Role         string   `json:"role,omitempty"`
-	Tier         string   `json:"tier,omitempty"`
-	Color        string   `json:"color,omitempty"`
-	Emoji        string   `json:"emoji,omitempty"`
-	Personality  string   `json:"personality,omitempty"`
-	SystemPrompt string   `json:"systemPrompt,omitempty"`
-	Skills       []string `json:"skills,omitempty"`
-	WorkingDir   string   `json:"workingDir,omitempty"`
-	// R23 · Per-member turn cap from the spawn modal. 0 means "use the
-	// team-wide default" (defaultMaxTurnsPerSession). R24 · The
-	// MaxCostUSD counterpart was removed — subscription-plan users
-	// have no meaningful dollar signal.
-	MaxTurns int `json:"maxTurns,omitempty"`
-	// R23 · Operator-controlled stagger. When > 0, the outer spawn
-	// loop sleeps this many ms AFTER creating this member's session
-	// before moving to the next. Useful to avoid auth bottlenecks
-	// (Claude subscription rate limits) when spawning many agents
-	// at once. 0 = no delay (default).
-	SpawnDelayMs int `json:"spawnDelayMs,omitempty"`
-}
+// Type aliases keep existing handler code working with minimal churn
+// while the canonical definitions live in internal/office/spawnpayload.
+// The longer-term plan is for handler files to import spawnpayload
+// directly and drop these aliases; see spawnpayload package doc.
+type (
+	memberOverride   = spawnpayload.MemberOverride
+	spawnTeamRequest = spawnpayload.SpawnTeamRequest
+	sessionTuning    = spawnpayload.SessionTuning
+)
 
-type spawnTeamRequest struct {
-	WorkingDir          string           `json:"workingDir"`
-	TemplateID          string           `json:"templateId"`
-	Mission             string           `json:"mission"`
-	MemberOverrides     []memberOverride `json:"memberOverrides"`
-	PerpetualMode       *bool            `json:"perpetualMode"` // nil = default true
-	TelegramEnabled     bool             `json:"telegramEnabled"`
-	TelegramIntervalMin int              `json:"telegramIntervalMin"`
-	// NewProject + ProjectName together signal that the operator wants
-	// to spawn into a freshly-created /app/workspace/<ProjectName>
-	// directory seeded with a CLAUDE.md. Mutually exclusive with a
-	// pre-populated WorkingDir; when NewProject is true, WorkingDir is
-	// computed server-side and the caller's value is ignored.
-	NewProject  bool   `json:"newProject"`
-	ProjectName string `json:"projectName"`
-	// R23's DailyCapUSD field was removed in R24 — see the package
-	// comment in spending.go for the reasoning.
-}
+// Function-pointer aliases for the helpers that moved to spawnpayload.
+// var (not const) so they're addressable; the indirection cost is
+// negligible compared to the spawn flow itself.
+var (
+	codegraphOptOut      = spawnpayload.CodegraphOptOut
+	eccOptOut            = spawnpayload.EccOptOut
+	resolveSessionTuning = spawnpayload.ResolveSessionTuning
+	defaultEffortFor     = spawnpayload.DefaultEffortFor
+)
 
-// projectNameRe constrains the slug an operator can supply for the "New
-// project" flow. Letters / digits / underscore / hyphen only, 1-64 chars.
-// Excludes dots and slashes on purpose so no request can traverse out of
-// /app/workspace.
-var projectNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+const (
+	defaultEffortWorker    = spawnpayload.DefaultEffortWorker
+	defaultEffortStrategic = spawnpayload.DefaultEffortStrategic
+)
 
-// newProjectRoot is the fixed parent directory for freshly-created
-// projects. Already in the workingDirAllowlist for production deploys
-// (see docker-compose.yml: /app/workspace is bind-mounted into the
-// jarvis container). Declared here so tests can reference the same path.
-const newProjectRoot = "/app/workspace"
+// projectNameRe + newProjectRoot were moved to internal/office (see
+// office.ProjectNameRe and office.NewProjectRoot) when the
+// new-project flow was extracted to office.PrepareNewProject.
 
 // defaultMaxTurnsPerSession is the safety-net ceiling applied to every
 // freshly-spawned SDK session. R18 · An agent hit 155 turns ($57.87) on
@@ -99,17 +74,12 @@ const newProjectRoot = "/app/workspace"
 // the member spawn payload.
 const defaultMaxTurnsPerSession = 100
 
-// firstNonEmpty returns the first non-empty string from its args, or
-// "" if all are empty. Used for R23's override-synthesized members to
-// pick override → default values when composing a TeamTemplateMember.
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
+// firstNonEmpty thin-wraps strs.FirstNonEmpty so the existing call
+// sites in this file don't need to grow an import each. P11.3.11
+// dedupe: the shared helper lives in internal/strs/ alongside other
+// zero-dep string utilities (was duplicated against ecc.go's copy
+// pre-Phase 11).
+var firstNonEmpty = strs.FirstNonEmpty
 
 type autoStandupRequest struct {
 	Enabled  bool `json:"enabled"`
@@ -156,6 +126,21 @@ type agentMessageRequest struct {
 	FromSessionID string `json:"fromSessionId"`
 	ToSessionID   string `json:"toSessionId"`
 	Content       string `json:"content"`
+}
+
+type agentAskRequest struct {
+	SessionID     string `json:"sessionId"`
+	FromSessionID string `json:"fromSessionId"`
+	Content       string `json:"content"`
+	AboutTaskID   string `json:"aboutTaskId,omitempty"`
+	WaitSeconds   int    `json:"waitSeconds,omitempty"`
+}
+
+type agentAskAnswerRequest struct {
+	SessionID     string `json:"sessionId"`
+	FromSessionID string `json:"fromSessionId"`
+	QuestionID    string `json:"questionId"`
+	Answer        string `json:"answer"`
 }
 
 type agentTaskStartRequest struct {
@@ -458,27 +443,7 @@ func (ctx *Context) OfficeTemplateFromTeam(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	roster := ctx.OfficeManager.GetRoster()
-	members := make([]teamtemplates.TeamTemplateMember, 0, len(roster))
-	for _, agent := range roster {
-		cfg := agent.Config
-		m := teamtemplates.TeamTemplateMember{
-			ID:    cfg.ID,
-			Name:  cfg.Name,
-			Role:  cfg.Role,
-			Tier:  cfg.Tier,
-			Color: cfg.Color,
-		}
-		if po := agent.GetPersonalityOverride(); po != nil {
-			m.Personality = po.Personality
-			m.SystemPrompt = po.SystemPrompt
-		} else {
-			m.Personality = cfg.Personality
-			m.SystemPrompt = cfg.SystemPrompt
-		}
-		m.Skills = cfg.Skills
-		members = append(members, m)
-	}
+	members := ctx.OfficeManager.SnapshotRosterAsTemplateMembers()
 
 	saved := ctx.TeamTemplateStore.Create(teamtemplates.TeamTemplate{
 		Name:        req.Name,
@@ -512,136 +477,32 @@ func (ctx *Context) OfficeHealth(w http.ResponseWriter, r *http.Request) {
 // OfficeSpawnTeam spawns a team from a template.
 // Creates a Claude session for each team member, registers them with the
 // office manager, and broadcasts session:created events.
-// spawnAgentSession creates either an SDK or PTY session for a team member.
-// Returns the sessionID and mode used, or empty string on failure.
-// R23 · The optional `ov` carries per-member MaxTurns from the spawn
-// modal. R24 removed the MaxCostUSD counterpart. When nil, defaults
-// apply (defaultMaxTurnsPerSession).
-func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool, ov *memberOverride) (string, string) {
-	if trySDK {
-		agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
-		kickstart := office.BuildKickstartPrompt(
-			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
-			req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
-		)
-		// Pre-generate session ID so we can inject it into MCP env and subprocess env.
-		sessionID := uuid.New().String()
-		// Agent token authorizes /api/office/agent/* calls from `cm` and jarvis-mcp.
-		// When per-member env comes from getProviderEnvVarsFor (Z.AI rate-limit
-		// allocation) the token is dropped, so we re-inject it here. Without
-		// this every `cm skill read`, `cm task list`, etc. gets 401.
-		agentToken := ""
-		if ctx.AgentTokenMgr != nil {
-			agentToken = ctx.AgentTokenMgr.Token()
-		}
-		mcpJarvisEnv := map[string]string{
-			"JARVIS_API_URL":    "http://localhost:3555",
-			"JARVIS_SESSION_ID": sessionID,
-		}
-		if agentToken != "" {
-			mcpJarvisEnv["JARVIS_AGENT_TOKEN"] = agentToken
-		}
-		mcpServers := map[string]any{
-			"jarvis": map[string]any{
-				"type":    "stdio",
-				"command": "jarvis-mcp",
-				"env":     mcpJarvisEnv,
-			},
-			"codegraphcontext": map[string]any{
-				"type":    "stdio",
-				"command": "cgc",
-				"args":    []string{"mcp", "start"},
-			},
-		}
-		// Also inject Jarvis env into subprocess so `cm` bash commands work.
-		agentEnv := make(map[string]string, len(envVars)+3)
-		for k, v := range envVars {
-			agentEnv[k] = v
-		}
-		agentEnv["JARVIS_API_URL"] = "http://localhost:3555"
-		agentEnv["JARVIS_SESSION_ID"] = sessionID
-		if agentToken != "" {
-			agentEnv["JARVIS_AGENT_TOKEN"] = agentToken
-		}
-		// R23 · Apply per-member turn cap if the operator set it.
-		// R24 removed the per-member cost cap — subscription plans
-		// (Z.AI, Claude sub) make dollar caps meaningless.
-		maxTurns := defaultMaxTurnsPerSession
-		if ov != nil && ov.MaxTurns > 0 {
-			maxTurns = ov.MaxTurns
-		}
-		// Per-member model override. Priority: spawn-modal override >
-		// template-pinned member.Model > empty (SDK default). Previously
-		// this value was dropped on the floor for claude-subscription /
-		// claude-api providers — only Z.AI honored it via env vars —
-		// which is why picking "Opus 4.7" for the lead had no effect.
-		memberModel := member.Model
-		if ov != nil && ov.Model != "" {
-			memberModel = ov.Model
-		}
-		// R31 · Stable cross-agent prefix rides on the system prompt so
-		// Anthropic's ephemeral cache (5-min TTL, 90% off cache hits)
-		// can discount it across every teammate + every turn. Content
-		// must be byte-for-byte identical per tier so cache lookups
-		// hit; BuildStableSystemPrompt is deterministic for a given
-		// (tier, mission) pair.
-		stablePrefix := office.BuildStableSystemPrompt(member.Tier, req.Mission)
-		sdkSession, err := ctx.SessionManager.CreateSDKSession(
-			context.Background(),
-			pty.SessionConfig{
-				ID:                 sessionID,
-				WorkingDir:         req.WorkingDir,
-				Mode:               pty.ModeClaudeSDK,
-				Name:               member.Name,
-				ProviderEnv:        agentEnv,
-				SystemPrompt:       kickstart,
-				McpServers:         mcpServers,
-				Model:              memberModel,
-				AppendSystemPrompt: stablePrefix,
-				MaxTurnsPerSession: maxTurns,
-			},
-		)
-		if err != nil {
-			slog.Error("Failed to create SDK session, falling back to PTY", "name", member.Name, "error", err)
-		} else {
-			// Start event forwarding before broadcast to avoid losing early events
-			go forwardSDKSessionEvents(sdkSession, ctx)
-			ctx.SSEBroker.Broadcast("session:created", map[string]interface{}{
-				"id": sdkSession.ID, "name": member.Name, "workingDir": req.WorkingDir,
-				"mode": "claude-sdk", "status": "idle", "createdAt": sdkSession.CreatedAt.UnixMilli(),
-			})
-			return sdkSession.ID, "sdk"
-		}
-	}
+// spawnAgentSpec carries the per-agent fields the spawn handler
+// needs to honour officeSessionMode = "hooks". perAgentCwd is the
+// pre-resolved working directory (a worktree path); hooksEnabled
+// flips the new ModeClaude+hooks code path; preassignedSessionID
+// (when non-empty) lets the caller bake the same sessionID into
+// .claude/settings.local.json BEFORE the session starts so the
+// hook URLs and the agent registration agree.
 
-	// PTY fallback
-	// Ensure agent token is present so `cm` calls from the shell can
-	// authenticate. See the SDK path for the full reasoning.
-	ptyEnv := make(map[string]string, len(envVars)+1)
-	for k, v := range envVars {
-		ptyEnv[k] = v
+// resolveOfficeSessionMode reads the operator's preferred office spawn
+// mode from settings. Default is "sdk" for back-compat with installs
+// from before hooks-mode shipped. Valid values:
+//   - "sdk"    : ModeClaudeSDK via claude-agent-sdk-go (programmatic
+//                billing pool starting 2026-06-15).
+//   - "hooks"  : ModeClaude + HTTP hooks; runs interactive `claude`
+//                in a PTY, billed on the interactive subscription pool.
+//   - "legacy" : ModeClaude without hooks (raw PTY, no structured
+//                events; escape hatch).
+// Unknown values fall back to "sdk".
+func (ctx *Context) resolveOfficeSessionMode() string {
+	settings := ctx.StateStore.GetSettings()
+	mode, _ := settings["officeSessionMode"].(string)
+	switch mode {
+	case "sdk", "hooks", "legacy":
+		return mode
 	}
-	if ctx.AgentTokenMgr != nil {
-		if tok := ctx.AgentTokenMgr.Token(); tok != "" {
-			ptyEnv["JARVIS_AGENT_TOKEN"] = tok
-		}
-	}
-	session, err := ctx.SessionManager.CreateSession(
-		context.Background(),
-		pty.SessionConfig{
-			WorkingDir:  req.WorkingDir,
-			Mode:        pty.ModeClaude,
-			Name:        member.Name,
-			ProviderEnv: ptyEnv,
-		},
-	)
-	if err != nil {
-		slog.Error("Failed to create PTY session", "name", member.Name, "error", err)
-		return "", ""
-	}
-	go forwardSessionEvents(session, ctx)
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
-	return session.ID, "pty"
+	return "sdk"
 }
 
 func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
@@ -660,35 +521,18 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	// New-project flow: validate the slug, create /app/workspace/<name>
 	// if it doesn't exist, seed a CLAUDE.md with design defaults, and
 	// hand the resulting path to the normal working-dir resolver. The
-	// operator's pre-filled WorkingDir is ignored when NewProject is true.
+	// operator's pre-filled WorkingDir is ignored when NewProject is
+	// true. The actual work lives in office.PrepareNewProject; here we
+	// just translate its errors into HTTP responses.
 	if req.NewProject {
-		if !projectNameRe.MatchString(req.ProjectName) {
-			request.WriteError(w, http.StatusBadRequest,
-				"project name must match [a-zA-Z0-9_-]{1,64} (no dots or slashes)")
-			return
-		}
-		target := filepath.Join(newProjectRoot, req.ProjectName)
-		created := false
-		if _, statErr := os.Stat(target); os.IsNotExist(statErr) {
-			if mkErr := os.MkdirAll(target, 0o755); mkErr != nil {
-				slog.Error("new project: mkdir failed", "path", target, "err", mkErr)
-				request.WriteError(w, http.StatusInternalServerError,
-					"failed to create project directory: "+mkErr.Error())
-				return
+		target, err := office.PrepareNewProject(req.ProjectName, req.Mission, ctx.SSEBroker.Broadcast)
+		if err != nil {
+			if errors.Is(err, office.ErrInvalidProjectName) {
+				request.WriteError(w, http.StatusBadRequest, err.Error())
+			} else {
+				request.WriteError(w, http.StatusInternalServerError, err.Error())
 			}
-			created = true
-		}
-		if seedErr := office.SeedNewProjectCLAUDEMd(target, req.ProjectName, req.Mission); seedErr != nil {
-			// Non-fatal — the team can still spawn, but log loudly so the
-			// operator can fix perms / disk issues before the next one.
-			slog.Warn("new project: CLAUDE.md seed failed", "path", target, "err", seedErr)
-		}
-		if created {
-			ctx.SSEBroker.Broadcast("office:projectCreated", map[string]interface{}{
-				"name": req.ProjectName,
-				"path": target,
-			})
-			slog.Info("new project created", "name", req.ProjectName, "path", target)
+			return
 		}
 		req.WorkingDir = target
 	}
@@ -713,75 +557,11 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		return
 	}
 
-	// Resolve template members from built-in or custom templates
-	var members []teamtemplates.TeamTemplateMember
-	templateUsed := "office-7"
-	if req.TemplateID != "" {
-		if tpl := ctx.findTeamTemplate(req.TemplateID); tpl != nil {
-			members = tpl.Members
-			templateUsed = tpl.ID
-		}
-	}
-	if members == nil {
-		// Default to office-7
-		if tpl := ctx.findTeamTemplate("office-7"); tpl != nil {
-			members = tpl.Members
-		} else {
-			members = teamtemplates.BuiltInTemplates()[0].Members
-		}
-	}
-
-	// R23 · Members added in the spawn modal's Members tab (inline +
-	// or duplicate) live only in req.MemberOverrides — they have no
-	// template counterpart. Synthesize a template entry for each
-	// override ID that isn't already in the members list, using the
-	// override fields directly so the rest of the spawn loop treats
-	// them identically to template-provided members. Dropped
-	// members are simply absent from the overrides list and get
-	// skipped naturally.
-	existing := make(map[string]struct{}, len(members))
-	for _, m := range members {
-		existing[m.ID] = struct{}{}
-	}
-	var filtered []teamtemplates.TeamTemplateMember
-	for _, m := range members {
-		found := false
-		for _, ov := range req.MemberOverrides {
-			if ov.ID == m.ID {
-				found = true
-				break
-			}
-		}
-		if found {
-			filtered = append(filtered, m)
-		}
-	}
-	// When the modal posts any overrides at all, honor the list as
-	// the source of truth: members the operator removed in the UI
-	// drop, and members they added slot in after the existing ones.
-	if len(req.MemberOverrides) > 0 {
-		members = filtered
-		for _, ov := range req.MemberOverrides {
-			if _, has := existing[ov.ID]; has {
-				continue
-			}
-			// Synthetic member from an override-only entry (inline
-			// add / duplicate). Provider + model on the template
-			// member aren't populated — they'll come from the
-			// override in the same way as any other member.
-			members = append(members, teamtemplates.TeamTemplateMember{
-				ID:           ov.ID,
-				Name:         firstNonEmpty(ov.Name, ov.ID),
-				Role:         firstNonEmpty(ov.Role, "Engineer"),
-				Tier:         firstNonEmpty(ov.Tier, "worker"),
-				Color:        firstNonEmpty(ov.Color, "blue"),
-				Emoji:        ov.Emoji,
-				Personality:  ov.Personality,
-				SystemPrompt: ov.SystemPrompt,
-				Skills:       ov.Skills,
-			})
-		}
-	}
+	// Resolve template members + per-member overrides into the final
+	// team composition. The pure helper lives in the office package
+	// so a future Orchestrator implementation can call it directly
+	// without going through Context.
+	members, templateUsed := office.ResolveMemberList(req, ctx.findTeamTemplate)
 
 	// Build default provider env vars
 	defaultProviderEnv := ctx.getProviderEnvVars()
@@ -791,111 +571,86 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	provider, _ := settings["provider"].(string)
 	isZAI := provider == "zai-glm"
 
-	// Collect requested models per member for rate-limit-aware allocation
-	memberIDs := make([]string, 0, len(members))
-	requestedModels := make(map[string]string)
-	memberProviders := make(map[string]string)
-	for _, member := range members {
-		memberIDs = append(memberIDs, member.ID)
-	}
-	for _, ov := range req.MemberOverrides {
-		requestedModels[ov.ID] = ov.Model
-		memberProviders[ov.ID] = ov.Provider
-	}
+	// Collect requested models per member for rate-limit-aware
+	// allocation. `memberProviders` collection was removed during the
+	// orchestrator extraction — it was assigned but never read.
+	memberIDs, requestedModels := office.CollectModelRequests(members, req.MemberOverrides)
 
-	// Allocate Sonnet models across agents to distribute rate limits
+	// Allocate Sonnet models across agents to distribute rate limits.
 	var sonnetAlloc map[string]string
 	if isZAI {
-		sonnetAlloc = AllocateZAIModels(requestedModels, memberIDs)
+		sonnetAlloc = office.AllocateZAIModels(requestedModels, memberIDs)
 		slog.Info("Z.AI model allocation", "allocation", sonnetAlloc)
 	}
 
-	// Build per-member provider override map with allocated Sonnet models
-	overrideMap := make(map[string]map[string]string)
-	for _, ov := range req.MemberOverrides {
-		sonnet := ""
-		if sonnetAlloc != nil {
-			sonnet = sonnetAlloc[ov.ID]
-		}
-		overrideMap[ov.ID] = ctx.getProviderEnvVarsFor(ov.Provider, ov.Model, sonnet)
-	}
+	// Build per-member provider override map with allocated Sonnet
+	// models. ctx.getProviderEnvVarsFor stays handler-side (it reads
+	// operator-configured account settings); the loop itself lives in
+	// the office package, with the builder passed as a callback.
+	overrideMap := office.BuildPerMemberEnvOverrides(
+		req.MemberOverrides, sonnetAlloc, ctx.getProviderEnvVarsFor,
+	)
 
 	spawned := make([]string, 0, len(members))
 	errors := make([]string, 0)
 
-	// Build member override lookup for name/role/personality/etc overrides
-	memberOverrideMap := make(map[string]memberOverride)
-	for _, ov := range req.MemberOverrides {
-		memberOverrideMap[ov.ID] = ov
-	}
+	// Build member override lookup for name/role/personality/etc
+	// overrides — used by the spawn loop further down for per-member
+	// working dir + tuning resolution.
+	memberOverrideMap := office.IndexMemberOverrides(req.MemberOverrides)
 
-	// Apply name/role/tier/color/emoji overrides to template members before spawning
-	for i, m := range members {
-		if ov, has := memberOverrideMap[m.ID]; has {
-			if ov.Name != "" {
-				members[i].Name = ov.Name
-			}
-			if ov.Role != "" {
-				members[i].Role = ov.Role
-			}
-			if ov.Tier != "" {
-				members[i].Tier = ov.Tier
-			}
-			if ov.Color != "" {
-				members[i].Color = ov.Color
-			}
-			if ov.Emoji != "" {
-				members[i].Emoji = ov.Emoji
-			}
-			// Personality and skills are set on the template member for kickstart use
-			if ov.Personality != "" {
-				members[i].Personality = ov.Personality
-			}
-			if ov.SystemPrompt != "" {
-				members[i].SystemPrompt = ov.SystemPrompt
-			}
-			if len(ov.Skills) > 0 {
-				members[i].Skills = ov.Skills
-			}
-		}
-	}
+	// Apply name/role/tier/color/emoji overrides to template members
+	// in place.
+	office.ApplyMemberOverrides(members, req.MemberOverrides)
 
 	slog.Info("Spawning office team", "template", templateUsed, "members", len(members), "workingDir", req.WorkingDir)
 
-	// Build kickstart prompts ahead of time for SDK mode
-	teamConfigs := make([]*office.TeamMemberConfig, 0, len(members))
-	for _, m := range members {
-		teamConfigs = append(teamConfigs, &office.TeamMemberConfig{
-			ID: m.ID, Name: m.Name, Role: m.Role, Tier: m.Tier, Color: m.Color,
-			Personality: m.Personality, SystemPrompt: m.SystemPrompt, Skills: m.Skills,
-		})
-	}
+	// Build kickstart prompts ahead of time for SDK mode.
+	teamConfigs := office.BuildTeamMemberConfigs(members)
 
-	// Set perpetual mode (default: true)
-	perpetual := true
-	if req.PerpetualMode != nil {
-		perpetual = *req.PerpetualMode
-	}
+	// Perpetual mode (default true; explicit false → one-shot team).
+	perpetual := office.ResolvePerpetualMode(req)
 
 	// Index the project with CodeGraphContext for optimized context.
-	go func() {
-		cgcCtx, cgcCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cgcCancel()
-		cmd := exec.CommandContext(cgcCtx, "cgc", "index", req.WorkingDir)
-		cmd.Dir = req.WorkingDir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			outStr := string(out)
-			if len(outStr) > 200 {
-				outStr = outStr[:200]
-			}
-			slog.Warn("CGC index failed (non-fatal)", "error", err, "output", outStr)
-		} else {
-			slog.Info("CGC index complete", "workingDir", req.WorkingDir)
-		}
-	}()
+	// Fire-and-forget background task; never blocks the spawn.
+	office.RunCGCIndex(req.WorkingDir)
 
-	// Determine session mode: SDK (default for agents) or PTY (fallback)
-	useSDK := true // Use SDK mode by default for office agents
+	// Determine session mode for office agents.
+	// "sdk"    -> ModeClaudeSDK (existing default; uses programmatic
+	//             billing pool after 2026-06-15).
+	// "hooks"  -> ModeClaude + HTTP hooks (interactive billing).
+	// "legacy" -> ModeClaude without hooks (raw PTY).
+	officeMode := ctx.resolveOfficeSessionMode()
+	useSDK := officeMode == "sdk"
+	hooksMode := officeMode == "hooks"
+
+	// In hooks mode, pre-assign sessionIDs so we can write the per-agent
+	// .claude/settings.local.json BEFORE the claude process spawns. The
+	// settings file bakes the sessionID into each hook URL; if Claude
+	// reads the file before we've assigned the ID, the URLs are wrong
+	// and every hook gets fail-open dropped.
+	var preassignedIDs map[string]string
+	var hookSpawnInfo []office.HookSpawnInfo
+	if hooksMode {
+		preassignedIDs, hookSpawnInfo = office.PreassignHookSessionIDs(members)
+	} else {
+		preassignedIDs = make(map[string]string)
+	}
+
+	// In hooks mode, set up per-agent worktrees + write the
+	// settings.local.json before the spawn loop. Returns configID -> cwd
+	// (worktree path or workingDir on fallback).
+	var hooksAgentCwd map[string]string
+	if hooksMode {
+		daemonURL := ctx.OfficeManager.GetDaemonURL()
+		hooksAgentCwd = office.SetupWorktreesWithHooks(office.WorktreeHooksConfig{
+			WorkingDir:  req.WorkingDir,
+			DaemonURL:   daemonURL,
+			Members:     teamConfigs,
+			SpawnInfo:   hookSpawnInfo,
+			EccDisabled: eccOptOut(req),
+		})
+	}
 
 	// R23's team-wide daily cap write was removed in R24 — operator
 	// uses subscription plans where the $ cap is meaningless.
@@ -909,80 +664,63 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 			envVars = ctx.getProviderEnvVarsFor(provider, "", sonnetAlloc[member.ID])
 		}
 
-		// Support per-agent working directory override
+		// Per-agent working-directory resolution. Per-member overrides
+		// must pass the same allowlist check the team-level WorkingDir
+		// went through — see office.ResolveMemberWorkingDir for the
+		// canonical implementation.
 		spawnReq := req
 		var memberOv *memberOverride
 		if ov, has := memberOverrideMap[member.ID]; has {
 			ov := ov // copy for &
 			memberOv = &ov
-			if ov.WorkingDir != "" {
-				spawnReq.WorkingDir = ov.WorkingDir
-			}
 		}
+		resolvedDir, dirErr := office.ResolveMemberWorkingDir(req.WorkingDir, member.ID, memberOv, ctx.ResolveWorkingDir)
+		if dirErr != nil {
+			request.WriteError(w, http.StatusBadRequest, dirErr.Error())
+			return
+		}
+		spawnReq.WorkingDir = resolvedDir
 
-		sessionID, usedMode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, useSDK, memberOv)
+		spec := spawnAgentSpec{}
+		if hooksMode {
+			spec.HooksEnabled = true
+			spec.PreassignedSessionID = preassignedIDs[member.ID]
+			spec.PerAgentCwd = hooksAgentCwd[member.ID]
+		}
+		sessionID, usedMode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, useSDK, memberOv, spec)
 		if sessionID == "" {
 			errors = append(errors, fmt.Sprintf("Failed to create session for %s", member.Name))
 			continue
 		}
 
-		// R23 · Per-member spawn delay. Sleeps between member spawns so
-		// operators can stagger startup (Claude subscription rate-limit
-		// smoothing, Z.AI IP warm-up). Skip the sleep on the last member
-		// since nothing comes after. Capped at 60s per delay to avoid
-		// accidentally stalling a spawn for an unreasonable interval.
-		if memberOv != nil && memberOv.SpawnDelayMs > 0 && i < len(members)-1 {
-			delay := time.Duration(memberOv.SpawnDelayMs) * time.Millisecond
-			if delay > 60*time.Second {
-				delay = 60 * time.Second
-			}
-			slog.Info("Per-member spawn delay", "name", member.Name, "ms", delay.Milliseconds())
-			time.Sleep(delay)
+		// Per-member spawn delay (operator-set stagger between spawns).
+		// Cap + skip-on-last + zero-skip logic lives in the helper.
+		spawnDelayMs := 0
+		if memberOv != nil {
+			spawnDelayMs = memberOv.SpawnDelayMs
 		}
+		office.SpawnDelaySleep(member.Name, spawnDelayMs, i == len(members)-1)
 
-		// Register agent with full config including personality and skills
-		ctx.OfficeManager.RegisterAgent(sessionID, member.ID, &office.TeamMemberConfig{
-			ID:           member.ID,
-			Name:         member.Name,
-			Role:         member.Role,
-			Tier:         member.Tier,
-			Color:        member.Color,
-			Personality:  member.Personality,
-			SystemPrompt: member.SystemPrompt,
-			Skills:       member.Skills,
-		})
-
-		// Record the resolved provider + model so BuildMemberPayload can
-		// surface them to the UI (Active Now cards, current-team banner).
-		// Priority (highest first):
-		//   1. per-spawn memberOverride from the modal
-		//   2. per-template member.Provider / member.Model (custom
-		//      templates can pin a specific LLM per member)
-		//   3. team-wide default provider, plus Z.AI sonnet allocation
-		resolvedProvider := provider
-		resolvedModel := ""
-		if member.Provider != "" {
-			resolvedProvider = member.Provider
-		}
-		if member.Model != "" {
-			resolvedModel = member.Model
-		}
+		// Resolve the per-member provider + model using the same
+		// precedence rules as the rest of the spawn flow.
+		var ovPtr *memberOverride
 		if ov, has := memberOverrideMap[member.ID]; has {
-			if ov.Provider != "" {
-				resolvedProvider = ov.Provider
-			}
-			if ov.Model != "" {
-				resolvedModel = ov.Model
-			}
+			ov := ov
+			ovPtr = &ov
 		}
-		if resolvedModel == "" && isZAI && sonnetAlloc != nil {
-			if m, ok := sonnetAlloc[member.ID]; ok {
-				resolvedModel = m
-			}
+		zaiSonnet := ""
+		if isZAI && sonnetAlloc != nil {
+			zaiSonnet = sonnetAlloc[member.ID]
 		}
-		if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
-			agent.SetProvider(resolvedProvider, resolvedModel)
-		}
+		resolvedProvider, resolvedModel := office.ResolveMemberProviderModel(
+			member, ovPtr, provider, zaiSonnet,
+		)
+		// One Manager call replaces the prior RegisterAgent + GetAgent
+		// + SetProvider + SetSessionMode quartet. Internal "pty" →
+		// "legacy" normalisation also moved inside.
+		ctx.OfficeManager.RegisterAgentWithProvider(
+			sessionID, teamConfigs[i], resolvedProvider, resolvedModel, usedMode,
+		)
 
 		if ctx.TelegramHandler != nil {
 			ctx.TelegramHandler.NotifySessionStart(sessionID, member.Name, req.WorkingDir)
@@ -992,31 +730,21 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		slog.Info("Spawned team member", "name", member.Name, "sessionId", sessionID, "role", member.Role, "mode", usedMode)
 	}
 
-	// Release the atomic claim if nothing actually spawned -- otherwise
-	// the team sits in "spawned with 0 agents" limbo and the operator
-	// can't retry without restarting jarvis.
+	// Release the atomic spawn-slot claim if nothing actually spawned
+	// — otherwise the team sits in "spawned with 0 agents" limbo and
+	// the operator can't retry. Paired with TrySetTeamSpawning above.
 	if len(spawned) == 0 {
-		ctx.OfficeManager.SetTeamSpawned(false)
+		ctx.OfficeManager.ReleaseTeamSpawnSlot()
 		request.WriteError(w, http.StatusInternalServerError, "Failed to spawn any agents: "+strings.Join(errors, "; "))
 		return
 	}
 
-	// Record the spawn context so the UI can show a "current team" banner
-	// while the team is active. Must happen BEFORE SetTeamSpawned(true) so
-	// any consumer listening on that signal already sees the context.
-	ctx.OfficeManager.SetSpawnContext(templateUsed, req.WorkingDir)
-
-	// Mark team as spawned (also triggers StartIdleMonitoring). The flag
-	// itself is already true from TrySetTeamSpawning above; this call is
-	// what starts the monitoring goroutines.
-	ctx.OfficeManager.SetTeamSpawned(true)
-
-	// Set team mission if provided
-	if req.Mission != "" {
-		ctx.OfficeManager.SetTeamMission(req.Mission)
-	}
-
-	ctx.OfficeManager.SetPerpetualMode(perpetual)
+	// Post-spawn state wiring: spawn-context banner, PR linkage,
+	// codegraph index, SetTeamSpawned(true) (starts monitoring
+	// goroutines), mission, perpetual mode. Order is documented
+	// inside FinalizeTeamSpawn — don't replace this call with
+	// inlined Manager calls.
+	ctx.OfficeManager.FinalizeTeamSpawn(req, templateUsed, perpetual)
 
 	// Inject kickstart prompts into PTY sessions (SDK sessions get kickstart via SystemPrompt).
 	if !useSDK {
@@ -1125,35 +853,21 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 
 // OfficeShutdownTeam shuts down the team.
 func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
-	ctx.OfficeManager.NotifyOfficeEvent("Team Shutting Down", "")
-
-	// Record experiment before shutdown so metrics are captured.
-	spawnedAt := ctx.OfficeManager.GetTeamSpawnedAt()
-	record := ctx.OfficeManager.BuildExperimentRecord(spawnedAt)
-	if err := office.RecordExperiment(record); err != nil {
-		slog.Warn("Failed to record experiment", "err", err)
-	}
-
-	// Stop idle monitoring and auto-standup timers.
-	ctx.OfficeManager.StopIdleMonitoring()
-
-	// Send shutdown message to each agent and stop their sessions.
-	shutdownMsg := "SHUTDOWN: The team is shutting down. Your session will be terminated."
-	roster := ctx.OfficeManager.GetRoster()
-	for _, agent := range roster {
-		// Try PTY session first, then SDK session
-		if s, found := ctx.SessionManager.GetSession(agent.SessionID); found {
+	const shutdownMsg = "SHUTDOWN: The team is shutting down. Your session will be terminated."
+	// All the shutdown bookkeeping (NotifyEvent, RecordExperiment,
+	// StopIdleMonitoring, UnregisterAgent, SetTeamSpawned(false))
+	// lives on Manager.TeardownTeam. The handler-side callback owns
+	// the per-session stop work because office must not import pty.
+	ctx.OfficeManager.TeardownTeam(func(sessionID string) {
+		if s, found := ctx.SessionManager.GetSession(sessionID); found {
 			s.WriteViaScreen(shutdownMsg + "\r")
-			_ = ctx.SessionManager.StopSession(context.Background(), agent.SessionID)
-		} else if sdk, found := ctx.SessionManager.GetSDKSession(agent.SessionID); found {
+			_ = ctx.SessionManager.StopSession(context.Background(), sessionID)
+		} else if sdk, found := ctx.SessionManager.GetSDKSession(sessionID); found {
 			sdk.WriteInkPrompt(shutdownMsg)
-			_ = ctx.SessionManager.StopSDKSession(agent.SessionID)
+			_ = ctx.SessionManager.StopSDKSession(sessionID)
 		}
-		ctx.cleanupSessionResources(agent.SessionID)
-		ctx.OfficeManager.UnregisterAgent(agent.SessionID)
-	}
-
-	ctx.OfficeManager.SetTeamSpawned(false)
+		ctx.cleanupSessionResources(sessionID)
+	})
 	ok(w, nil)
 }
 
@@ -1208,21 +922,28 @@ func (ctx *Context) OfficeCreateSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Snapshot current workingDir from any live SDK session so the
-	// restore handler can rehydrate the same path. All agents share
-	// the team working dir, so any session gives us the answer.
+	// Snapshot current workingDir from any live SDK session AND
+	// harvest each member's Claude-side session ID so the snapshot
+	// can later be restored as a fork via `--resume <id>`. The pure
+	// helper lives in the office package; here we just adapt the
+	// pty.SessionManager into the SDKSessionLookup shape.
 	workingDir := ""
+	claudeSessionIDs := map[string]string{}
 	if ctx.SessionManager != nil {
-		roster := ctx.OfficeManager.GetRoster()
-		for _, a := range roster {
-			if sdk, ok := ctx.SessionManager.GetSDKSession(a.SessionID); ok {
-				workingDir = sdk.WorkingDir
-				break
+		lookup := func(sid string) (office.SDKSessionData, bool) {
+			sdk, ok := ctx.SessionManager.GetSDKSession(sid)
+			if !ok {
+				return office.SDKSessionData{}, false
 			}
+			return office.SDKSessionData{
+				WorkingDir:      sdk.WorkingDir,
+				ClaudeSessionID: sdk.ClaudeSessionID(),
+			}, true
 		}
+		workingDir, claudeSessionIDs = office.HarvestSessionData(ctx.OfficeManager.GetRoster(), lookup)
 	}
 
-	snap, err := ctx.OfficeManager.CreateSnapshot(req.Name, workingDir)
+	snap, err := ctx.OfficeManager.CreateSnapshot(req.Name, workingDir, claudeSessionIDs)
 	if err != nil {
 		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1269,12 +990,21 @@ func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request
 		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(snap.Members) == 0 {
-		request.WriteError(w, http.StatusBadRequest, "snapshot has no members")
+	if err := office.ValidateSnapshotForRestore(snap); err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if snap.WorkingDir == "" {
-		request.WriteError(w, http.StatusBadRequest, "snapshot has no workingDir")
+
+	// ?fork=<bool> asks restore to resume each member's prior Claude
+	// session via --resume <id> --fork-session. Requires the snapshot
+	// to carry per-member ClaudeSessionIDs (captured when the snapshot
+	// was created against a live SDK team). Without the IDs we fall
+	// back to a fresh transcript so the operator still gets a working
+	// team. Strict parse — a typo returns 400 rather than silently
+	// becoming a fresh team.
+	forkRequested, err := office.ParseForkQuery(r.URL.Query().Get("fork"))
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1282,20 +1012,7 @@ func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request
 	// through spawnTeamFromRequest so all the existing spawn plumbing
 	// (allowlist validation, template resolve, session creation)
 	// runs unchanged.
-	overrides := make([]memberOverride, 0, len(snap.Members))
-	for _, m := range snap.Members {
-		ov := memberOverride{
-			ID:           m.ConfigID,
-			Name:         m.Config.Name,
-			Role:         m.Config.Role,
-			Tier:         m.Config.Tier,
-			Color:        m.Config.Color,
-			Personality:  m.Config.Personality,
-			SystemPrompt: m.Config.SystemPrompt,
-			Skills:       m.Config.Skills,
-		}
-		overrides = append(overrides, ov)
-	}
+	overrides, forkAppliedCount := buildRestoreOverrides(snap, forkRequested)
 	perpetual := snap.PerpetualMode
 	req := spawnTeamRequest{
 		WorkingDir:      snap.WorkingDir,
@@ -1333,15 +1050,30 @@ func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request
 		"name":        snap.Name,
 		"memberCount": len(snap.Members),
 		"seededTasks": seeded,
+		"forked":      forkApplied(forkRequested, forkAppliedCount),
+		"forkCount":   forkAppliedCount,
 	})
 	slog.Info("team snapshot restored",
-		"name", snap.Name, "members", len(snap.Members), "seededTasks", seeded)
+		"name", snap.Name, "members", len(snap.Members),
+		"seededTasks", seeded, "forkRequested", forkRequested,
+		"forkAppliedCount", forkAppliedCount)
 	ok(w, map[string]interface{}{
 		"restored":    snap.Name,
 		"memberCount": len(snap.Members),
 		"seededTasks": seeded,
+		"forked":      forkApplied(forkRequested, forkAppliedCount),
+		"forkCount":   forkAppliedCount,
 	})
 }
+
+// buildRestoreOverrides + forkApplied were moved to the office
+// package (office.BuildRestoreOverrides, office.ForkApplied). Thin
+// local aliases retained so the existing snapshot tests in this
+// package don't churn during the migration.
+var (
+	buildRestoreOverrides = office.BuildRestoreOverrides
+	forkApplied           = office.ForkApplied
+)
 
 // OfficeResumeTeam lifts the pause flag. Idempotent. R25.
 func (ctx *Context) OfficeResumeTeam(w http.ResponseWriter, r *http.Request) {
@@ -1756,36 +1488,10 @@ func (ctx *Context) OfficeGetMeetings(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]interface{}{"meetings": meetings})
 }
 
-// OfficeGetLearnings returns all learnings.
+// OfficeGetLearnings returns all learning files (one entry per
+// agent ConfigID). The walk + filter logic lives in office.
 func (ctx *Context) OfficeGetLearnings(w http.ResponseWriter, r *http.Request) {
-	homeDir, _ := os.UserHomeDir()
-	learningsDir := filepath.Join(homeDir, ".jarvis", "learnings")
-	entries, err := os.ReadDir(learningsDir)
-	if err != nil {
-		ok(w, map[string]interface{}{"learnings": []interface{}{}})
-		return
-	}
-	var learnings []map[string]interface{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		info, infoErr := e.Info()
-		var modTime string
-		if infoErr == nil {
-			modTime = info.ModTime().Format(time.RFC3339)
-		}
-		configID := strings.TrimSuffix(e.Name(), ".json")
-		learnings = append(learnings, map[string]interface{}{
-			"configId": configID,
-			"file":     e.Name(),
-			"modified": modTime,
-		})
-	}
-	if learnings == nil {
-		learnings = make([]map[string]interface{}, 0)
-	}
-	ok(w, map[string]interface{}{"learnings": learnings})
+	ok(w, map[string]interface{}{"learnings": office.ListLearningFiles()})
 }
 
 // OfficeGetLearningsByConfig returns learnings for a specific config ID.
@@ -1801,37 +1507,27 @@ func (ctx *Context) OfficeGetLearningsByConfig(w http.ResponseWriter, r *http.Re
 		request.WriteError(w, http.StatusBadRequest, "invalid config ID")
 		return
 	}
-	homeDir, _ := os.UserHomeDir()
-	learningPath := filepath.Join(homeDir, ".jarvis", "learnings", configID+".json")
-	data, err := os.ReadFile(learningPath)
+	learnings, err := office.LoadLearningsForUI(configID)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, office.ErrLearningsNotFound) {
 			ok(w, map[string]interface{}{"learnings": []interface{}{}, "configId": configID})
 			return
 		}
-		request.WriteError(w, http.StatusInternalServerError, "failed to read learnings file")
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	// Decode the file as the canonical AgentLearningData shape and hand
-	// the UI the entries array directly.
-	var parsed struct {
-		ConfigID  string      `json:"configId"`
-		Name      string      `json:"name"`
-		Learnings interface{} `json:"learnings"`
-	}
-	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to parse learnings file: "+jsonErr.Error())
-		return
-	}
-	out := parsed.Learnings
-	if out == nil {
-		out = []interface{}{}
+	// Pull the friendly name from the full record (cheap re-load
+	// because LoadLearningsForUI threw it away). Falls back to
+	// configID when the file lacks one.
+	full := office.LoadLearningData(configID)
+	name := configID
+	if full != nil && full.Name != "" {
+		name = full.Name
 	}
 	ok(w, map[string]interface{}{
-		"learnings": out,
+		"learnings": learnings,
 		"configId":  configID,
-		"name":      parsed.Name,
+		"name":      name,
 	})
 }
 
@@ -1853,87 +1549,16 @@ func (ctx *Context) OfficePostCodeGraphBuild(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// buildCodeGraph walks the working directory tree (max 3 levels, 500 entries).
+// buildCodeGraph walks the working directory tree (max 3 levels,
+// 500 entries). The walk + filter logic lives in
+// office.BuildCodeGraphSnapshot — here we just resolve the rootDir
+// from the live session manager.
 func (ctx *Context) buildCodeGraph() interface{} {
-	// Determine root directory from the first session's working directory.
 	sessions := ctx.SessionManager.GetAllSessions()
 	if len(sessions) == 0 {
 		return nil
 	}
-	rootDir := sessions[0].WorkingDir
-	if rootDir == "" {
-		return nil
-	}
-
-	type dirEntry struct {
-		Path      string        `json:"path"`
-		Name      string        `json:"name"`
-		IsDir     bool          `json:"isDir"`
-		FileCount int           `json:"fileCount,omitempty"`
-		Children  []interface{} `json:"children,omitempty"`
-	}
-
-	const maxEntries = 500
-	const maxDepth = 3
-	count := 0
-
-	var entries []interface{}
-	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip errors
-		}
-		if count >= maxEntries {
-			return filepath.SkipAll
-		}
-
-		rel, relErr := filepath.Rel(rootDir, path)
-		if relErr != nil {
-			return nil
-		}
-		if rel == "." {
-			return nil
-		}
-
-		// Check depth
-		depth := len(strings.Split(rel, string(filepath.Separator)))
-		if depth > maxDepth {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// Skip hidden directories and common non-essential directories
-		name := info.Name()
-		if strings.HasPrefix(name, ".") && info.IsDir() {
-			return filepath.SkipDir
-		}
-		if info.IsDir() && (name == "node_modules" || name == "vendor" || name == "__pycache__") {
-			return filepath.SkipDir
-		}
-
-		entry := map[string]interface{}{
-			"path":  rel,
-			"name":  name,
-			"isDir": info.IsDir(),
-		}
-		if !info.IsDir() {
-			entry["size"] = info.Size()
-		}
-		entries = append(entries, entry)
-		count++
-		return nil
-	})
-
-	if entries == nil {
-		entries = make([]interface{}, 0)
-	}
-
-	return map[string]interface{}{
-		"root":    rootDir,
-		"entries": entries,
-		"total":   count,
-	}
+	return office.BuildCodeGraphSnapshot(sessions[0].WorkingDir)
 }
 
 // OfficePostCodeGraphImpact returns impact analysis for files.
@@ -1942,36 +1567,13 @@ func (ctx *Context) OfficePostCodeGraphImpact(w http.ResponseWriter, r *http.Req
 	if !decodeBody(w, r, &req) {
 		return
 	}
-
-	// Determine root directory from the first session's working directory.
 	rootDir := ""
 	sessions := ctx.SessionManager.GetAllSessions()
 	if len(sessions) > 0 {
 		rootDir = sessions[0].WorkingDir
 	}
-
-	type fileInfo struct {
-		Path   string `json:"path"`
-		Exists bool   `json:"exists"`
-		Size   int64  `json:"size,omitempty"`
-	}
-
-	files := make([]fileInfo, 0, len(req.Files))
-	for _, f := range req.Files {
-		fullPath := f
-		if rootDir != "" && !filepath.IsAbs(f) {
-			fullPath = filepath.Join(rootDir, f)
-		}
-		info, err := os.Stat(fullPath)
-		if err != nil {
-			files = append(files, fileInfo{Path: f, Exists: false})
-		} else {
-			files = append(files, fileInfo{Path: f, Exists: true, Size: info.Size()})
-		}
-	}
-
 	ok(w, map[string]interface{}{
-		"files": files,
+		"files": office.AnalyzeCodeGraphImpact(rootDir, req.Files),
 	})
 }
 
@@ -2009,62 +1611,12 @@ func (ctx *Context) OfficePostWrapUp(w http.ResponseWriter, r *http.Request) {
 	// Stop idle monitoring so no new brainstorms/replenishment triggers
 	mgr.StopIdleMonitoring()
 
-	// Send wrap-up notification to all team sessions with clear instructions.
-	wrapUpPrompt := `[WRAP-UP INITIATED] The team is wrapping up. Follow these steps:
-
-1. FINISH your current task -- complete what you're working on right now
-2. COMMIT all changes with a clear commit message
-3. SAVE your work context: cm memory write "<summary of what you did, current state, and any unfinished work>"
-4. DO NOT start any new tasks from your queue
-5. DO NOT pick up any new work
-6. Report your final status: cm task complete <taskId>
-7. Once you've committed, saved memory, and reported status, stop working
-
-This is a graceful shutdown. Take the time to finish cleanly, but do not begin anything new.`
-
 	// Fan out the wrap-up prompt AND cancel queued work that hasn't
-	// started yet. The prompt tells agents "DO NOT start new tasks" but
-	// marking pending/acknowledged tasks as failed is the backstop: an
-	// agent that ignores the prompt still can't pull a fresh task
+	// started yet. The prompt tells agents "DO NOT start new tasks";
+	// marking pending/acknowledged tasks as failed is the backstop —
+	// an agent that ignores the prompt still can't pull a fresh task
 	// because there are none left in TaskPending state.
-	roster := mgr.GetRoster()
-	notifiedSessionIDs := make([]string, 0, len(roster))
-	missedAgents := make([]string, 0)
-	cancelledTasks := 0
-
-	for _, agent := range roster {
-		delivered := false
-		if s, found := ctx.SessionManager.GetSession(agent.SessionID); found {
-			if s.WriteInkPrompt(wrapUpPrompt) {
-				delivered = true
-			}
-		} else if sdk, found := ctx.SessionManager.GetSDKSession(agent.SessionID); found {
-			if sdk.WriteInkPrompt(wrapUpPrompt) {
-				delivered = true
-			}
-		}
-
-		if delivered {
-			notifiedSessionIDs = append(notifiedSessionIDs, agent.SessionID)
-		} else {
-			name := agent.SessionID
-			if agent.Config != nil {
-				name = agent.Config.Name
-			}
-			missedAgents = append(missedAgents, name)
-		}
-
-		// Cancel all queued (but not yet started) tasks. TaskInProgress
-		// is deliberately left alone so agents can FINISH current work
-		// -- that's step 1 of the wrap-up prompt.
-		for _, t := range agent.GetTasks() {
-			if t.Status == office.TaskPending || t.Status == office.TaskAcknowledged {
-				if agent.UpdateTaskStatus(t.ID, office.TaskFailed) {
-					cancelledTasks++
-				}
-			}
-		}
-	}
+	notifiedSessionIDs, missedAgents, cancelledTasks := mgr.FanOutWrapUpPrompt(office.WrapUpPrompt, ctx.writeSessionPrompt)
 
 	if len(missedAgents) > 0 {
 		slog.Warn("Wrap-up prompt undelivered for some agents",
@@ -2084,10 +1636,10 @@ This is a graceful shutdown. Take the time to finish cleanly, but do not begin a
 		"cancelledTasks": cancelledTasks,
 	})
 
-	// R33 · Fire-and-forget structured wrap-up report. Generates a
+	// Fire-and-forget structured wrap-up report. Generates a
 	// markdown post-mortem into ~/.jarvis/office-memory/reports/ and
 	// broadcasts office:reportGenerated when done. Failures are
-	// logged but do not roll back the wrap-up response -- operators
+	// logged but do not roll back the wrap-up response — operators
 	// can always retry via POST /api/office/reports/generate.
 	go func() {
 		defer func() {
@@ -2095,13 +1647,7 @@ This is a graceful shutdown. Take the time to finish cleanly, but do not begin a
 				slog.Error("panic in wrap-up report generator", "panic", rec)
 			}
 		}()
-		meta, err := office.GenerateWrapUpReport(mgr, "wrap-up", "")
-		if err != nil {
-			slog.Error("auto-generate wrap-up report failed", "err", err)
-			return
-		}
-		ctx.SSEBroker.Broadcast("office:reportGenerated", meta)
-		slog.Info("wrap-up report generated", "filename", meta.Filename, "bytes", meta.SizeBytes)
+		office.GenerateAndBroadcastWrapUpReport(mgr, "wrap-up", "", ctx.SSEBroker.Broadcast)
 	}()
 }
 
@@ -2319,6 +1865,72 @@ func (ctx *Context) OfficeAgentMessage(w http.ResponseWriter, r *http.Request) {
 	ok(w, nil)
 }
 
+// OfficeAgentAsk implements the blocking `cm ask` primitive. The request
+// blocks for up to WaitSeconds (capped server-side) until either a
+// teammate answers, the rotation chain is exhausted, or no recipient is
+// available. The response always carries a status field; non-200 only
+// for input validation or unknown-asker errors.
+func (ctx *Context) OfficeAgentAsk(w http.ResponseWriter, r *http.Request) {
+	var req agentAskRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.FromSessionID == "" || req.Content == "" {
+		request.WriteError(w, http.StatusBadRequest, "fromSessionId and content are required")
+		return
+	}
+	wait := time.Duration(req.WaitSeconds) * time.Second
+	if wait <= 0 {
+		// Default if the CLI didn't pass --wait. 5m matches the skill's
+		// recommended default and the office-ask-for-help skill.
+		wait = 5 * time.Minute
+	}
+	q, err := ctx.OfficeManager.AskQuestion(req.FromSessionID, req.Content, req.AboutTaskID, wait)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{
+		"questionId": q.ID,
+		"status":     string(q.Status),
+		"answer":     q.Answer,
+		"answeredBy": q.ToName,
+		"tried":      q.Tried,
+	})
+}
+
+// OfficeAgentAskAnswer is the responder side of `cm ask`. The recipient
+// identified by FromSessionID submits an answer for the named question.
+// Validates that they are the current recipient (rotation-safe).
+func (ctx *Context) OfficeAgentAskAnswer(w http.ResponseWriter, r *http.Request) {
+	var req agentAskAnswerRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.FromSessionID == "" || req.QuestionID == "" || req.Answer == "" {
+		request.WriteError(w, http.StatusBadRequest, "fromSessionId, questionId, and answer are required")
+		return
+	}
+	if err := ctx.OfficeManager.AnswerQuestion(req.QuestionID, req.FromSessionID, req.Answer); err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ok(w, nil)
+}
+
+// OfficeAgentListQuestions returns the questions currently addressed to
+// the requesting session. Used by `cm ask list` so a teammate can see
+// any pending questions they should answer.
+func (ctx *Context) OfficeAgentListQuestions(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		request.WriteError(w, http.StatusBadRequest, "sessionId is required")
+		return
+	}
+	questions := ctx.OfficeManager.ListPendingQuestionsFor(sessionID)
+	ok(w, map[string]interface{}{"questions": questions})
+}
+
 // OfficeAgentGetTasks returns tasks for the requesting agent, plus
 // any incoming handoffs awaiting accept/reject. R29 adds
 // `incomingHandoffs` to the payload so an agent polling its queue
@@ -2364,16 +1976,14 @@ func (ctx *Context) OfficeAgentTaskStart(w http.ResponseWriter, r *http.Request)
 	ok(w, nil)
 }
 
-// uiKeywordRe matches task titles that strongly suggest user-visible work.
-// Matching triggers the screenshot soft gate — the completion still lands,
-// but the response carries a warning that the agent didn't cite browser
-// verification in their summary.
-var uiKeywordRe = regexp.MustCompile(`(?i)\b(ui|frontend|front[- ]end|page|button|modal|dialog|layout|styling|css|design|screen(?:shot)?|visual|expo|react[- ]native)\b`)
-
-// verificationEvidenceRe matches phrases that would show up in a handoff
-// summary that ran a browser check — screenshot file paths, tool names,
-// "verified visually", etc. Presence of any match suppresses the gate.
-var verificationEvidenceRe = regexp.MustCompile(`(?i)(screenshot|browser[- ]screenshot|verified visually|expect-cli|puppeteer|\.png\b|confirmed\s+(?:in|via)\s+browser)`)
+// uiKeywordRe + verificationEvidenceRe were moved to the office
+// package (office.UIKeywordRe, office.VerificationEvidenceRe).
+// Aliases retained so the existing screenshot_gate_test.go in this
+// package keeps compiling.
+var (
+	uiKeywordRe            = office.UIKeywordRe
+	verificationEvidenceRe = office.VerificationEvidenceRe
+)
 
 // OfficeAgentTaskComplete marks a task as completed. Adds a `warning`
 // field to the response + broadcasts office:uiTaskMissingScreenshot when
@@ -2387,50 +1997,33 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	var warning string
 	if agent != nil {
-		// Capture the task title + prior status BEFORE the update so:
-		//  a) the UI-keyword check has the full title even after the task
-		//     transitions out of the active set, and
-		//  b) we can short-circuit when an already-completed task is
-		//     re-completed. Without (b), repeated `cm task complete` calls
-		//     re-fire the SSE broadcasts + UI-keyword warning every time,
-		//     spamming the activity feed (observed 6x on one task in prod).
-		var taskTitle string
-		var priorStatus office.TaskStatus
-		for _, t := range agent.GetTasks() {
-			if t != nil && t.ID == req.TaskID {
-				taskTitle = t.Title
-				priorStatus = t.Status
-				break
-			}
-		}
-		if priorStatus == office.TaskCompleted {
-			// Idempotent no-op: the task is already completed. Don't re-fire
-			// broadcasts, don't re-emit the screenshot-gate warning, don't
-			// inject a next-task prompt. Just acknowledge.
+		// Single-lock lookup + mutation. Returns AlreadyComplete=true
+		// for repeat calls so we short-circuit broadcasts (observed
+		// 6× re-fire in prod before the idempotency guard).
+		result := agent.CompleteTask(req.TaskID)
+		if result.AlreadyComplete {
 			ok(w, map[string]interface{}{"alreadyComplete": true})
 			return
 		}
+		// Result.Found may be false when the task ID is unknown; the
+		// pre-extraction code fell through here (UpdateTaskStatus
+		// returned false, broadcasts still fired with the unknown
+		// taskID, and downstream branches no-op'd on nil). Preserve
+		// that — broadcasts for a nonexistent task are harmless.
 
-		agent.UpdateTaskStatus(req.TaskID, office.TaskCompleted)
-
-		// Soft screenshot gate (R15 F8). Fire only for UI-keyword titles
-		// when the summary lacks browser-verification evidence AND no
-		// attached screenshot exists for this task. R34 added the
-		// office.HasTaskScreenshot check so agents that upload a real
-		// PNG via `cm task complete --screenshot <path>` don't get the
-		// warning even if their summary text is sparse -- an attached
-		// image is stronger evidence than a text citation.
-		if taskTitle != "" && uiKeywordRe.MatchString(taskTitle) &&
-			!verificationEvidenceRe.MatchString(req.Result) &&
-			!office.HasTaskScreenshot(req.TaskID) {
+		// Soft screenshot gate. The predicate (title hits UI keywords
+		// AND summary lacks verification phrases AND no attached PNG)
+		// lives in office.ShouldWarnMissingScreenshot; here we just
+		// broadcast the SSE + log when it fires.
+		if office.ShouldWarnMissingScreenshot(result.Title, req.Result, req.TaskID) {
 			warning = "UI-tagged task completed without explicit visual verification evidence in the summary. Did you run browser-screenshot against the dev URL? Cite the path (e.g. '/tmp/after.png') in your --summary, or upload the PNG via `cm task complete <id> --screenshot <path>` so operators see the evidence in the dashboard."
 			ctx.SSEBroker.Broadcast("office:uiTaskMissingScreenshot", map[string]interface{}{
 				"sessionId": req.SessionID,
 				"taskId":    req.TaskID,
-				"title":     taskTitle,
+				"title":     result.Title,
 			})
 			slog.Warn("UI task completed without visual verification",
-				"sessionId", req.SessionID, "taskId", req.TaskID, "title", taskTitle)
+				"sessionId", req.SessionID, "taskId", req.TaskID, "title", result.Title)
 		}
 
 		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
@@ -2448,36 +2041,130 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
 		}
 
-		// Immediate re-tasking (async to avoid blocking the HTTP response).
+		// R3.4 · Fire `claude ultrareview` against the agent's
+		// worktree when the task carries the `needs-review` label.
+		// Runs async — the operator gets a background SSE event with
+		// findings; the agent's task-complete reply is unaffected
+		// (and never blocks).
+		if office.TaskHasNeedsReviewLabel(result.Task) {
+			cwd := agent.GetWorktreePath()
+			if cwd == "" {
+				slog.Warn("ultrareview: task tagged needs-review but agent has no worktree",
+					"sessionId", req.SessionID, "taskId", req.TaskID)
+			} else {
+				broker := ctx.SSEBroker
+				sid := req.SessionID
+				tid := req.TaskID
+				configID := agent.ConfigID
+				go func() {
+					// Background-task panic guard: a panic inside the
+					// review shell-out or SSE writer must not take down
+					// jarvis. Same pattern as the kickstart goroutine.
+					defer func() {
+						if rec := recover(); rec != nil {
+							slog.Error("ultrareview panic", "sessionId", sid, "taskId", tid, "rec", rec)
+						}
+					}()
+					// Use the configID-aware variant so the findings
+					// also append to the library experience markdown.
+					office.RunUltrareviewAndBroadcastForAgent(context.Background(), cwd, configID, sid, tid, broker.Broadcast)
+				}()
+			}
+		}
+
+		// Immediate re-tasking (async to avoid blocking the HTTP
+		// response). Falls back to idle-monitor if nothing's queued.
 		nextTask := agent.NextPendingTask()
 		if nextTask != nil {
 			sid := agent.SessionID
 			title := nextTask.Title
 			taskID := nextTask.ID
 			go func() {
-				// Background prompt injection -- a panic here (closed
-				// PTY fd, SDK writer race on session teardown) must not
-				// take down the whole jarvis process. Same pattern as
-				// the round-3 kickstart goroutine at office.go:798.
+				// Background prompt injection — a panic here (closed
+				// PTY fd, SDK writer race on session teardown) must
+				// not take down the whole jarvis process.
 				defer func() {
 					if r := recover(); r != nil {
 						slog.Error("next-task prompt injection panic", "session", sid, "taskId", taskID, "err", r)
 					}
 				}()
-				sessions := ctx.OfficeManager.Sessions()
-				if sessions != nil {
-					prompt := fmt.Sprintf("[NEXT TASK] %s\nAcknowledge and start: cm task ack %s && cm task start %s", title, taskID, taskID)
-					sessions.WriteInkPrompt(sid, prompt)
-				}
+				ctx.OfficeManager.PromptNextTask(sid, title, taskID)
 			}()
 		} else {
-			go ctx.OfficeManager.CheckForIdleAgents()
+			safego.Go("office.checkForIdleAgents", ctx.OfficeManager.CheckForIdleAgents)
+		}
+
+		// Knowledge-library write. Renders the just-completed task
+		// into ~/.jarvis/office-memory/library/experiences/<id>/<task>.md
+		// so PageIndex can index it for future agents. Wrapped in
+		// safego so a library-write failure can't affect the
+		// task-complete HTTP response.
+		if result.Found && result.Task != nil {
+			rec := buildLibraryExperience(agent, result.Task, req.Result)
+			safego.Go("library.writeExperience", func() {
+				if err := library.WriteExperience(rec); err != nil {
+					slog.Warn("library write failed",
+						"sessionId", req.SessionID,
+						"taskId", req.TaskID,
+						"err", err)
+				}
+			})
 		}
 	}
 	if warning != "" {
 		ok(w, map[string]interface{}{"warning": warning})
 	} else {
 		ok(w, nil)
+	}
+}
+
+// buildLibraryExperience projects a completed task + agent state +
+// the operator-supplied result string into a library.ExperienceRecord.
+// Kept handler-side so the office package doesn't need to know about
+// the library schema (clean dependency direction: handler imports
+// both office + library).
+//
+// Outcome score is computed from completion status + ultrareview
+// severity ("none" at this point because ultrareview runs async
+// post-broadcast) + the agent's current quality proxy + a
+// placeholder recovery attempts of 0 (TODO: thread the real count
+// from recovery.go once it's tracked per-task).
+func buildLibraryExperience(agent *office.AgentState, task *office.Task, completionNote string) library.ExperienceRecord {
+	agentName := agent.ConfigID
+	role := ""
+	if agent.Config != nil {
+		agentName = agent.Config.Name
+		role = agent.Config.Role
+	}
+	durationMS := int64(0)
+	if !task.StartedAt.IsZero() && !task.CompletedAt.IsZero() {
+		durationMS = task.CompletedAt.Sub(task.StartedAt).Milliseconds()
+	}
+	quality := office.CalculateAgentScore(agent).QualityScore
+	outcome := office.ComputeOutcomeScore(office.TaskCompleted, "none", quality, 0)
+	approach := completionNote
+	if approach == "" && len(task.ProgressLog) > 0 {
+		// Fall back to the last progress entry as a one-line summary
+		// when the operator didn't pass a --summary.
+		approach = task.ProgressLog[len(task.ProgressLog)-1].Note
+	}
+	return library.ExperienceRecord{
+		AgentConfigID:       agent.ConfigID,
+		AgentName:           agentName,
+		AgentRole:           role,
+		TaskID:              task.ID,
+		TaskTitle:           task.Title,
+		TaskLabels:          task.Labels,
+		WorkingDir:          agent.GetWorktreePath(),
+		CompletionStatus:    "completed",
+		OutcomeScore:        outcome,
+		UltrareviewSeverity: "none",
+		RecoveryAttempts:    0,
+		StartedAt:           task.StartedAt,
+		CompletedAt:         task.CompletedAt,
+		DurationMS:          durationMS,
+		CostUSD:             task.FinalCostUSD,
+		ApproachSummary:     approach,
 	}
 }
 
@@ -2546,25 +2233,11 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 		ok(w, nil)
 		return
 	}
-	// R36 · Validate labels BEFORE creating the task so invalid
-	// input yields a clean 400 instead of a half-created task.
-	normLabels := make([]string, 0, len(req.Labels))
-	seen := make(map[string]bool, len(req.Labels))
-	for _, raw := range req.Labels {
-		l := office.NormalizeTaskLabel(raw)
-		if err := office.ValidateTaskLabel(l); err != nil {
-			request.WriteError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if seen[l] {
-			continue
-		}
-		seen[l] = true
-		normLabels = append(normLabels, l)
-	}
-	if len(normLabels) > office.TaskLabelMaxPerTask {
-		request.WriteError(w, http.StatusBadRequest,
-			fmt.Sprintf("too many labels: %d (max %d)", len(normLabels), office.TaskLabelMaxPerTask))
+	// Validate labels BEFORE creating the task so invalid input
+	// yields a clean 400 instead of a half-created task.
+	normLabels, err := office.NormalizeAndValidateLabels(req.Labels)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	task := &office.Task{
@@ -2753,27 +2426,11 @@ func (ctx *Context) OfficeAgentTaskTriage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	source := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
-	if source == nil {
-		request.WriteError(w, http.StatusNotFound, "source agent not found")
+	source, target, err := ctx.OfficeManager.TriageTaskBetweenAgents(req.SessionID, req.ToSessionID, req.TaskID)
+	if err != nil {
+		request.WriteError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	target := ctx.OfficeManager.GetAgent(req.ToSessionID)
-	if target == nil {
-		request.WriteError(w, http.StatusNotFound, "target agent not found")
-		return
-	}
-
-	task := source.RemoveTask(req.TaskID)
-	if task == nil {
-		request.WriteError(w, http.StatusNotFound, "task not found")
-		return
-	}
-
-	task.Status = office.TaskPending
-	task.AssignedAt = time.Now()
-	task.Source = "triage"
-	target.AddTask(task)
 
 	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.SessionID})
 	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.ToSessionID})
@@ -2839,8 +2496,9 @@ func (ctx *Context) OfficeAgentFileLock(w http.ResponseWriter, r *http.Request) 
 	if agent := ctx.OfficeManager.GetAgent(req.SessionID); agent != nil {
 		agent.TouchAgentAPI()
 	}
-	// Validate file path: no path traversal, no absolute paths
-	if strings.Contains(req.FilePath, "..") || strings.HasPrefix(req.FilePath, "/") || strings.Contains(req.FilePath, "\x00") {
+	// Validate file path: no path traversal, no absolute paths, no
+	// NUL bytes. Helper lives in internal/strs.
+	if !strs.IsSafeRelativePath(req.FilePath) {
 		request.WriteError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
@@ -3027,23 +2685,17 @@ func (ctx *Context) OfficeAgentSkillCreate(w http.ResponseWriter, r *http.Reques
 		request.WriteError(w, http.StatusBadRequest, "invalid skill name")
 		return
 	}
-	homeDir, _ := os.UserHomeDir()
-	skillDir := filepath.Join(homeDir, ".claude", "skills", req.SkillName)
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to create skill directory")
-		return
-	}
-	skillPath := filepath.Join(skillDir, "SKILL.md")
-	isUpdate := false
-	if _, err := os.Stat(skillPath); err == nil {
-		isUpdate = true
-	}
-	if err := os.WriteFile(skillPath, []byte(req.Content), 0o644); err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to write skill file")
+	skillPath, updated, err := office.WriteSharedSkill(req.SkillName, req.Content)
+	if err != nil {
+		if errors.Is(err, office.ErrSkillPathTraversal) {
+			request.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	action := "created"
-	if isUpdate {
+	if updated {
 		action = "updated"
 	}
 	ok(w, map[string]interface{}{
@@ -3053,25 +2705,20 @@ func (ctx *Context) OfficeAgentSkillCreate(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// OfficeAgentDeleteSkill deletes a shared skill by name.
+// OfficeAgentDeleteSkill deletes a shared skill by name. The file
+// I/O + traversal-prevention lives in office.DeleteSharedSkill.
 func (ctx *Context) OfficeAgentDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if !safeName(name) {
 		request.WriteError(w, http.StatusBadRequest, "invalid skill name")
 		return
 	}
-	homeDir, _ := os.UserHomeDir()
-	skillPath := filepath.Join(homeDir, ".claude", "skills", name)
-
-	absSkillPath, _ := filepath.Abs(skillPath)
-	absSkillsBase, _ := filepath.Abs(filepath.Join(homeDir, ".claude", "skills"))
-	if !strings.HasPrefix(absSkillPath, absSkillsBase+string(filepath.Separator)) {
-		request.WriteError(w, http.StatusBadRequest, "invalid skill name")
-		return
-	}
-
-	if err := os.RemoveAll(skillPath); err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to delete skill")
+	if err := office.DeleteSharedSkill(name); err != nil {
+		if errors.Is(err, office.ErrSkillPathTraversal) {
+			request.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ok(w, map[string]interface{}{"deleted": name})

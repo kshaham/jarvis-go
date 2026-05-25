@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shaharia-lab/claude-agent-sdk-go/claude"
+
+	"github.com/claudeman/jarvis-go/internal/logscrub"
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // SDKSession wraps the Claude Agent SDK for programmatic agent interaction.
@@ -88,6 +92,31 @@ type SDKSession struct {
 	// across sessions to share the cache.
 	appendSystemPrompt string
 
+	// R1.3 additions: per-session tuning forwarded to the SDK on
+	// Start(). Empty / zero values mean "let the SDK default apply".
+	systemPromptFile                   string
+	appendSystemPromptFile             string
+	effort                             string
+	fallbackModel                      string
+	excludeDynamicSystemPromptSections bool
+	strictMcpConfig                    bool
+
+	// R3.5 additions: fork-from-resume support for snapshot restore.
+	// resumeSessionID asks the SDK for --resume <id>; forkSession adds
+	// --fork-session so the resumed transcript branches into a new id.
+	resumeSessionID string
+	forkSession     bool
+
+	// R3.6: optional GitHub PR number forwarded via --from-pr <n>.
+	// Zero leaves the flag off (default).
+	fromPRNumber int
+
+	// R4.1: opt-in browser-automation tooling forwarded via --chrome.
+	chromeEnabled bool
+
+	// R4.3: opt-in channel subscriptions forwarded via --channels.
+	channels []string
+
 	// Output observers
 	outputObservers   map[int]func(string)
 	outputObserverSeq int
@@ -121,6 +150,18 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		model:              config.Model,
 		appendSystemPrompt: config.AppendSystemPrompt,
 		maxTurnsPerSession: config.MaxTurnsPerSession,
+
+		systemPromptFile:                   config.SystemPromptFile,
+		appendSystemPromptFile:             config.AppendSystemPromptFile,
+		effort:                             config.Effort,
+		fallbackModel:                      config.FallbackModel,
+		excludeDynamicSystemPromptSections: config.ExcludeDynamicSystemPromptSections,
+		strictMcpConfig:                    config.StrictMcpConfig,
+		resumeSessionID:                    config.ResumeSessionID,
+		forkSession:                        config.ForkSession,
+		fromPRNumber:                       config.FromPRNumber,
+		chromeEnabled:                      config.ChromeEnabled,
+		channels:                           sanitizeChannels(config.Channels, "sdk:"+id),
 		outputObservers:    make(map[int]func(string)),
 		activeTools:        make(map[string]bool),
 		toolTracker:        newToolEventTracker(),
@@ -161,6 +202,93 @@ func (s *SDKSession) Start(ctx context.Context) error {
 		opts = append(opts, claude.WithAppendSystemPrompt(s.appendSystemPrompt))
 	}
 
+	// R1.3 · File-backed system prompts. When a file is set we still
+	// pass the inline variant too (the SDK enforces precedence
+	// internally and the file path wins). This double-attach is safe
+	// and keeps the in-process kickstart path functional during the
+	// rollout.
+	extraArgs := map[string]string{}
+	if s.systemPromptFile != "" {
+		extraArgs["system-prompt-file"] = s.systemPromptFile
+	}
+	if s.appendSystemPromptFile != "" {
+		extraArgs["append-system-prompt-file"] = s.appendSystemPromptFile
+	}
+	if s.excludeDynamicSystemPromptSections {
+		// Empty value on a boolean CLI flag; the SDK serialises this as
+		// a bare --exclude-dynamic-system-prompt-sections argument.
+		extraArgs["exclude-dynamic-system-prompt-sections"] = ""
+	}
+	// R3.6 · --from-pr loads PR context into the system prompt. Pushed
+	// through WithExtraArgs because the SDK doesn't expose a typed
+	// option yet.
+	if s.fromPRNumber > 0 {
+		extraArgs["from-pr"] = strconv.Itoa(s.fromPRNumber)
+	}
+	// R4.1 · --chrome turns on Claude's built-in browser-automation
+	// tools. Pushed through WithExtraArgs (bare flag, no value).
+	if s.chromeEnabled {
+		extraArgs["chrome"] = ""
+	}
+	// R4.3 · --channels subscribes to MCP channel notifications.
+	//
+	// P7.2.8 fix: the CLI expects a repeated `--channels <spec>` flag,
+	// one per subscription. The SDK's WithExtraArgs is a single-valued
+	// map (`map[string]string`) so we can only forward ONE channel via
+	// the SDK path. Previously we comma-joined — that's the wrong
+	// grammar; the CLI would have silently passed the comma-joined
+	// value as a single spec, never matching a real channel.
+	//
+	// Pragmatic resolution: forward the first channel; log a clear
+	// WARN if there are more so operators know to switch
+	// officeSessionMode=hooks (PTY) where the repeated-flag pattern
+	// works. Single-channel SDK teams continue to function unchanged.
+	if len(s.channels) > 0 {
+		extraArgs["channels"] = s.channels[0]
+		if len(s.channels) > 1 {
+			slog.Warn("SDK session can only subscribe to 1 channel via WithExtraArgs; forwarding first only; set officeSessionMode=hooks for multi-channel",
+				"session", s.ID,
+				"forwarded", s.channels[0],
+				"dropped", s.channels[1:])
+		}
+	}
+	if len(extraArgs) > 0 {
+		opts = append(opts, claude.WithExtraArgs(extraArgs))
+	}
+
+	// R1.3 · Per-session reasoning effort. Only attach when the
+	// caller picks a tier; empty defers to the SDK + env defaults.
+	if effortLevel := normaliseEffort(s.effort); effortLevel != "" {
+		opts = append(opts, claude.WithEffort(effortLevel))
+	}
+
+	// R1.3 · Fallback model — the SDK retries an overloaded primary
+	// against this model before failing the turn. Empty disables.
+	// Dollar-cap budget is intentionally NOT wired: jarvis runs
+	// against subscription-billed providers (Claude subscription,
+	// Z.AI Coding Plan) where per-turn USD limits are meaningless.
+	if s.fallbackModel != "" {
+		opts = append(opts, claude.WithFallbackModel(s.fallbackModel))
+	}
+
+	// R1.3 · Strict MCP config: ignores user/project MCP registrations
+	// so the office MCP surface is exactly what jarvis passed in.
+	if s.strictMcpConfig {
+		opts = append(opts, claude.WithStrictMcpConfig())
+	}
+
+	// R3.5 · Resume + fork. Snapshot-restore captures each member's
+	// final ClaudeSessionID; when the operator picks "restore as fork"
+	// we replay that ID through --resume and add --fork-session so
+	// Claude branches the transcript into a new session instead of
+	// hijacking the original (which may still be running elsewhere).
+	if s.resumeSessionID != "" {
+		opts = append(opts, claude.WithSessionIDToResume(s.resumeSessionID))
+		if s.forkSession {
+			opts = append(opts, claude.WithForkSession())
+		}
+	}
+
 	if len(s.providerEnv) > 0 {
 		opts = append(opts, claude.WithEnv(s.providerEnv))
 		// Log env keys (not values) for auth diagnostics
@@ -173,11 +301,26 @@ func (s *SDKSession) Start(ctx context.Context) error {
 		slog.Warn("SDK session has no provider env vars", "session", s.ID)
 	}
 
-	// Capture subprocess stderr for diagnostics (API errors, auth issues)
+	// Capture subprocess stderr for diagnostics (API errors, auth issues).
+	// Pipe through logscrub.All before logging — Claude's stderr on 401
+	// includes `Authorization: Bearer ...` headers verbatim that would
+	// otherwise land in slog (and any downstream log shipper) in
+	// cleartext. Scrubbing here is the single chokepoint.
+	//
+	// SCOPE LIMIT (P12.3): only the parent Claude subprocess's stderr
+	// passes through this callback. MCP child processes (context7,
+	// sequential-thinking, codegraph, codegraphcontext, jarvis-mcp)
+	// emit their own stderr directly to the host and bypass this
+	// scrubber. claude.WithStderr in the SDK does not expose a per-MCP
+	// stderr hook (verified against claude-agent-sdk-go v0.3.1).
+	// Operators concerned about MCP-server credential leakage should
+	// tail those child processes directly. See docs/ECC.md "Operating
+	// notes → MCP server stderr is not captured" for the rationale.
 	opts = append(opts, claude.WithStderr(func(line string) {
-		slog.Debug("SDK subprocess stderr", "session", s.ID, "line", line)
-		if strings.Contains(line, "error") || strings.Contains(line, "Error") || strings.Contains(line, "unauthorized") || strings.Contains(line, "rate") {
-			slog.Warn("SDK subprocess error", "session", s.ID, "stderr", line)
+		scrubbed := logscrub.All(line)
+		slog.Debug("SDK subprocess stderr", "session", s.ID, "line", scrubbed)
+		if strings.Contains(scrubbed, "error") || strings.Contains(scrubbed, "Error") || strings.Contains(scrubbed, "unauthorized") || strings.Contains(scrubbed, "rate") {
+			slog.Warn("SDK subprocess error", "session", s.ID, "stderr", scrubbed)
 		}
 	}))
 
@@ -195,9 +338,11 @@ func (s *SDKSession) Start(ctx context.Context) error {
 
 	// Start event consumer goroutine FIRST, wait for it to be ready
 	// before sending the kickstart to avoid dropping early events.
+	// safego wraps so a panic in event parsing (malformed SDK
+	// frame, JSON decode race) doesn't crash the whole daemon.
 	consumerReady := make(chan struct{})
 	s.wg.Add(1)
-	go s.eventConsumer(sessionCtx, consumerReady)
+	safego.Go("pty.sdk.eventConsumer", func() { s.eventConsumer(sessionCtx, consumerReady) })
 	<-consumerReady
 
 	// Send kickstart as the first turn.
@@ -575,6 +720,29 @@ func (s *SDKSession) Stop() {
 	slog.Info("SDK session stopped", "session", s.ID)
 }
 
+// ClaudeSessionID returns the Claude-side session identifier reported
+// by the SDK (populated from system_init / result events). Empty until
+// the first SDK event arrives. R3.5 callers use this to persist a
+// resume-point inside team snapshots.
+func (s *SDKSession) ClaudeSessionID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.claudeSessionID
+}
+
+// SetClaudeSessionIDForTest seeds the underlying claudeSessionID so
+// tests can exercise code paths (snapshot fork-restore, attach
+// command lookup) without driving a real SDK handshake. Production
+// callers must NOT use this — the ID is normally written by the
+// event consumer when system_init / result events arrive. Lives in
+// the production file so the test helper is visible to consumers
+// in other packages.
+func (s *SDKSession) SetClaudeSessionIDForTest(id string) {
+	s.mu.Lock()
+	s.claudeSessionID = id
+	s.mu.Unlock()
+}
+
 func (s *SDKSession) GetStatus() SessionStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -649,6 +817,26 @@ func (s *SDKSession) WriteViaScreen(input string) bool {
 // stripControlChars removes C0 control characters (0x00-0x1F except \n,
 // \t) and DEL (0x7F). Used to make WriteViaScreen safe on SDK sessions
 // where terminal-control sequences don't make sense as LLM input.
+// normaliseEffort maps the operator-facing string (low|medium|high|max,
+// case-insensitive) to the SDK's EffortLevel typed alias. Returns ""
+// for unrecognised values so the caller skips the option entirely
+// (letting SDK defaults apply). The "xhigh" CLI value documented for
+// some models maps to EffortMax in the SDK.
+func normaliseEffort(in string) claude.EffortLevel {
+	switch strings.ToLower(strings.TrimSpace(in)) {
+	case "low":
+		return claude.EffortLow
+	case "medium", "med":
+		return claude.EffortMedium
+	case "high":
+		return claude.EffortHigh
+	case "xhigh", "max", "maximum":
+		return claude.EffortMax
+	default:
+		return ""
+	}
+}
+
 func stripControlChars(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

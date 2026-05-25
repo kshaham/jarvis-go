@@ -90,7 +90,7 @@ func (cm *CaseManager) Get(name string) (*CaseInfo, error) {
 
 // Create creates a new case directory and returns its info.
 func (cm *CaseManager) Create(name string) (*CaseInfo, error) {
-	if !isValidCaseName(name) {
+	if !IsValidCaseName(name) {
 		return nil, fmt.Errorf("invalid case name: %q", name)
 	}
 	cm.mu.Lock()
@@ -104,7 +104,7 @@ func (cm *CaseManager) Create(name string) (*CaseInfo, error) {
 
 // Delete removes a case directory and all its contents.
 func (cm *CaseManager) Delete(name string) error {
-	if !isValidCaseName(name) {
+	if !IsValidCaseName(name) {
 		return fmt.Errorf("invalid case name: %q", name)
 	}
 	cm.mu.Lock()
@@ -119,8 +119,19 @@ func (cm *CaseManager) Delete(name string) error {
 	return os.RemoveAll(casePath)
 }
 
-// isValidCaseName checks that a case name is safe for use in file paths.
-func isValidCaseName(name string) bool {
+// IsValidCaseName reports whether name is safe to use as a case
+// directory or symlink name. Rules:
+//   - non-empty, ≤ 128 chars
+//   - only letters, digits, hyphen, underscore, dot
+//   - no ".." anywhere in the string (defense in depth against the
+//     "a..b" form that passes the per-char check but would collapse
+//     into a traversal under filepath.Clean)
+//
+// Exported so the HTTP handlers can pre-validate user input and
+// return a precise 400 before reaching the CaseManager — the inner
+// CaseManager methods (Create, Link) still call this so the security
+// floor doesn't depend on every caller remembering to validate.
+func IsValidCaseName(name string) bool {
 	if name == "" || len(name) > 128 {
 		return false
 	}
@@ -136,7 +147,7 @@ func isValidCaseName(name string) bool {
 // The name must match [a-zA-Z0-9_-]+. The target path must exist and be a directory.
 // Returns the linked case info on success.
 func (cm *CaseManager) Link(name, folderPath string) (*CaseInfo, error) {
-	if !isValidCaseName(name) {
+	if !IsValidCaseName(name) {
 		return nil, fmt.Errorf("invalid case name: %q", name)
 	}
 	cm.mu.Lock()

@@ -1,0 +1,134 @@
+/* P13.4 · Activity strip widgets. Three rolling-window cards rendered
+ * via office.js _renderActivityStrip(). Consumes design tokens. */
+
+.activity-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--ds-space-3);
+  margin: var(--ds-space-3) 0 var(--ds-space-4);
+}
+
+.activity-strip.hidden {
+  display: none;
+}
+
+.activity-widget {
+  background: var(--bg-card-solid);
+  border: 1px solid var(--ds-hairline);
+  border-radius: var(--ds-radius-lg);
+  padding: var(--ds-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+  box-shadow: var(--ds-elev-1);
+  transition: border-color var(--ds-duration-fast) var(--ds-ease-out);
+}
+
+.activity-widget:hover {
+  border-color: var(--ds-hairline-strong);
+}
+
+.activity-widget-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+
+.activity-widget-label {
+  font-size: var(--ds-text-xs);
+  color: var(--text-muted);
+  letter-spacing: var(--ds-tracking-wide);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.activity-widget-value {
+  font-size: var(--ds-text-2xl);
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: var(--ds-leading-tight);
+}
+
+.activity-widget-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+  font-size: var(--ds-text-xs);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.activity-widget-sub > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-widget-spark {
+  width: 100%;
+  height: 32px;
+  margin-top: auto;
+  color: var(--ds-status-info);
+}
+
+.activity-widget-spark path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.activity-widget-spark .spark-fill {
+  fill: currentColor;
+  opacity: 0.12;
+  stroke: none;
+}
+
+.activity-widget[data-widget="throughput"] .activity-widget-spark {
+  color: var(--ds-status-success);
+}
+
+.activity-widget-bars {
+  display: flex;
+  height: 8px;
+  border-radius: var(--ds-radius-pill);
+  overflow: hidden;
+  background: var(--ds-surface-2);
+  gap: 2px;
+}
+
+.activity-health-bar {
+  display: block;
+  height: 100%;
+  width: var(--w, 0%);
+  transition: width var(--ds-duration-normal) var(--ds-ease-out);
+}
+
+.activity-health-bar[data-status="working"] { background: var(--ds-status-working); }
+.activity-health-bar[data-status="idle"]    { background: var(--ds-status-idle); }
+.activity-health-bar[data-status="meeting"] { background: var(--ds-status-meeting); }
+.activity-health-bar[data-status="stuck"]   { background: var(--ds-status-stuck); }
+
+.activity-health-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
+
+.activity-health-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--ds-status-idle);
+}
+
+.activity-health-legend[data-status="working"] i { background: var(--ds-status-working); }
+.activity-health-legend[data-status="stuck"]   i { background: var(--ds-status-stuck); }
+
+@media (max-width: 900px) {
+  .activity-strip {
+    grid-template-columns: 1fr;
+  }
+}

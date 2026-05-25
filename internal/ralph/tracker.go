@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // Configuration constants matching the Node.js implementation.
@@ -192,7 +194,9 @@ func (t *Tracker) ProcessOutput(data string) {
 		if t.onCompletion != nil {
 			cb := t.onCompletion
 			phrase := t.state.CompletionPhrase
-			go cb(phrase)
+			// safego: callback is operator-supplied; a panic there
+			// would otherwise crash the daemon.
+			safego.Go("ralph.onCompletion", func() { cb(phrase) })
 		}
 
 		// Check circuit breaker after completion
@@ -335,7 +339,9 @@ func (t *Tracker) notifyTodoUpdate() {
 	t.emitEvent(TodosUpdated{Todos: todos})
 	if t.onTodoUpdate != nil {
 		cb := t.onTodoUpdate
-		go cb(todos)
+		// safego: callback is operator-supplied; a panic there
+		// would otherwise crash the daemon.
+		safego.Go("ralph.onTodoUpdate", func() { cb(todos) })
 	}
 }
 

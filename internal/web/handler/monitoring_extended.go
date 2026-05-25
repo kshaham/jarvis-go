@@ -6,12 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/claudeman/jarvis-go/internal/claudeauth"
 	"github.com/claudeman/jarvis-go/internal/web/auth"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
@@ -249,136 +248,13 @@ func (ctx *Context) AuthChangePassword(w http.ResponseWriter, r *http.Request) {
 // Also handles credential symlink persistence for Docker volume survival.
 // GET /api/claude/auth-status
 func (ctx *Context) GetClaudeAuthStatus(w http.ResponseWriter, r *http.Request) {
-	homeDir, _ := os.UserHomeDir()
-	credPath := filepath.Join(homeDir, ".claude", ".credentials.json")
-	symlinkTarget := filepath.Join(homeDir, ".claude-auth", ".credentials.json")
-
-	// Find the credentials file
-	pathToRead := ""
-	if fileExists(credPath) {
-		pathToRead = credPath
-	} else if fileExists(symlinkTarget) {
-		pathToRead = symlinkTarget
-	} else {
-		request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"authenticated": false,
-			"reason":        "no_credentials",
-		})
-		return
-	}
-
-	data, err := os.ReadFile(pathToRead)
-	if err != nil || len(strings.TrimSpace(string(data))) == 0 {
-		request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"authenticated": false,
-			"reason":        "empty_credentials",
-		})
-		return
-	}
-
-	// Credential sync: if the credentials file is a real file (not symlink),
-	// Claude Code replaced the symlink with atomic write. Persist to volume.
-	info, err := os.Lstat(credPath)
-	if err == nil && info.Mode()&os.ModeSymlink == 0 {
-		// Regular file, not symlink -- persist and restore symlink
-		os.MkdirAll(filepath.Dir(symlinkTarget), 0755)
-		if copyErr := copyFile(credPath, symlinkTarget); copyErr == nil {
-			os.Remove(credPath)
-			os.Symlink(symlinkTarget, credPath)
-			slog.Info("Persisted Claude credentials to volume and restored symlink")
-		}
-	}
-
-	// Parse credentials JSON
-	var creds map[string]interface{}
-	if err := json.Unmarshal(data, &creds); err != nil {
-		request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"authenticated": false,
-			"reason":        "invalid_credentials",
-		})
-		return
-	}
-
-	// Check claudeAiOauth
-	if oauth, ok := creds["claudeAiOauth"].(map[string]interface{}); ok {
-		if token, ok := oauth["accessToken"].(string); ok && token != "" {
-			// Check expiry
-			if expiresAt, ok := oauth["expiresAt"].(float64); ok && time.Now().UnixMilli() > int64(expiresAt) {
-				request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-					"authenticated": false,
-					"reason":        "token_expired",
-					"expiresAt":     expiresAt,
-				})
-				return
-			}
-			subType, _ := oauth["subscriptionType"].(string)
-			if subType == "" {
-				subType = "unknown"
-			}
-			request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-				"authenticated":    true,
-				"method":           "subscription",
-				"subscriptionType": subType,
-				"expiresAt":        oauth["expiresAt"],
-			})
-			return
-		}
-	}
-
-	// Check oauthAccount
-	if account, ok := creds["oauthAccount"].(map[string]interface{}); ok {
-		token, _ := account["accessToken"].(string)
-		token2, _ := account["token"].(string)
-		if token != "" || token2 != "" {
-			if expiresAt, ok := account["expiresAt"].(float64); ok && time.Now().UnixMilli() > int64(expiresAt) {
-				request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-					"authenticated": false,
-					"reason":        "token_expired",
-					"expiresAt":     expiresAt,
-				})
-				return
-			}
-			subType, _ := account["subscriptionType"].(string)
-			if subType == "" {
-				subType = "unknown"
-			}
-			request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-				"authenticated":    true,
-				"method":           "subscription",
-				"subscriptionType": subType,
-				"expiresAt":        account["expiresAt"],
-			})
-			return
-		}
-	}
-
-	// Check apiKey
-	if apiKey, ok := creds["apiKey"].(string); ok && apiKey != "" {
-		request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"authenticated": true,
-			"method":        "api_key",
-		})
-		return
-	}
-
-	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"authenticated": false,
-		"reason":        "no_valid_token",
-	})
+	// All credential-file location, parsing, expiry, and
+	// symlink-restoration logic lives in internal/claudeauth.
+	request.WriteJSON(w, http.StatusOK, claudeauth.CheckStatus())
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0600)
-}
+// fileExists + copyFile were moved to internal/claudeauth (the
+// only consumer) as private package helpers.
 
 // GetScreens returns all active screen sessions.
 // GET /api/screens

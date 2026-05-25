@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // CompletionTimePattern matches Claude's "Worked for Xm Ys" completion messages.
@@ -136,7 +138,10 @@ func (d *TokenStabilityDetector) Start() {
 	d.ticker = time.NewTicker(d.interval)
 	d.mu.Unlock()
 
-	go func() {
+	// safego: stability detector runs per-session for the entire
+	// session lifetime; a panic in onStable() (operator callback)
+	// would otherwise crash the daemon.
+	safego.Go("respawn.tokenStability", func() {
 		for {
 			select {
 			case <-d.done:
@@ -156,7 +161,7 @@ func (d *TokenStabilityDetector) Start() {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // Stop halts the periodic checks.

@@ -127,6 +127,13 @@ type AgentState struct {
 	Provider string
 	Model    string
 
+	// SessionMode records which spawn path produced this agent: "sdk" |
+	// "hooks" | "legacy" | "" (unknown / pre-R37 install). Set by the
+	// office spawn handler after a successful CreateSession /
+	// CreateSDKSession and surfaced in BuildMemberPayload so the
+	// dashboard can render the "via {mode}" badge.
+	SessionMode string
+
 	// ActiveTool is the name of the Claude tool the agent is currently
 	// invoking (e.g. "Bash", "Read", "Edit"), or "" when idle / thinking.
 	// Written by the SDK event forwarder on every tool_use event.
@@ -140,6 +147,17 @@ type AgentState struct {
 	StandupSlot    *waitSlot
 	BrainstormSlot *waitSlot
 	LeaderTaskSlot *waitSlot
+	// QuestionSlot is installed by Manager.AskQuestion when this agent is
+	// the current recipient of a `cm ask` from a teammate. The asker's
+	// HTTP handler blocks on the slot's channel until either the
+	// recipient calls AnswerQuestion (slot.deliver), the per-recipient
+	// timeout fires and AskQuestion rotates to a fallback (slot.finish +
+	// new slot installed), or the total wait elapses (slot.finish + 200
+	// returned to asker with status="timeout"). Only one question can be
+	// outstanding per recipient at a time -- AskQuestion overwrites this
+	// field when re-targeting and finishes the previous slot to drop any
+	// late reply that lands during the rotation.
+	QuestionSlot *waitSlot
 	// Reflection / curiosity are still raw channels — they're not
 	// part of the round-pollution pattern (single reply, slot is torn
 	// down on the reader side). Leaving them untouched keeps the
@@ -331,40 +349,102 @@ func (a *AgentState) UpdateTaskStatus(taskID string, status TaskStatus) bool {
 	defer a.mu.Unlock()
 	for _, t := range a.taskQueue.Tasks {
 		if t.ID == taskID {
-			t.Status = status
-			now := time.Now()
-			if status == TaskInProgress && t.StartedAt.IsZero() {
-				t.StartedAt = now
-				// R36 · Snapshot agent cost + turn count for
-				// per-task rollups. The delta against these at
-				// completion feeds the cost-by-label view in
-				// Insights. Cheap under the already-held mutex.
-				t.StartCostUSD = a.TotalCostUSD
-				t.StartTurnCount = a.TurnCount
-			}
-			if status == TaskCompleted || status == TaskFailed {
-				t.CompletedAt = now
-				// R36 · Final delta. If the task never entered
-				// TaskInProgress (direct pending->failed), the
-				// Start* zero values mean FinalCostUSD == current
-				// cumulative -- close enough to "nothing tracked"
-				// that a downstream filter on (StartedAt.IsZero())
-				// can drop it from aggregates.
-				t.FinalCostUSD = a.TotalCostUSD - t.StartCostUSD
-				t.FinalTurnCount = a.TurnCount - t.StartTurnCount
-			}
-			// Reclaim per-task side-channel state whenever the task leaves
-			// TaskInProgress. Previously only the auto-complete path in
-			// recovery.go cleared ProgressChecks; normal completions, fails,
-			// and blocks left entries stranded -- a slow per-agent leak.
-			if status != TaskInProgress {
-				delete(a.ProgressChecks, taskID)
-				delete(a.AckNudges, taskID)
-			}
+			a.applyTaskStatusLocked(t, status)
 			return true
 		}
 	}
 	return false
+}
+
+// applyTaskStatusLocked writes the status + timestamps + R36 cost
+// snapshot onto the given task pointer. Caller MUST hold a.mu —
+// the *Locked suffix is the contract.
+//
+// Extracted so CompleteTask (which needs lookup+mutation under one
+// lock acquisition) can reuse the bookkeeping without re-acquiring
+// a.mu through the public UpdateTaskStatus.
+func (a *AgentState) applyTaskStatusLocked(t *Task, status TaskStatus) {
+	t.Status = status
+	now := time.Now()
+	if status == TaskInProgress && t.StartedAt.IsZero() {
+		t.StartedAt = now
+		// R36 · Snapshot agent cost + turn count for per-task
+		// rollups. The delta against these at completion feeds the
+		// cost-by-label view in Insights.
+		t.StartCostUSD = a.TotalCostUSD
+		t.StartTurnCount = a.TurnCount
+	}
+	if status == TaskCompleted || status == TaskFailed {
+		t.CompletedAt = now
+		// R36 · Final delta. If the task never entered
+		// TaskInProgress (direct pending->failed), the Start*
+		// zero values mean FinalCostUSD == current cumulative —
+		// close enough to "nothing tracked" that a downstream
+		// filter on StartedAt.IsZero() can drop it from aggregates.
+		t.FinalCostUSD = a.TotalCostUSD - t.StartCostUSD
+		t.FinalTurnCount = a.TurnCount - t.StartTurnCount
+	}
+	// Reclaim per-task side-channel state whenever the task leaves
+	// TaskInProgress. Previously only the auto-complete path in
+	// recovery.go cleared ProgressChecks; normal completions, fails,
+	// and blocks left entries stranded — a slow per-agent leak.
+	if status != TaskInProgress {
+		delete(a.ProgressChecks, t.ID)
+		delete(a.AckNudges, t.ID)
+	}
+}
+
+// CompleteTaskResult bundles the metadata OfficeAgentTaskComplete
+// needs after applying the status mutation. Lets the handler decide
+// whether to fire SSE / ultrareview / re-tasking without a second
+// scan of the task queue.
+type CompleteTaskResult struct {
+	// Found is true when a task with the requested ID exists. When
+	// false the caller should write a no-op response.
+	Found bool
+
+	// AlreadyComplete is true when the task was already in
+	// TaskCompleted on entry; mutation was skipped. Caller should
+	// short-circuit so repeated `cm task complete` calls don't
+	// re-fire broadcasts (observed 6× re-fire in prod before the
+	// idempotency guard).
+	AlreadyComplete bool
+
+	// Task is the pointer captured during the lookup. Safe to read
+	// post-mutation because the lock is dropped only after the
+	// status update completes.
+	Task *Task
+
+	// Title is the task's title at lookup time. Captured because the
+	// screenshot-gate check needs it even after the task moves out
+	// of the active set.
+	Title string
+}
+
+// CompleteTask is the single-lock equivalent of:
+//  1. iterating GetTasks() to capture title + prior status,
+//  2. short-circuiting when already TaskCompleted,
+//  3. calling UpdateTaskStatus(taskID, TaskCompleted).
+//
+// Captures snapshot + applies update under one mutex acquisition so
+// no concurrent writer can land between the lookup and the
+// mutation. Caller (handler) uses the result to drive SSE,
+// ultrareview, and re-tasking branches.
+func (a *AgentState) CompleteTask(taskID string) CompleteTaskResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.taskQueue.Tasks {
+		if t == nil || t.ID != taskID {
+			continue
+		}
+		if t.Status == TaskCompleted {
+			return CompleteTaskResult{Found: true, AlreadyComplete: true, Task: t, Title: t.Title}
+		}
+		title := t.Title
+		a.applyTaskStatusLocked(t, TaskCompleted)
+		return CompleteTaskResult{Found: true, Task: t, Title: title}
+	}
+	return CompleteTaskResult{}
 }
 
 // SetTaskProgress appends a progress note to the task's ProgressLog and
@@ -524,6 +604,16 @@ func (a *AgentState) SetProvider(provider, model string) {
 	a.mu.Lock()
 	a.Provider = provider
 	a.Model = model
+	a.mu.Unlock()
+}
+
+// SetSessionMode records which spawn mode produced this agent ("sdk",
+// "hooks", "legacy"). Used by BuildMemberPayload to surface the "via
+// {mode}" badge on each agent's dashboard card so operators can see at
+// a glance which billing path is active.
+func (a *AgentState) SetSessionMode(mode string) {
+	a.mu.Lock()
+	a.SessionMode = mode
 	a.mu.Unlock()
 }
 

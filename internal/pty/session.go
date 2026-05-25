@@ -6,12 +6,25 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	vtpkg "github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
 	"github.com/google/uuid"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
+)
+
+// vtScreenCols / vtScreenRows match the PTY winsize used at session
+// start (see pty.StartWithSize call further down). Keeping the vt
+// emulator the same dimensions means cursor positions and wrapped
+// lines render identically to what claude actually sees.
+const (
+	vtScreenCols = 200
+	vtScreenRows = 50
 )
 
 const (
@@ -68,6 +81,7 @@ type Session struct {
 	events     chan SessionEvent
 	done       chan struct{}
 	cancelFunc context.CancelFunc
+	sessionCtx context.Context // set in Start(); used by background goroutines that outlive a single function call
 	idleReset  chan struct{}
 
 	// Provider env
@@ -90,6 +104,50 @@ type Session struct {
 	// --dangerously-skip-permissions so interactive /login works.
 	// Required because the CLI refuses that flag as root.
 	omitSkipPermissions bool
+
+	// claudeBinaryPath overrides the PATH-resolved `claude` binary.
+	// Empty means resolve via exec.LookPath. Tests point this at
+	// cmd/fakeclaude so the office integration path can run without
+	// a real Claude install.
+	claudeBinaryPath string
+
+	// hooksEnabled flags ModeClaude sessions whose office spawner has
+	// written a .claude/settings.local.json into WorkingDir. Today
+	// this is informational only -- the binary itself doesn't behave
+	// differently. Surfaced via Status() so the dashboard can render
+	// the "via hooks" badge.
+	hooksEnabled bool
+
+	// R1.3 · Per-session CLI flags mirrored from SessionConfig. PTY
+	// sessions get the same flag surface as SDK sessions where the
+	// `claude` CLI exposes it. Empty / zero values mean "skip".
+	systemPromptFile                   string
+	appendSystemPromptFile             string
+	effort                             string
+	fallbackModel                      string
+	excludeDynamicSystemPromptSections bool
+	strictMcpConfig                    bool
+	// R3.6 · Optional GitHub PR linkage forwarded via --from-pr <n>.
+	fromPRNumber int
+	// R4.1 · Optional browser-automation tools forwarded via --chrome.
+	chromeEnabled bool
+	// R4.3 · Optional channel subscriptions forwarded as repeated
+	// --channels args (one per entry).
+	channels []string
+
+	// vtEmulator is the canonical screen-state model for this PTY.
+	// Every byte chunk read from the PTY is fed into it before the
+	// per-chunk heuristic detectors run. SafeEmulator is the
+	// concurrency-safe variant so the read loop, idle detector, and
+	// dashboard snapshot calls don't need to coordinate locking.
+	//
+	// We keep it alongside (not replacing) the existing
+	// terminalBuffer + StripANSI parsing so the v1 swap is purely
+	// additive: existing code paths see no behavioural change, but
+	// new code can call Snapshot() to read a faithful screen view
+	// instead of doing per-chunk substring searches that miss when
+	// ANSI escape sequences split across PTY reads.
+	vtEmulator *vtpkg.SafeEmulator
 }
 
 // NewSession creates a new session (does not start it).
@@ -116,7 +174,42 @@ func NewSession(config SessionConfig) *Session {
 		providerEnv:         config.ProviderEnv,
 		niceConfig:          config.NiceConfig,
 		omitSkipPermissions: config.OmitSkipPermissions,
+		claudeBinaryPath:    config.ClaudeBinaryPath,
+		hooksEnabled:        config.HooksEnabled,
+		vtEmulator:          vtpkg.NewSafeEmulator(vtScreenCols, vtScreenRows),
+
+		systemPromptFile:                   config.SystemPromptFile,
+		appendSystemPromptFile:             config.AppendSystemPromptFile,
+		effort:                             config.Effort,
+		fallbackModel:                      config.FallbackModel,
+		excludeDynamicSystemPromptSections: config.ExcludeDynamicSystemPromptSections,
+		strictMcpConfig:                    config.StrictMcpConfig,
+		fromPRNumber:                       config.FromPRNumber,
+		chromeEnabled:                      config.ChromeEnabled,
+		channels:                           sanitizeChannels(config.Channels, "pty:"+id),
 	}
+}
+
+// Snapshot returns the current rendered screen as plain text. Reads
+// from the SafeEmulator so it's race-free against the read loop.
+// Empty string means the emulator has no buffered content yet (fresh
+// session that hasn't produced output). Useful for the dashboard's
+// stable-screen view and for any future detector that wants to
+// reason about the full screen state instead of a single PTY chunk.
+func (s *Session) Snapshot() string {
+	if s.vtEmulator == nil {
+		return ""
+	}
+	return s.vtEmulator.String()
+}
+
+// HooksEnabled returns whether this session was spawned with Claude
+// Code hooks wired to the daemon. Read by the office payload builder
+// so the per-agent card can render a "via hooks" badge.
+func (s *Session) HooksEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hooksEnabled
 }
 
 // Start spawns the PTY process and begins the read loop.
@@ -134,15 +227,24 @@ func (s *Session) Start(ctx context.Context) error {
 
 	s.mu.Lock()
 	s.cancelFunc = cancel
+	s.sessionCtx = sessionCtx
 	s.mu.Unlock()
 
 	var cmd *exec.Cmd
 	switch s.Mode {
 	case ModeClaude:
 		// Resolve claude binary path to avoid symlink race during deploys.
-		claudePath, lookErr := exec.LookPath("claude")
-		if lookErr != nil {
-			claudePath = "claude" // fallback to PATH resolution
+		// Tests can override via SessionConfig.ClaudeBinaryPath (used by
+		// cmd/fakeclaude in the office integration suite).
+		var claudePath string
+		if s.claudeBinaryPath != "" {
+			claudePath = s.claudeBinaryPath
+		} else {
+			var lookErr error
+			claudePath, lookErr = exec.LookPath("claude")
+			if lookErr != nil {
+				claudePath = "claude" // fallback to PATH resolution
+			}
 		}
 		// Auth sessions (omitSkipPermissions=true) need the flag
 		// dropped -- Claude CLI refuses --dangerously-skip-permissions
@@ -152,6 +254,48 @@ func (s *Session) Start(ctx context.Context) error {
 		claudeArgs := []string{}
 		if !s.omitSkipPermissions {
 			claudeArgs = append(claudeArgs, "--dangerously-skip-permissions")
+		}
+		// R1.3 · forward the same per-session knobs as the SDK path.
+		// All conditional so an unconfigured session matches the
+		// pre-R1.3 invocation byte-for-byte.
+		if s.systemPromptFile != "" {
+			claudeArgs = append(claudeArgs, "--system-prompt-file", s.systemPromptFile)
+		}
+		if s.appendSystemPromptFile != "" {
+			claudeArgs = append(claudeArgs, "--append-system-prompt-file", s.appendSystemPromptFile)
+		}
+		if s.excludeDynamicSystemPromptSections {
+			claudeArgs = append(claudeArgs, "--exclude-dynamic-system-prompt-sections")
+		}
+		if effort := normaliseEffortString(s.effort); effort != "" {
+			claudeArgs = append(claudeArgs, "--effort", effort)
+		}
+		if s.fallbackModel != "" {
+			claudeArgs = append(claudeArgs, "--fallback-model", s.fallbackModel)
+		}
+		if s.strictMcpConfig {
+			claudeArgs = append(claudeArgs, "--strict-mcp-config")
+		}
+		// R3.6 · --from-pr <n> loads PR diff + description into the
+		// system prompt so the agent has the PR context on its first
+		// turn. Zero leaves the flag off so non-PR teams are unchanged.
+		if s.fromPRNumber > 0 {
+			claudeArgs = append(claudeArgs, "--from-pr", strconv.Itoa(s.fromPRNumber))
+		}
+		// R4.1 · --chrome enables browser-automation tools (navigate,
+		// click, screenshot, evaluate). Opt-in per team because it
+		// widens the agent's reach beyond the worktree.
+		if s.chromeEnabled {
+			claudeArgs = append(claudeArgs, "--chrome")
+		}
+		// R4.3 · --channels subscribes to MCP channel notifications.
+		// Each entry becomes its own --channels arg so the CLI sees
+		// a flat list (unlike the SDK path, which has to comma-join
+		// because WithExtraArgs is single-valued).
+		for _, ch := range s.channels {
+			if ch != "" {
+				claudeArgs = append(claudeArgs, "--channels", ch)
+			}
 		}
 		cmd = exec.CommandContext(sessionCtx, claudePath, claudeArgs...)
 	case ModeShell:
@@ -185,17 +329,19 @@ func (s *Session) Start(ctx context.Context) error {
 	// Track both goroutines so we can close channels safely after both exit.
 	s.wg.Add(2)
 
-	// Start the read loop goroutine
-	go s.readLoop(sessionCtx)
-	// Start idle detector goroutine
-	go s.idleDetector(sessionCtx)
+	// safego: per-session loops live for the entire session lifetime.
+	// A panic in either readLoop (PTY read on a stale fd, syscall
+	// edge case) or idleDetector (timer race during Stop) would
+	// crash the whole jarvis daemon without the wrapper.
+	safego.Go("pty.readLoop", func() { s.readLoop(sessionCtx) })
+	safego.Go("pty.idleDetector", func() { s.idleDetector(sessionCtx) })
 
 	// Cleanup goroutine: close channels only after both goroutines finish.
-	go func() {
+	safego.Go("pty.session.cleanup", func() {
 		s.wg.Wait()
 		close(s.done)
 		close(s.events)
-	}()
+	})
 
 	return nil
 }
@@ -273,6 +419,26 @@ func (s *Session) AddOutputObserver(cb func(string)) func() {
 }
 
 // notifyOutputObservers fans out terminal data to all registered observers.
+//
+// LOCKING: observerMu is held only while snapshotting the observer
+// slice — NOT while running callbacks. This is deliberate. Observers
+// include the Telegram bridge, regex matchers, and SSE forwarders;
+// they can each take tens of milliseconds and may themselves acquire
+// other locks (manager.mu, telegram client mu). Holding observerMu
+// across callbacks would invert the lock order with several callers,
+// risking deadlock under load.
+//
+// Contract for observer authors:
+//  1. Callbacks MUST be safe to invoke concurrently with one another.
+//     The snapshot below is a one-time copy; subsequent callbacks
+//     happen sequentially in this goroutine, but other goroutines may
+//     also be calling notifyOutputObservers at the same time.
+//  2. Callbacks MUST NOT acquire s.mu or s.observerMu themselves —
+//     they will deadlock if the call path back into Session re-enters
+//     a method that takes either.
+//  3. Callbacks SHOULD be non-blocking. If a callback needs to do
+//     heavy work, it should hand the data off to its own goroutine
+//     with bounded buffering.
 func (s *Session) notifyOutputObservers(data string) {
 	s.observerMu.Lock()
 	observers := make([]func(string), 0, len(s.outputObservers))
@@ -520,6 +686,16 @@ func (s *Session) processOutput(rawData string) {
 		return
 	}
 
+	// Feed the SafeEmulator first so Snapshot() reflects the latest
+	// state by the time downstream observers see this chunk. The
+	// SafeEmulator handles its own locking (no need for s.mu).
+	if s.vtEmulator != nil {
+		// Write returns (n, err) but the emulator never errors on
+		// arbitrary input -- it absorbs partial / malformed escape
+		// sequences gracefully. Ignore both safely.
+		_, _ = s.vtEmulator.Write([]byte(data))
+	}
+
 	s.mu.Lock()
 	s.terminalBuffer.Append(data)
 	s.lastActivityAt = time.Now()
@@ -593,6 +769,13 @@ func (s *Session) processOutput(rawData string) {
 // detectAndAutoRespondMenu detects Claude Code's Ink interactive selection menus
 // and auto-selects option 1 to prevent agents from getting stuck.
 // Menus have patterns like "❯ 1. Title" with numbered options below.
+//
+// Two-layer detection:
+//   1. Per-chunk substring scan on cleanData -- fast, latency-optimal
+//      for the common case where the entire menu lands in one PTY read.
+//   2. Snapshot fallback when the per-chunk scan misses a marker but
+//      one is present -- handles ANSI splits across chunk boundaries
+//      that would have left the per-chunk view incomplete.
 func (s *Session) detectAndAutoRespondMenu(cleanData string) {
 	// Only auto-respond in Claude mode (not shell sessions)
 	if s.Mode != ModeClaude {
@@ -607,41 +790,99 @@ func (s *Session) detectAndAutoRespondMenu(cleanData string) {
 		return
 	}
 
-	// Detect selection menu patterns:
-	// - "❯ 1." at start of a line (Ink's selection arrow)
-	// - "Pick task" or "Which" question followed by numbered items
-	// - "Type something" as an option (Claude Code's free-text fallback)
-	hasSelector := strings.Contains(cleanData, "❯") || strings.Contains(cleanData, ">")
-	hasNumbered := strings.Contains(cleanData, "1.") && strings.Contains(cleanData, "2.")
-	hasTypeSomething := strings.Contains(cleanData, "Type something")
-	hasPickTask := strings.Contains(cleanData, "Pick task") || strings.Contains(cleanData, "Which task") || strings.Contains(cleanData, "Which option")
-	hasChatAbout := strings.Contains(cleanData, "Chat about this")
+	// Helper: does a haystack carry the full menu signature? Reused
+	// for the per-chunk and snapshot views so we never drift between
+	// them.
+	hasMenuSignature := func(text string) bool {
+		hasSelector := strings.Contains(text, "❯") || strings.Contains(text, ">")
+		hasNumbered := strings.Contains(text, "1.") && strings.Contains(text, "2.")
+		hasTypeSomething := strings.Contains(text, "Type something")
+		hasPickTask := strings.Contains(text, "Pick task") || strings.Contains(text, "Which task") || strings.Contains(text, "Which option")
+		hasChatAbout := strings.Contains(text, "Chat about this")
+		return hasSelector && hasNumbered && (hasTypeSomething || hasPickTask || hasChatAbout)
+	}
 
-	if hasSelector && hasNumbered && (hasTypeSomething || hasPickTask || hasChatAbout) {
+	// Per-chunk first (fast path).
+	matched := hasMenuSignature(cleanData)
+	// Snapshot fallback only if per-chunk missed AND something
+	// menu-shaped appeared in the chunk (cheap pre-filter so we don't
+	// pay for Snapshot() on every output read).
+	if !matched && (strings.ContainsAny(cleanData, "❯>") || strings.Contains(cleanData, "1.")) {
+		matched = hasMenuSignature(s.Snapshot())
+	}
+
+	if matched {
 		s.mu.Lock()
 		s.lastAutoResponse = time.Now()
 		ptyFile := s.ptyFile
+		sessionCtx := s.sessionCtx
 		s.mu.Unlock()
 
-		if ptyFile != nil {
-			// Send "1" + Enter to select the first option
+		if ptyFile != nil && sessionCtx != nil {
+			// Send "1" + Enter to select the first option after a brief
+			// delay for Ink to settle. Honour session shutdown via
+			// sessionCtx so a Stop()-then-timer-fires race doesn't
+			// write to a closed ptyFile. Re-check s.ptyFile under the
+			// lock before each write — a respawn could have swapped
+			// the file pointer in the meantime.
 			go func() {
-				// R26 · ptyFile closed mid-timer would panic here;
-				// guard so the session goroutine survives.
+				// Belt-and-braces: panic recovery stays in case a
+				// future code path slips past the lock check below.
 				defer func() {
 					if rec := recover(); rec != nil {
 						slog.Warn("auto-menu goroutine recovered from panic",
 							"session", s.ID, "panic", rec)
 					}
 				}()
-				time.Sleep(500 * time.Millisecond) // brief delay for Ink to be ready
-				ptyFile.Write([]byte("1"))
-				time.Sleep(200 * time.Millisecond)
-				ptyFile.Write([]byte("\r"))
+				if !sleepCtx(sessionCtx, 500*time.Millisecond) {
+					return
+				}
+				if !s.writeIfPtyFileMatches(ptyFile, []byte("1")) {
+					return
+				}
+				if !sleepCtx(sessionCtx, 200*time.Millisecond) {
+					return
+				}
+				if !s.writeIfPtyFileMatches(ptyFile, []byte("\r")) {
+					return
+				}
 				slog.Info("Auto-selected menu option 1", "session", s.ID)
 			}()
 		}
 	}
+}
+
+// sleepCtx blocks for d, or returns false early if ctx is cancelled.
+// True means "the sleep completed normally; proceed."
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// writeIfPtyFileMatches writes p to expected only if s.ptyFile still
+// points at expected at the moment of the write. Guards against the
+// "Stop() closed the file and a respawn opened a new one" race. The
+// brief lock-hold around Write is acceptable: Write to a PTY is
+// non-blocking on the file descriptor (the kernel buffers).
+func (s *Session) writeIfPtyFileMatches(expected *os.File, p []byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ptyFile != expected {
+		return false
+	}
+	_, err := s.ptyFile.Write(p)
+	if err != nil {
+		slog.Warn("auto-menu write failed",
+			"session", s.ID, "err", err, "bytes", len(p))
+		return false
+	}
+	return true
 }
 
 func (s *Session) detectWorkingState(rawData, cleanData string) {
@@ -790,4 +1031,25 @@ func (s *Session) buildEnv() []string {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env
+}
+
+// normaliseEffortString validates an operator-supplied effort tier and
+// returns the value to pass to `--effort`. Mirrors the SDK helper in
+// sdk_session.go but returns a string for CLI use. "xhigh" is accepted
+// for symmetry with the docs even though the SDK collapses it to "max".
+func normaliseEffortString(in string) string {
+	switch strings.ToLower(strings.TrimSpace(in)) {
+	case "low":
+		return "low"
+	case "medium", "med":
+		return "medium"
+	case "high":
+		return "high"
+	case "xhigh":
+		return "xhigh"
+	case "max", "maximum":
+		return "max"
+	default:
+		return ""
+	}
 }

@@ -99,6 +99,12 @@ func TestStableSystemPromptCoversBoilerplate(t *testing.T) {
 			"memory",
 			"cm task ack",
 			"agent/<your-id>",
+			// R37 · Self-sustaining task primitives (Claude /goal +
+			// help-seeking) live in the cached prefix.
+			"/goal",
+			"cm ask",
+			"office-goal-loop",
+			"office-ask-for-help",
 		} {
 			if !strings.Contains(got, mustHave) {
 				t.Errorf("stable prefix for %s missing %q", tier, mustHave)
@@ -175,7 +181,7 @@ func TestPickSkillsForRoleMatchesExpectedBuckets(t *testing.T) {
 		{"Some Unknown Role", "git-advanced"},
 	}
 	for _, tc := range cases {
-		skills := pickSkillsForRole(tc.role)
+		skills := pickSkillsForRole(tc.role, true)
 		found := false
 		for _, s := range skills {
 			if s == tc.mustHave {

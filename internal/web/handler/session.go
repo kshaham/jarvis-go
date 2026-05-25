@@ -312,17 +312,7 @@ func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
 		Status:     string(session.Status()),
 	})
 
-	// Create Ralph tracker for this session
-	tracker := ralph.NewTracker()
-	ctx.RalphTrackersMu.Lock()
-	ctx.RalphTrackers[session.ID] = tracker
-	ctx.RalphTrackersMu.Unlock()
-
-	// Create run summary tracker for this session
-	runTracker := runsummary.New(session.ID)
-	ctx.RunSummariesMu.Lock()
-	ctx.RunSummaries[session.ID] = runTracker
-	ctx.RunSummariesMu.Unlock()
+	ctx.initSessionTrackers(session.ID)
 
 	// Initialize respawn controller for this session with a session writer
 	rc := ctx.GetOrCreateRespawnController(session.ID)

@@ -24,8 +24,19 @@ func Auth(am *auth.Manager) func(http.Handler) http.Handler {
 
 // AuthWithAgentToken is like Auth but additionally accepts a valid agent
 // token as authentication. Pass nil for atm to get the strict cookie-only
-// behavior.
+// behavior. Kept for callers that do not need mobile-token support.
 func AuthWithAgentToken(am *auth.Manager, atm *auth.AgentTokenManager) func(http.Handler) http.Handler {
+	return AuthWithTokens(am, atm, nil)
+}
+
+// AuthWithTokens accepts any of: a valid session cookie, a valid agent
+// token (X-Jarvis-Agent-Token or Authorization: Bearer), or a valid
+// mobile bearer token. Pass nil for atm/mtm to disable that path.
+// Mobile tokens are issued per-device via POST /api/auth/mobile/login
+// and revocable from the operator's Settings; they unlock the same
+// surface area as a session cookie so the mobile app can drive every
+// office endpoint the web dashboard can.
+func AuthWithTokens(am *auth.Manager, atm *auth.AgentTokenManager, mtm *auth.MobileTokenManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// If no password is configured, auth is disabled -- pass through
@@ -48,18 +59,21 @@ func AuthWithAgentToken(am *auth.Manager, atm *auth.AgentTokenManager) func(http
 				return
 			}
 
-			// Fallback: accept a valid agent token so jarvis-mcp tools that
-			// touch general status/config routes work inside spawned sessions.
-			if atm != nil {
-				presented := r.Header.Get("X-Jarvis-Agent-Token")
-				if presented == "" {
-					if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-						presented = strings.TrimPrefix(h, "Bearer ")
-					}
-				}
-				if atm.Validate(presented) {
+			// Bearer fallback: try the agent token first, then any
+			// registered mobile token. Both arrive via the same
+			// X-Jarvis-Agent-Token header or Authorization: Bearer,
+			// so a single extract handles both.
+			presented := bearerOrAgentHeader(r)
+			if presented != "" {
+				if atm != nil && atm.Validate(presented) {
 					next.ServeHTTP(w, r)
 					return
+				}
+				if mtm != nil {
+					if _, ok := mtm.Validate(presented); ok {
+						next.ServeHTTP(w, r)
+						return
+					}
 				}
 			}
 
@@ -69,6 +83,19 @@ func AuthWithAgentToken(am *auth.Manager, atm *auth.AgentTokenManager) func(http
 			w.Write([]byte(`{"success":false,"error":"authentication required"}`))
 		})
 	}
+}
+
+// bearerOrAgentHeader extracts a bearer token from either the
+// X-Jarvis-Agent-Token header (legacy agent path) or the standard
+// Authorization: Bearer header (mobile + agent SDKs).
+func bearerOrAgentHeader(r *http.Request) string {
+	if v := r.Header.Get("X-Jarvis-Agent-Token"); v != "" {
+		return v
+	}
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
+	}
+	return ""
 }
 
 // AgentTokenAuth requires a valid X-Jarvis-Agent-Token header (or Bearer

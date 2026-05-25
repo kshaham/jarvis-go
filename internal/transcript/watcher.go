@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 const (
@@ -46,7 +48,7 @@ func (w *Watcher) Start(transcriptPath string) {
 	w.isRunning = true
 	w.mu.Unlock()
 
-	go w.watchLoop()
+	safego.Go("transcript.watchLoop", w.watchLoop)
 }
 
 // Stop halts the watcher.

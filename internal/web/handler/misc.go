@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,79 +16,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/claudeman/jarvis-go/internal/cases"
 	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/ralph"
-	"github.com/claudeman/jarvis-go/internal/runsummary"
+	"github.com/claudeman/jarvis-go/internal/safeexec"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
-
-// allowedCommands is the set of command names permitted by /api/run.
-// `env` is deliberately NOT included -- it would leak ANTHROPIC_API_KEY and
-// other provider credentials to any authenticated caller.
-var allowedCommands = []string{"git", "npm", "go", "ls", "cat", "head", "tail", "grep", "find", "wc", "sort", "diff", "echo", "pwd", "which", "node", "npx", "tsc"}
-
-// allowedBinaryPrefixes constrains where the resolved binary may live. A
-// matching base name alone is insufficient because any directory on PATH
-// can shadow the real binary; we resolve to an absolute path and require
-// it live inside one of these prefixes.
-var allowedBinaryPrefixes = []string{
-	"/usr/bin/",
-	"/usr/local/bin/",
-	"/opt/homebrew/bin/",
-	"/bin/",
-	"/sbin/",
-	"/usr/sbin/",
-	// Common Go toolchain installs
-	"/usr/local/go/bin/",
-	"/opt/homebrew/opt/go/bin/",
-}
-
-// resolveAllowedCommand looks up the command name via exec.LookPath, verifies
-// the base name is in the allowlist, and confirms the resolved absolute path
-// lives under one of the allowed system-binary prefixes. Returns the absolute
-// path on success so the caller executes the verified binary directly.
-func resolveAllowedCommand(cmd string) (string, []string, bool) {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return "", nil, false
-	}
-	base := filepath.Base(parts[0])
-	allowed := false
-	for _, a := range allowedCommands {
-		if base == a {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		return "", nil, false
-	}
-	abs, err := exec.LookPath(base)
-	if err != nil {
-		return "", nil, false
-	}
-	prefixOK := false
-	for _, p := range allowedBinaryPrefixes {
-		if strings.HasPrefix(abs, p) {
-			prefixOK = true
-			break
-		}
-	}
-	if !prefixOK {
-		return "", nil, false
-	}
-	return abs, parts[1:], true
-}
-
-// shellMetachars matches dangerous shell metacharacters that could enable injection.
-var shellMetachars = regexp.MustCompile(`[;|&$` + "`" + `><(){}]`)
 
 // --- Templates ---
 
@@ -684,17 +623,7 @@ func (ctx *Context) QuickStart(w http.ResponseWriter, r *http.Request) {
 
 	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 
-	// Create Ralph tracker for quick-start session
-	qsTracker := ralph.NewTracker()
-	ctx.RalphTrackersMu.Lock()
-	ctx.RalphTrackers[session.ID] = qsTracker
-	ctx.RalphTrackersMu.Unlock()
-
-	// Create run summary tracker for quick-start session
-	qsRunTracker := runsummary.New(session.ID)
-	ctx.RunSummariesMu.Lock()
-	ctx.RunSummaries[session.ID] = qsRunTracker
-	ctx.RunSummariesMu.Unlock()
+	ctx.initSessionTrackers(session.ID)
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -831,14 +760,14 @@ func (ctx *Context) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Reject shell metacharacters before any other parsing.
-	if shellMetachars.MatchString(body.Command) {
+	if safeexec.ContainsShellMetachars(body.Command) {
 		request.WriteError(w, http.StatusBadRequest, "command not allowed")
 		return
 	}
 	// Resolve to an absolute path and confirm the base name is in the
 	// allowlist AND the resolved path is inside an approved prefix. This
 	// blocks the `PATH=/tmp:...` shim attack on the allowlisted names.
-	absPath, args, ok := resolveAllowedCommand(body.Command)
+	absPath, args, ok := safeexec.Resolve(body.Command)
 	if !ok {
 		request.WriteError(w, http.StatusBadRequest, "command not allowed")
 		return
@@ -1015,21 +944,17 @@ func (ctx *Context) LinkCase(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-
-	// Validate name format: only letters, numbers, hyphens, underscores
-	for _, c := range body.Name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			request.WriteError(w, http.StatusBadRequest, "invalid case name: use only letters, numbers, hyphens, underscores")
-			return
-		}
+	if !cases.IsValidCaseName(body.Name) {
+		request.WriteError(w, http.StatusBadRequest, "invalid case name: use only letters, numbers, hyphens, underscores, dots (no ..)")
+		return
 	}
-
 	if body.Path == "" {
 		request.WriteError(w, http.StatusBadRequest, "path is required")
 		return
 	}
 
-	// Expand ~ to home directory
+	// Expand ~ to home directory so operators can paste paths
+	// straight from their shell.
 	expandedPath := body.Path
 	if strings.HasPrefix(expandedPath, "~") {
 		homeDir, err := os.UserHomeDir()
@@ -1040,17 +965,8 @@ func (ctx *Context) LinkCase(w http.ResponseWriter, r *http.Request) {
 		expandedPath = filepath.Join(homeDir, expandedPath[1:])
 	}
 
-	// Validate the path exists and is a directory
-	info, err := os.Stat(expandedPath)
-	if err != nil {
-		request.WriteError(w, http.StatusBadRequest, "folder not found: "+expandedPath)
-		return
-	}
-	if !info.IsDir() {
-		request.WriteError(w, http.StatusBadRequest, "path is not a directory")
-		return
-	}
-
+	// CaseManager.Link does the stat + IsDir + symlink work and
+	// returns a 400-shaped error on the unhappy paths. Defer to it.
 	caseInfo, err := ctx.CaseManager.Link(body.Name, expandedPath)
 	if err != nil {
 		request.WriteError(w, http.StatusBadRequest, err.Error())
@@ -1165,23 +1081,22 @@ func (ctx *Context) GeneratePlanDetailed(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Determine the working directory from the case (if specified)
+	// Determine the working directory from the case (if specified).
+	// Wizard dir gets cleared before the run so stale agent prompts/
+	// results from a prior generation don't contaminate this one.
 	workingDir := ""
 	if req.CaseName != "" {
-		caseInfo, err := ctx.CaseManager.Get(req.CaseName)
-		if err == nil {
+		if caseInfo, err := ctx.CaseManager.Get(req.CaseName); err == nil {
 			workingDir = caseInfo.Path
-
-			// Clear old ralph-wizard directory for fresh generation
-			wizardDir := filepath.Join(caseInfo.Path, "ralph-wizard")
-			if _, statErr := os.Stat(wizardDir); statErr == nil {
-				os.RemoveAll(wizardDir)
+			if clearErr := cases.ClearRalphWizardDir(caseInfo); clearErr != nil {
+				log.Printf("[plan-session] failed to clear ralph-wizard dir for case=%s: %v",
+					req.CaseName, clearErr)
 			}
 		}
 	}
-
 	if workingDir == "" {
-		// Fallback to home directory or current working directory
+		// Fallback to home directory so plan generation always has a
+		// valid cwd, even without an attached case.
 		homeDir, _ := os.UserHomeDir()
 		workingDir = homeDir
 	}
@@ -1224,17 +1139,7 @@ func (ctx *Context) GeneratePlanDetailed(w http.ResponseWriter, r *http.Request)
 		"orchestratorId": orchestratorID,
 	})
 
-	// Create Ralph tracker for plan session
-	planTracker := ralph.NewTracker()
-	ctx.RalphTrackersMu.Lock()
-	ctx.RalphTrackers[session.ID] = planTracker
-	ctx.RalphTrackersMu.Unlock()
-
-	// Create run summary tracker for plan session
-	planRunTracker := runsummary.New(session.ID)
-	ctx.RunSummariesMu.Lock()
-	ctx.RunSummaries[session.ID] = planRunTracker
-	ctx.RunSummariesMu.Unlock()
+	ctx.initSessionTrackers(session.ID)
 
 	go forwardSessionEvents(session, ctx)
 
@@ -1326,44 +1231,11 @@ func (ctx *Context) GetRalphWizardFiles(w http.ResponseWriter, r *http.Request) 
 		request.WriteError(w, http.StatusNotFound, "case not found")
 		return
 	}
-
-	wizardDir := filepath.Join(caseInfo.Path, "ralph-wizard")
-	entries, err := os.ReadDir(wizardDir)
+	files, err := cases.ListRalphWizardFiles(caseInfo)
 	if err != nil {
-		request.WriteError(w, http.StatusNotFound, "ralph wizard directory not found")
+		request.WriteError(w, http.StatusNotFound, err.Error())
 		return
 	}
-
-	type wizardFile struct {
-		AgentType  string `json:"agentType"`
-		PromptFile string `json:"promptFile,omitempty"`
-		ResultFile string `json:"resultFile,omitempty"`
-	}
-	var files []wizardFile
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		agentDir := filepath.Join(wizardDir, entry.Name())
-		wf := wizardFile{AgentType: entry.Name()}
-
-		if _, statErr := os.Stat(filepath.Join(agentDir, "prompt.md")); statErr == nil {
-			wf.PromptFile = entry.Name() + "/prompt.md"
-		}
-		if _, statErr := os.Stat(filepath.Join(agentDir, "result.json")); statErr == nil {
-			wf.ResultFile = entry.Name() + "/result.json"
-		}
-
-		if wf.PromptFile != "" || wf.ResultFile != "" {
-			files = append(files, wf)
-		}
-	}
-
-	if files == nil {
-		files = []wizardFile{}
-	}
-
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"data": map[string]interface{}{
@@ -1373,7 +1245,9 @@ func (ctx *Context) GetRalphWizardFiles(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// GetRalphWizardFile reads a specific file from the ralph-wizard directory.
+// GetRalphWizardFile reads a specific file from the ralph-wizard
+// directory. The symlink-safe path resolution + read lives in
+// cases.ReadRalphWizardFile; this handler does HTTP shape only.
 // GET /api/cases/{caseName}/ralph-wizard/file/*
 func (ctx *Context) GetRalphWizardFile(w http.ResponseWriter, r *http.Request) {
 	caseName := chi.URLParam(r, "caseName")
@@ -1383,63 +1257,31 @@ func (ctx *Context) GetRalphWizardFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prevent browser caching
+	// Prevent browser caching.
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 
-	// Extract the file path from the URL (everything after ralph-wizard/file/)
 	filePath := chi.URLParam(r, "*")
 	if filePath == "" {
 		request.WriteError(w, http.StatusBadRequest, "file path is required")
 		return
 	}
 
-	wizardDir := filepath.Join(caseInfo.Path, "ralph-wizard")
-
-	// Security: ensure path is within wizard directory. R27 security
-	// review · Lexical filepath.Abs is not enough — a symlink inside
-	// ralph-wizard/ pointing outside the case directory (e.g., an
-	// agent creates ralph-wizard/escape -> /etc) passes the string
-	// prefix check because the symlink itself lexically lives inside
-	// wizardDir. EvalSymlinks resolves the chain and catches the
-	// escape. internal/pty/workingdir.go already uses this pattern
-	// for spawn-time validation; applying it here for parity.
-	fullPath := filepath.Join(wizardDir, filePath)
-	resolvedPath, err := filepath.EvalSymlinks(fullPath)
+	data, err := cases.ReadRalphWizardFile(caseInfo, filePath)
 	if err != nil {
-		// EvalSymlinks errors on missing files with os.IsNotExist —
-		// fall back to a 404 so clients see a clean not-found for
-		// typical "file doesn't exist" cases.
-		if os.IsNotExist(err) {
+		switch {
+		case errors.Is(err, cases.ErrRalphWizardFileMissing):
 			request.WriteError(w, http.StatusNotFound, "file not found")
-			return
+		case errors.Is(err, cases.ErrRalphWizardPathInvalid):
+			request.WriteError(w, http.StatusForbidden, "invalid file path")
+		default:
+			request.WriteError(w, http.StatusInternalServerError, "failed to read file: "+err.Error())
 		}
-		request.WriteError(w, http.StatusBadRequest, "invalid file path")
-		return
-	}
-	resolvedWizard, err := filepath.EvalSymlinks(wizardDir)
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to resolve wizard directory")
-		return
-	}
-	if !strings.HasPrefix(resolvedPath, resolvedWizard+string(filepath.Separator)) && resolvedPath != resolvedWizard {
-		request.WriteError(w, http.StatusForbidden, "invalid file path")
-		return
-	}
-
-	data, err := os.ReadFile(resolvedPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			request.WriteError(w, http.StatusNotFound, "file not found")
-			return
-		}
-		request.WriteError(w, http.StatusInternalServerError, "failed to read file: "+err.Error())
 		return
 	}
 
 	content := string(data)
 	isJSON := strings.HasSuffix(filePath, ".json")
-
 	result := map[string]interface{}{
 		"success": true,
 		"data": map[string]interface{}{
@@ -1449,14 +1291,11 @@ func (ctx *Context) GetRalphWizardFile(w http.ResponseWriter, r *http.Request) {
 			"parsed":   nil,
 		},
 	}
-
-	// Parse JSON content if applicable
 	if isJSON {
 		var parsed interface{}
 		if jsonErr := json.Unmarshal(data, &parsed); jsonErr == nil {
 			result["data"].(map[string]interface{})["parsed"] = parsed
 		}
 	}
-
 	request.WriteJSON(w, http.StatusOK, result)
 }

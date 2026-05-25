@@ -144,6 +144,21 @@ func (m *SessionManager) GetSDKSession(id string) (*SDKSession, bool) {
 	return s, ok
 }
 
+// RegisterSDKSessionForTest inserts a pre-built SDKSession into the
+// manager's internal map so tests can exercise handler code paths
+// that look up sessions by ID without spinning up a real Claude
+// subprocess. Production callers go through CreateSDKSession; this
+// shortcut bypasses subprocess lifecycle entirely and is unsafe for
+// anything other than test fixtures.
+func (m *SessionManager) RegisterSDKSessionForTest(s *SDKSession) {
+	if s == nil {
+		return
+	}
+	m.mu.Lock()
+	m.sdkSessions[s.ID] = s
+	m.mu.Unlock()
+}
+
 // GetAllSDKSessions returns every live SDK session. Snapshot copy so
 // callers can iterate without holding the manager lock (useful for
 // bulk operations like daily-cap enforcement that call StopSDKSession

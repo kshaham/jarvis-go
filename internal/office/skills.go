@@ -26,30 +26,50 @@ import (
 var suggestedSkillsByRole = map[string][]string{
 	"manager": {
 		"office-protocols",
+		// Self-sustaining task loop using Claude Code's /goal command
+		// (R37). Read once, applied to every multi-step task.
+		"office-goal-loop",
 		"office-memory-discipline",
 		"office-context-budget",
 		"office-standup",
 		"office-task-handoff",
+		// Structured help-seeking with lead-first + fallback. The lead
+		// is most often on the *receiving* end; this skill teaches them
+		// how to answer well and how to ask up the chain when needed.
+		"office-ask-for-help",
 		"office-code-review",
 		"implementation-plan",
 		"team-dev-instance",
 		"office-self-improvement",
+		// P10 · ECC adds: planning + evaluation + safe-change discipline.
+		"agent-eval",
+		"verification-loop",
+		"continuous-learning",
 	},
 	"architect": {
 		"office-protocols",
+		"office-goal-loop",
 		"office-memory-discipline",
 		"office-context-budget",
 		"office-onboarding",
+		"office-ask-for-help",
 		"implementation-plan",
 		"team-dev-instance",
 		"go-concurrency",
 		"go-http-server",
 		"go-mcp-tools",
+		// P10 · ECC adds: API + ADR discipline for cross-cutting design.
+		"api-design",
+		"architecture-decision-records",
+		"backend-patterns",
+		"security-review",
 	},
 	"frontend": {
 		"office-protocols",
+		"office-goal-loop",
 		"office-memory-discipline",
 		"office-context-budget",
+		"office-ask-for-help",
 		"headless-browser",
 		"team-dev-instance",
 		"expect-testing",
@@ -60,33 +80,51 @@ var suggestedSkillsByRole = map[string][]string{
 		// alignment, tabular-nums, scale-on-press, 40x40 hit area.
 		// Read before merging any UI work.
 		"make-interfaces-feel-better",
+		// P10 · ECC adds: structured frontend direction + e2e flow.
+		"frontend-design-direction",
+		"e2e-testing",
+		"browser-qa",
 	},
 	"backend": {
 		"office-protocols",
+		"office-goal-loop",
 		"office-memory-discipline",
 		"office-context-budget",
+		"office-ask-for-help",
 		"team-dev-instance",
 		"go-concurrency",
 		"go-http-server",
 		"go-errors",
 		"jarvis-auth",
 		"go-atomic-writes",
+		// P10 · ECC adds: backend patterns + API design discipline.
+		"backend-patterns",
+		"api-design",
+		"deployment-patterns",
 	},
 	"devops": {
 		"office-protocols",
+		"office-goal-loop",
 		"office-memory-discipline",
 		"office-context-budget",
+		"office-ask-for-help",
 		"team-dev-instance",
 		"git-advanced",
 		"shell-scripting-safe",
 		"docker-compose-debug",
 		"go-pprof",
 		"release-prep",
+		// P10 · ECC adds: structured git + deployment + security review.
+		"git-workflow",
+		"deployment-patterns",
+		"security-review",
 	},
 	"qa": {
 		"office-protocols",
+		"office-goal-loop",
 		"office-memory-discipline",
 		"office-context-budget",
+		"office-ask-for-help",
 		// Browser verification is first-class for QA of any user-visible
 		// feature. Without these two, QA agents default to unit-test-only
 		// verification and miss regressions that only appear in the DOM.
@@ -101,17 +139,26 @@ var suggestedSkillsByRole = map[string][]string{
 		// any UI-keyword task to spot missing animations, hit areas,
 		// tabular numbers, and concentric radii before sign-off.
 		"make-interfaces-feel-better",
+		// P10 · ECC adds: TDD + e2e + verification-loop discipline.
+		"tdd-workflow",
+		"e2e-testing",
+		"verification-loop",
+		"eval-harness",
 	},
 	"designer": {
 		"office-protocols",
+		"office-goal-loop",
 		"office-memory-discipline",
 		"office-context-budget",
+		"office-ask-for-help",
 		"design-principles",
 		"web-design-guidelines",
 		"make-interfaces-feel-better",
 		"headless-browser",
 		"office-focused-search",
 		"office-task-handoff",
+		// P10 · ECC adds: explicit direction-setting framework.
+		"frontend-design-direction",
 	},
 }
 
@@ -121,8 +168,10 @@ var suggestedSkillsByRole = map[string][]string{
 // a capability head start in this codebase.
 var defaultSuggestedSkills = []string{
 	"office-protocols",
+	"office-goal-loop",
 	"office-memory-discipline",
 	"office-context-budget",
+	"office-ask-for-help",
 	"office-onboarding",
 	"office-focused-search",
 	"go-concurrency",
@@ -145,8 +194,14 @@ var (
 // the kickstart prompt for the given role. The block lists skill names
 // with their one-line descriptions read from each SKILL.md frontmatter,
 // followed by a hint to discover more via `cm skill search`.
-func BuildSuggestedSkillsSection(role string) string {
-	skills := pickSkillsForRole(role)
+//
+// P11.2.7 · Gates ECC-sourced skill names on the team's per-spawn
+// `disableEcc` flag. When ECC is disabled, ECC entries are filtered
+// from the recommendation list AND the ECC-mentioning footer hint is
+// suppressed. Mirrors the existing pattern for codegraph (the
+// `CodegraphBinaryAvailable()` gate further down).
+func BuildSuggestedSkillsSection(role string, eccEnabled bool) string {
+	skills := pickSkillsForRole(role, eccEnabled)
 	descs := loadSkillFrontmatterCache()
 
 	var b strings.Builder
@@ -160,22 +215,89 @@ func BuildSuggestedSkillsSection(role string) string {
 		fmt.Fprintf(&b, "- %-28s -- %s\n", name, oneLine(desc))
 	}
 	b.WriteString("\nDiscover more with `cm skill search <keyword>`. See `cm skill read office-skill-discovery` for the search discipline.\n")
+
+	// P6.3 · Nudge agents toward the codegraph MCP for structural
+	// codebase questions. Only emit when the binary is on PATH —
+	// otherwise the hint would point at tools the agent can't reach.
+	if CodegraphBinaryAvailable() {
+		b.WriteString("\nFor structural code questions (\"how does X work\", \"what calls Y\", \"blast radius of changing Z\") prefer the `mcp__codegraph__codegraph_context` tool over grep+read. It returns search + callers + callees + signatures in one call against a pre-built AST index of this workspace.\n")
+	}
 	return b.String()
+}
+
+// eccSkillNames is the set of skill names that come from the
+// vendored ECC bundle (P10.5 additions to suggestedSkillsByRole).
+// Kept here rather than tagged in the per-role lists so a single
+// audit reveals which names are ECC-sourced. When ECC is disabled
+// for a team, pickSkillsForRole filters these out so operators don't
+// see `cm skill read agent-eval` hints they can't satisfy.
+var eccSkillNames = map[string]struct{}{
+	"agent-eval":                   {},
+	"verification-loop":            {},
+	"continuous-learning":          {},
+	"api-design":                   {},
+	"architecture-decision-records": {},
+	"backend-patterns":             {},
+	"security-review":              {},
+	"frontend-design-direction":    {},
+	"e2e-testing":                  {},
+	"browser-qa":                   {},
+	"deployment-patterns":          {},
+	"git-workflow":                 {},
+	"tdd-workflow":                 {},
+	"eval-harness":                 {},
 }
 
 // pickSkillsForRole returns the priority skill list for a role string.
 // Matches by lowercase substring against roleMatchOrder; falls back to
-// defaultSuggestedSkills.
-func pickSkillsForRole(role string) []string {
+// defaultSuggestedSkills. Deduplicates the chosen list so a future
+// merge that accidentally lists the same skill twice (e.g. jarvis +
+// vendored ECC overlap) doesn't surface duplicates to operators.
+// P11.2.7 · When eccEnabled is false, drops every name present in
+// eccSkillNames so the kickstart hint stays accurate for ECC-disabled
+// teams.
+func pickSkillsForRole(role string, eccEnabled bool) []string {
 	r := strings.ToLower(role)
+	var picked []string
 	for _, key := range roleMatchOrder {
 		if strings.Contains(r, key) {
 			if list, ok := suggestedSkillsByRole[key]; ok {
-				return list
+				picked = list
+				break
 			}
 		}
 	}
-	return defaultSuggestedSkills
+	if picked == nil {
+		picked = defaultSuggestedSkills
+	}
+	deduped := dedupeSkills(picked)
+	if eccEnabled {
+		return deduped
+	}
+	out := make([]string, 0, len(deduped))
+	for _, name := range deduped {
+		if _, isECC := eccSkillNames[name]; isECC {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// dedupeSkills returns a copy of `in` with duplicate skill names
+// removed, preserving first-occurrence order. Stable so the kickstart
+// prompt's skill listing is deterministic across runs.
+func dedupeSkills(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // loadSkillFrontmatterCache returns a cached map of skill name -> the

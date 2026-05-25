@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/claudeman/jarvis-go/internal/library"
 )
 
 // memoryInjectMaxChars caps how much per-agent memory we inject into the
@@ -63,6 +65,18 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	if learnings := BuildLearningsPromptSection(config.ID); learnings != "" {
 		b.WriteString("## Learned Knowledge\n")
 		b.WriteString(learnings)
+		b.WriteString("\n")
+	}
+
+	// Knowledge-library hints — top-3 highest-outcome past
+	// experiences relevant to this role + working directory. Pulled
+	// from ~/.jarvis/office-memory/library/ (the corpus PageIndex
+	// MCP also indexes for on-demand retrieval). This eager-inject
+	// path guarantees high-value hits land in the kickstart even
+	// when the agent doesn't think to query the MCP itself.
+	if hints := BuildLibraryHintsSection(config, workingDir); hints != "" {
+		b.WriteString("## What Worked Before\n")
+		b.WriteString(hints)
 		b.WriteString("\n")
 	}
 
@@ -159,7 +173,11 @@ func BuildStableSystemPrompt(tier, teamMission string) string {
 	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
 	b.WriteString("- Before duplicating work: `cm knowledge search <keywords>` -- searches every teammate's memory + learnings + standups + whiteboard.\n")
 	b.WriteString("- Before any browser verification: `cm dev url` (and `cm dev creds` if login-gated). Don't spin up competing dev servers.\n")
-	b.WriteString("- Keep memory fresh: `cm memory section <name> \"<content>\"` / `cm memory append \"<entry>\"`. At ~70% context run `/compact` after saving state to memory.\n\n")
+	b.WriteString("- Keep memory fresh: `cm memory section <name> \"<content>\"` / `cm memory append \"<entry>\"`. At ~70% context run `/compact` after saving state to memory.\n")
+	// R37 · Self-sustaining task primitives. Lives in the cached prefix
+	// so every agent sees the two escape hatches without paying for the
+	// full skill bodies on every turn.
+	b.WriteString("- For multi-step tasks, wrap your work in `/goal <criteria>` so Claude Code's evaluator decides when you're done. If you get stuck, ask the team: `cm ask \"<question>\" --about <taskId> --wait 5m` (lead-first, fallback teammate, blocks until answered or timeout). Read `cm skill read office-goal-loop` and `cm skill read office-ask-for-help` once.\n\n")
 
 	b.WriteString("## Team Messaging\n")
 	b.WriteString("Team messages arrive as `[Team Message from <name>]: <content>`. Reply with `cm message <sessionId> \"...\"`. `cm roster` lists sessionIds.\n")
@@ -231,4 +249,68 @@ func filterTeammates(selfID string, teammates []*TeamMemberConfig) []*TeamMember
 		}
 	}
 	return result
+}
+
+// kickstartHintsK is how many "What Worked Before" hits we surface
+// at spawn time. 3 keeps the prompt budget bounded; agents can pull
+// more via the PageIndex MCP if they need them.
+const kickstartHintsK = 3
+
+// BuildLibraryHintsSection renders the top-K most-relevant past
+// experiences from the knowledge library as a markdown section to
+// inject into the agent's kickstart. Returns empty string when no
+// hits clear the relevance threshold or the library is empty.
+//
+// Empty is normal on a fresh jarvis install — the library populates
+// organically as tasks complete. Agents always have access to the
+// PageIndex MCP regardless of this section's content.
+func BuildLibraryHintsSection(config *TeamMemberConfig, workingDir string) string {
+	if config == nil {
+		return ""
+	}
+	hits, err := library.Search(library.Query{
+		AgentRole:  config.Role,
+		WorkingDir: workingDir,
+		K:          kickstartHintsK,
+	})
+	if err != nil {
+		slog.Debug("library search at kickstart failed", "err", err, "role", config.Role)
+		return ""
+	}
+	return renderHintsAsMarkdown(hits)
+}
+
+// renderHintsAsMarkdown is the rendering half of
+// BuildLibraryHintsSection — factored out so the next-task injection
+// path can reuse it (Tier 2.1c).
+func renderHintsAsMarkdown(hits []library.Hit) string {
+	if len(hits) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Past tasks the team handled well in this area. Each entry is a real ")
+	b.WriteString("experience captured under `~/.jarvis/office-memory/library/`. Use the ")
+	b.WriteString("`mcp__pageindex__get_page_content` tool to read any of them in full ")
+	b.WriteString("if the summary suggests a relevant approach.\n\n")
+	for i, h := range hits {
+		fmt.Fprintf(&b, "%d. **[outcome %.2f]** %s\n",
+			i+1, h.OutcomeScore, dashIfEmpty(h.TaskTitle))
+		if h.ApproachSummary != "" {
+			b.WriteString("   Approach: ")
+			b.WriteString(h.ApproachSummary)
+			b.WriteString("\n")
+		}
+		if len(h.TaskLabels) > 0 {
+			fmt.Fprintf(&b, "   Labels: %s\n", strings.Join(h.TaskLabels, ", "))
+		}
+		fmt.Fprintf(&b, "   Source: `%s`\n", h.Path)
+	}
+	return b.String()
+}
+
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "(untitled task)"
+	}
+	return s
 }

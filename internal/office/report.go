@@ -67,6 +67,30 @@ func WrapUpReportsDir() string {
 	return filepath.Join(home, ".jarvis", "office-memory", "reports")
 }
 
+// GenerateAndBroadcastWrapUpReport runs GenerateWrapUpReport and
+// emits a single SSE event on success, or logs the failure on
+// error. Used by the wrap-up handler's fire-and-forget goroutine
+// so the result-shape + broadcast logic doesn't have to live
+// inline.
+//
+// broadcast may be nil — tests use that path to verify the report
+// generation works without an SSE broker present.
+//
+// Failures are logged at error level (not returned) because the
+// caller is a goroutine — there's nowhere to return an error to.
+// Operators can always retry via POST /api/office/reports/generate.
+func GenerateAndBroadcastWrapUpReport(m *Manager, trigger, reason string, broadcast SSEBroadcaster) {
+	meta, err := GenerateWrapUpReport(m, trigger, reason)
+	if err != nil {
+		slog.Error("auto-generate wrap-up report failed", "err", err, "trigger", trigger)
+		return
+	}
+	if broadcast != nil {
+		broadcast("office:reportGenerated", meta)
+	}
+	slog.Info("wrap-up report generated", "filename", meta.Filename, "bytes", meta.SizeBytes)
+}
+
 // GenerateWrapUpReport builds a structured Markdown report for the
 // current team state, writes it to disk atomically, prunes old
 // reports to WrapUpReportsMaxKeep, and returns the metadata. Safe to

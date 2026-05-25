@@ -6,8 +6,11 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // CSRFStore manages CSRF tokens with 1-hour TTL and single-use validation.
@@ -20,7 +23,7 @@ type CSRFStore struct {
 // The cleanup goroutine exits when the provided context is cancelled.
 func NewCSRFStore(ctx context.Context) *CSRFStore {
 	s := &CSRFStore{tokens: make(map[string]time.Time)}
-	go s.cleanupLoop(ctx)
+	safego.Go("csrf.cleanupLoop", func() { s.cleanupLoop(ctx) })
 	return s
 }
 
@@ -83,6 +86,16 @@ func CSRF(store *CSRFStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "POST" || r.Method == "PUT" || r.Method == "DELETE" || r.Method == "PATCH" {
+				// CSRF protects cookie-based auth from cross-origin abuse
+				// (the confused-deputy problem). Bearer-token requests
+				// already require the caller to know the secret, so a
+				// malicious page in another origin can't forge them.
+				// The upstream auth middleware has already validated the
+				// bearer; if we see one here we can safely skip CSRF.
+				if hasBearer(r) {
+					next.ServeHTTP(w, r)
+					return
+				}
 				token := r.Header.Get("X-CSRF-Token")
 				if token == "" || !store.Validate(token) {
 					w.Header().Set("Content-Type", "application/json")
@@ -94,4 +107,18 @@ func CSRF(store *CSRFStore) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// hasBearer reports whether the request carries either an
+// Authorization: Bearer header or the legacy X-Jarvis-Agent-Token header.
+// Auth middleware runs before CSRF in the chain, so by the time we get
+// here any present token has already been verified.
+func hasBearer(r *http.Request) bool {
+	if r.Header.Get("X-Jarvis-Agent-Token") != "" {
+		return true
+	}
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return true
+	}
+	return false
 }

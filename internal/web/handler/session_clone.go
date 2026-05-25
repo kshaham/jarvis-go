@@ -10,8 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/ralph"
-	"github.com/claudeman/jarvis-go/internal/runsummary"
 	"github.com/claudeman/jarvis-go/internal/state"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
@@ -83,15 +81,7 @@ func (ctx *Context) CloneSession(w http.ResponseWriter, r *http.Request) {
 
 		// Lifecycle trackers mirror the CreateSession path so clones respawn
 		// + ralph-track the same way as originals.
-		tracker := ralph.NewTracker()
-		ctx.RalphTrackersMu.Lock()
-		ctx.RalphTrackers[session.ID] = tracker
-		ctx.RalphTrackersMu.Unlock()
-
-		runTracker := runsummary.New(session.ID)
-		ctx.RunSummariesMu.Lock()
-		ctx.RunSummaries[session.ID] = runTracker
-		ctx.RunSummariesMu.Unlock()
+		ctx.initSessionTrackers(session.ID)
 
 		rc := ctx.GetOrCreateRespawnController(session.ID)
 		rc.SetSessionWriter(&respawnSessionWriter{session: session})

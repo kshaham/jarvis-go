@@ -2,7 +2,7 @@
 
 > Multi-agent orchestration platform -- manage teams of autonomous Claude Code agents working on real codebases.
 
-![Go 1.25](https://img.shields.io/badge/go-1.25-blue) ![License MIT](https://img.shields.io/badge/license-MIT-green) ![Tests 340+](https://img.shields.io/badge/tests-340%2B-brightgreen) ![Fixes 95+](https://img.shields.io/badge/fixes-95%2B-purple)
+![Go 1.25](https://img.shields.io/badge/go-1.25-blue) ![License MIT](https://img.shields.io/badge/license-MIT-green) ![Tests 600+](https://img.shields.io/badge/tests-600%2B-brightgreen) ![Fixes 95+](https://img.shields.io/badge/fixes-95%2B-purple)
 
 ---
 
@@ -13,7 +13,7 @@ Jarvis Go is a production-grade multi-agent orchestration system implemented in 
 ### Key Capabilities
 
 - **Dual session modes**: Claude Agent SDK (Go) for persistent multi-turn sessions with immediate prompt delivery, plus PTY fallback mode
-- **Virtual office team**: 6 prebuilt templates (31 agent configs) across full-stack, backend/AI, frontend, research, and innovation categories
+- **Virtual office team**: 7 prebuilt templates (43 agent configs) across full-stack, backend/AI, frontend, research, and innovation categories
 - **Autonomous monitoring loop**: 12 functions on a 15-second tick (stuck detection, reflection, curiosity, task triage, water-cooler chat, bug sweeps, blocked-task escalation, more)
 - **Self-improvement engine**: agents reflect on completed tasks, build a per-agent learning store, auto-distill insights at 30 entries, and share skills across the team
 - **Perpetual RALPH loop**: agents never idle -- they find TODOs, write tests, review commits, refactor code, generate their own tasks
@@ -21,7 +21,7 @@ Jarvis Go is a production-grade multi-agent orchestration system implemented in 
 - **Agent memory persistence**: per-project memory files via `cm memory read/write/append` survive restarts and team respawns
 - **CodeGraphContext (CGC) integration**: agents use an MCP-backed code graph to query call chains, dependencies, and patterns instead of reading entire files (cuts context consumption 5-10x)
 - **5-column kanban** for task tracking with dependencies, priorities, leader assignment, and blocked-task triage
-- **44+ MCP tools**: full `office_*` tool suite for agent task/memory/skill/message operations plus 26 session/monitoring/planning tools
+- **48+ MCP tools**: full `office_*` tool suite for agent task/memory/skill/message operations plus session/monitoring/planning tools
 - **Z.AI Coding Plan support**: GLM models via Anthropic-compatible API with rate-limit-aware model allocation across team members (GLM-5.1 Opus, GLM-5 Sonnet, GLM-4.7 per agent)
 - **Telegram bot integration**: remote monitoring, session control, periodic office summaries
 - **Chat & standup transcript persistence**: inter-agent messages and standup transcripts saved to disk, restored on page refresh and server restart
@@ -36,21 +36,27 @@ Jarvis Go is a production-grade multi-agent orchestration system implemented in 
 jarvis-go/
 ├── cmd/
 │   ├── jarvis/             # Main web server binary
-│   ├── jarvis-mcp/         # MCP stdio server (44+ tools)
+│   ├── jarvis-mcp/         # MCP stdio server (48+ tools)
 │   ├── cm/                 # Agent CLI (injected into agent sessions)
-│   └── ptyserver/          # Standalone PTY server
+│   ├── ptyserver/          # Standalone PTY server
+│   └── fakeclaude/         # Test impersonator of `claude` CLI (hooks integration tests)
 │
 └── internal/
     ├── office/             # Virtual office: manager, agents, tasks, learning, recovery,
     │                       #   standup, brainstorm, kickstart, scoring, metrics
     ├── pty/                # Dual-mode sessions: SDK (claude-agent-sdk-go) + PTY fallback,
     │                       #   screen buffering, idle detection, rate-limit allocation
+    ├── claudehooks/        # Claude Code hook dispatcher (envelope, settings, transcript, handlers)
     ├── respawn/            # Automatic session respawn state machine
     ├── ralph/              # RALPH loop tracker and circuit breaker
     ├── subagent/           # Subagent watcher (Claude Code sub-tasks)
     ├── telegram/           # Telegram bot, commands, streaming, queue, webhook
+    ├── teamtemplates/      # Built-in team composition templates + store
     ├── templates/          # Session/team configuration templates
     ├── state/              # Persistent application settings (JSON, atomic write)
+    ├── scheduler/          # Cron-style scheduler (runner, store) for recurring tasks
+    ├── notifications/      # Notification router + channels + store
+    ├── metrics/            # Prometheus metrics exposition
     ├── cases/              # Saved prompt cases
     ├── collections/        # LRU map, stale expiration map
     ├── integrations/       # External integration state
@@ -59,15 +65,15 @@ jarvis-go/
     ├── cleanup/            # Graceful shutdown helpers
     ├── filewatcher/        # File system watcher for hot-reload
     └── web/
-        ├── handler/        # HTTP handlers (session, office, config, monitoring)
-        ├── sse/            # Server-Sent Events broker and client pool
+        ├── handler/        # HTTP handlers (session, office, config, monitoring, scheduler, ...)
+        ├── sse/            # Server-Sent Events broker, batcher, client pool
         ├── middleware/     # Auth, CSRF (with retry), request logging, rate limiting
-        ├── auth/           # Session authentication with cached IsPasswordConfigured
+        ├── auth/           # Session authentication + agent-token verifier
         ├── request/        # Request parsing helpers
         └── static/         # Embedded frontend assets (office.html, office.js, etc.)
 ```
 
-**22 packages**, ~32,500 lines of Go. Dual session architecture: SDK sessions spawn
+**30 packages**, ~50k lines of Go. Dual session architecture: SDK sessions spawn
 a persistent `claude.NewSession()` subprocess that stays alive across all turns
 (kickstart, standup, brainstorm, replenishment), while PTY sessions use traditional
 screen-scraping for fallback compatibility.
@@ -88,23 +94,39 @@ make build
 make build-all
 ```
 
+### Install bundled skills (one-time)
+
+Jarvis ships ~54 curated skills under `./skills/` that the built-in team
+templates reference by name (`office-protocols`, `go-concurrency`,
+`agentic-eval`, etc.). Install them into `~/.claude/skills/` so agents
+can resolve them:
+
+```bash
+./scripts/install-skills.sh              # symlink, skip existing
+./scripts/install-skills.sh --copy       # copy instead of symlink
+./scripts/install-skills.sh --force      # overwrite existing
+./scripts/install-skills.sh --dry-run    # preview only
+```
+
+Skipping this step is non-fatal — agents still run, but skill lookups
+return empty descriptions and prompt quality degrades.
+
 ### Run
 
 ```bash
-./jarvis web                    # Start on port 3000
-./jarvis web --port 3555        # Custom port
+./jarvis web                    # Start on port 3555 (default)
+./jarvis web --port 8080        # Custom port
 ./jarvis web --https            # TLS mode
 ./jarvis version
 ```
 
-Open `http://localhost:3000` in your browser.
+Open `http://localhost:3555` in your browser.
 
 ### Docker Deployment
 
 The recommended production setup uses Docker Compose:
 
 ```bash
-# From the jarvis/ project root (not jarvis-go/)
 docker compose up -d
 ```
 
@@ -146,16 +168,41 @@ to give cloners a working flow.
 |---|---|---|
 | `JARVIS_API_URL` | Server URL (used by `cm` CLI and `jarvis-mcp` inside sessions) | `http://localhost:3555` |
 | `JARVIS_SESSION_ID` | Current session ID (injected per agent) | auto-generated |
-| `ANTHROPIC_AUTH_TOKEN` | Z.AI API key (Coding Plan proxy auth) | — |
-| `ANTHROPIC_BASE_URL` | Anthropic-compatible endpoint URL | `https://api.z.ai/api/anthropic` |
-| `ANTHROPIC_DEFAULT_OPUS_MODEL` | Opus model mapping | `glm-5.1` |
+| `JARVIS_AGENT_TOKEN` | Per-agent auth token; `cm` sends it to authenticate back to the server | auto-generated |
+| `JARVIS_HOOK_SIGNING_KEY` | HMAC key used by `internal/claudehooks` to verify hook webhooks | required when hooks mode is on |
+| `JARVIS_WORKSPACE_PATHS` | Colon-separated list of paths added to the workingDirAllowlist at startup | — |
+| `JARVIS_LOG_LEVEL` | Log verbosity (`debug`, `info`, `warn`, `error`) | `info` |
+| `JARVIS_LOG_FORMAT` | Log encoding (`text`, `json`) | `json` |
+| `ANTHROPIC_AUTH_TOKEN` | Z.AI API key (Coding Plan proxy auth); injected per agent | — |
+| `ANTHROPIC_BASE_URL` | Anthropic-compatible endpoint URL; injected per agent | `https://api.z.ai/api/anthropic` |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | Opus model mapping; injected per agent | `glm-5.1` |
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | Sonnet model mapping (per-agent override by allocator) | `glm-4.7` |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Haiku model mapping | `glm-4.5-air` |
-| `ANTHROPIC_API_KEY` | Direct Anthropic API key (if not using Z.AI) | — |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Haiku model mapping; injected per agent | `glm-4.5-air` |
+| `ANTHROPIC_API_KEY` | Direct Anthropic API key (if not using Z.AI); injected per agent | — |
 | `API_TIMEOUT_MS` | Request timeout for agent API calls | `3000000` |
 | `GEMINI_API_KEY` | Gemini API key (for Nano Banana image generation) | — |
 | `HEADLESS_BROWSER_HOST` | Chrome headless host for agent browser testing | `headless-shell` |
 | `HEADLESS_BROWSER_PORT` | Chrome DevTools port | `9222` |
+| `EXPECT_BROWSER_WS_ENDPOINT` | WebSocket endpoint puppeteer-core connects to (set in `runtime-browser` stage) | `ws://headless-shell:9222` |
+
+The `ANTHROPIC_*` variables are read by Claude Code (the subprocess), not by jarvis itself. Jarvis injects them into each agent session based on the account settings configured in the UI.
+
+### Mobile App
+
+A companion React Native app (Expo) lives at `claudeman/jarvis-mobile/`. It connects to the jarvis HTTP server over LAN or TLS and uses a per-device bearer token instead of the browser's session cookie.
+
+Endpoints (all under `/api/auth/mobile/`):
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/auth/mobile/login` | none (rate-limited per IP, same as `/api/auth/login`) | Body `{"password": "...", "deviceName": "My iPhone"}`. Returns `{"token": "...", "deviceId": "...", "expiresAt": <unix-ms>}` exactly once. |
+| POST | `/api/auth/mobile/logout` | bearer token | Revokes the presented token. |
+| GET | `/api/auth/mobile/tokens` | session cookie OR bearer | Lists registered devices (no tokens, just metadata). |
+| DELETE | `/api/auth/mobile/tokens/{deviceId}` | session cookie OR bearer | Revokes a specific device (e.g. lost phone). Idempotent. |
+
+The mobile bearer is accepted alongside session cookies on every existing `/api/office/*` route, so the mobile app can drive everything the web dashboard can. Bearer-authenticated requests skip CSRF (they're not vulnerable to cross-origin abuse the way cookies are).
+
+Tokens persist to `~/.jarvis/mobile-tokens.json` with `0600` permissions. Only the SHA-256 hash of the raw token is on disk; the raw value is returned to the client exactly once. Default TTL is 90 days; expired tokens are evicted lazily on next validation.
 
 ---
 
@@ -163,7 +210,7 @@ to give cloners a working flow.
 
 ### Team Templates
 
-Jarvis ships with **6 prebuilt team templates** (31 agent configs) accessible via `GET /api/office/templates`:
+Jarvis ships with **7 prebuilt team templates** (43 agent configs) accessible via `GET /api/office/templates`:
 
 | Template | Category | Members | Composition |
 |----------|----------|---------|-------------|
@@ -173,6 +220,7 @@ Jarvis ships with **6 prebuilt team templates** (31 agent configs) accessible vi
 | **Full-Stack Compact** | fullstack | 5 | Captain (Tech Lead), Dash (Frontend), Stack (Backend), Shield (QA/Security), Ops (DevOps) |
 | **Research Lab** | research | 7 | Atlas (Director), Cipher (Researcher), Prism (Analyst), Proto (POC), Slide (Presentation), Muse (Brand), Quill (Writer) |
 | **Innovation Sprint** | research | 6 | Spark (Lead), Scout (Research), Flux (Prototype), Pitch (Storyteller), Brief (Writer), Verify (Validator) |
+| **Core Builders** | fullstack | 6 | Vince (Tech Lead + wiki), Lisa (Research/QA), Allen (Framework Scout/QA), Kyle (Design — liquid-glass aesthetic), Kam (Backend), Henry (Frontend) |
 
 Each team member has:
 - **Role** -- e.g., Frontend Engineer, Backend Engineer, QA Engineer, Tech Lead, DevOps Engineer, Researcher
@@ -238,6 +286,35 @@ Automated standup is triggered on a configurable interval (default: 4 hours) or 
 ### Shutdown
 
 `POST /api/office/shutdown-team` terminates all agent sessions after an optional wrap-up.
+
+### Snapshots & Fork Mode
+
+Team snapshots capture the team's configuration, mission, member list, per-member tasks + queues, whiteboard, perpetual-mode state, pause state, and (when available) each member's `ClaudeSessionID` so restores can rehydrate the AI session via `claude --resume`.
+
+- `POST /api/office/snapshots` — capture the current team to a named snapshot
+- `POST /api/office/snapshots/{name}/restore` — spawn the saved team
+- `POST /api/office/snapshots/{name}/restore?fork=true` — **fork mode**: keep the original team alive, spawn a parallel team that resumes each member's Claude transcript via `claude --fork-session`. Members without a captured session ID start fresh. Useful for branching experiments off a stuck agent. SSE: `office:snapshotRestored` with `forked: true` and `forkCount: N`.
+
+Implementation: `internal/office/snapshot.go`. Restore handler: `internal/web/handler/office.go` `OfficeRestoreSnapshot`.
+
+### Per-session generated files
+
+When jarvis spawns an agent, it lays down a small `.claude/` tree inside the agent's worktree before the Claude subprocess starts. This is how hooks, tools, and per-team policy reach the agent without operator config:
+
+| File | Purpose | Generated by |
+|---|---|---|
+| `.claude/settings.local.json` | Hook event URLs (PreToolUse, Stop, SubagentStart, …), strict MCP config, allowed tool list | `internal/claudehooks/settings.go` |
+| `.claude/commands/*.md` | Office slash commands + 3 ECC commands (`/security-scan`, `/test-coverage`, `/refactor-clean`) | `internal/office/claudefiles.go` + `claudefiles_defaults.go` |
+| `.claude/agents/*.md` | 3 office-native Task-tool agents + 4 ECC agents (`code-architect`, `security-reviewer`, `pr-test-analyzer`, `code-simplifier`) | same |
+| `.claude/output-style.json` | Bottom-of-prompt prefix showing team / role / blocker count | `internal/office/statusline.go` |
+| `.claude/statusline.sh` | Statusline script that `curl`s `/api/office/agent/statusline?sessionId=...` for a one-line live status | same |
+| `.claude/jarvis-system-prompt.md` | Kickstart prompt prefix, prompt-cache-friendly (passed via `--append-system-prompt-file`) | `internal/office/kickstart.go` |
+
+ECC files are skipped when the spawn request carries `disableEcc: true`.
+
+### Ultrareview on completion
+
+Tasks labelled `needs-review` (via `cm label <taskId> needs-review`) trigger an adversarial code review when the agent marks them complete. The review shells out to `claude ultrareview --json` against the agent's diff and posts the findings as an `office:taskReviewed` SSE event. Findings carry severity (`blocker` / `warning` / `nit` / `info`), file, line, and a description; the task detail view renders them as a coloured badge stack. Implementation: `internal/office/ultrareview.go`, hook: `internal/web/handler/office.go` `OfficeAgentTaskComplete`.
 
 ---
 
@@ -455,6 +532,24 @@ The `cm` binary is compiled and injected into every agent session. It communicat
 | `cm memory read` | Read agent memory |
 | `cm memory write <content>` | Write agent memory |
 | `cm memory append <entry>` | Append to agent memory |
+| `cm memory section <name> "<content>"` | Overwrite a named section in agent memory |
+| `cm memory query <keyword>` | Search agent memory across all sections |
+| `cm knowledge <query>` (alias `cm know`) | Search the cross-agent knowledge base |
+| `cm label <taskId> <label>` | Attach a feature label to a task (cost rollups) |
+| `cm handoff <taskId> <toAgent> <reason>` | Hand a task off to another teammate |
+| `cm handoff-accept <handoffId>` | Accept an incoming handoff |
+| `cm handoff-reject <handoffId> <reason>` | Decline an incoming handoff |
+| `cm handoff-cancel <handoffId>` | Cancel a handoff you initiated |
+| `cm ask <toAgent> "<question>" [--timeout <sec>]` | Blocking Q&A — wait for the teammate to answer |
+| `cm answer <questionId> "<answer>"` | Reply to a pending `cm ask` |
+| `cm answered <questionId>` | Mark a question as resolved without an answer |
+| `cm no-recipient <questionId>` | Mark a question as undeliverable (no matching agent) |
+| `cm dev announce <url> --pid <pid>` | Lead announces the shared dev instance URL |
+| `cm dev url [--probe]` | Workers fetch the current dev URL (with optional health probe) |
+| `cm dev clear [--all]` | Clear the dev instance + credentials |
+| `cm dev creds set "<text>" [--name <slot>]` | Share credentials (e.g. `"admin@dev.local / password123"`) |
+| `cm dev creds` | Print stored credentials |
+| `cm onboard` / `cm onboarding <topic>` | Print onboarding doc; `<topic>` defaults to the topic router |
 
 ---
 
@@ -621,6 +716,27 @@ Add to `~/.claude/settings.json` or `claude_desktop_config.json`:
 }
 ```
 
+### Additional MCP servers (auto-attached per team)
+
+Every spawned agent session gets the following MCP servers wired
+automatically. Operators don't need to add them to `~/.claude/settings.json`
+— jarvis injects them into each agent's `.claude/settings.local.json`
+at spawn time.
+
+| Server | Always on? | Gate | What it provides |
+|---|---|---|---|
+| `jarvis` | yes | always | Office orchestration tools (roster, tasks, memory, knowledge, skills, file locks). |
+| `codegraphcontext` | yes | always | Symbol search and codebase navigation. |
+| `codegraph` | optional | `codegraph` binary on PATH AND `disableCodegraph: false` (default) | Full symbol index + call graph + impact analysis. |
+| `context7` | optional | `npx` on PATH (Node 18+) AND `disableEcc: false` (default) | Live library documentation lookup. |
+| `sequential-thinking` | optional | same as context7 | Structured chain-of-thought reasoning for complex tasks. |
+| `shadcn` | optional | same as context7 | UI component discovery (metadata only; doesn't run code generation). |
+
+Hosts without `npx` silently skip the ECC MCPs rather than failing the
+spawn — see `office.NpxAvailable()` for the cached check. To disable
+the entire ECC bundle (commands + agents + these three MCPs) per team,
+pass `disableEcc: true` in the spawn request. See `docs/ECC.md`.
+
 ---
 
 ## Claude Agent SDK (Go) Sessions
@@ -691,6 +807,66 @@ cgc init   # Initialize KuzuDB (first time only)
 
 ---
 
+## ECC Bundle
+
+Jarvis vendors a curated subset of the [ECC](https://github.com/affaan-m/ECC)
+project (MIT, attribution in `THIRD_PARTY_LICENSES.md`) so spawned
+agents have a richer skill + agent + tool surface than the office's
+native set provides:
+
+- **22 skills** at `skills/ecc/<name>/SKILL.md` — `agent-eval`,
+  `agentic-engineering`, `api-design`, `architecture-decision-records`,
+  `backend-patterns`, `browser-qa`, `code-tour`, `codebase-onboarding`,
+  `coding-standards`, `context-budget`, `continuous-learning`,
+  `deep-research`, `deployment-patterns`, `e2e-testing`, `eval-harness`,
+  `frontend-design-direction`, `git-workflow`,
+  `make-interfaces-feel-better`, `mcp-server-patterns`,
+  `security-review`, `tdd-workflow`, `verification-loop`.
+- **4 Task-tool subagents** at `internal/office/ecc_agents/*.md` —
+  `code-architect`, `security-reviewer`, `pr-test-analyzer`,
+  `code-simplifier`. Laid into each worktree's `.claude/agents/` at
+  spawn time.
+- **3 slash commands** at `internal/office/ecc_commands/*.md` —
+  `/security-scan`, `/test-coverage`, `/refactor-clean`. Laid into
+  each worktree's `.claude/commands/`.
+- **3 MCP servers** wired per spawn — `context7`,
+  `sequential-thinking`, `shadcn`. All gated on `npx` (Node 18+) on
+  PATH; missing-Node hosts silently skip these entries.
+
+Per-team opt-out: pass `disableEcc: true` in the spawn request and the
+bundle (agents + commands + MCPs) is excluded. Full inventory and
+refresh workflow: `docs/ECC.md`.
+
+---
+
+## Tool Policy
+
+Every spawned team enforces an operator-controlled allow/deny matrix
+before every tool call, via Claude Code's `PreToolUse` hook. The
+default policy blocks the obvious — `rm -rf /` (excluding `/tmp` and
+`/var`), `sudo`, `curl … | sh`, and writes to `/etc/`, `/usr/`,
+`/System/`, or `~/.ssh/`. Denied calls return a structured
+`permissionDecisionReason` to the agent so it can re-plan rather than
+silently dropping work.
+
+Policies live in `~/.jarvis/tool-policy.json` and are operator-editable
+from the dashboard's Settings page or via the API:
+
+```bash
+# Read current policy
+curl http://127.0.0.1:3555/api/office/tool-policy
+
+# Push a custom policy (CSRF token + auth cookie required)
+curl -X PUT http://127.0.0.1:3555/api/office/tool-policy \
+  -H 'Content-Type: application/json' \
+  -d '{"denyPatterns":[{"tool":"Bash","pattern":"rm\\s+-rf\\s+/"}],"allowOutsideWorktree":false}'
+```
+
+Implementation: `internal/claudehooks/tool_policy.go` (store +
+PreToolUse hook), `internal/web/handler/tool_policy.go` (HTTP).
+
+---
+
 ## Z.AI Coding Plan
 
 Jarvis supports [Z.AI](https://z.ai) as an Anthropic-compatible provider, enabling GLM models via the Coding Plan endpoint.
@@ -754,13 +930,20 @@ The embedded frontend provides a single-page dashboard served from `internal/web
 - **Session cards** with live status indicators (working, idle, stopped), token counts, color labels, and role badges
 - **Agent cards** in the office view showing task queue, tier badge, recovery status, and last-activity timestamp
 - **Progress ring** per session showing completion percentage of the current task queue
+- **Activity strip** — three rolling-window widgets (cost-7d, throughput-24h, agent-health) above the team-overview row, with inline SVG sparklines
+- **Per-agent cost-per-turn sparkline** in the detail panel, sourced from `/api/office/agent/{sessionId}/usage-series`
+- **React beta dashboard** at `/office-v2` — opt-in, built from `internal/web/spa/` (Vite + TypeScript + Tailwind + Tanstack Query). Run `npm install && npm run build` inside the SPA directory to ship it; without the build, `/office-v2` serves a styled placeholder page
 
-### Command Palette (Cmd+K)
+### Command Palette (⌘K) — global
 
-Press `Cmd+K` (or `Ctrl+K`) from anywhere to open the command palette. Supports fuzzy search over:
-- Session actions (spawn, rename, delete, send input)
-- Office actions (standup, brainstorm, wrap-up, spawn team)
-- Settings and navigation
+Press `⌘K` (or `Ctrl+K`) from anywhere on `/office` to open the global command palette. Renders as an overlay with fuzzy search + keyboard navigation (`↑↓` move, `↵` run, `esc` close). Default actions:
+
+- Navigate: open Office dashboard, open Terminal sessions
+- Team: spawn team, pause team, resume team
+- Surfaces: open snapshots, open handoffs, open whiteboard, view tool policy
+- Search: search messages + tasks
+
+Pages may register additional actions via `window.CommandPalette.register({id, label, group, hint?, run})`. Implementation at `internal/web/static/public/js/command-palette.js`. The terminal page (`/`) keeps its own session-switcher palette unchanged.
 
 ### Status Filters
 
@@ -811,6 +994,10 @@ All state changes are pushed via Server-Sent Events on `GET /api/sse`. The broke
 | `office:settingsUpdated` | Office settings changed |
 | `office:wrapUpStarted` | Wrap-up sequence initiated |
 | `office:shutdown` | Office shutdown |
+| `office:taskReviewed` | Ultrareview findings posted for a completed task |
+| `office:snapshotRestored` | Snapshot restored (includes `forked: true` when fork mode used) |
+| `office:remoteSessionCreated` | Operator spawned a claude.ai web session via `/api/office/spawn-remote` |
+| `office:claudeSessionStopped` | Operator stopped a Claude session via `/api/office/claude-sessions/{sid}/stop` |
 | `respawn:stateChanged` | Respawn controller state transition |
 | `ralph:updated` | RALPH tracker event |
 | `runsummary:updated` | Run summary parsed |
@@ -951,6 +1138,24 @@ All endpoints are prefixed with `/api`. Mutating endpoints (POST/PUT/DELETE) req
 | `GET` | `/api/office/memory/{sessionId}` | Agent persistent memory |
 | `POST` | `/api/office/brainstorm` | Trigger brainstorm session |
 
+#### Snapshots, search, and integrations
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/office/snapshots` | List saved team snapshots |
+| `POST` | `/api/office/snapshots` | Create a snapshot of the current team |
+| `POST` | `/api/office/snapshots/{name}/restore` | Restore a snapshot. Add `?fork=true` for fork mode (keeps the original team running, spawns a parallel team resuming each member's Claude session via `--fork-session`) |
+| `DELETE` | `/api/office/snapshots/{name}` | Delete a snapshot |
+| `GET` | `/api/office/agent/{sessionId}/usage-series` | Recent per-turn cost series + averages (powers the detail-panel sparkline) |
+| `POST` | `/api/office/search` | Text search across messages + tasks (`{query, types?, limit?}`); returns scored hits with kind, snippet, agent name, timestamp |
+| `GET` | `/api/office/tool-policy` | Current tool-policy deny matrix (operator-readable) |
+| `PUT` | `/api/office/tool-policy` | Replace the tool-policy matrix; takes effect on the next PreToolUse hook fire |
+| `GET` | `/api/office/pr/{number}` | Team + sessions linked to a GitHub PR number |
+| `POST` | `/api/office/spawn-remote` | Spawn a claude.ai web session via `claude --remote`. Returns `{url, sessionId}` |
+| `GET` | `/api/office/claude-sessions/{sid}/logs` | Tail Claude logs for a session (text/plain) |
+| `POST` | `/api/office/claude-sessions/{sid}/stop` | Stop a Claude session (`claude stop <sid>`) |
+| `GET` | `/api/office/claude-sessions/{sid}/attach-command` | Return argv for `claude attach` so operators can re-enter a session from a terminal |
+
 ### Agent Callback Endpoints (auth-exempt, called by `cm` CLI and `jarvis-mcp`)
 
 These endpoints are placed outside the auth middleware group so in-session agents can reach them using only their injected `JARVIS_SESSION_ID`. They are not exposed in the authenticated UI routes.
@@ -1023,7 +1228,7 @@ make test-race
 make bench
 ```
 
-**340+ tests** across 22 packages. Key test coverage areas:
+**600+ tests** across 30 packages. Key test coverage areas:
 
 | Package | Coverage Focus |
 |---|---|

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 const (
@@ -43,7 +45,10 @@ func NewClient(w http.ResponseWriter, f http.Flusher, ctx context.Context, subs 
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	go c.writePump()
+	// safego: one writePump per SSE client; if a panic in the write
+	// loop tears down the daemon, every other client + the office
+	// itself goes with it.
+	safego.Go("sse.writePump", c.writePump)
 
 	return c
 }

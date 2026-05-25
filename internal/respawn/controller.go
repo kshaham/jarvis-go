@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // Controller manages the respawn state machine for a single session.
@@ -69,12 +71,15 @@ func (rc *Controller) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Start stuck detection
+	// Start stuck detection. safego wraps in panic recovery — a
+	// panic inside stuckDetector (e.g., nil-deref on a torn-down
+	// session) would otherwise crash the entire jarvis daemon
+	// since this goroutine lives for the whole session lifetime.
 	rc.wg.Add(1)
-	go func() {
+	safego.Go("respawn.stuckDetector", func() {
 		defer rc.wg.Done()
 		rc.stuckDetector(childCtx)
-	}()
+	})
 
 	return nil
 }

@@ -142,6 +142,11 @@ class OfficeApp {
     // last-seen standup timestamp (mirrored from SSE + settings refresh so the
     // overview widget can show "Last standup" without an extra fetch).
     this._sessionTasksCompleted = 0;
+    // P13.4 · ring buffer of completion / blocker timestamps for the
+    // activity-strip's throughput-24h widget. Capped so a long-running
+    // session can't grow unbounded.
+    this._taskCompletionTimestamps = [];
+    this._taskBlockedTimestamps = [];
     this._completedTaskIds = new Set();
     this._lastStandupAt = 0;
     // Round 10 state
@@ -731,6 +736,39 @@ class OfficeApp {
       if (data) this.handleWhiteboardUpdate(data);
     });
 
+    // R37 · Claude Code hooks telemetry. Hooks-mode agents emit these
+    // when their underlying claude session compacts context or surfaces
+    // a notification (permission request, etc). Surfaced on the activity
+    // feed so operators see deterministic markers instead of guessing
+    // from output bytes; per-agent visual cues live on the next render
+    // pass via the existing renderAgentCards path.
+    this.eventSource.addEventListener('office:claudeSessionStarted', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      this.addActivityEntry('system',
+        `claude session started (${this._agentNameFromSession(data.sessionId) || data.sessionId.slice(0, 8)}${data.model ? ' · ' + data.model : ''})`);
+    });
+
+    this.eventSource.addEventListener('office:claudeNotification', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = this._agentNameFromSession(data.sessionId) || data.sessionId.slice(0, 8);
+      const msg = (data.message || '').slice(0, 120);
+      this.addActivityEntry('system', `🔔 ${who}: ${msg || 'Claude notification'}`);
+      // Highlight the agent's card briefly so the operator can spot
+      // who needs attention. Re-uses the existing card-flash pattern.
+      this._flashAgentCard(data.sessionId);
+    });
+
+    this.eventSource.addEventListener('office:claudeCompact', (e) => {
+      const data = this.safeParseSSE(e);
+      if (!data) return;
+      const who = this._agentNameFromSession(data.sessionId) || data.sessionId.slice(0, 8);
+      const phase = data.event === 'PreCompact' ? 'starting context compact' : 'finished context compact';
+      this.addActivityEntry('system',
+        `${who}: ${phase}${data.trigger ? ' (' + data.trigger + ')' : ''}`);
+    });
+
     this.eventSource.addEventListener('office:waterCoolerChat', (e) => {
       const data = this.safeParseSSE(e);
       if (data) {
@@ -1220,911 +1258,6 @@ class OfficeApp {
     }
   }
 
-  // ========== Rendering ==========
-
-  render() {
-    this.renderAgentCards();
-    this.updateSpawnButton();
-    this.renderKanbanBoard();
-    this.renderMessages();
-    this.renderStandup();
-    this.updateStatusBar();
-  }
-
-  updateSpawnButton() {
-    const btn = document.getElementById('btnSpawnTeam');
-    if (btn) {
-      // Keep clickable even when a team is active -- clicking opens the modal
-      // in view-mode so the operator can still inspect templates + the
-      // current team's configuration without wrapping up first.
-      btn.disabled = false;
-      btn.textContent = this.state.teamSpawned ? 'Team Config' : 'Spawn Team';
-      btn.title = this.state.teamSpawned
-        ? 'View templates and current team configuration'
-        : 'Spawn a new team';
-    }
-  }
-
-  /**
-   * Renders all agent cards in the grid.
-   * Replaces the old renderDesk() / renderFloor() pattern.
-   */
-  renderAgentCards() {
-    const grid = document.getElementById('agentGrid');
-    if (!grid) return;
-
-    const empty = document.getElementById('agentEmpty');
-
-    // Remove skeleton cards if present
-    for (const sk of grid.querySelectorAll('.skeleton-card')) {
-      sk.remove();
-    }
-
-    if (this.state.members.length === 0 && !this.state.teamSpawned) {
-      if (empty) empty.style.display = '';
-      for (const card of grid.querySelectorAll('.agent-card')) {
-        card.remove();
-      }
-      return;
-    }
-
-    // Show skeletons while team is spawned but members haven't arrived yet
-    if (this.state.teamSpawned && this.state.members.length === 0) {
-      if (empty) empty.style.display = 'none';
-      for (const card of grid.querySelectorAll('.agent-card')) {
-        card.remove();
-      }
-      for (let i = 0; i < 3; i++) {
-        const sk = document.createElement('div');
-        sk.className = 'skeleton-card skeleton';
-        grid.appendChild(sk);
-      }
-      return;
-    }
-
-    if (empty) empty.style.display = 'none';
-
-    // Apply filter
-    const filter = this._agentFilter || 'all';
-    let visibleMembers = filter === 'all'
-      ? this.state.members.slice()
-      : this.state.members.filter(m => m.status === filter);
-
-    // F3 · pinned agents float to the top. Stable sort: pinned first,
-    // preserving the existing order within each group.
-    visibleMembers = visibleMembers
-      .map((m, i) => ({ m, i, pinned: this.isPinned(m) }))
-      .sort((a, b) => (b.pinned - a.pinned) || (a.i - b.i))
-      .map(({ m }) => m);
-
-    const existingCards = new Map();
-    for (const card of grid.querySelectorAll('.agent-card')) {
-      const sid = card.dataset.sessionId;
-      if (sid) existingCards.set(sid, card);
-    }
-
-    const visibleIds = new Set(visibleMembers.map(m => m.sessionId));
-
-    // Remove cards that are not visible (filtered out or stale)
-    for (const [sid, card] of existingCards) {
-      if (!visibleIds.has(sid)) {
-        card.remove();
-        existingCards.delete(sid);
-      }
-    }
-
-    // Render/update. To reflect pinning order changes, re-append every
-    // card in the new order — moving an existing node is cheap and keeps
-    // pinned agents at the top.
-    for (const member of visibleMembers) {
-      let card = existingCards.get(member.sessionId);
-      if (card) {
-        this.updateAgentCard(card, member);
-      } else {
-        card = this.createAgentCard(member);
-      }
-      card.classList.toggle('is-pinned', this.isPinned(member));
-      grid.appendChild(card);
-    }
-
-    // If filter results in no cards but members exist, show a hint
-    if (visibleMembers.length === 0 && this.state.members.length > 0) {
-      if (empty) {
-        empty.style.display = '';
-        const hint = empty.querySelector('.agent-empty-hint');
-        if (hint) hint.textContent = `No agents with status "${filter}".`;
-      }
-    } else {
-      if (empty) {
-        const hint = empty.querySelector('.agent-empty-hint');
-        if (hint) hint.textContent = 'Click "Spawn Team" to create an AI team.';
-      }
-    }
-
-    this.updateNavBadges();
-  }
-
-  createAgentCard(member) {
-    const card = document.createElement('div');
-    // .border-beam is always present so the ::before pseudo is ready;
-    // .border-beam--active is added only while the agent is working
-    // so the rotating conic-gradient only spins on active tiles.
-    card.className = `agent-card border-beam status-${member.status}${member.status === 'working' ? ' border-beam--active' : ''}${this.isPinned(member) ? ' is-pinned' : ''}`;
-    card.dataset.sessionId = member.sessionId;
-    if (member.configId) card.dataset.configId = member.configId;
-    card.tabIndex = 0;
-    card.setAttribute('role', 'button');
-    card.setAttribute('aria-label', `${member.name} - ${member.role} (${member.status})`);
-    card.onclick = () => this.showDetail(member.sessionId);
-    card.onkeydown = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        this.showDetail(member.sessionId);
-      }
-    };
-    this.fillAgentCard(card, member);
-    this._injectStarButton(card, member);
-    return card;
-  }
-
-  // F3 · inject a star-toggle button into an agent card. Idempotent:
-  // safely skips if the card already has one (e.g. on updateAgentCard
-  // paths that re-run fillAgentCard).
-  _injectStarButton(card, member) {
-    if (card.querySelector(':scope > .agent-star-btn')) return;
-    const btn = document.createElement('button');
-    btn.className = 'agent-star-btn';
-    btn.setAttribute('aria-label', this.isPinned(member) ? 'Unpin agent' : 'Pin agent');
-    btn.setAttribute('title', 'Pin to top');
-    btn.innerHTML = '<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      this.togglePin(member);
-      btn.classList.remove('pop');
-      // Force reflow so class re-add restarts animation.
-      void btn.offsetWidth;
-      btn.classList.add('pop');
-    };
-    card.appendChild(btn);
-  }
-
-  // F3 · pin helpers.
-  _pinKey(member) {
-    // Prefer configId (survives respawn); fall back to sessionId.
-    return (member && (member.configId || member.sessionId)) || '';
-  }
-
-  isPinned(member) {
-    const key = this._pinKey(member);
-    return !!key && this._pinnedAgents.has(key);
-  }
-
-  togglePin(member) {
-    const key = this._pinKey(member);
-    if (!key) return;
-    if (this._pinnedAgents.has(key)) {
-      this._pinnedAgents.delete(key);
-    } else {
-      this._pinnedAgents.add(key);
-    }
-    this._savePinnedAgents();
-    // Re-render the grid so sort order + is-pinned class refresh.
-    this.renderAgentCards();
-  }
-
-  _loadPinnedAgents() {
-    try {
-      const raw = localStorage.getItem('office_pinned_agents');
-      if (!raw) return new Set();
-      const arr = JSON.parse(raw);
-      return new Set(Array.isArray(arr) ? arr : []);
-    } catch {
-      return new Set();
-    }
-  }
-
-  _savePinnedAgents() {
-    try {
-      localStorage.setItem('office_pinned_agents', JSON.stringify([...this._pinnedAgents]));
-    } catch { /* quota */ }
-  }
-
-  // F3 · map a Claude tool name to a sprite icon reference. Unknown
-  // tools fall back to a generic "activity" icon. The referenced
-  // symbols live in the inline sprite at the top of office.html.
-  _toolIconRef(name) {
-    const lower = String(name || '').toLowerCase();
-    if (lower.startsWith('bash')) return 'icon-tool-bash';
-    if (lower.startsWith('read')) return 'icon-tool-read';
-    if (lower.startsWith('edit') || lower.startsWith('write') || lower.startsWith('multiedit')) return 'icon-tool-edit';
-    if (lower.startsWith('grep') || lower.startsWith('glob')) return 'icon-tool-search';
-    if (lower.startsWith('webfetch') || lower.startsWith('websearch')) return 'icon-tool-web';
-    if (lower.startsWith('task') || lower.startsWith('agent')) return 'icon-tool-agent';
-    return 'icon-tool-generic';
-  }
-
-  // Human-friendly cost formatter. Cents for sub-dollar values so the
-  // card doesn't advertise "$0.0341" clutter; K/M abbreviation above
-  // $1000 / $1M so ambitious teams don't blow the layout.
-  _formatCost(n) {
-    const v = Number(n) || 0;
-    if (v < 0.005)        return '0c';
-    if (v < 1)            return Math.round(v * 100) + 'c';
-    if (v < 1000)         return '$' + v.toFixed(2);
-    if (v < 1_000_000)    return '$' + (v / 1000).toFixed(1) + 'K';
-    return '$' + (v / 1_000_000).toFixed(1) + 'M';
-  }
-
-  fillAgentCard(card, member) {
-    // Defensive defaults -- prevent "undefined" rendering
-    if (!member.name) member.name = member.configId || 'Agent';
-    if (!member.role) member.role = '';
-    if (!member.status) member.status = 'idle';
-    if (!member.avatarColor) member.avatarColor = member.color || 'blue';
-
-    // F4 · compact view branch — emits a dense row with only the most
-    // scannable data (status dot + name + role + tasks + cost). The
-    // rich card markup below is skipped entirely so re-renders stay
-    // cheap when a 12+ agent team is in compact mode.
-    if (this._viewMode === 'compact') {
-      const queue = (this.taskQueues || []).find(q => q.sessionId === member.sessionId);
-      const tasks = queue ? queue.tasks || [] : [];
-      const completed = tasks.filter(t => t.status === 'completed' || t.status === 'failed').length;
-      const total = tasks.length;
-      const cost = this._formatCost(Number(member.totalCost) || 0);
-      card.innerHTML = `
-        <span class="agent-compact-dot" data-status="${this.escapeAttr(member.status)}" title="${this.escapeAttr(member.status)}"></span>
-        <span class="agent-compact-name">${this.escapeHtml(member.name)}</span>
-        <span class="agent-compact-role">${this.escapeHtml(member.role)}</span>
-        <span></span>
-        <span class="agent-compact-tasks">${completed}/${total}</span>
-        <span class="agent-compact-cost">${cost}</span>
-        <span></span>
-      `;
-      return;
-    }
-
-    const queue = (this.taskQueues || []).find(q => q.sessionId === member.sessionId);
-    const tasks = queue ? queue.tasks || [] : [];
-    const total = tasks.length;
-    const completed = tasks.filter(t => t.status === 'completed' || t.status === 'failed').length;
-    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-    const currentTask = tasks.find(t => t.status === 'in_progress') || tasks.find(t => t.status === 'pending');
-    const rawCost = Number(member.totalCost) || 0;
-    const costFmt = this._formatCost(rawCost);
-    // Magnitude-based tier so high-burn agents pop visually:
-    //   <= $0.05 faint | <= $1 normal | <= $5 warn | >$5 alert
-    let costTier = 'cost-normal';
-    if (rawCost > 5)      costTier = 'cost-alert';
-    else if (rawCost > 1) costTier = 'cost-warn';
-    else if (rawCost <= 0.05) costTier = 'cost-faint';
-    const costStr = `<span class="${costTier}" title="$${rawCost.toFixed(4)}">${costFmt}</span>`;
-
-    const badgeClass = `badge-${member.status}`;
-    const statusLabel = member.status.charAt(0).toUpperCase() + member.status.slice(1);
-    // Map each status to a sprite icon reference. Unknown statuses fall
-    // back to the idle moon (better than a missing graphic).
-    const iconByStatus = {
-      working:    { href: 'icon-working',    extra: 'status-icon--pulse' },
-      idle:       { href: 'icon-idle',       extra: '' },
-      stuck:      { href: 'icon-stuck',      extra: '' },
-      meeting:    { href: 'icon-meeting',    extra: '' },
-      brainstorm: { href: 'icon-brainstorm', extra: 'status-icon--pulse' },
-    };
-    const iconMeta = iconByStatus[member.status] || iconByStatus.idle;
-    const statusIconHtml = `<svg class="status-icon ${iconMeta.extra}" aria-hidden="true"><use href="#${iconMeta.href}"/></svg>`;
-    const taskHtml = currentTask
-      ? `<div class="agent-card-task">${this.escapeHtml((currentTask.title || '').slice(0, 60))}</div>`
-      : '';
-
-    const progressHtml = total > 0 ? `
-      <div class="agent-card-progress">
-        <div class="agent-progress-label">
-          <span>${completed}/${total} tasks</span>
-          <span>${pct}%</span>
-        </div>
-        <div class="agent-progress-bar">
-          <div class="agent-progress-fill" style="width:${pct}%"></div>
-        </div>
-      </div>
-    ` : '';
-
-    // Avatar: SVG icon (by configId/role) or fallback to initials
-    const avatarColors = {
-      blue: '#1d4ed8', purple: '#7e22ce', pink: '#9d174d',
-      green: '#166534', orange: '#9a3412', yellow: '#854d0e', red: '#991b1b',
-    };
-    const avatarBg = avatarColors[member.avatarColor] || '#27272a';
-    const iconSvg = this.getAgentIcon(member);
-    const avatarContent = member.avatarInitial || (member.name ? member.name[0] : '?');
-    const avatarHtml = iconSvg
-      ? `<div class="agent-avatar agent-avatar-icon" style="background:${avatarBg}">${iconSvg}</div>`
-      : `<div class="agent-avatar" style="background:${avatarBg}">${this.escapeHtml(avatarContent)}</div>`;
-
-    const lastActiveStr = member.lastActivityAt ? this.timeAgo(member.lastActivityAt) : '';
-    const lastActiveHtml = lastActiveStr
-      ? `<span class="agent-card-last-active" title="Last active">${this.escapeHtml(lastActiveStr)}</span>`
-      : '';
-
-    // R18 · Turn-count badge. Shows after 50 turns (~mid-session), goes
-    // red at 80+ so operators can spot long-runners before the 100-turn
-    // cap stops them. Tooltip exposes exact count + cap flag.
-    const turnCount = (member.usage && typeof member.usage.turnCount === 'number') ? member.usage.turnCount : 0;
-    const turnCapped = !!(member.usage && member.usage.turnCapReached);
-    let turnBadgeHtml = '';
-    if (turnCount >= 50 || turnCapped) {
-      const cls = turnCapped ? 'turn-badge turn-capped' : turnCount >= 80 ? 'turn-badge turn-hot' : 'turn-badge';
-      turnBadgeHtml = `<span class="${cls}" title="${turnCount} turns${turnCapped ? ' — turn cap reached' : ''}">${turnCount}t</span>`;
-    }
-
-    // R19 · Event-drop pill. Non-zero means the SDK session's outbound
-    // channel overflowed; dashboard data for this agent may be stale.
-    // Small grey pill so it doesn't scream, but the tooltip makes the
-    // implication explicit.
-    const eventsDropped = (member.usage && typeof member.usage.eventsDropped === 'number') ? member.usage.eventsDropped : 0;
-    const dropBadgeHtml = eventsDropped > 0
-      ? `<span class="drop-badge" title="${eventsDropped} SSE event${eventsDropped === 1 ? '' : 's'} dropped — dashboard data may be stale">⚠ ${eventsDropped}ev</span>`
-      : '';
-
-    // R20 · Loop advisory badge. Advisory-only — the backend never
-    // auto-stops. Orange so it reads as "check this" without the red
-    // alarm of a hard failure. Clears on the next turn boundary.
-    const inLoop = !!(member.usage && member.usage.inLoop);
-    const loopBadgeHtml = inLoop
-      ? `<span class="loop-badge" title="Output-repeat advisory — agent may be looping on the same emission">⟳ loop?</span>`
-      : '';
-
-    // R21 · Tool-level loop advisory badge. Red because (toolName,
-    // resultHash) duplication is almost always a real loop —
-    // agent re-ran the same tool with the same args/output 3+ times.
-    // Shows the looping tool name ("⟲ Bash") so operators can jump
-    // straight to inspecting that command chain.
-    const toolInLoop = !!(member.usage && member.usage.toolInLoop);
-    const loopingTool = (member.usage && member.usage.loopingTool) || 'tool';
-    const toolLoopBadgeHtml = toolInLoop
-      ? `<span class="tool-loop-badge" title="Tool-loop advisory — ${this.escapeAttr(loopingTool)} produced identical output 3+ times">⟲ ${this.escapeHtml(loopingTool)}</span>`
-      : '';
-
-    // Feature 5: Unread message badge
-    const unreadCount = (this.state.recentMessages || []).filter(
-      m => (m.toSessionId === member.sessionId) && m.id && !this._readMessages.has(m.id)
-    ).length;
-    const unreadBadgeHtml = unreadCount > 0
-      ? `<span class="unread-badge" title="${unreadCount} unread message${unreadCount > 1 ? 's' : ''}">${unreadCount}</span>`
-      : '';
-
-    // Feature 6: Active tool / thinking indicator
-    let activeToolHtml = '';
-    if (member.status === 'working') {
-      const activeTool = member.activeTool || (member.activeTools && member.activeTools[0]);
-      if (activeTool) {
-        // F3 · crafted tool row: uppercase tool name + optional
-        // monospace argument preview, truncated with full value in
-        // the title tooltip. Pairs with the border-beam on working
-        // tiles so the card reads "beam + currently running Bash
-        // on <cmd>" at a glance.
-        const toolStr = String(activeTool);
-        const colonIdx = toolStr.indexOf(':');
-        const toolName = colonIdx > 0 ? toolStr.slice(0, colonIdx) : toolStr;
-        const toolArg = colonIdx > 0 ? toolStr.slice(colonIdx + 1).trim() : '';
-        const iconRef = this._toolIconRef(toolName);
-        const argPreview = toolArg ? toolArg.slice(0, 40) + (toolArg.length > 40 ? '…' : '') : '';
-        activeToolHtml = `<div class="agent-card-tool-now" title="${this.escapeAttr(toolStr)}">
-          <svg class="tool-icon" aria-hidden="true"><use href="#${iconRef}"/></svg>
-          <span class="tool-name">${this.escapeHtml(toolName)}</span>
-          ${argPreview ? `<span class="tool-arg">${this.escapeHtml(argPreview)}</span>` : ''}
-        </div>`;
-      } else {
-        activeToolHtml = `<div class="agent-thinking"><span class="thinking-dots"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></span><span>Thinking...</span></div>`;
-      }
-    }
-
-    // Feature 8: Autonomy badge
-    const autonomyLevel = this._autonomyLevels.get(member.sessionId) || 'full';
-    const autonomyLabels = { full: 'Full Auto', cautious: 'Cautious', manual: 'Manual' };
-    const autonomyBadgeHtml = `<span class="autonomy-badge autonomy-${autonomyLevel}">${this.escapeHtml(autonomyLabels[autonomyLevel] || 'Full Auto')}</span>`;
-
-    const learningCount = member.learningCount || 0;
-    const skillCount = member.skillCount || 0;
-    const learningsBadgeHtml = learningCount > 0
-      ? `<div class="agent-learnings">🧠 ${learningCount}${skillCount > 0 ? ` · ${skillCount} skills` : ''}</div>`
-      : '';
-
-    // Score badge from server-computed AgentScore
-    const score = member.score || {};
-    const scoreGrade = score.grade || '';
-    const scoreOverall = typeof score.overallScore === 'number' ? Math.round(score.overallScore * 100) : null;
-    const scoreBadgeHtml = scoreGrade
-      ? `<span class="score-badge grade-${scoreGrade}" title="Score: ${scoreOverall !== null ? scoreOverall + '%' : '?'}">${scoreGrade}</span>`
-      : '';
-
-    // Recent activities: last 5 tasks (most recent first) -- SVG icons
-    const recentTasks = tasks.slice().sort((a, b) => {
-      const aTime = a.completedAt || a.assignedAt || '';
-      const bTime = b.completedAt || b.assignedAt || '';
-      return bTime > aTime ? 1 : bTime < aTime ? -1 : 0;
-    }).slice(0, 5);
-
-    const actIcons = {
-      completed: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
-      in_progress: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
-      failed: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-      blocked: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
-    };
-
-    const recentActivityHtml = recentTasks.length > 0 ? `
-      <div class="agent-card-activities">
-        ${recentTasks.map(t => {
-          const icon = actIcons[t.status] || '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>';
-          const cls = t.status === 'completed' ? 'act-done' : t.status === 'in_progress' ? 'act-wip' : t.status === 'failed' ? 'act-fail' : 'act-pending';
-          return `<div class="agent-activity-item ${cls}"><span class="act-icon">${icon}</span><span class="act-text">${this.escapeHtml((t.title || '').slice(0, 45))}</span></div>`;
-        }).join('')}
-      </div>
-    ` : '';
-
-    // Quick action buttons (visible on hover). R18 adds Inject (nudge an
-    // agent with operator text) and Kill (surgical stop) alongside the
-    // existing Details / Prompt / Terminal trio.
-    const quickActionsHtml = `
-      <div class="agent-card-actions">
-        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.openMemberModal('${member.sessionId}')" title="Details">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </button>
-        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.quickPrompt('${member.sessionId}')" title="Send prompt">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
-        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.injectPrompt('${member.sessionId}')" title="Inject operator prompt">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-        </button>
-        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.navigateToSessionDirect('${member.sessionId}')" title="Terminal">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-        </button>
-        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.bumpAgentWorkdir('${member.sessionId}')" title="Change working directory">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 3h10v9H3z"/></svg>
-        </button>
-        <button class="agent-quick-btn" onclick="event.stopPropagation(); office.restartAgent('${member.sessionId}')" title="Restart agent in place (keep memory + tasks)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 18 5.3L23 10"/></svg>
-        </button>
-        <button class="agent-quick-btn agent-quick-btn--danger" onclick="event.stopPropagation(); office.killAgent('${member.sessionId}')" title="Kill agent">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-        </button>
-      </div>
-    `;
-
-    card.innerHTML = `
-      ${unreadBadgeHtml}
-      ${quickActionsHtml}
-      <div class="agent-card-header">
-        ${avatarHtml}
-        <div class="agent-card-meta">
-          <div class="agent-card-name-row">
-            <span class="agent-card-name">${this.escapeHtml(member.name)}</span>
-            ${scoreBadgeHtml}
-          </div>
-          <div class="agent-card-role">${this.escapeHtml(member.role)}</div>
-        </div>
-        <span class="agent-status-badge ${badgeClass}">
-          ${statusIconHtml}
-          <span class="status-dot"></span>
-          ${statusLabel}
-        </span>
-      </div>
-      ${taskHtml}
-      ${progressHtml}
-      ${activeToolHtml ? `<div class="agent-card-tool-wrap">${activeToolHtml}</div>` : ''}
-      ${recentActivityHtml}
-      <div class="agent-card-footer">
-        <span class="agent-card-workdir" title="${this.escapeAttr(member.workingDir || '')}">${this.escapeHtml((member.workingDir || '').replace(/^.*[/\\]/, ''))}</span>
-        <span class="agent-card-cost">${lastActiveHtml}${toolLoopBadgeHtml}${loopBadgeHtml}${dropBadgeHtml}${turnBadgeHtml}${costStr}</span>
-      </div>
-      <div class="agent-card-badges">${autonomyBadgeHtml}${learningsBadgeHtml}</div>
-      ${this._renderCardSparkline(member)}
-    `;
-  }
-
-  _renderCardSparkline(member) {
-    const recent = member && member.usage && Array.isArray(member.usage.recentTurnCosts)
-      ? member.usage.recentTurnCosts : [];
-    if (recent.length < 2) return '';
-    const svg = this._renderSparkline(recent, 60, 14);
-    if (!svg) return '';
-    return `<div class="agent-card-spark" title="Recent turn costs">${svg}</div>`;
-  }
-
-  updateAgentCard(card, member) {
-    // Update CSS status class; include no-anim to suppress fadeSlideIn on re-render.
-    // Preserve .border-beam so the pseudo-element stays ready, toggle
-    // .border-beam--active based on whether the agent is working.
-    // Round 10 · preserve .is-pinned across re-renders.
-    const pinned = this.isPinned(member);
-    card.className = `agent-card border-beam status-${member.status} no-anim${member.status === 'working' ? ' border-beam--active' : ''}${pinned ? ' is-pinned' : ''}`;
-    card.setAttribute('aria-label', `${member.name} - ${member.role} (${member.status})`);
-    // Re-fill content to reflect new state
-    this.fillAgentCard(card, member);
-    // fillAgentCard overwrites innerHTML, so re-inject the star button.
-    this._injectStarButton(card, member);
-  }
-
-  // ========== Detail Panel ==========
-
-  showDetail(sessionId) {
-    this.detailSessionId = sessionId;
-    const panel = document.getElementById('detailPanel');
-    if (panel) panel.classList.add('open');
-    this.renderDetailPanel(sessionId);
-  }
-
-  closeDetail() {
-    this.detailSessionId = null;
-    const panel = document.getElementById('detailPanel');
-    if (panel) panel.classList.remove('open');
-  }
-
-  renderDetailPanel(sessionId) {
-    const container = document.getElementById('detailPanelContent');
-    if (!container) return;
-
-    const member = this.state.members.find(m => m.sessionId === sessionId);
-    if (!member) {
-      container.innerHTML = '<div style="color:#52525b;font-size:12px;padding:16px">Member not found</div>';
-      return;
-    }
-
-    const queue = (this.taskQueues || []).find(q => q.sessionId === sessionId);
-    const tasks = queue ? queue.tasks || [] : [];
-
-    // Tasks HTML
-    const taskItems = tasks.slice(0, 10).map(t => `
-      <div class="detail-task-item">
-        <span class="detail-task-status ${t.status}"></span>
-        <span>${this.escapeHtml((t.title || '').slice(0, 50))}</span>
-      </div>
-    `).join('');
-
-    // Recent messages HTML
-    const agentMessages = (this.state.recentMessages || [])
-      .filter(m => m.fromSessionId === sessionId || m.toSessionId === sessionId)
-      .slice(-5)
-      .reverse();
-
-    const msgItems = agentMessages.map(msg => {
-      const direction = msg.fromSessionId === sessionId
-        ? `To ${this.escapeHtml(msg.toName)}`
-        : `From ${this.escapeHtml(msg.fromName)}`;
-      const ago = this.formatTimeAgo(msg.timestamp);
-      return `<div class="detail-message-item">
-        <div class="detail-message-meta">${direction} (${ago})</div>
-        ${this.escapeHtml((msg.content || '').slice(0, 120))}
-      </div>`;
-    }).join('');
-
-    const costStr = (member.totalCost || 0) >= 1
-      ? '$' + (member.totalCost || 0).toFixed(2)
-      : (((member.totalCost || 0) * 100).toFixed(0)) + 'c';
-
-    const lastActive = member.lastActivityAt
-      ? `Last active: ${this.formatTimeAgo(member.lastActivityAt)}`
-      : '';
-
-    const detailScore = member.score || {};
-    const detailGrade = detailScore.grade || '';
-    const detailGradeColor = { A: '#22c55e', B: '#4ade80', C: '#eab308', D: '#f97316', F: '#ef4444' }[detailGrade] || '#52525b';
-    const detailScoreHtml = detailGrade ? `
-      <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="score-badge grade-${detailGrade}" style="font-size:11px;padding:2px 8px">${detailGrade}</span>
-        <span style="font-size:11px;color:${detailGradeColor}">${Math.round((detailScore.overallScore || 0) * 100)}% overall</span>
-        <span style="font-size:11px;color:#52525b">Completion: ${Math.round((detailScore.completionRate || 0) * 100)}%</span>
-        <span style="font-size:11px;color:#52525b">Collab: ${Math.round((detailScore.collaborationScore || 0) * 100)}%</span>
-      </div>` : '';
-
-    container.innerHTML = `
-      <div class="detail-agent-header">
-        <div class="agent-avatar ${this.getAgentIcon(member) ? 'agent-avatar-icon' : ''} avatar-${member.avatarColor}" style="width:44px;height:44px;font-size:16px;border-radius:10px">${this.getAgentIcon(member) || this.escapeHtml(member.avatarEmoji || member.avatarInitial)}</div>
-        <div>
-          <div class="detail-agent-name">${this.escapeHtml(member.name)}</div>
-          <div class="detail-agent-role">${this.escapeHtml(member.role)}</div>
-        </div>
-      </div>
-      <div class="detail-section">
-        <div class="detail-section-title">Status</div>
-        <span class="agent-status-badge badge-${member.status}">
-          <span class="status-dot"></span>
-          ${member.status}
-        </span>
-        ${lastActive ? `<div style="font-size:11px;color:#52525b;margin-top:4px">${lastActive}</div>` : ''}
-        ${member.workingDir ? `<div style="font-size:11px;color:#52525b;font-family:monospace;word-break:break-all">${this.escapeHtml(member.workingDir)}</div>` : ''}
-        <div style="font-size:11px;color:#52525b;margin-top:2px">Cost: ${costStr}</div>
-        ${detailScoreHtml}
-      </div>
-      ${tasks.length > 0 ? `
-      <div class="detail-section">
-        <div class="detail-section-title">Tasks (${tasks.length})</div>
-        <div class="detail-task-list">${taskItems}</div>
-      </div>` : ''}
-      ${agentMessages.length > 0 ? `
-      <div class="detail-section">
-        <div class="detail-section-title">Recent Messages</div>
-        <div class="detail-message-list">${msgItems}</div>
-      </div>` : ''}
-      <div class="detail-section">
-        <div class="detail-section-title">Whiteboard</div>
-        <textarea class="agent-detail-whiteboard-area" id="detailWhiteboardText" placeholder="Freeform notes about what this agent is working on...">Loading...</textarea>
-        <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
-          <button class="panel-btn" onclick="office.saveWhiteboard('${this.escapeAttr(sessionId)}')">Save</button>
-          <span id="detailWhiteboardMeta" style="font-size:11px;color:#52525b"></span>
-        </div>
-      </div>
-      <div class="detail-section">
-        <div class="agent-detail-subtabs" role="tablist">
-          <button class="agent-detail-subtab active" data-subtab="activity" onclick="office.switchDetailSubtab('${this.escapeAttr(sessionId)}','activity')">Activity</button>
-          <button class="agent-detail-subtab" data-subtab="learnings" onclick="office.switchDetailSubtab('${this.escapeAttr(sessionId)}','learnings')">Learnings</button>
-          <button class="agent-detail-subtab" data-subtab="cost" onclick="office.switchDetailSubtab('${this.escapeAttr(sessionId)}','cost')">Cost &amp; Tokens</button>
-        </div>
-        <div class="agent-detail-subpanel" id="detailSubpanel">Loading...</div>
-      </div>
-      <div class="detail-section">
-        <div class="detail-section-title">Terminal</div>
-        <pre class="detail-terminal">Loading...</pre>
-      </div>
-      <div class="detail-section">
-        <div class="detail-section-title">Session Analysis</div>
-        <div class="analysis-timeline">
-          <div class="analysis-event-empty">Loading...</div>
-        </div>
-      </div>
-      <div class="detail-section">
-        <button class="panel-btn" style="width:100%" onclick="office.openMemberModal('${this.escapeAttr(sessionId)}')">Open Full Details</button>
-        <button class="panel-btn panel-btn-primary" style="width:100%;margin-top:6px" onclick="office.navigateToSessionById('${this.escapeAttr(sessionId)}')">Open Session</button>
-        <button class="review-btn" style="width:100%;margin-top:6px" onclick="office.showReview('${this.escapeAttr(sessionId)}')">Review Code Changes</button>
-      </div>
-    `;
-
-    // Load whiteboard + default sub-tab in parallel with terminal.
-    this._loadWhiteboard(sessionId);
-    this.switchDetailSubtab(sessionId, 'activity');
-
-    // Feature 1: fetch terminal buffer with short-lived cache, then build session analysis timeline
-    const detailContent = document.getElementById('detailPanelContent');
-    this._fetchTerminalPreview(sessionId)
-      .then(data => {
-        const termEl = detailContent ? detailContent.querySelector('.detail-terminal') : null;
-        if (termEl && data && data.terminalBuffer) {
-          const lines = data.terminalBuffer.split('\n').slice(-30).join('\n');
-          termEl.textContent = lines;
-
-          // Feature 4: build session analysis timeline from terminal output
-          const analysisEl = detailContent ? detailContent.querySelector('.analysis-timeline') : null;
-          if (analysisEl) {
-            const events = this.parseSessionEvents(data.terminalBuffer);
-            if (events.length > 0) {
-              analysisEl.innerHTML = events.map(ev =>
-                `<div class="analysis-event">
-                  <span class="event-icon">${this.escapeHtml(ev.icon)}</span>
-                  <span class="event-text">${this.escapeHtml(ev.text)}</span>
-                </div>`
-              ).join('');
-            } else {
-              analysisEl.innerHTML = '<div class="analysis-event-empty">No events detected.</div>';
-            }
-          }
-        } else if (termEl) {
-          termEl.textContent = '(no terminal output)';
-        }
-      }).catch(() => {
-        const termEl = detailContent ? detailContent.querySelector('.detail-terminal') : null;
-        if (termEl) termEl.textContent = '(terminal unavailable)';
-      });
-  }
-
-  /** Fetch terminal preview with a short-lived 5-second cache to avoid redundant requests. */
-  async _fetchTerminalPreview(sessionId) {
-    const cached = this._detailCache.get(sessionId);
-    if (cached && Date.now() - cached.time < this._detailCacheTimeout) {
-      return cached.data;
-    }
-    const res = await fetch(`/api/sessions/${sessionId}/terminal?tail=4096`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    this._detailCache.set(sessionId, { data, time: Date.now() });
-    return data;
-  }
-
-  /**
-   * Parse terminal output lines and extract key session events.
-   * Returns an array of { icon, text } objects (max 15 events).
-   */
-  parseSessionEvents(terminalBuffer) {
-    const lines = terminalBuffer.split('\n');
-    const events = [];
-
-    for (const line of lines) {
-      if (events.length >= 15) break;
-      const stripped = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
-      if (!stripped) continue;
-
-      if (/Bash\s*\(/.test(stripped)) {
-        const match = stripped.match(/Bash\s*\(\s*["']?([^"')]+)/);
-        const cmd = match ? match[1].slice(0, 50) : stripped.slice(0, 50);
-        events.push({ icon: '$', text: cmd });
-      } else if (/\bWrite\s*\(/.test(stripped)) {
-        const match = stripped.match(/Write\s*\(\s*["']?([^"',)]+)/);
-        const path = match ? match[1].slice(0, 50) : 'file';
-        events.push({ icon: 'W', text: path });
-      } else if (/\bEdit\s*\(/.test(stripped)) {
-        const match = stripped.match(/Edit\s*\(\s*["']?([^"',)]+)/);
-        const path = match ? match[1].slice(0, 50) : 'file';
-        events.push({ icon: 'E', text: path });
-      } else if (/\bRead\s*\(/.test(stripped)) {
-        const match = stripped.match(/Read\s*\(\s*["']?([^"',)]+)/);
-        const path = match ? match[1].slice(0, 50) : 'file';
-        events.push({ icon: 'R', text: path });
-      } else if (/[✓✔]/.test(stripped) || /\bpassed\b/i.test(stripped)) {
-        events.push({ icon: '+', text: stripped.slice(0, 60) });
-      } else if (/[✗✘]/.test(stripped) || /\bfailed\b/i.test(stripped)) {
-        events.push({ icon: '!', text: stripped.slice(0, 60) });
-      }
-    }
-
-    return events;
-  }
-
-  // ========== Agent detail modal: whiteboard + sub-tabs ==========
-
-  async _loadWhiteboard(sessionId) {
-    const area = document.getElementById('detailWhiteboardText');
-    const meta = document.getElementById('detailWhiteboardMeta');
-    if (!area) return;
-    try {
-      const res = await fetch('/api/office/whiteboard');
-      if (!res.ok) { area.value = ''; return; }
-      const data = await res.json();
-      const notes = (data && (data.notes || data.data || data)) || {};
-      const note = notes[sessionId];
-      if (note) {
-        area.value = note.content || '';
-        if (meta && note.updatedAt) {
-          meta.textContent = 'Updated ' + this.formatTimeAgo(new Date(note.updatedAt).getTime());
-        }
-      } else {
-        area.value = '';
-        if (meta) meta.textContent = '';
-      }
-    } catch (err) {
-      area.value = '';
-    }
-  }
-
-  async saveWhiteboard(sessionId) {
-    const area = document.getElementById('detailWhiteboardText');
-    if (!area) return;
-    try {
-      await this.postJson('/api/office/whiteboard', {
-        sessionId,
-        text: area.value || '',
-      });
-      const meta = document.getElementById('detailWhiteboardMeta');
-      if (meta) meta.textContent = 'Saved just now';
-    } catch (err) {
-      console.error('Failed to save whiteboard:', err);
-    }
-  }
-
-  switchDetailSubtab(sessionId, subtab) {
-    document.querySelectorAll('.agent-detail-subtab').forEach(b => {
-      b.classList.toggle('active', b.getAttribute('data-subtab') === subtab);
-    });
-    const panel = document.getElementById('detailSubpanel');
-    if (!panel) return;
-    panel.innerHTML = '<div style="color:#52525b;font-size:12px">Loading...</div>';
-    if (subtab === 'activity') this._renderDetailActivity(sessionId, panel);
-    else if (subtab === 'learnings') this._renderDetailLearnings(sessionId, panel);
-    else if (subtab === 'cost') this._renderDetailCost(sessionId, panel);
-  }
-
-  async _renderDetailActivity(sessionId, panel) {
-    try {
-      const res = await fetch(`/api/office/timeline?agent=${encodeURIComponent(sessionId)}&limit=10`);
-      if (!res.ok) { panel.innerHTML = '<div style="color:#52525b;font-size:12px">No recent activity.</div>'; return; }
-      const data = await res.json();
-      const entries = data.entries || [];
-      if (entries.length === 0) {
-        panel.innerHTML = '<div style="color:#52525b;font-size:12px">No recent activity.</div>';
-        return;
-      }
-      panel.innerHTML = entries.map(e => `
-        <div class="timeline-entry">
-          <div class="timeline-entry-dot kind-${this._escapeAttr(e.kind)}"></div>
-          <div class="timeline-entry-body">
-            <div class="timeline-entry-title">${this._escapeHtml(e.title || '')}</div>
-            ${e.summary ? `<div class="timeline-entry-summary">${this._escapeHtml(e.summary)}</div>` : ''}
-            <div class="timeline-entry-time">${this.formatTimeAgo(new Date(e.timestamp).getTime())}</div>
-          </div>
-        </div>
-      `).join('');
-    } catch (err) {
-      panel.innerHTML = '<div style="color:#52525b;font-size:12px">Failed to load activity.</div>';
-    }
-  }
-
-  async _renderDetailLearnings(sessionId, panel) {
-    const member = this.state.members.find(m => m.sessionId === sessionId);
-    const configId = member && member.configId;
-    if (!configId) {
-      panel.innerHTML = '<div style="color:#52525b;font-size:12px">No agent profile associated.</div>';
-      return;
-    }
-    try {
-      const res = await fetch(`/api/office/learnings/${encodeURIComponent(configId)}`);
-      if (!res.ok) { panel.innerHTML = '<div style="color:#52525b;font-size:12px">No learnings available.</div>'; return; }
-      const data = await res.json();
-      const items = data.learnings || data.entries || [];
-      if (items.length === 0) {
-        panel.innerHTML = '<div style="color:#52525b;font-size:12px">No learnings yet.</div>';
-        return;
-      }
-      panel.innerHTML = items.slice(0, 30).map(l => `
-        <div class="agent-detail-learning-item">
-          <div class="agent-detail-learning-head">
-            <span class="agent-detail-learning-cat">${this._escapeHtml(l.category || 'general')}</span>
-            <span class="agent-detail-learning-time">${l.learnedAt ? this.formatTimeAgo(new Date(l.learnedAt).getTime()) : ''}</span>
-          </div>
-          <div class="agent-detail-learning-body">${this._escapeHtml(l.content || l.text || '')}</div>
-        </div>
-      `).join('');
-    } catch (err) {
-      panel.innerHTML = '<div style="color:#52525b;font-size:12px">Failed to load learnings.</div>';
-    }
-  }
-
-  _renderDetailCost(sessionId, panel) {
-    const member = this.state.members.find(m => m.sessionId === sessionId);
-    if (!member) { panel.innerHTML = '<div style="color:#52525b;font-size:12px">No member data.</div>'; return; }
-    const u = member.usage || {};
-    const total = u.totalCostUSD || member.totalCost || 0;
-    const input = u.totalInputTokens || 0;
-    const output = u.totalOutputTokens || 0;
-    const turns = u.turnCount || 0;
-    const recent = Array.isArray(u.recentTurnCosts) ? u.recentTurnCosts : [];
-    const spark = recent.length > 1 ? this._renderSparkline(recent, 180, 36) : '';
-    panel.innerHTML = `
-      <div class="agent-detail-cost-grid">
-        <div class="agent-detail-cost-cell">
-          <div class="agent-detail-cost-label">Total spend</div>
-          <div class="agent-detail-cost-value">$${total.toFixed(4)}</div>
-        </div>
-        <div class="agent-detail-cost-cell">
-          <div class="agent-detail-cost-label">Turns</div>
-          <div class="agent-detail-cost-value">${turns}</div>
-        </div>
-        <div class="agent-detail-cost-cell">
-          <div class="agent-detail-cost-label">Input tokens</div>
-          <div class="agent-detail-cost-value">${input.toLocaleString()}</div>
-        </div>
-        <div class="agent-detail-cost-cell">
-          <div class="agent-detail-cost-label">Output tokens</div>
-          <div class="agent-detail-cost-value">${output.toLocaleString()}</div>
-        </div>
-      </div>
-      ${spark ? `<div style="margin-top:8px"><div style="font-size:11px;color:#52525b;margin-bottom:4px">Recent turn costs</div>${spark}</div>` : ''}
-    `;
-  }
-
-  _renderSparkline(values, width, height) {
-    if (!values || values.length < 2) return '';
-    const max = Math.max(...values, 0.0001);
-    const min = Math.min(...values, 0);
-    const range = max - min || 1;
-    const stepX = width / (values.length - 1);
-    const points = values.map((v, i) => {
-      const x = (i * stepX).toFixed(1);
-      const y = (height - ((v - min) / range) * (height - 2) - 1).toFixed(1);
-      return `${x},${y}`;
-    }).join(' ');
-    return `<svg class="agent-detail-spark-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-      <polyline points="${points}" fill="none" stroke="#60a5fa" stroke-width="1.5" />
-    </svg>`;
-  }
-
   // ========== Tab Navigation ==========
 
   switchTab(tab) {
@@ -2136,7 +1269,7 @@ class OfficeApp {
     });
 
     // Show/hide panels
-    const panels = ['agents', 'tasks', 'standup', 'messages', 'metrics', 'activity', 'reports', 'settings', 'timeline', 'insights', 'meetings', 'network'];
+    const panels = ['agents', 'tasks', 'standup', 'messages', 'metrics', 'activity', 'reports', 'settings', 'timeline', 'insights', 'meetings', 'network', 'knowledge'];
     for (const panel of panels) {
       const el = document.getElementById(`panel-${panel}`);
       if (el) {
@@ -2162,6 +1295,7 @@ class OfficeApp {
     if (tab === 'insights') this.renderInsights();
     if (tab === 'meetings') this.renderMeetings();
     if (tab === 'network') this.renderAgentNetwork();
+    if (tab === 'knowledge') this.renderKnowledge();
   }
 
   // Refresh the timeline when it's the active tab. Throttled so a bursty
@@ -2366,10 +1500,6 @@ class OfficeApp {
         <div class="insight-card-title">Team spend today</div>
         <div class="insight-big-number">$${totalCost.toFixed(4)}</div>
         <div style="font-size:11px;color:#71717a">${totalTurns} turns across ${roster.length} agents</div>
-        <div class="insight-budget-bar" id="insightBudgetBar" data-tier="ok">
-          <div class="insight-budget-bar-track"><div class="insight-budget-bar-fill"></div></div>
-          <div class="insight-budget-bar-label t-meta"></div>
-        </div>
       </div>
       <div class="insight-card">
         <div class="insight-card-title">Cost per agent</div>
@@ -2704,199 +1834,6 @@ class OfficeApp {
       }
     });
     if (countEl) countEl.textContent = shown === 0 ? `No matches for "${q}"` : `${shown} match${shown === 1 ? '' : 'es'}`;
-  }
-
-  // ========== Task detail modal ==========
-
-  async openTaskDetail(sessionId, taskId) {
-    const modal = document.getElementById('taskDetailModal');
-    const body = document.getElementById('taskModalBody');
-    const title = document.getElementById('taskModalTitle');
-    if (!modal || !body) return;
-    modal.classList.remove('hidden');
-    body.innerHTML = '<div class="task-modal-loading">Loading…</div>';
-    if (title) title.textContent = 'Task';
-    try {
-      const res = await fetch('/api/office/task-queues/' + encodeURIComponent(sessionId));
-      const data = await res.json();
-      const tasks = (data && Array.isArray(data.tasks)) ? data.tasks : [];
-      const t = tasks.find(x => x.id === taskId);
-      if (!t) {
-        body.innerHTML = '<div class="task-modal-loading">Task not found.</div>';
-        return;
-      }
-      if (title) title.textContent = t.title || 'Task';
-      const member = this._findMemberBySession(sessionId);
-      const agentLine = member
-        ? `<div class="task-modal-field"><strong>Agent:</strong> <a href="#" onclick="office.showDetail('${this._escapeAttr(sessionId)}');office.closeTaskDetail();return false;">${this._escapeHtml(member.name || sessionId)}</a></div>`
-        : '';
-      const ts = this._taskTimestamps(t);
-      const blocker = (t.status === 'blocked' && t.blockerDescription)
-        ? `<div class="task-modal-field"><strong>Blocker:</strong> ${this._escapeHtml(t.blockerDescription)}</div>`
-        : '';
-      const progress = Array.isArray(t.progressLog) && t.progressLog.length > 0
-        ? `<div class="task-modal-progress">
-             <strong style="color:#e4e4e7">Progress log</strong>
-             ${t.progressLog.slice().reverse().map(p => `
-               <div class="task-modal-progress-item">
-                 <div class="task-modal-progress-ts">${this._escapeHtml(this._formatRelativeTime(new Date(p.timestamp)))}</div>
-                 <div class="task-modal-progress-note">${this._escapeHtml(p.note || '')}</div>
-               </div>`).join('')}
-           </div>`
-        : '';
-      body.innerHTML = `
-        <div class="task-modal-field"><strong>Status:</strong> ${this._escapeHtml(t.status)}</div>
-        <div class="task-modal-field"><strong>Priority:</strong> ${this._escapeHtml(t.priority || 'normal')}</div>
-        ${agentLine}
-        ${ts}
-        ${blocker}
-        <div class="task-modal-field" style="margin-top:10px;color:#a1a1aa">${this._escapeHtml(t.description || '')}</div>
-        <div class="task-modal-labels" id="taskModalLabels">${this._renderTaskLabelsEditor(sessionId, taskId, t.labels || [])}</div>
-        <div id="taskModalScreenshots" class="task-modal-screenshots"></div>
-        ${progress}
-      `;
-      // R34 · If agents uploaded a screenshot via `cm task complete
-      // --screenshot`, render thumbnails so operators see real
-      // evidence instead of just a text citation. Fire-and-forget --
-      // failure just hides the section.
-      this._loadTaskScreenshots(taskId);
-    } catch (err) {
-      body.innerHTML = '<div class="task-modal-loading">Failed to load task.</div>';
-    }
-  }
-
-  // R34 · Fetch the task-screenshots directory index via a grep-able
-  // per-task list. There's no dedicated listing endpoint today, so
-  // we piggyback on the SSE payload and keep an in-memory index.
-  // For the happy path, the task detail modal also accepts a direct
-  // filename list from the progress log if we've observed it there.
-  async _loadTaskScreenshots(taskId) {
-    const el = document.getElementById('taskModalScreenshots');
-    if (!el) return;
-    // Prefer the in-memory index populated by the SSE listener; fall
-    // back to empty. Operators refresh the modal by reopening it.
-    const index = this._taskScreenshotIndex || {};
-    const filenames = index[taskId] || [];
-    if (!filenames.length) {
-      el.innerHTML = '';
-      return;
-    }
-    el.innerHTML = `
-      <div class="task-modal-screenshots-header">
-        <strong>Visual verification</strong>
-        <span class="task-modal-screenshots-hint">${filenames.length} screenshot${filenames.length === 1 ? '' : 's'}</span>
-      </div>
-      <div class="task-modal-screenshot-grid">
-        ${filenames.map(fn => `
-          <a class="task-modal-screenshot-link" href="/api/office/task-screenshots/${encodeURIComponent(fn)}" target="_blank" rel="noopener">
-            <img class="task-modal-screenshot-thumb" src="/api/office/task-screenshots/${encodeURIComponent(fn)}" alt="${this._escapeAttr(fn)}" loading="lazy" />
-          </a>
-        `).join('')}
-      </div>`;
-  }
-
-  closeTaskDetail() {
-    const modal = document.getElementById('taskDetailModal');
-    if (modal) modal.classList.add('hidden');
-  }
-
-  // ========== R36 · Labels editor on task detail modal ==========
-
-  _renderTaskLabelsEditor(sessionId, taskId, labels) {
-    const sid = this._escapeAttr(sessionId);
-    const tid = this._escapeAttr(taskId);
-    const pills = (labels || []).map(l => `
-      <span class="task-label-pill">
-        ${this._escapeHtml(l)}
-        <button class="task-label-pill-x" onclick="office._removeTaskLabel('${sid}','${tid}','${this._escapeAttr(l)}')" title="Remove label">×</button>
-      </span>`).join('');
-    return `
-      <div class="task-modal-field"><strong>Labels:</strong></div>
-      <div class="task-label-row" id="taskLabelRow-${tid}">${pills}</div>
-      <div class="task-label-addrow">
-        <input type="text" class="task-label-input" id="taskLabelInput-${tid}"
-               placeholder="add label (lowercase, - allowed)"
-               onkeydown="if(event.key==='Enter'){office._addTaskLabelFromInput('${sid}','${tid}');event.preventDefault();}">
-        <button class="btn btn-sm" onclick="office._addTaskLabelFromInput('${sid}','${tid}')">Add</button>
-      </div>`;
-  }
-
-  async _addTaskLabelFromInput(sessionId, taskId) {
-    const input = document.getElementById('taskLabelInput-' + taskId);
-    if (!input) return;
-    const val = (input.value || '').trim();
-    if (!val) return;
-    try {
-      const resp = await this.postJson('/api/office/agent/task/labels', {
-        sessionId, taskId, add: [val],
-      });
-      input.value = '';
-      if (resp && Array.isArray(resp.labels)) {
-        this._refreshTaskLabelRow(sessionId, taskId, resp.labels);
-      }
-    } catch (err) {
-      this.showToast('Failed to add label: ' + (err.message || err), 'error');
-    }
-  }
-
-  async _removeTaskLabel(sessionId, taskId, label) {
-    try {
-      const resp = await this.postJson('/api/office/agent/task/labels', {
-        sessionId, taskId, remove: [label],
-      });
-      if (resp && Array.isArray(resp.labels)) {
-        this._refreshTaskLabelRow(sessionId, taskId, resp.labels);
-      }
-    } catch (err) {
-      this.showToast('Failed to remove label: ' + (err.message || err), 'error');
-    }
-  }
-
-  _refreshTaskLabelRow(sessionId, taskId, labels) {
-    const row = document.getElementById('taskLabelRow-' + taskId);
-    if (!row) return;
-    const sid = this._escapeAttr(sessionId);
-    const tid = this._escapeAttr(taskId);
-    row.innerHTML = (labels || []).map(l => `
-      <span class="task-label-pill">
-        ${this._escapeHtml(l)}
-        <button class="task-label-pill-x" onclick="office._removeTaskLabel('${sid}','${tid}','${this._escapeAttr(l)}')" title="Remove label">×</button>
-      </span>`).join('');
-  }
-
-  _taskTimestamps(t) {
-    const rows = [];
-    if (t.assignedAt) rows.push(['Assigned', t.assignedAt]);
-    if (t.startedAt && !t.startedAt.startsWith('0001')) rows.push(['Started', t.startedAt]);
-    if (t.completedAt && !t.completedAt.startsWith('0001')) rows.push(['Completed', t.completedAt]);
-    return rows.map(([label, ts]) => `<div class="task-modal-field"><strong>${label}:</strong> ${this._escapeHtml(this._formatRelativeTime(new Date(ts)))}</div>`).join('');
-  }
-
-  _findMemberBySession(sessionId) {
-    const roster = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
-    return roster.find(m => m.sessionId === sessionId);
-  }
-
-  _escapeHtml(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-  _escapeAttr(s) { return this._escapeHtml(s).replace(/'/g, '&#39;'); }
-
-  _formatRelativeTime(date) {
-    if (!(date instanceof Date) || isNaN(date.getTime())) return '';
-    const diff = Date.now() - date.getTime();
-    const s = Math.floor(diff / 1000);
-    if (s < 60) return s + 's ago';
-    const m = Math.floor(s / 60);
-    if (m < 60) return m + 'm ago';
-    const h = Math.floor(m / 60);
-    if (h < 24) return h + 'h ago';
-    const d = Math.floor(h / 24);
-    return d + 'd ago';
   }
 
   // ========== Standup ==========
@@ -3252,214 +2189,6 @@ class OfficeApp {
       headerBtn.textContent = active ? 'End Standup' : 'Standup';
       headerBtn.onclick = active ? () => this.stopStandup() : () => this.startStandup();
     }
-  }
-
-  // ========== Member Modal ==========
-
-  async openMemberModal(sessionId) {
-    if (this.modalAbortController) this.modalAbortController.abort();
-    this.modalAbortController = new AbortController();
-    const signal = this.modalAbortController.signal;
-
-    this.selectedMemberId = sessionId;
-    const member = this.state.members.find(m => m.sessionId === sessionId);
-    if (!member) return;
-
-    const modal = document.getElementById('memberModal');
-    const avatar = document.getElementById('modalAvatar');
-    const name = document.getElementById('modalName');
-    const role = document.getElementById('modalRole');
-    const status = document.getElementById('modalStatus');
-    const workdir = document.getElementById('modalWorkDir');
-    const memoryContent = document.getElementById('modalMemoryContent');
-
-    const modalIcon = this.getAgentIcon(member);
-    avatar.className = `modal-avatar ${modalIcon ? 'agent-avatar-icon' : ''} avatar-${member.avatarColor}`;
-    if (modalIcon) {
-      avatar.innerHTML = modalIcon;
-    } else {
-      avatar.textContent = member.avatarInitial;
-    }
-    name.textContent = member.name;
-    role.textContent = member.role;
-    status.innerHTML = `<span class="member-card-status ${member.status}">${member.status}</span>`;
-    workdir.textContent = member.workingDir || 'N/A';
-    memoryContent.textContent = 'Loading...';
-
-    const taskSection = document.getElementById('modalCurrentTask');
-    const taskTitle = document.getElementById('modalTaskTitle');
-    const taskProgressFill = document.getElementById('modalTaskProgressFill');
-    const taskProgressLabel = document.getElementById('modalTaskProgressLabel');
-
-    const queue = (this.taskQueues || []).find(q => q.sessionId === sessionId);
-    if (queue && queue.tasks && queue.tasks.length > 0) {
-      const currentTask = queue.tasks.find(t => t.status === 'in_progress') || queue.tasks.find(t => t.status === 'pending');
-      if (currentTask) {
-        taskTitle.textContent = currentTask.title;
-        const total = queue.tasks.length;
-        const completed = queue.tasks.filter(t => t.status === 'completed' || t.status === 'failed').length;
-        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-        taskProgressFill.style.width = `${pct}%`;
-        taskProgressLabel.textContent = `${completed}/${total} tasks (${pct}%)`;
-        taskSection.classList.remove('hidden');
-      } else {
-        taskSection.classList.add('hidden');
-      }
-    } else {
-      taskSection.classList.add('hidden');
-    }
-
-    const lastActivityEl = document.getElementById('modalLastActivity');
-    if (member.lastActivityAt) {
-      lastActivityEl.textContent = `Last active: ${this.formatTimeAgo(member.lastActivityAt)}`;
-    } else {
-      lastActivityEl.textContent = '';
-    }
-
-    const agentMsgList = document.getElementById('modalAgentMessagesList');
-    const agentMessages = (this.state.recentMessages || []).filter(
-      m => m.fromSessionId === sessionId || m.toSessionId === sessionId
-    ).slice(-5).reverse();
-
-    if (agentMessages.length > 0) {
-      agentMsgList.innerHTML = agentMessages.map(msg => {
-        const direction = msg.fromSessionId === sessionId ? `To ${this.escapeHtml(msg.toName)}` : `From ${this.escapeHtml(msg.fromName)}`;
-        const ago = this.formatTimeAgo(msg.timestamp);
-        return `<div class="modal-agent-message-entry">
-          <div class="modal-agent-message-header">${direction} (${ago})</div>
-          ${this.escapeHtml((msg.content || '').slice(0, 200))}
-        </div>`;
-      }).join('');
-      document.getElementById('modalAgentMessages').classList.remove('hidden');
-    } else {
-      agentMsgList.innerHTML = '<div class="modal-agent-message-entry">No recent messages.</div>';
-    }
-
-    const promptInput = document.getElementById('modalPromptInput');
-    if (promptInput) promptInput.value = '';
-
-    const personalityInput = document.getElementById('modalPersonalityInput');
-    const systemPromptInput = document.getElementById('modalSystemPromptInput');
-    if (personalityInput) personalityInput.value = '';
-    if (systemPromptInput) systemPromptInput.value = '';
-
-    // Feature 8: Populate autonomy dropdown
-    const autonomySelect = document.getElementById('modalAutonomySelect');
-    if (autonomySelect) {
-      autonomySelect.value = this._autonomyLevels.get(sessionId) || 'full';
-    }
-
-    modal.classList.remove('hidden');
-
-    try {
-      const persRes = await fetch(`/api/office/member/${sessionId}/personality`, { signal });
-      if (this.selectedMemberId !== sessionId) return;
-      const persData = await persRes.json();
-      if (persData.success) {
-        if (personalityInput) personalityInput.value = persData.personality || '';
-        if (systemPromptInput) systemPromptInput.value = persData.systemPrompt || '';
-      }
-    } catch {
-      // Non-critical
-    }
-
-    try {
-      const res = await fetch(`/api/office/memory/${sessionId}`, { signal });
-      if (this.selectedMemberId !== sessionId) return;
-      const data = await res.json();
-      if (data && data.shortTerm) {
-        const entries = data.shortTerm.slice(-10).reverse();
-        if (entries.length > 0) {
-          memoryContent.textContent = entries.map(e => {
-            const ago = Math.round((Date.now() - e.timestamp) / 60000);
-            return `[${e.category}] ${e.summary} (${ago}m ago)`;
-          }).join('\n');
-        } else {
-          memoryContent.textContent = 'No recent activity recorded.';
-        }
-      } else {
-        memoryContent.textContent = 'No memory data available.';
-      }
-    } catch {
-      memoryContent.textContent = 'Failed to load memory.';
-    }
-  }
-
-  async sendPromptToMember() {
-    if (!this.selectedMemberId) return;
-    const input = document.getElementById('modalPromptInput');
-    if (!input) return;
-    const prompt = input.value.trim();
-    if (!prompt) return;
-
-    try {
-      const data = await this.postJson(`/api/sessions/${this.selectedMemberId}/input`, { input: prompt });
-      if (data && !data.error) {
-        input.value = '';
-        this.showNotification(`Prompt sent to ${this.state.members.find(m => m.sessionId === this.selectedMemberId)?.name || 'agent'}`, 'success');
-      } else {
-        this.showNotification('Failed to send prompt', 'error');
-      }
-    } catch {
-      this.showNotification('Failed to send prompt', 'error');
-    }
-  }
-
-  async saveAgentPersonality() {
-    if (!this.selectedMemberId) return;
-    const personality = (document.getElementById('modalPersonalityInput')?.value || '').trim();
-    const systemPrompt = (document.getElementById('modalSystemPromptInput')?.value || '').trim();
-
-    try {
-      const data = await this.putJson(`/api/office/member/${this.selectedMemberId}/personality`, {
-        personality,
-        systemPrompt,
-      });
-      if (data.success) {
-        this.showNotification('Personality updated and applied', 'success');
-        this.addActivityEntry('system', 'Agent personality updated');
-      } else {
-        this.showNotification(data.error || 'Failed to update personality', 'error');
-      }
-    } catch {
-      this.showNotification('Failed to update personality', 'error');
-    }
-  }
-
-  async resetAgentPersonality() {
-    if (!this.selectedMemberId) return;
-
-    try {
-      const data = await this.putJson(`/api/office/member/${this.selectedMemberId}/personality`, {
-        personality: '',
-        systemPrompt: '',
-      });
-      if (data.success) {
-        const persRes = await fetch(`/api/office/member/${this.selectedMemberId}/personality`);
-        const persData = await persRes.json();
-        if (persData.success) {
-          const personalityInput = document.getElementById('modalPersonalityInput');
-          const systemPromptInput = document.getElementById('modalSystemPromptInput');
-          if (personalityInput) personalityInput.value = persData.personality || '';
-          if (systemPromptInput) systemPromptInput.value = persData.systemPrompt || '';
-        }
-        this.showNotification('Personality reset to default', 'info');
-        this.addActivityEntry('system', 'Agent personality reset to default');
-      } else {
-        this.showNotification(data.error || 'Failed to reset personality', 'error');
-      }
-    } catch {
-      this.showNotification('Failed to reset personality', 'error');
-    }
-  }
-
-  closeMemberModal() {
-    if (this.modalAbortController) {
-      this.modalAbortController.abort();
-      this.modalAbortController = null;
-    }
-    document.getElementById('memberModal').classList.add('hidden');
-    this.selectedMemberId = null;
   }
 
   // ========== Feature 7: Code Review ==========
@@ -4151,7 +2880,7 @@ class OfficeApp {
     const settings = this._spawnSettings || {};
     const defaultProvider = settings.provider || 'claude-subscription';
     const defaultModel = this.getDefaultModelForProvider(defaultProvider, settings);
-    const defaultWorkingDir = settings.defaultWorkingDir || '~/Code';
+    const defaultWorkingDir = settings.defaultWorkingDir || '';
 
     document.getElementById('spawnWorkingDir').value = defaultWorkingDir;
     document.getElementById('spawnStep2Title').textContent = tpl.name;
@@ -5273,769 +4002,6 @@ class OfficeApp {
     }
   }
 
-  // ========== Tasks ==========
-
-  async fetchAndRenderTasks() {
-    // Cancel any in-flight Tasks-tab fetches; rapid tab toggling would
-    // otherwise stack three-way races whose out-of-order responses
-    // stomp the task/queue/lock state.
-    if (this._tasksAbortController) {
-      try { this._tasksAbortController.abort(); } catch (_) { /* already aborted */ }
-    }
-    this._tasksAbortController = new AbortController();
-    const signal = this._tasksAbortController.signal;
-    try {
-      const [bugRes, queueRes, lockRes] = await Promise.all([
-        fetch('/api/office/bug-tasks', { signal }),
-        fetch('/api/office/task-queues', { signal }),
-        fetch('/api/office/file-locks', { signal }),
-      ]);
-      const bugData = bugRes.ok ? await bugRes.json() : { success: false };
-      const queueData = queueRes.ok ? await queueRes.json() : { success: false };
-      const lockData = lockRes.ok ? await lockRes.json() : { success: false };
-
-      this.bugTasks = bugData.success ? bugData.tasks : [];
-      this.taskQueues = queueData.success ? queueData.queues : [];
-      this.state.fileLocks = lockData.success ? lockData.locks : [];
-      this.renderTasks();
-      this.renderKanbanBoard();
-      // R30 · If the graph view is currently active, refresh the
-      // dependency graph on the same tick. Cheap — one extra GET
-      // that shares the tasks we just queued above.
-      if (this._taskView === 'graph') this.fetchAndRenderTaskGraph();
-    } catch (err) {
-      if (err && err.name === 'AbortError') return;
-      console.error('Failed to fetch tasks:', err);
-    }
-  }
-
-  // ========== R30 · Task dependency graph ==========
-  //
-  // View toggle state + layout. The graph shares the Tasks tab with
-  // the kanban — only one is visible at a time. Layout is computed
-  // from the backend's topological depth + agent attribution.
-
-  setTaskView(view) {
-    if (view !== 'kanban' && view !== 'graph') return;
-    this._taskView = view;
-    const kanban = document.getElementById('kanbanBoard');
-    const graph = document.getElementById('taskGraphWrap');
-    const hideDone = document.getElementById('taskGraphHideDone');
-    const download = document.getElementById('taskGraphDownload');
-    // querySelector on .task-view-chip hits every chip including the
-    // download button -- only set `active` based on the data-task-view
-    // attribute (which only the kanban/graph chips carry).
-    document.querySelectorAll('.task-view-chip').forEach(el => {
-      if (!el.dataset.taskView) return;
-      el.classList.toggle('active', el.dataset.taskView === view);
-    });
-    if (view === 'graph') {
-      if (kanban) kanban.classList.add('hidden');
-      if (graph) graph.classList.remove('hidden');
-      if (hideDone) hideDone.classList.remove('hidden');
-      if (download) download.classList.remove('hidden');
-      this.fetchAndRenderTaskGraph();
-    } else {
-      if (kanban) kanban.classList.remove('hidden');
-      if (graph) graph.classList.add('hidden');
-      if (hideDone) hideDone.classList.add('hidden');
-      if (download) download.classList.add('hidden');
-    }
-  }
-
-  // R32 · Graph export. Clones the live SVG, inlines computed styles
-  // per element (so the downloaded file renders without the
-  // dashboard's CSS), serializes to XML, and triggers a Blob download.
-  exportTaskGraphSvg() {
-    const svg = document.getElementById('taskGraphSvg');
-    if (!svg) return;
-    const clone = svg.cloneNode(true);
-    // Copy computed style into each element so the file renders
-    // correctly outside the dashboard's CSS.
-    const inlineStyles = (live, clonedEl) => {
-      const cs = window.getComputedStyle(live);
-      // Only properties that affect visual output -- avoid flooding the
-      // file with every single CSS property (there are ~350).
-      const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray',
-        'opacity', 'font-family', 'font-size', 'font-weight'];
-      const decls = [];
-      for (const p of props) {
-        const v = cs.getPropertyValue(p);
-        if (v && v !== 'none' && v !== 'normal') decls.push(p + ':' + v);
-      }
-      if (decls.length) clonedEl.setAttribute('style', decls.join(';'));
-    };
-    const liveNodes = svg.querySelectorAll('*');
-    const clonedNodes = clone.querySelectorAll('*');
-    for (let i = 0; i < liveNodes.length && i < clonedNodes.length; i++) {
-      inlineStyles(liveNodes[i], clonedNodes[i]);
-    }
-    // Also set a background so SVG renders well on a light viewer.
-    clone.setAttribute('style', 'background:#0a0a0a');
-
-    const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-      new XMLSerializer().serializeToString(clone);
-    const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const filename = `task-graph-${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}.svg`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-
-  setGraphHideCompleted(hide) {
-    this._graphHideCompleted = hide;
-    this.renderTaskGraph(this._lastGraphData);
-  }
-
-  async fetchAndRenderTaskGraph() {
-    try {
-      const res = await fetch('/api/office/task-graph');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      this._lastGraphData = data;
-      this.renderTaskGraph(data);
-    } catch (err) {
-      console.error('Failed to fetch task graph:', err);
-    }
-  }
-
-  renderTaskGraph(data) {
-    if (!data) return;
-    const svg = document.getElementById('taskGraphSvg');
-    const empty = document.getElementById('taskGraphEmpty');
-    const banner = document.getElementById('taskGraphCycleBanner');
-    if (!svg || !empty || !banner) return;
-
-    // Cycle banner.
-    if (data.cycleDetected && data.cycleNodeIds && data.cycleNodeIds.length) {
-      banner.classList.remove('hidden');
-      banner.textContent = `Cycle detected in: ${data.cycleNodeIds.join(' → ')}. Resolve via the task detail modal or cm task blocked.`;
-    } else {
-      banner.classList.add('hidden');
-      banner.textContent = '';
-    }
-
-    // Apply the hide-completed filter.
-    const hideDone = this._graphHideCompleted !== false; // default true
-    let nodes = (data.nodes || []).slice();
-    if (hideDone) {
-      // Keep a completed task if any dependent (forward edge) exists,
-      // since it anchors an in-flight chain.
-      const hasDependent = new Set();
-      for (const n of nodes) {
-        for (const b of (n.blockedBy || [])) hasDependent.add(b);
-      }
-      nodes = nodes.filter(n => n.status !== 'completed' || hasDependent.has(n.id));
-    }
-
-    // Count edges to decide empty state.
-    let edgeCount = 0;
-    for (const n of nodes) edgeCount += (n.blockedBy || []).length;
-
-    if (nodes.length === 0 || edgeCount === 0) {
-      empty.classList.remove('hidden');
-      svg.innerHTML = '';
-      svg.setAttribute('viewBox', '0 0 100 100');
-      return;
-    }
-    empty.classList.add('hidden');
-
-    // Layer nodes by depth.
-    const byDepth = new Map();
-    for (const n of nodes) {
-      const d = n.depth || 0;
-      if (!byDepth.has(d)) byDepth.set(d, []);
-      byDepth.get(d).push(n);
-    }
-    const depths = Array.from(byDepth.keys()).sort((a, b) => a - b);
-
-    // Geometry.
-    const NODE_W = 180;
-    const NODE_H = 48;
-    const COL_GAP = 64;
-    const ROW_GAP = 14;
-    const PAD = 24;
-
-    // Stable per-agent colour. Reuse the member accent if available.
-    const agentColor = (sessionId) => {
-      const m = (this.state && this.state.members) ? this.state.members.find(x => x.sessionId === sessionId) : null;
-      return (m && m.color) || '#6366f1';
-    };
-
-    // Position nodes: column = depth, row = sort within column.
-    const pos = new Map();
-    let maxRow = 0;
-    depths.forEach((d, colIdx) => {
-      const col = byDepth.get(d);
-      col.sort((a, b) => {
-        if ((a.agentName || '') !== (b.agentName || '')) return (a.agentName || '').localeCompare(b.agentName || '');
-        const pr = { high: 0, medium: 1, low: 2 };
-        const pa = pr[a.priority] ?? 3;
-        const pb = pr[b.priority] ?? 3;
-        if (pa !== pb) return pa - pb;
-        return a.id.localeCompare(b.id);
-      });
-      col.forEach((n, rowIdx) => {
-        pos.set(n.id, {
-          x: PAD + colIdx * (NODE_W + COL_GAP),
-          y: PAD + rowIdx * (NODE_H + ROW_GAP),
-        });
-        if (rowIdx > maxRow) maxRow = rowIdx;
-      });
-    });
-
-    const width = PAD + depths.length * (NODE_W + COL_GAP);
-    const height = PAD * 2 + (maxRow + 1) * (NODE_H + ROW_GAP);
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    svg.setAttribute('width', width);
-    svg.setAttribute('height', height);
-
-    // Build edges first (drawn underneath nodes). Direction is
-    // prereq → dependent, so we iterate dependents' blockedBy lists.
-    const critSet = new Set((data.criticalPath || []));
-    const edgeFrags = [];
-    const arrowFrags = [];
-    const visibleIds = new Set(nodes.map(n => n.id));
-    for (const n of nodes) {
-      for (const prereqId of (n.blockedBy || [])) {
-        if (!pos.has(prereqId) || !pos.has(n.id)) continue;
-        if (!visibleIds.has(prereqId) || !visibleIds.has(n.id)) continue;
-        const a = pos.get(prereqId);
-        const b = pos.get(n.id);
-        const x1 = a.x + NODE_W;
-        const y1 = a.y + NODE_H / 2;
-        const x2 = b.x;
-        const y2 = b.y + NODE_H / 2;
-        const mx = x1 + (x2 - x1) / 2;
-        const path = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
-        const prereqNode = nodes.find(x => x.id === prereqId);
-        const isBlocking = (n.status === 'in_progress' || n.status === 'blocked')
-          && prereqNode && prereqNode.status !== 'completed';
-        const isCrit = critSet.has(prereqId) && critSet.has(n.id);
-        const classes = ['task-graph-edge'];
-        if (isBlocking) classes.push('blocking');
-        if (isCrit) classes.push('on-critical');
-        edgeFrags.push(
-          `<path class="${classes.join(' ')}" d="${path}" data-from="${this.escapeAttr(prereqId)}" data-to="${this.escapeAttr(n.id)}"${n.blockerDescription ? ` data-tooltip="${this.escapeAttr(n.blockerDescription)}"` : ''}/>`
-        );
-        // Arrow head.
-        const arrowSize = 5;
-        const ah = `${x2},${y2} ${x2 - arrowSize},${y2 - arrowSize} ${x2 - arrowSize},${y2 + arrowSize}`;
-        arrowFrags.push(
-          `<polygon class="task-graph-edge-arrow${isBlocking ? ' blocking' : ''}" points="${ah}" fill="${isBlocking ? '#ef4444' : '#52525b'}"/>`
-        );
-      }
-    }
-
-    // Build nodes.
-    const nodeFrags = [];
-    for (const n of nodes) {
-      const p = pos.get(n.id);
-      if (!p) continue;
-      const cls = ['task-graph-node', `status-${n.status || 'pending'}`];
-      if (n.onCriticalPath) cls.push('on-critical');
-      if (data.cycleDetected && data.cycleNodeIds && data.cycleNodeIds.includes(n.id)) cls.push('cycle');
-      const color = n.unknown ? '#52525b' : agentColor(n.sessionId);
-      const title = this.escapeHtml(this._truncateTaskTitle(n.title || n.id, 28));
-      const critGlyph = n.onCriticalPath ? ' 🔥' : '';
-      const meta = n.unknown ? 'missing' : (n.agentName || '');
-      const onclickAttr = n.unknown
-        ? ''
-        : ` onclick="office.openTaskDetail('${this.escapeAttr(n.sessionId)}','${this.escapeAttr(n.id)}')"`;
-      nodeFrags.push(`
-        <g class="${cls.join(' ')}${n.unknown ? '' : ' task-graph-node-click'}" data-id="${this.escapeAttr(n.id)}" transform="translate(${p.x},${p.y})"${onclickAttr}>
-          <rect width="${NODE_W}" height="${NODE_H}" rx="6" ry="6"/>
-          <rect class="task-graph-node-band" x="0" y="0" width="4" height="${NODE_H}" fill="${color}" rx="2" ry="2"/>
-          <text class="task-graph-node-title" x="12" y="18">${title}${critGlyph}</text>
-          <text class="task-graph-node-meta" x="12" y="36">${this.escapeHtml(meta)} · ${this.escapeHtml(n.status || '')}</text>
-        </g>`);
-    }
-
-    svg.innerHTML = edgeFrags.join('') + arrowFrags.join('') + nodeFrags.join('');
-
-    // Hook hover to lowlight non-connected nodes + edges. Cheap DOM
-    // traversal — task counts stay bounded by team size, so doing it
-    // on every mouseenter is fine.
-    const reach = this._buildGraphReach(nodes);
-    svg.querySelectorAll('.task-graph-node').forEach(el => {
-      el.addEventListener('mouseenter', () => this._graphHoverEnter(el.dataset.id, reach));
-      el.addEventListener('mouseleave', () => this._graphHoverLeave());
-    });
-  }
-
-  _truncateTaskTitle(s, max) {
-    if (!s) return '';
-    return s.length > max ? s.substring(0, max - 1) + '…' : s;
-  }
-
-  // _buildGraphReach returns maps of ancestors + descendants for every
-  // node, keyed by node ID. Used for the hover-highlight behaviour so
-  // the visual "reachable" set is computed once per render instead of
-  // on every mouseenter.
-  _buildGraphReach(nodes) {
-    const forward = new Map(); // id → Set(dependents)
-    const backward = new Map(); // id → Set(prereqs)
-    for (const n of nodes) {
-      if (!backward.has(n.id)) backward.set(n.id, new Set());
-      for (const b of (n.blockedBy || [])) {
-        if (!forward.has(b)) forward.set(b, new Set());
-        forward.get(b).add(n.id);
-        backward.get(n.id).add(b);
-      }
-    }
-    const ancestors = new Map();
-    const descendants = new Map();
-    const walk = (graph, start) => {
-      const out = new Set();
-      const stack = [start];
-      while (stack.length) {
-        const cur = stack.pop();
-        const next = graph.get(cur);
-        if (!next) continue;
-        for (const v of next) {
-          if (!out.has(v)) { out.add(v); stack.push(v); }
-        }
-      }
-      return out;
-    };
-    for (const n of nodes) {
-      ancestors.set(n.id, walk(backward, n.id));
-      descendants.set(n.id, walk(forward, n.id));
-    }
-    return { ancestors, descendants };
-  }
-
-  _graphHoverEnter(id, reach) {
-    const svg = document.getElementById('taskGraphSvg');
-    if (!svg) return;
-    const keep = new Set([id]);
-    (reach.ancestors.get(id) || new Set()).forEach(x => keep.add(x));
-    (reach.descendants.get(id) || new Set()).forEach(x => keep.add(x));
-    svg.querySelectorAll('.task-graph-node').forEach(el => {
-      const nid = el.dataset.id;
-      el.classList.toggle('lowlight', !keep.has(nid));
-      el.classList.toggle('highlight', nid === id);
-    });
-    svg.querySelectorAll('.task-graph-edge').forEach(el => {
-      const from = el.dataset.from, to = el.dataset.to;
-      const visible = keep.has(from) && keep.has(to);
-      el.classList.toggle('lowlight', !visible);
-    });
-  }
-
-  _graphHoverLeave() {
-    const svg = document.getElementById('taskGraphSvg');
-    if (!svg) return;
-    svg.querySelectorAll('.lowlight, .highlight').forEach(el => {
-      el.classList.remove('lowlight');
-      el.classList.remove('highlight');
-    });
-  }
-
-  // ---- Tasks filter bar (Round 7 E1) ----
-  // AND across categories (query AND priority AND status), OR within
-  // a category (priority=high OR priority=med). Matches Linear /
-  // GitHub filter conventions.
-  _applyTaskFilter(tasks) {
-    const f = this._taskFilter;
-    if (!f) return tasks;
-    const q = (f.q || '').trim().toLowerCase();
-    const pri = f.priority || new Set();
-    const st = f.status || new Set();
-    if (!q && pri.size === 0 && st.size === 0) return tasks;
-    return tasks.filter(t => {
-      if (q) {
-        const hay = `${t.title || ''} ${t.description || ''}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (pri.size > 0 && !pri.has(t.priority || 'medium')) return false;
-      if (st.size > 0) {
-        // Map the kanban status chip onto raw task.status values.
-        const s = t.status || 'pending';
-        const chipMatchesStatus =
-          (st.has('pending') && (s === 'pending' || s === 'acknowledged')) ||
-          (st.has('in_progress') && s === 'in_progress') ||
-          (st.has('blocked') && s === 'blocked') ||
-          (st.has('completed') && (s === 'completed' || s === 'failed'));
-        if (!chipMatchesStatus) return false;
-      }
-      return true;
-    });
-  }
-
-  _onTaskFilterInput(q) {
-    this._taskFilter.q = q || '';
-    this.renderTasks();
-    this.renderKanbanBoard();
-  }
-
-  _toggleTaskChip(kind, value) {
-    if (!this._taskFilter[kind]) return;
-    const set = this._taskFilter[kind];
-    if (set.has(value)) set.delete(value); else set.add(value);
-    // Reflect chip state in the DOM.
-    const sel = `[data-chip="${kind}"][data-value="${value}"]`;
-    const btn = document.querySelector(sel);
-    if (btn) btn.classList.toggle('active', set.has(value));
-    this.renderTasks();
-    this.renderKanbanBoard();
-  }
-
-  _clearTaskFilters() {
-    this._taskFilter = { q: '', priority: new Set(), status: new Set() };
-    const input = document.getElementById('taskFilterSearch');
-    if (input) input.value = '';
-    document.querySelectorAll('.task-filter-chip.active').forEach(b => b.classList.remove('active'));
-    this.renderTasks();
-    this.renderKanbanBoard();
-  }
-
-  // ---- F2: kanban hover quick-edit actions ----
-  // These call the same endpoints agents use via the `cm` CLI, so no
-  // new backend surface. All handlers are fire-and-forget -- the
-  // server broadcasts office:taskUpdated via SSE and our existing
-  // listeners re-render on receipt.
-  async _kanbanCyclePriority(sessionId, taskId, nextPri) {
-    try {
-      await this.postJson('/api/office/agent/task-progress', {
-        sessionId, taskId, priority: nextPri,
-      });
-    } catch (err) {
-      this.showNotification('Failed to update priority', 'error');
-    }
-  }
-  async _kanbanTaskStart(sessionId, taskId) {
-    try {
-      await this.postJson('/api/office/agent/task-ack', { sessionId, taskId });
-      await this.postJson('/api/office/agent/task-start', { sessionId, taskId });
-    } catch (err) {
-      this.showNotification('Failed to start task', 'error');
-    }
-  }
-  async _kanbanTaskBlock(sessionId, taskId) {
-    const reason = prompt('Why is this blocked?') || '';
-    if (!reason) return;
-    try {
-      await this.postJson('/api/office/agent/task-progress', {
-        sessionId, taskId, isBlocked: true, progress: reason,
-      });
-    } catch (err) {
-      this.showNotification('Failed to mark blocked', 'error');
-    }
-  }
-  async _kanbanTaskComplete(sessionId, taskId) {
-    try {
-      await this.postJson('/api/office/agent/task-complete', { sessionId, taskId });
-    } catch (err) {
-      this.showNotification('Failed to complete task', 'error');
-    }
-  }
-
-  renderTasks() {
-    const list = document.getElementById('tasksList');
-    if (!list) return;
-
-    const bugTasks = this.bugTasks || [];
-    const taskQueues = this.taskQueues || [];
-    const fileLocks = this.state.fileLocks || [];
-
-    if (bugTasks.length === 0 && taskQueues.length === 0 && fileLocks.length === 0) {
-      list.innerHTML = `<div class="tasks-empty">
-        <div class="empty-state-title">No active tasks</div>
-        <div class="empty-state-sub">Run a standup to distribute work across the team, or trigger <span class="t-mono">/lint</span> to auto-populate bug tasks.</div>
-      </div>`;
-      return;
-    }
-
-    let html = '';
-
-    html += this.renderFileLocks();
-
-    const openBugs = this._applyTaskFilter(bugTasks.filter(t => t.status !== 'resolved'));
-    if (openBugs.length > 0) {
-      html += '<div class="tasks-section-title">Bug Tasks</div>';
-      html += openBugs.map(t => {
-        const priorityClass = `priority-${t.priority}`;
-        const assignee = this.state.members.find(m => m.sessionId === t.assignedTo);
-        const assigneeName = assignee ? assignee.name : 'Unknown';
-        return `
-          <div class="task-card ${priorityClass}">
-            <div class="task-card-header">
-              <span class="task-priority">${t.priority.toUpperCase()}</span>
-              <span class="task-category">${t.category}</span>
-              <span class="task-status task-status-${t.status}">${t.status}</span>
-            </div>
-            <div class="task-card-file">${this.escapeHtml(t.file)}${t.line ? ':' + t.line : ''}</div>
-            <div class="task-card-desc">${this.escapeHtml(t.description)}</div>
-            <div class="task-card-footer">
-              <span class="task-assignee">Assigned to: ${this.escapeHtml(assigneeName)}</span>
-              ${t.status !== 'resolved' ? `<button class="btn-resolve" onclick="office.resolveBugTask('${t.id}')">Resolve</button>` : ''}
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    if (taskQueues.length > 0) {
-      html += '<div class="tasks-section-title">Sprint Tasks</div>';
-      for (const queue of taskQueues) {
-        if (queue.tasks.length === 0) continue;
-        html += `<div class="task-queue-agent">${this.escapeHtml(queue.agentName)}</div>`;
-        html += queue.tasks.map(t => {
-          // R29 · Render handoff pill + operator force-resolve controls
-          // when a task is handoff_pending. The click target of the card
-          // still opens the detail modal — buttons stop propagation.
-          const isHandoff = t.status === 'handoff_pending' && t.handoff;
-          const handoffPill = isHandoff
-            ? `<span class="task-status status-pill--handoff">→ ${this.escapeHtml(t.handoff.toName || 'agent')}</span>`
-            : `<span class="task-status task-status-${t.status}">${t.status}</span>`;
-          const handoffCtx = isHandoff && t.handoff.context
-            ? `<div class="task-card-handoff-ctx">${this.escapeHtml(t.handoff.context)}</div>`
-            : '';
-          const handoffControls = isHandoff
-            ? `<div class="task-card-handoff-actions">
-                <button class="btn-handoff-accept" onclick="event.stopPropagation(); office.forceAcceptHandoff('${this.escapeAttr(t.id)}')">Force accept</button>
-                <button class="btn-handoff-reject" onclick="event.stopPropagation(); office.forceRejectHandoff('${this.escapeAttr(t.id)}')">Force reject</button>
-              </div>`
-            : '';
-          const labelPills = (t.labels && t.labels.length)
-            ? `<div class="task-card-labels">${t.labels.map(l => `<span class="task-label-pill task-label-pill--small">${this.escapeHtml(l)}</span>`).join('')}</div>`
-            : '';
-          return `
-          <div class="task-card priority-${t.priority} task-card-clickable" onclick="office.openTaskDetail('${this.escapeAttr(queue.sessionId)}','${this.escapeAttr(t.id)}')">
-            <div class="task-card-header">
-              <span class="task-priority">${t.priority.toUpperCase()}</span>
-              ${handoffPill}
-            </div>
-            <div class="task-card-desc">${this.escapeHtml(t.title)}</div>
-            ${labelPills}
-            ${handoffCtx}
-            ${handoffControls}
-          </div>
-        `;}).join('');
-      }
-    }
-
-    list.innerHTML = html;
-  }
-
-  // R29 · Operator-only handoff controls. Used when the receiving
-  // agent is unresponsive — the operator decides whether to hand the
-  // task off (accept) or send it back to the sender (reject).
-  async forceAcceptHandoff(taskId) {
-    if (!confirm('Force-accept this handoff? Task will move to the receiver as if they had accepted it.')) return;
-    try {
-      await this.postJson('/api/office/handoffs/force-accept', { taskId });
-      this.fetchAndRenderTasks();
-    } catch (err) {
-      console.error('force-accept handoff failed:', err);
-      this.showNotification('Force-accept failed: ' + (err.message || err), 'error');
-    }
-  }
-
-  async forceRejectHandoff(taskId) {
-    const reason = prompt('Reason for rejecting this handoff?', 'operator override');
-    if (reason === null) return;
-    try {
-      await this.postJson('/api/office/handoffs/force-reject', { taskId, reason: reason || 'operator override' });
-      this.fetchAndRenderTasks();
-    } catch (err) {
-      console.error('force-reject handoff failed:', err);
-      this.showNotification('Force-reject failed: ' + (err.message || err), 'error');
-    }
-  }
-
-  async resolveBugTask(taskId) {
-    try {
-      await this.putJson(`/api/office/bug-tasks/${taskId}`, { status: 'resolved' });
-      this.fetchAndRenderTasks();
-    } catch (err) {
-      console.error('Failed to resolve bug task:', err);
-    }
-  }
-
-  handleBugTaskCreated(task) {
-    if (!this.bugTasks) this.bugTasks = [];
-    this.bugTasks.push(task);
-    if (this.activeTab === 'tasks') this.renderTasks();
-    this.updateStatusBar();
-  }
-
-  handleBugTaskUpdated(task) {
-    if (!this.bugTasks) return;
-    const idx = this.bugTasks.findIndex(t => t.id === task.id);
-    if (idx >= 0) {
-      this.bugTasks[idx] = task;
-    }
-    if (this.activeTab === 'tasks') this.renderTasks();
-    this.updateStatusBar();
-  }
-
-  handleBugTaskResolved(task) {
-    if (!this.bugTasks) return;
-    const idx = this.bugTasks.findIndex(t => t.id === task.id);
-    if (idx >= 0) this.bugTasks[idx] = task;
-    if (this.activeTab === 'tasks') this.renderTasks();
-    this.updateStatusBar();
-  }
-
-  handleTaskQueueGenerated(data) {
-    // Re-fetch full task queues from API (debounced to avoid rapid re-fetches)
-    this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 300);
-    const totalTasks = data.taskCount || 0;
-    this.addActivityEntry('task', `Task queues generated: ${totalTasks} tasks for ${data.agentName || 'agent'}`);
-    this.addNotification('info', 'Tasks generated', `${totalTasks} tasks for ${data.agentName || 'agent'}`);
-    this._scheduleRender(() => this.renderAgentCards(), 'agents', 100);
-    this.updateStatusBar();
-  }
-
-  handleTaskQueueUpdated(data) {
-    // Re-fetch full task queues from API (debounced to avoid rapid re-fetches)
-    this._scheduleRender(() => this.fetchAndRenderTasks(), 'taskFetch', 300);
-    this._scheduleRender(() => this.renderAgentCards(), 'agents', 100);
-    this.updateStatusBar();
-    // Round 9 · count task completions for the session-local throughput
-    // counter. De-duped via _completedTaskIds so backfill fetches or
-    // repeated SSE payloads don't double-count.
-    if (data && data.task && (data.task.status === 'completed' || data.task.status === 'failed') && data.task.id && !this._completedTaskIds.has(data.task.id)) {
-      this._completedTaskIds.add(data.task.id);
-      if (data.task.status === 'completed') this._sessionTasksCompleted++;
-    }
-    this._scheduleOverviewRefresh();
-  }
-
-  // ========== Kanban Board ==========
-
-  renderKanbanBoard() {
-    const backlogEl = document.getElementById('kanbanBacklog');
-    const todoEl = document.getElementById('kanbanTodo');
-    const wipEl = document.getElementById('kanbanWip');
-    const reviewEl = document.getElementById('kanbanReview');
-    const doneEl = document.getElementById('kanbanDone');
-    if (!backlogEl || !todoEl || !wipEl || !reviewEl || !doneEl) return;
-
-    const queues = this.taskQueues || [];
-    const allTasksRaw = queues.flatMap(q => (q.tasks || []).map(t => ({ ...t, _sessionId: q.sessionId })));
-    // Apply the task-filter-bar filter so the board honors search + chips.
-    const allTasks = this._applyTaskFilter(allTasksRaw);
-
-    // 5-column status mapping:
-    // pending        -> Backlog
-    // acknowledged   -> To Do
-    // in_progress    -> In Progress
-    // blocked        -> Review
-    // completed/failed -> Done
-    const backlog = allTasks.filter(t => t.status === 'pending');
-    const todo = allTasks.filter(t => t.status === 'acknowledged');
-    const inProgress = allTasks.filter(t => t.status === 'in_progress');
-    const review = allTasks.filter(t => t.status === 'blocked');
-    const done = allTasks.filter(t => t.status === 'completed' || t.status === 'failed');
-
-    // Resolve the owning agent's current status per task so kanban
-    // cards in the "doing" column can light up with the border-beam
-    // only when the agent is actually computing right now.
-    const membersBySid = new Map((this.state.members || []).map(m => [m.sessionId, m]));
-
-    const renderCards = (tasks) => {
-      return tasks.map(t => {
-        const isDone = t.status === 'completed' || t.status === 'failed';
-        const isFailed = t.status === 'failed';
-        const isBlocked = t.status === 'blocked';
-        const owner = t._sessionId ? membersBySid.get(t._sessionId) : null;
-        const ownerWorking = owner && owner.status === 'working';
-        const isDoingAndWorking = t.status === 'in_progress' && ownerWorking;
-        const cls = [
-          t.priority === 'high' ? 'card-high' : '',
-          isDone ? 'card-done' : '',
-          isBlocked ? 'card-blocked' : '',
-          'border-beam',
-          isDoingAndWorking ? 'border-beam--active' : '',
-        ].filter(Boolean).join(' ');
-        const priority = t.priority || 'medium';
-        const priorityBadge = `<span class="priority-badge priority-${priority}">${priority}</span>`;
-        const failedBadge = isFailed
-          ? `<span class="kanban-failed-badge">failed</span>`
-          : '';
-        const blockedBadge = (t.blockedBy && t.blockedBy.length > 0)
-          ? `<span class="kanban-blocked-badge">blocked by ${t.blockedBy.length}</span>`
-          : '';
-        const clickHandler = t._sessionId
-          ? `office.openTaskDetail('${this.escapeAttr(t._sessionId)}','${this.escapeAttr(t.id)}')`
-          : `office.switchTab('tasks')`;
-        // F2 · hover-only quick-edit strip for mutable tasks. Only
-        // render if we know the owning session; bug tasks and orphans
-        // don't get the buttons since the existing endpoints need
-        // sessionId.
-        let quickHtml = '';
-        if (t._sessionId && !isDone) {
-          const sid = this.escapeAttr(t._sessionId);
-          const tid = this.escapeAttr(t.id);
-          // Priority cycle: high -> medium -> low -> high
-          const nextPri = priority === 'high' ? 'low' : (priority === 'medium' ? 'high' : 'medium');
-          const buttons = [];
-          buttons.push(`<button class="q-priority" data-pri="${this.escapeAttr(priority)}" title="Cycle priority (click to set to ${nextPri})" onclick="event.stopPropagation(); office._kanbanCyclePriority('${sid}','${tid}','${nextPri}')">${priority}</button>`);
-          if (t.status === 'pending' || t.status === 'acknowledged') {
-            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskStart('${sid}','${tid}')" title="Start this task">Start</button>`);
-          }
-          if (t.status === 'in_progress') {
-            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskBlock('${sid}','${tid}')" title="Mark blocked">Block</button>`);
-            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskComplete('${sid}','${tid}')" title="Mark complete">Done</button>`);
-          }
-          if (t.status === 'blocked') {
-            buttons.push(`<button onclick="event.stopPropagation(); office._kanbanTaskStart('${sid}','${tid}')" title="Unblock / resume">Resume</button>`);
-          }
-          quickHtml = `<div class="kanban-card-quick">${buttons.join('')}</div>`;
-        }
-        return `<div class="kanban-card ${cls}" title="${this.escapeAttr(t.title || '')}" onclick="${clickHandler}">
-          <div class="kanban-card-title">${this.escapeHtml(t.title || '')}</div>
-          ${priorityBadge}${failedBadge}${blockedBadge}
-          ${quickHtml}
-        </div>`;
-      }).join('');
-    };
-
-    backlogEl.innerHTML = renderCards(backlog);
-    todoEl.innerHTML = renderCards(todo);
-    wipEl.innerHTML = renderCards(inProgress);
-    reviewEl.innerHTML = renderCards(review);
-    doneEl.innerHTML = renderCards(done);
-
-    // WIP limit: one active task per worker. Above that, the In
-    // Progress column gets a warn badge (over-limit) so bottlenecks
-    // are visible at a glance.
-    const teamSize = (this.state && Array.isArray(this.state.members)) ? this.state.members.length : 0;
-    const wipLimit = teamSize > 0 ? teamSize : null;
-
-    // Update counts with a subtle pulse when the value changes; tracked
-    // per-element so a re-render with unchanged counts stays quiet.
-    const setCount = (el, next, limit) => {
-      if (!el) return;
-      const prev = parseInt(el.dataset.prevCount || '0', 10);
-      const overLimit = limit && next > limit;
-      el.textContent = overLimit ? `${next}/${limit}` : String(next);
-      el.dataset.prevCount = String(next);
-      el.classList.toggle('over-limit', !!overLimit);
-      if (prev !== next) {
-        el.classList.remove('count-pulse');
-        // Force reflow so re-adding the class retriggers the animation.
-        void el.offsetWidth;
-        el.classList.add('count-pulse');
-      }
-    };
-    setCount(document.getElementById('kanbanBacklogCount'), backlog.length, null);
-    setCount(document.getElementById('kanbanTodoCount'), todo.length, null);
-    setCount(document.getElementById('kanbanWipCount'), inProgress.length, wipLimit);
-    setCount(document.getElementById('kanbanReviewCount'), review.length, null);
-    setCount(document.getElementById('kanbanDoneCount'), done.length, null);
-  }
-
   // ========== Ad-Hoc Meetings ==========
 
   handleMeetingStarted(meeting) {
@@ -6273,196 +4239,6 @@ class OfficeApp {
     }
 
     this._lastActivityRenderCount = currentCount;
-  }
-
-  // ========== Settings ==========
-
-  async fetchOfficeSettings() {
-    try {
-      const res = await fetch('/api/office/settings');
-      const data = await res.json();
-      if (data.success) {
-        this.officeSettings = data;
-        this.populateSettingsForm(data);
-        this.updateStatusBar();
-      }
-    } catch (err) {
-      // Non-critical
-    }
-  }
-
-  populateSettingsForm(settings) {
-    const el = (id) => document.getElementById(id);
-    const autoEnabled = el('settingAutoStandupEnabled');
-    const autoInterval = el('settingAutoStandupInterval');
-    const brainstormCooldown = el('settingBrainstormCooldown');
-    const brainstormResponseTimeout = el('settingBrainstormResponseTimeout');
-    const idleThreshold = el('settingIdleThreshold');
-    const meetingTimeout = el('settingMeetingTimeout');
-    const standupTimeout = el('settingStandupTimeout');
-    const fileLockExpiry = el('settingFileLockExpiry');
-    const teamMission = el('settingTeamMission');
-
-    if (autoEnabled && settings.autoStandup) autoEnabled.checked = settings.autoStandup.enabled;
-    if (autoInterval && settings.autoStandup) autoInterval.value = Math.round(settings.autoStandup.intervalMs / 3600000 * 10) / 10;
-    if (brainstormCooldown) brainstormCooldown.value = Math.round(settings.brainstormCooldownMs / 60000);
-    if (brainstormResponseTimeout) brainstormResponseTimeout.value = Math.round(settings.brainstormResponseTimeoutMs / 1000);
-    if (idleThreshold) idleThreshold.value = Math.round(settings.idleThresholdMs / 60000);
-    if (meetingTimeout) meetingTimeout.value = Math.round(settings.meetingInactivityTimeoutMs / 1000);
-    if (standupTimeout) standupTimeout.value = Math.round(settings.standupResponseTimeoutMs / 1000);
-    if (fileLockExpiry) fileLockExpiry.value = Math.round(settings.fileLockExpiryMs / 60000);
-    if (teamMission) teamMission.value = settings.teamMission || '';
-    const teamDailyBudget = el('settingTeamDailyBudget');
-    if (teamDailyBudget) teamDailyBudget.value = settings.teamDailyBudget || 0;
-    this._updateMissionCharCount();
-
-    this.updateMissionBanner(settings.teamMission);
-    // Round 9 · budget value may have changed → re-evaluate pill + bar.
-    this._updateBudgetPill();
-  }
-
-  _filterSettings(q) {
-    const panel = document.getElementById('settingsPanel');
-    if (!panel) return;
-    const needle = (q || '').trim().toLowerCase();
-    const sections = panel.querySelectorAll('.settings-section');
-    let visible = 0;
-    sections.forEach(sec => {
-      if (!needle) {
-        sec.classList.remove('filtered-out');
-        visible++;
-        return;
-      }
-      // Match against the section title plus any label/span text.
-      const hay = sec.textContent.toLowerCase();
-      const match = hay.includes(needle);
-      sec.classList.toggle('filtered-out', !match);
-      if (match) visible++;
-    });
-    const empty = document.getElementById('settingsSearchEmpty');
-    if (empty) empty.classList.toggle('hidden', visible > 0);
-  }
-
-  _setActivityFilter(type) {
-    this._activityFilter = type || 'all';
-    document.querySelectorAll('#activityTypeBar .timeline-filter-chip').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.activityType === this._activityFilter);
-    });
-    // Apply to currently rendered entries. The activity feed is always
-    // fully rebuilt when events arrive (or stays stable), so we can
-    // toggle .filtered-out without touching activityLog itself.
-    const feed = document.getElementById('activityFeed');
-    if (!feed) return;
-    feed.querySelectorAll('.activity-entry').forEach(el => {
-      const cls = Array.from(el.classList).find(c => c.startsWith('type-')) || '';
-      const entryType = cls.replace('type-', '');
-      const show = this._activityFilter === 'all' || entryType === this._activityFilter;
-      el.classList.toggle('filtered-out', !show);
-    });
-  }
-
-  _updateMissionCharCount() {
-    const ta = document.getElementById('settingTeamMission');
-    const out = document.getElementById('missionCharCount');
-    if (!ta || !out) return;
-    const len = ta.value.length;
-    const max = parseInt(ta.getAttribute('maxlength') || '1000', 10);
-    out.textContent = `${len} / ${max}`;
-    out.classList.toggle('near-limit', len >= max * 0.9 && len < max);
-    out.classList.toggle('at-limit', len >= max);
-  }
-
-  async updateSetting(key) {
-    const el = (id) => document.getElementById(id);
-    const body = {};
-
-    switch (key) {
-      case 'autoStandupEnabled':
-        body.autoStandup = { enabled: el('settingAutoStandupEnabled').checked };
-        break;
-      case 'autoStandupInterval': {
-        const hours = parseFloat(el('settingAutoStandupInterval').value);
-        if (hours >= 0.5) body.autoStandup = { intervalMs: Math.round(hours * 3600000) };
-        break;
-      }
-      case 'brainstormCooldown': {
-        const mins = parseInt(el('settingBrainstormCooldown').value);
-        if (mins >= 1) body.brainstormCooldownMs = mins * 60000;
-        break;
-      }
-      case 'brainstormResponseTimeout': {
-        const secs = parseInt(el('settingBrainstormResponseTimeout').value);
-        if (secs >= 30) body.brainstormResponseTimeoutMs = secs * 1000;
-        break;
-      }
-      case 'idleThreshold': {
-        const mins = parseInt(el('settingIdleThreshold').value);
-        if (mins >= 1) body.idleThresholdMs = mins * 60000;
-        break;
-      }
-      case 'meetingTimeout': {
-        const secs = parseInt(el('settingMeetingTimeout').value);
-        if (secs >= 10) body.meetingInactivityTimeoutMs = secs * 1000;
-        break;
-      }
-      case 'standupTimeout': {
-        const secs = parseInt(el('settingStandupTimeout').value);
-        if (secs >= 30) body.standupResponseTimeoutMs = secs * 1000;
-        break;
-      }
-      case 'fileLockExpiry': {
-        const mins = parseInt(el('settingFileLockExpiry').value);
-        if (mins >= 1) body.fileLockExpiryMs = mins * 60000;
-        break;
-      }
-      case 'teamMission':
-        body.teamMission = el('settingTeamMission').value;
-        break;
-      case 'teamDailyBudget': {
-        const raw = parseFloat(el('settingTeamDailyBudget').value);
-        body.teamDailyBudget = Number.isFinite(raw) && raw >= 0 ? raw : 0;
-        break;
-      }
-    }
-
-    try {
-      const data = await this.putJson('/api/office/settings', body);
-      if (data.success) {
-        this.officeSettings = data;
-        this.showSettingsSaved();
-        this.showToast('Settings saved', 'success');
-      }
-    } catch (err) {
-      console.error('Failed to update setting:', err);
-      this.showToast('Failed to save settings', 'error');
-    }
-  }
-
-  showSettingsSaved() {
-    const status = document.getElementById('settingsSaveStatus');
-    if (status) {
-      status.textContent = 'Settings saved';
-      setTimeout(() => { status.textContent = ''; }, 2000);
-    }
-  }
-
-  updateMissionBanner(mission) {
-    const banner = document.getElementById('officeMissionBanner');
-    const text = document.getElementById('missionBannerText');
-    if (!banner || !text) return;
-
-    if (mission && mission.trim()) {
-      const trimmed = mission.trim();
-      text.textContent = trimmed;
-      // Full mission in a native tooltip so operators can see the whole
-      // thing when the badge ellipsis truncates it.
-      banner.setAttribute('title', trimmed);
-      banner.classList.remove('hidden');
-    } else {
-      banner.classList.add('hidden');
-      banner.removeAttribute('title');
-      text.textContent = '';
-    }
   }
 
   // ========== Connection Status & Health ==========
@@ -7196,7 +4972,7 @@ class OfficeApp {
     lines.push(`- **Members:** ${members.length} (${counts.working} working · ${counts.idle} idle · ${counts.meeting} meeting · ${counts.stuck} stuck)`);
     lines.push(`- **Tasks:** ${completedTasks} / ${totalTasks} completed${totalTasks > 0 ? ` · ${Math.round((completedTasks / totalTasks) * 100)}%` : ''}`);
     if (blockedTasks > 0) lines.push(`- **Blocked:** ${blockedTasks} task${blockedTasks === 1 ? '' : 's'}`);
-    lines.push(`- **Spend today:** $${totalCost.toFixed(4)}${settings.teamDailyBudget > 0 ? ` of $${settings.teamDailyBudget} budget (${asciiBar((totalCost / settings.teamDailyBudget) * 100)} ${Math.round((totalCost / settings.teamDailyBudget) * 100)}%)` : ''}`);
+    lines.push(`- **Spend today:** $${totalCost.toFixed(4)}`);
     lines.push('');
 
     lines.push('## Agents');
@@ -7373,120 +5149,6 @@ class OfficeApp {
   closeSavedReportModal() {
     const modal = document.getElementById('savedReportModal');
     if (modal) modal.classList.add('hidden');
-  }
-
-  // ========== R34 · Browser health indicator (Settings tab) ==========
-
-  startBrowserHealthPoll() {
-    this.pollBrowserHealth();
-    if (this._browserHealthTimer) return;
-    this._browserHealthTimer = setInterval(() => this.pollBrowserHealth(), 60000);
-  }
-
-  stopBrowserHealthPoll() {
-    if (this._browserHealthTimer) {
-      clearInterval(this._browserHealthTimer);
-      this._browserHealthTimer = null;
-    }
-  }
-
-  async pollBrowserHealth() {
-    const pill = document.getElementById('browserHealthPill');
-    const dot = document.getElementById('browserHealthDot');
-    const label = document.getElementById('browserHealthLabel');
-    if (!pill || !dot || !label) return;
-    try {
-      const res = await fetch('/api/office/browser/health');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      if (data.ok) {
-        pill.classList.remove('browser-health-pill--down');
-        pill.classList.add('browser-health-pill--up');
-        label.textContent = 'browser: ready';
-        pill.title = `${data.browserVersion || 'ok'} · ${data.latencyMs}ms · ${data.host}:${data.port}`;
-      } else {
-        pill.classList.add('browser-health-pill--down');
-        pill.classList.remove('browser-health-pill--up');
-        label.textContent = 'browser: unreachable';
-        pill.title = `${data.error || 'unreachable'} · ${data.host}:${data.port}`;
-      }
-    } catch (err) {
-      pill.classList.add('browser-health-pill--down');
-      pill.classList.remove('browser-health-pill--up');
-      label.textContent = 'browser: error';
-      pill.title = err.message || String(err);
-    }
-  }
-
-  _renderExperimentHistory(experiments) {
-    if (!experiments || experiments.length === 0) {
-      return `<div class="experiment-no-data"><div class="empty-icon">&#128202;</div><div class="empty-text">No experiments recorded yet</div><div class="empty-hint">Experiments are recorded when teams are shut down</div></div>`;
-    }
-
-    // Show most recent first (up to 20).
-    const recent = [...experiments].reverse().slice(0, 20);
-
-    const rows = recent.map(exp => {
-      const ts = exp.timestamp ? new Date(exp.timestamp).toLocaleString() : '-';
-      const completionPct = exp.taskCount > 0
-        ? Math.round((exp.completedCount / exp.taskCount) * 100) + '%'
-        : '-';
-      const avgScorePct = typeof exp.avgScore === 'number'
-        ? Math.round(exp.avgScore * 100) + '%'
-        : '-';
-      const mission = exp.mission ? this.escapeHtml(exp.mission.slice(0, 40)) + (exp.mission.length > 40 ? '…' : '') : '-';
-      return `<tr>
-        <td>${this.escapeHtml(ts)}</td>
-        <td>${mission}</td>
-        <td>${exp.taskCount || 0}</td>
-        <td>${completionPct}</td>
-        <td>${avgScorePct}</td>
-        <td>${this.escapeHtml(exp.duration || '-')}</td>
-        <td>${this.escapeHtml(exp.topPerformer || '-')}</td>
-      </tr>`;
-    }).join('');
-
-    return `<div class="experiment-table-wrapper">
-      <table class="experiment-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Mission</th>
-            <th>Tasks</th>
-            <th>Completed</th>
-            <th>Avg Score</th>
-            <th>Duration</th>
-            <th>Top Performer</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-  }
-
-  _renderHealthScore(metrics, members) {
-    let score = 100;
-    if ((metrics.totalStuckAlerts || 0) > 5) score -= 20;
-    if ((metrics.totalRecoveryAttempts || 0) > 10) score -= 15;
-    const successRate = (metrics.totalTasks || 0) > 0
-      ? (metrics.totalTasksCompleted || 0) / metrics.totalTasks
-      : 1;
-    if (successRate < 0.7) score -= 20;
-    if (members.filter(mem => mem.status === 'stuck').length > 0) score -= 10;
-
-    const grade = score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F';
-    const gradeColor = grade === 'A' ? '#22c55e'
-      : grade === 'B' ? '#4ade80'
-      : grade === 'C' ? '#eab308'
-      : grade === 'D' ? '#f97316'
-      : '#ef4444';
-    const gradeLabel = grade === 'A' ? 'Excellent'
-      : grade === 'B' ? 'Good'
-      : grade === 'C' ? 'Fair'
-      : grade === 'D' ? 'Needs Attention'
-      : 'Critical';
-
-    return `<div class="health-score-display"><div class="health-grade" style="font-size:48px;font-weight:700;color:${gradeColor}">${grade}</div><div class="health-detail">${score}/100 - ${gradeLabel}</div></div>`;
   }
 
   // ========== Feature: Agent Relationship Mini-Graph ==========
@@ -7980,6 +5642,162 @@ class OfficeApp {
     svg.innerHTML = defs + edgeHtml + nodeHtml;
   }
 
+  // ========== Knowledge tab (PageIndex-backed self-improvement) ==========
+
+  // renderKnowledge populates the Knowledge tab by hitting
+  // /api/knowledge/stats + /api/knowledge/promotions. Cheap (both
+  // endpoints are O(directory entries) + a JSON-file read). Called
+  // on every switchTab('knowledge') so the operator always sees
+  // fresh state when they navigate in.
+  async renderKnowledge() {
+    await Promise.all([
+      this._renderKnowledgeStats(),
+      this._renderKnowledgeLedger(),
+    ]);
+  }
+
+  async _renderKnowledgeStats() {
+    let stats;
+    try {
+      const resp = await fetch('/api/knowledge/stats');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      stats = await resp.json();
+    } catch (e) {
+      // Network/server failure: blank the tiles instead of leaving
+      // stale numbers from a prior render. Console + activity feed
+      // capture the error for diagnostics.
+      console.warn('knowledge stats fetch failed', e);
+      for (const id of ['kStatExperiences', 'kStatWorkflows', 'kStatPromoted', 'kStatRevoked', 'kStatMcp']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '—';
+      }
+      return;
+    }
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = String(val ?? 0);
+    };
+    set('kStatExperiences', stats.experiences);
+    set('kStatWorkflows', stats.workflows);
+    set('kStatPromoted', stats.ledgerPromoted);
+    set('kStatRevoked', stats.ledgerRevoked);
+    const mcpEl = document.getElementById('kStatMcp');
+    if (mcpEl) {
+      mcpEl.textContent = stats.pageindexAvailable ? 'ready' : 'offline';
+      mcpEl.title = stats.pageindexAvailable
+        ? 'Agents have mcp__pageindex__* tools wired into their SDK session.'
+        : 'PageIndex MCP not available — install `npx @pageindex/mcp` and restart jarvis to enable lazy retrieval.';
+    }
+  }
+
+  async _renderKnowledgeLedger() {
+    const tbody = document.getElementById('knowledgeLedgerBody');
+    if (!tbody) return;
+    let resp;
+    try {
+      resp = await fetch('/api/knowledge/promotions');
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="6" class="knowledge-empty">Failed to load promotions.</td></tr>';
+      return;
+    }
+    if (!resp.ok) {
+      tbody.innerHTML = `<tr><td colspan="6" class="knowledge-empty">HTTP ${resp.status} loading promotions.</td></tr>`;
+      return;
+    }
+    const data = await resp.json();
+    const entries = data.entries || [];
+    if (entries.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="knowledge-empty">No library docs cited yet — once agents start referencing experiences the ledger fills here.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = entries.map(e => this._renderLedgerRow(e)).join('');
+  }
+
+  _renderLedgerRow(e) {
+    const path = this._escapeHTML(e.path || '');
+    const reuse = e.reuse_count || 0;
+    const avg = (e.avg_outcome != null) ? e.avg_outcome.toFixed(2) : '—';
+    const lastUsed = this._formatLedgerTime(e.last_used_at);
+    let status = '<span class="knowledge-pill">pending</span>';
+    if (e.promoted_at && !this._isZeroTime(e.promoted_at)) {
+      status = '<span class="knowledge-pill knowledge-pill-promoted">promoted</span>';
+    }
+    if (e.revoked_at && !this._isZeroTime(e.revoked_at)) {
+      status = '<span class="knowledge-pill knowledge-pill-revoked">revoked</span>';
+    }
+    const isWorkflow = path.indexOf('workflows/') === 0;
+    const canRevoke = isWorkflow && !(e.revoked_at && !this._isZeroTime(e.revoked_at));
+    const action = canRevoke
+      ? `<button class="panel-btn panel-btn-danger" onclick="office.revokeKnowledge('${this._escapeAttr(e.path)}')" title="Revoke this promotion + remove the on-disk SKILL.md (24h cool-down before re-promotion)">Revoke</button>`
+      : '';
+    return `<tr>
+      <td><code>${path}</code></td>
+      <td>${reuse}</td>
+      <td>${avg}</td>
+      <td>${lastUsed}</td>
+      <td>${status}</td>
+      <td>${action}</td>
+    </tr>`;
+  }
+
+  async revokeKnowledge(path) {
+    if (!path) return;
+    const reason = window.prompt(`Revoke ${path}?\n\nOptionally explain why (stored in the ledger):`);
+    if (reason === null) return; // operator cancelled
+    let resp;
+    try {
+      resp = await fetch('/api/knowledge/revoke', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': this.csrfToken || '',
+        },
+        body: JSON.stringify({ path, reason }),
+      });
+    } catch (e) {
+      alert('Revoke failed: ' + e.message);
+      return;
+    }
+    if (!resp.ok) {
+      const text = await resp.text();
+      alert('Revoke failed: ' + text);
+      return;
+    }
+    // Refresh just the affected views.
+    await this.renderKnowledge();
+  }
+
+  _isZeroTime(s) {
+    if (!s) return true;
+    return s.startsWith('0001-01-01');
+  }
+
+  _formatLedgerTime(s) {
+    if (!s || this._isZeroTime(s)) return '—';
+    try {
+      const d = new Date(s);
+      if (isNaN(d.getTime())) return '—';
+      const now = Date.now();
+      const ageSec = Math.max(0, Math.floor((now - d.getTime()) / 1000));
+      if (ageSec < 60) return `${ageSec}s ago`;
+      if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`;
+      if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h ago`;
+      return `${Math.floor(ageSec / 86400)}d ago`;
+    } catch (_) {
+      return '—';
+    }
+  }
+
+  _escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  _escapeAttr(s) {
+    return this._escapeHTML(s).replace(/`/g, '&#96;');
+  }
+
   // Simple force-directed simulation. Runs a fixed number of ticks synchronously;
   // sufficient for teams under ~20 nodes without blocking the main thread.
   _runForceSimulation(nodes, edges, width, height) {
@@ -8392,9 +6210,6 @@ class OfficeApp {
     }
     const lastStandupMs = this._lastStandupAt || 0;
 
-    // Budget: pulled from officeSettings. 0 / unset → no budget.
-    const budget = (this.officeSettings && Number(this.officeSettings.teamDailyBudget)) || 0;
-
     return {
       total: members.length,
       counts,
@@ -8403,7 +6218,6 @@ class OfficeApp {
       lastStandupMs,
       nextStandupMs,
       throughput: this._sessionTasksCompleted,
-      budget,
     };
   }
 
@@ -8521,7 +6335,11 @@ class OfficeApp {
   // Called from handleMemberUpdated / handleTaskQueueUpdated / handleMessage.
   _scheduleOverviewRefresh() {
     this._scheduleRender(() => this._renderOverviewWidget(), 'overview', 150);
+    this._scheduleRender(() => this._renderActivityStrip(), 'activity-strip', 200);
   }
+
+  // _renderActivityStrip + _drawSparkline were moved to
+  // js/office-widgets.js (P13.4 / P13.7 widget cluster).
 
   // F2 · make activity-feed entries jump to their source surface. Invoked
   // from an onclick injected by renderActivity; see _makeActivityRowDrillable.
@@ -8671,45 +6489,11 @@ class OfficeApp {
     });
   }
 
-  // F4 · header budget pill + insights progress bar. Called on cost + settings
-  // changes. Defensive against officeSettings not being fetched yet.
-  _updateBudgetPill() {
-    const pill = document.getElementById('budgetPill');
-    const val = document.getElementById('budgetPillValue');
-    const budget = (this.officeSettings && Number(this.officeSettings.teamDailyBudget)) || 0;
-    const members = (this.state && Array.isArray(this.state.members)) ? this.state.members : [];
-    const totalCost = members.reduce((s, m) => s + (Number(m.totalCost) || 0), 0);
-
-    if (!pill || !val) return;
-    if (budget <= 0) {
-      pill.classList.add('hidden');
-      pill.removeAttribute('data-tier');
-      return;
-    }
-    pill.classList.remove('hidden');
-    const pct = Math.max(0, (totalCost / budget) * 100);
-    let tier = 'ok';
-    if (pct >= 95) tier = 'alert';
-    else if (pct >= 80) tier = 'warn';
-    else if (pct >= 50) tier = 'mid';
-    pill.setAttribute('data-tier', tier);
-    pill.style.setProperty('--budget-pct', Math.min(100, pct).toFixed(0));
-    val.textContent = `$${totalCost.toFixed(2)} / $${budget}`;
-    pill.title = `Today: $${totalCost.toFixed(4)} of $${budget} (${pct.toFixed(0)}%)`;
-
-    // Also refresh the Insights bar if the tab is mounted — lightweight.
-    const bar = document.getElementById('insightBudgetBar');
-    if (bar) {
-      bar.setAttribute('data-tier', tier);
-      const fill = bar.querySelector('.insight-budget-bar-fill');
-      if (fill) {
-        fill.style.width = `${Math.min(100, pct).toFixed(1)}%`;
-        fill.setAttribute('data-tier', tier);
-      }
-      const label = bar.querySelector('.insight-budget-bar-label');
-      if (label) label.textContent = `$${totalCost.toFixed(2)} / $${budget} · ${pct.toFixed(0)}%`;
-    }
-  }
+  // _updateBudgetPill is intentionally a no-op. The header budget pill +
+  // teamDailyBudget setting were removed when jarvis switched to
+  // subscription-only providers (no per-turn dollar charge). Kept as a
+  // stub so any lingering caller paths fail silently rather than throw.
+  _updateBudgetPill() {}
 
   // F5 · quick-add task modal.
   openQuickAddModal() {

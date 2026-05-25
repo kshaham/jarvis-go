@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,11 +18,34 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/ralph"
 	"github.com/claudeman/jarvis-go/internal/respawn"
-	"github.com/claudeman/jarvis-go/internal/runsummary"
+	"github.com/claudeman/jarvis-go/internal/secpath"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
+
+// resolveSessionFilePath maps a query-supplied workdir-relative path
+// to an absolute path inside the session's working directory, writing
+// the right HTTP error and returning ok=false when validation fails.
+// Centralises the three near-identical path-traversal checks the
+// session-file handlers used to inline (audit caught them drifting
+// out of sync — GetSessionTailFile had been missing the absolute-path
+// rejection that the other two enforce).
+func resolveSessionFilePath(w http.ResponseWriter, session *pty.Session, filePath string) (string, bool) {
+	abs, err := secpath.ResolveUnderRoot(session.WorkingDir, filePath)
+	switch {
+	case err == nil:
+		return abs, true
+	case errors.Is(err, secpath.ErrPathAbsolute):
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, secpath.ErrInvalidPath):
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, secpath.ErrRootUnresolvable):
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+	default:
+		request.WriteError(w, http.StatusForbidden, err.Error())
+	}
+	return "", false
+}
 
 // maxBulkItems caps the number of session IDs per bulk operation to prevent
 // accidental DoS of the state store on enormous requests.
@@ -1182,17 +1206,7 @@ func (ctx *Context) ImportSession(w http.ResponseWriter, r *http.Request) {
 
 	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 
-	// Create Ralph tracker for imported session
-	importTracker := ralph.NewTracker()
-	ctx.RalphTrackersMu.Lock()
-	ctx.RalphTrackers[session.ID] = importTracker
-	ctx.RalphTrackersMu.Unlock()
-
-	// Create run summary tracker for imported session
-	importRunTracker := runsummary.New(session.ID)
-	ctx.RunSummariesMu.Lock()
-	ctx.RunSummaries[session.ID] = importRunTracker
-	ctx.RunSummariesMu.Unlock()
+	ctx.initSessionTrackers(session.ID)
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1215,36 +1229,8 @@ func (ctx *Context) GetSessionFileContent(w http.ResponseWriter, r *http.Request
 		request.WriteError(w, http.StatusBadRequest, "path query parameter is required")
 		return
 	}
-
-	// Reject absolute paths -- always resolve relative to session working directory.
-	if filepath.IsAbs(filePath) {
-		request.WriteError(w, http.StatusBadRequest, "absolute paths not allowed")
-		return
-	}
-	filePath = filepath.Join(session.WorkingDir, filePath)
-
-	// Resolve to absolute and validate no path traversal outside WorkingDir.
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		request.WriteError(w, http.StatusBadRequest, "invalid path")
-		return
-	}
-	absWorkDir, err := filepath.Abs(session.WorkingDir)
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to resolve working directory")
-		return
-	}
-
-	// Ensure the resolved path is within the session's working directory.
-	if !strings.HasPrefix(absPath, absWorkDir+string(filepath.Separator)) && absPath != absWorkDir {
-		request.WriteError(w, http.StatusForbidden, "path is outside session working directory")
-		return
-	}
-
-	// Ensure path does not contain traversal components after resolution.
-	relPath, err := filepath.Rel(absWorkDir, absPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		request.WriteError(w, http.StatusForbidden, "path traversal not allowed")
+	absPath, pathOK := resolveSessionFilePath(w, session, filePath)
+	if !pathOK {
 		return
 	}
 
@@ -1602,27 +1588,8 @@ func (ctx *Context) GetSessionFileRaw(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "missing path parameter")
 		return
 	}
-
-	// Reject absolute paths -- always resolve relative to session working directory.
-	if filepath.IsAbs(filePath) {
-		request.WriteError(w, http.StatusBadRequest, "absolute paths not allowed")
-		return
-	}
-	filePath = filepath.Join(session.WorkingDir, filePath)
-
-	// Resolve to absolute and validate no path traversal outside WorkingDir.
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		request.WriteError(w, http.StatusBadRequest, "invalid path")
-		return
-	}
-	absWorkDir, err := filepath.Abs(session.WorkingDir)
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to resolve working directory")
-		return
-	}
-	if !strings.HasPrefix(absPath, absWorkDir+string(filepath.Separator)) && absPath != absWorkDir {
-		request.WriteError(w, http.StatusForbidden, "path traversal attempt detected")
+	absPath, pathOK := resolveSessionFilePath(w, session, filePath)
+	if !pathOK {
 		return
 	}
 
@@ -1709,25 +1676,14 @@ func (ctx *Context) GetSessionTailFile(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "missing path parameter")
 		return
 	}
-
-	// Resolve path
-	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(session.WorkingDir, filePath)
-	}
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		request.WriteError(w, http.StatusBadRequest, "invalid path")
-		return
-	}
-
-	// Validate path is within working directory
-	absWorkDir, err := filepath.Abs(session.WorkingDir)
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, "failed to resolve working directory")
-		return
-	}
-	if !strings.HasPrefix(absPath, absWorkDir+string(filepath.Separator)) && absPath != absWorkDir {
-		request.WriteError(w, http.StatusForbidden, "path traversal attempt detected")
+	// Tightening note: pre-extraction this path silently accepted
+	// absolute filePaths if they happened to live inside workingDir.
+	// resolveSessionFilePath rejects absolute inputs across the
+	// board — same behaviour the other two session-file handlers
+	// already enforced. Dashboard JS only ever sends relative
+	// paths, so the tightening is invisible to legitimate callers.
+	absPath, pathOK := resolveSessionFilePath(w, session, filePath)
+	if !pathOK {
 		return
 	}
 

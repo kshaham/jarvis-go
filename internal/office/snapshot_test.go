@@ -57,7 +57,7 @@ func TestCreateListLoadDeleteSnapshot_RoundTrip(t *testing.T) {
 	a1.AddTask(&Task{ID: "t-1", Title: "design it", Status: TaskInProgress})
 	a1.AddTask(&Task{ID: "t-2", Title: "write it", Status: TaskPending})
 
-	snap, err := m.CreateSnapshot("first-snap", "/tmp/work")
+	snap, err := m.CreateSnapshot("first-snap", "/tmp/work", map[string]string{"cfg-1": "claude-sid-1"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestCreateSnapshot_RefusesWhenTeamNotSpawned(t *testing.T) {
 	store := &recordingSessionStore{}
 	m := NewManager(store, func(string, interface{}) {}, nil)
 	// teamSpawned defaults to false
-	_, err := m.CreateSnapshot("will-fail", "/tmp")
+	_, err := m.CreateSnapshot("will-fail", "/tmp", nil)
 	if err == nil {
 		t.Fatal("expected error when team not spawned")
 	}

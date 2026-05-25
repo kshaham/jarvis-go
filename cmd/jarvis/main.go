@@ -51,11 +51,45 @@ func configureLogging() {
 // of the tree), so unsetting is safe. API-key and Z.AI modes still
 // work because those set their own env via ProviderEnv on the child,
 // independent of the parent's environment.
+//
+// When JARVIS_SCRUB_CREDENTIALS=1 is set, also unset any inherited
+// env var whose name ends in a sensitive suffix (_SECRET, _TOKEN,
+// _PASSWORD, _KEY, _CREDENTIAL). Default off because operators
+// commonly export GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY, etc. for
+// downstream tools (`gh`, `aws`); aggressively unsetting would
+// silently break those flows. Opt-in is safer.
 func scrubInheritedAuthEnv() {
 	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} {
 		if os.Getenv(k) != "" {
 			slog.Warn("unsetting inherited auth env var to prevent subscription-auth shadowing", "key", k)
 			_ = os.Unsetenv(k)
+		}
+	}
+	if os.Getenv("JARVIS_SCRUB_CREDENTIALS") == "1" {
+		scrubCredentialEnvByPattern()
+	}
+}
+
+// scrubCredentialEnvByPattern unsets any env var matching the
+// credential suffix pattern. Called only when the operator opts in
+// via JARVIS_SCRUB_CREDENTIALS=1. Logs each removal so operators see
+// exactly what was scrubbed (debugging "why does my GITHUB_TOKEN
+// vanish" is otherwise a head-scratcher).
+func scrubCredentialEnvByPattern() {
+	suffixes := []string{"_SECRET", "_TOKEN", "_PASSWORD", "_KEY", "_CREDENTIAL"}
+	for _, raw := range os.Environ() {
+		eq := strings.IndexByte(raw, '=')
+		if eq <= 0 {
+			continue
+		}
+		name := raw[:eq]
+		upper := strings.ToUpper(name)
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(upper, suffix) {
+				slog.Warn("unsetting inherited credential env var (JARVIS_SCRUB_CREDENTIALS=1)", "key", name)
+				_ = os.Unsetenv(name)
+				break
+			}
 		}
 	}
 }

@@ -51,6 +51,85 @@ type SessionConfig struct {
 	// R31 uses this for the onboarding router + critical rules that
 	// every teammate sees.
 	AppendSystemPrompt string
+
+	// SystemPromptFile / AppendSystemPromptFile (R1.3) point at a
+	// file containing the same content as SystemPrompt /
+	// AppendSystemPrompt. Forwarded via Claude's --system-prompt-file
+	// / --append-system-prompt-file CLI flags (SDK forwards via
+	// WithExtraArgs). File-backed prompts cache more reliably than
+	// inline strings because the prompt-cache key is the file path
+	// rather than the in-memory bytes, so multiple sessions that
+	// share the same file path see cache hits even when the SDK
+	// rebuilds the option list per session. When both inline +
+	// file are set the file wins (matches Claude's documented
+	// precedence).
+	SystemPromptFile       string
+	AppendSystemPromptFile string
+
+	// Effort is the per-session reasoning-effort tier passed via
+	// Claude's --effort flag (SDK: claude.WithEffort). Accepts
+	// "low" | "medium" | "high" | "max". Empty defers to the SDK
+	// default (which respects ANTHROPIC_*_EFFORT env vars). R1.3
+	// defaults: medium for workers, high for strategic-tier.
+	Effort string
+
+	// FallbackModel is the model the SDK switches to when the
+	// primary is rate-limited or unavailable. Empty disables
+	// fallback. R1.3 default: one tier down from the primary
+	// (opus -> sonnet, sonnet -> haiku).
+	FallbackModel string
+
+	// ExcludeDynamicSystemPromptSections (R1.3) excludes per-machine
+	// sections (cwd, env, memory paths, git-repo flag) from the
+	// system prompt so the prompt-cache hash is portable across
+	// hosts running the same team template. Wired via Claude's
+	// --exclude-dynamic-system-prompt-sections CLI flag (SDK forwards
+	// via WithExtraArgs).
+	ExcludeDynamicSystemPromptSections bool
+
+	// StrictMcpConfig (R1.3) locks MCP discovery to whatever jarvis
+	// passes via --mcp-config / WithMcpServers, ignoring user-level
+	// or project-level MCP registrations. Defends against an
+	// operator accidentally polluting the office MCP surface from
+	// their personal ~/.claude.json.
+	StrictMcpConfig bool
+
+	// ResumeSessionID (R3.5) instructs the SDK to spawn this session
+	// against an existing Claude session ID via --resume <id>. Used
+	// by the snapshot-restore "fork" path: a snapshot captures the
+	// per-member ClaudeSessionID, and on restore each new SDK session
+	// resumes its predecessor's transcript. Empty = fresh session
+	// (current behaviour).
+	ResumeSessionID string
+
+	// ForkSession (R3.5) pairs with ResumeSessionID to ask Claude to
+	// branch the resumed session into a NEW session ID rather than
+	// reusing it. Lets jarvis snapshot-restore in parallel to the
+	// original team without colliding on session state. Ignored
+	// when ResumeSessionID is empty.
+	ForkSession bool
+
+	// FromPRNumber (R3.6) forwards --from-pr <n> so Claude loads the
+	// PR's diff + description into its system prompt context. Zero =
+	// no PR linkage. Pushed through claude.WithExtraArgs because the
+	// SDK doesn't expose a typed option (CLI-only flag at time of
+	// writing).
+	FromPRNumber int
+
+	// ChromeEnabled (R4.1) forwards --chrome so the agent gets
+	// Claude's built-in browser-automation tools (navigate, click,
+	// screenshot, evaluate). Off by default because it widens the
+	// blast radius significantly (any reachable URL becomes a tool
+	// target). Per-team opt-in via the spawn modal.
+	ChromeEnabled bool
+
+	// Channels (R4.3) is an opt-in list of channel subscriptions
+	// passed via --channels <spec>. Each entry is forwarded as its
+	// own --channels arg so the SDK / CLI sees the full multi-value
+	// shape. Empty slice = no subscriptions (default). Entries look
+	// like "plugin:office-events@local" — exact grammar is owned by
+	// Claude Code's channels research preview and may change.
+	Channels []string
 	// OmitSkipPermissions drops the --dangerously-skip-permissions
 	// flag from the claude CLI spawn (ModeClaude only). Default zero
 	// value = false = keep the flag (existing behaviour). Auth
@@ -58,6 +137,22 @@ type SessionConfig struct {
 	// when running as root ("cannot be used with root/sudo privileges
 	// for security reasons") and exits immediately, breaking /login.
 	OmitSkipPermissions bool
+
+	// HooksEnabled (ModeClaude only) flags that this session should
+	// receive Claude Code HTTP hooks. The office spawn handler also
+	// writes a .claude/settings.local.json into WorkingDir before the
+	// session starts, pointing the hooks at the daemon's
+	// /api/claude/hooks/{sessionID}/{event} endpoint. Lets ModeClaude
+	// match ModeClaudeSDK on signal fidelity (ActiveTool, SDKWorking,
+	// RecordTurnUsage, etc) while keeping interactive subscription
+	// billing.
+	HooksEnabled bool
+
+	// ClaudeBinaryPath overrides the `claude` binary lookup. Empty
+	// means resolve via PATH (production behaviour). Tests point this
+	// at cmd/fakeclaude so integration tests can run without a real
+	// Claude install. ModeClaude only.
+	ClaudeBinaryPath string
 }
 
 type NiceConfig struct {

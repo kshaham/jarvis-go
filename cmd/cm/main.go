@@ -99,6 +99,11 @@ func main() {
 		})
 		fmt.Println("Message sent.")
 
+	// Ask -- structured Q&A with the team lead (and fallback teammate).
+	// See ~/.claude/skills/office-ask-for-help.
+	case "ask":
+		handleAsk(args)
+
 	// Skill
 	case "skill":
 		handleSkill(args)
@@ -187,35 +192,99 @@ func handleOnboard(args []string) {
 
 func handleStandup(args []string) {
 	if len(args) < 2 || args[0] != "respond" {
-		fatal("Usage: cm standup respond <content>")
+		fatal("Usage: cm standup respond <content> | --json '<schema body>'\n" +
+			"  JSON shape:\n" + indent2(SchemaExampleFor("standup")))
 	}
-	content := strings.Join(args[1:], " ")
-	post("/api/office/agent/standup/response", map[string]interface{}{
-		"sessionId": sessionID, "content": content,
-	})
+	rest := args[1:]
+	body := map[string]interface{}{"sessionId": sessionID}
+	if jsonStr, ok := extractFlag(&rest, "--json"); ok {
+		report, rendered, err := DecodeStandupJSON(jsonStr)
+		if err != nil {
+			fatal(fmt.Sprintf("--json validation failed: %v\nExpected shape:\n%s", err, indent2(SchemaExampleFor("standup"))))
+		}
+		body["content"] = rendered
+		body["structured"] = report
+	} else {
+		body["content"] = strings.Join(rest, " ")
+	}
+	post("/api/office/agent/standup/response", body)
 	fmt.Println("Standup response submitted.")
 }
 
 func handleBrainstorm(args []string) {
 	if len(args) < 2 || args[0] != "respond" {
-		fatal("Usage: cm brainstorm respond <proposals>")
+		fatal("Usage: cm brainstorm respond <proposals> | --json '<schema body>'\n" +
+			"  JSON shape:\n" + indent2(SchemaExampleFor("brainstorm")))
 	}
-	proposals := strings.Join(args[1:], " ")
-	post("/api/office/agent/brainstorm/response", map[string]interface{}{
-		"sessionId": sessionID, "proposals": proposals,
-	})
+	rest := args[1:]
+	body := map[string]interface{}{"sessionId": sessionID}
+	if jsonStr, ok := extractFlag(&rest, "--json"); ok {
+		resp, rendered, err := DecodeBrainstormJSON(jsonStr)
+		if err != nil {
+			fatal(fmt.Sprintf("--json validation failed: %v\nExpected shape:\n%s", err, indent2(SchemaExampleFor("brainstorm"))))
+		}
+		body["proposals"] = rendered
+		body["structured"] = resp
+	} else {
+		body["proposals"] = strings.Join(rest, " ")
+	}
+	post("/api/office/agent/brainstorm/response", body)
 	fmt.Println("Brainstorm proposals submitted.")
 }
 
 func handleLeaderTasks(args []string) {
 	if len(args) < 2 || args[0] != "respond" {
-		fatal("Usage: cm leader-tasks respond <content>")
+		fatal("Usage: cm leader-tasks respond <content> | --json '<schema body>'\n" +
+			"  JSON shape:\n" + indent2(SchemaExampleFor("leader-tasks")))
 	}
-	content := strings.Join(args[1:], " ")
-	post("/api/office/agent/leader-tasks/response", map[string]interface{}{
-		"sessionId": sessionID, "content": content,
-	})
+	rest := args[1:]
+	body := map[string]interface{}{"sessionId": sessionID}
+	if jsonStr, ok := extractFlag(&rest, "--json"); ok {
+		lt, rendered, err := DecodeLeaderTasksJSON(jsonStr)
+		if err != nil {
+			fatal(fmt.Sprintf("--json validation failed: %v\nExpected shape:\n%s", err, indent2(SchemaExampleFor("leader-tasks"))))
+		}
+		body["content"] = rendered
+		body["structured"] = lt
+	} else {
+		body["content"] = strings.Join(rest, " ")
+	}
+	post("/api/office/agent/leader-tasks/response", body)
 	fmt.Println("Leader task assignments submitted.")
+}
+
+// extractFlag removes the first `--flagName <value>` occurrence from
+// args (in place) and returns the value. Used by the standup /
+// brainstorm / leader-tasks handlers to pull out --json without
+// disturbing the positional rest. Returns ("", false) when the flag
+// is absent.
+func extractFlag(args *[]string, flagName string) (string, bool) {
+	for i, a := range *args {
+		if a != flagName {
+			continue
+		}
+		if i+1 >= len(*args) {
+			return "", true // flag without value -- treat as empty
+		}
+		value := (*args)[i+1]
+		// Remove flag + value from the slice.
+		*args = append((*args)[:i], (*args)[i+2:]...)
+		return value, true
+	}
+	return "", false
+}
+
+// indent2 prefixes every line of s with two spaces so multi-line
+// usage examples render cleanly under "Usage: ..." headers.
+func indent2(s string) string {
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = "  " + l
+	}
+	return strings.Join(lines, "\n")
 }
 
 func handleReflect(args []string) {
@@ -802,6 +871,106 @@ func handleDevCreds(args []string) {
 	}
 }
 
+// handleAsk implements `cm ask`. Three forms:
+//
+//	cm ask "<question>" [--about <taskId>] [--wait 5m]
+//	cm ask answer <questionId> "<answer>"
+//	cm ask list
+//
+// The blocking form has its own HTTP client (longer timeout than the
+// 15s default) because it intentionally sits on the connection while
+// the office rotates through recipients.
+func handleAsk(args []string) {
+	if len(args) < 1 {
+		fatal("Usage: cm ask <question> [--about <taskId>] [--wait 5m]\n  cm ask answer <questionId> <answer>\n  cm ask list")
+	}
+	switch args[0] {
+	case "answer":
+		if len(args) < 3 {
+			fatal("Usage: cm ask answer <questionId> <answer>")
+		}
+		post("/api/office/agent/ask/answer", map[string]interface{}{
+			"sessionId":     sessionID,
+			"fromSessionId": sessionID,
+			"questionId":    args[1],
+			"answer":        strings.Join(args[2:], " "),
+		})
+		fmt.Println("Answer submitted.")
+		return
+	case "list":
+		printJSON(get(fmt.Sprintf("/api/office/agent/ask/list?sessionId=%s", url.QueryEscape(sessionID))))
+		return
+	}
+
+	// Blocking ask form. Parse positional question text + flags.
+	question, flags := parseArgsAndFlags(args)
+	if question == "" {
+		fatal("Usage: cm ask <question> [--about <taskId>] [--wait 5m]")
+	}
+	wait := 5 * time.Minute
+	if w, ok := flags["wait"]; ok {
+		parsed, err := time.ParseDuration(w)
+		if err != nil {
+			fatal(fmt.Sprintf("invalid --wait duration %q: %v", w, err))
+		}
+		wait = parsed
+	}
+
+	// Long-poll client: sit on the request as long as the server might
+	// hold it, plus a small slack for the round trip. Independent of the
+	// package-level `client` so other CLI calls keep their tight 15s
+	// timeout.
+	askClient := &http.Client{Timeout: wait + 30*time.Second}
+	body, _ := json.Marshal(map[string]interface{}{
+		"sessionId":     sessionID,
+		"fromSessionId": sessionID,
+		"content":       question,
+		"aboutTaskId":   flags["about"],
+		"waitSeconds":   int(wait.Seconds()),
+	})
+	requireEnv()
+	req, err := http.NewRequest("POST", apiURL+"/api/office/agent/ask", bytes.NewReader(body))
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	req.Header.Set("Content-Type", "application/json")
+	addAgentAuth(req)
+	resp, err := askClient.Do(req)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		text, _ := io.ReadAll(resp.Body)
+		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
+	}
+	var out struct {
+		Success    bool     `json:"success"`
+		QuestionID string   `json:"questionId"`
+		Status     string   `json:"status"`
+		Answer     string   `json:"answer"`
+		AnsweredBy string   `json:"answeredBy"`
+		Tried      []string `json:"tried"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		fatal("decode error: " + err.Error())
+	}
+	switch out.Status {
+	case "answered":
+		fmt.Printf("status: answered (by %s, qid: %s)\n%s\n", out.AnsweredBy, out.QuestionID, out.Answer)
+	case "timeout":
+		fmt.Printf("status: timeout (qid: %s, asked: %s)\nNo one answered in time. Run `cm task blocked <taskId>` to escalate.\n",
+			out.QuestionID, strings.Join(out.Tried, ", "))
+		os.Exit(2)
+	case "no-recipient":
+		fmt.Printf("status: no-recipient (qid: %s)\nNobody on the team is available right now. Run `cm task blocked <taskId>` to escalate.\n",
+			out.QuestionID)
+		os.Exit(2)
+	default:
+		fmt.Printf("status: %s (qid: %s)\n", out.Status, out.QuestionID)
+	}
+}
+
 func handleSkill(args []string) {
 	if len(args) < 1 {
 		fatal("Usage: cm skill <list|read|create|search> ...")
@@ -1045,6 +1214,15 @@ Commands:
   locks                               List active file locks
   roster                              Get team roster
   message <toSessionId> <content>     Send message to teammate
+  ask <question> [--about <taskId>] [--wait 5m]
+                                      Ask the lead (fallback: non-busy teammate);
+                                      blocks until answered or timeout. Status
+                                      "answered" prints the reply; "timeout" or
+                                      "no-recipient" exit non-zero so scripts can
+                                      escalate via cm task blocked. See
+                                      cm skill read office-ask-for-help.
+  ask answer <questionId> <answer>    Reply to a question addressed to you
+  ask list                            List pending questions for you
   skill list|read|create|search       Manage shared skills
   memory read|write|append            Manage agent memory (flat)
   memory section <name> [content]     Read or overwrite a memory section

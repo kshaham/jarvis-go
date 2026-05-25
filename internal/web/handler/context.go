@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/claudeman/jarvis-go/internal/cases"
+	"github.com/claudeman/jarvis-go/internal/claudehooks"
 	"github.com/claudeman/jarvis-go/internal/integrations"
 	"github.com/claudeman/jarvis-go/internal/notifications"
 	"github.com/claudeman/jarvis-go/internal/office"
@@ -41,6 +42,8 @@ type Context struct {
 	TemplateStore       *templates.Store
 	TeamTemplateStore   *teamtemplates.Store
 	AgentTokenMgr       *auth.AgentTokenManager
+	MobileTokenMgr      *auth.MobileTokenManager
+	ToolPolicy          *claudehooks.ToolPolicyStore
 	Scheduler           *scheduler.Store
 	SchedulerRunner     *scheduler.Runner
 	Notifications       *notifications.Store
@@ -123,6 +126,27 @@ func (ctx *Context) cleanupSessionResources(sessionID string) {
 		}
 	}
 	ctx.ActivePlanOrchestratorsMu.Unlock()
+}
+
+// initSessionTrackers installs the Ralph + RunSummary trackers for
+// a freshly-created session. Symmetric with cleanupSessionResources
+// — every CreateSession callsite must invoke this so the dashboard's
+// /api/sessions/{id}/ralph + /run-summary endpoints have populated
+// state to serve.
+//
+// Pre-extraction the same five lines were inlined at 5 handler call
+// sites (QuickStart, GeneratePlanDetailed, ImportSession, two clone
+// paths, the bare create-session). One site dropped the RunSummary
+// install at some point and silently broke the run-summary panel
+// until the next refactor pass; centralising removes that footgun.
+func (ctx *Context) initSessionTrackers(sessionID string) {
+	ctx.RalphTrackersMu.Lock()
+	ctx.RalphTrackers[sessionID] = ralph.NewTracker()
+	ctx.RalphTrackersMu.Unlock()
+
+	ctx.RunSummariesMu.Lock()
+	ctx.RunSummaries[sessionID] = runsummary.New(sessionID)
+	ctx.RunSummariesMu.Unlock()
 }
 
 // ResolveWorkingDir reads the configured allowlist from settings (or falls
@@ -208,67 +232,11 @@ func (ctx *Context) getProviderEnvVars() map[string]string {
 	return env
 }
 
-// Z.AI model rate limits (max concurrent requests per model).
-var zaiModelRateLimits = map[string]int{
-	"glm-5.1":       2,
-	"glm-5":         2,
-	"glm-4.7":       3,
-	"glm-4.7-flash": 5,
-	"glm-4.5-air":   5,
-}
-
-// zaiModelDowngradePath defines the fallback chain when a model's slots are full.
-var zaiModelDowngradePath = []string{"glm-5.1", "glm-5", "glm-4.7", "glm-4.7-flash", "glm-4.5-air"}
-
-// AllocateZAIModels distributes models across agents to respect rate limits.
-// For each agent, it tries to use the requested model; if that model's concurrent
-// slots are full, it cascades down to the next model version.
-// Returns a map of memberID -> allocated model (for the Sonnet/primary tier).
-func AllocateZAIModels(requestedModels map[string]string, memberIDs []string) map[string]string {
-	allocated := make(map[string]string)
-	usage := make(map[string]int) // model -> count of agents assigned
-
-	for _, id := range memberIDs {
-		requested := requestedModels[id]
-		if requested == "" {
-			requested = "glm-5.1"
-		}
-
-		// Try the requested model, then cascade down
-		assigned := false
-		startIdx := -1
-		for i, m := range zaiModelDowngradePath {
-			if m == requested {
-				startIdx = i
-				break
-			}
-		}
-		if startIdx < 0 {
-			startIdx = 0 // unknown model, start from top
-		}
-
-		for i := startIdx; i < len(zaiModelDowngradePath); i++ {
-			model := zaiModelDowngradePath[i]
-			limit := zaiModelRateLimits[model]
-			if limit == 0 {
-				limit = 3 // default
-			}
-			if usage[model] < limit {
-				allocated[id] = model
-				usage[model]++
-				assigned = true
-				break
-			}
-		}
-		if !assigned {
-			// All slots full, use the lowest model as fallback
-			allocated[id] = "glm-4.7"
-			usage["glm-4.7"]++
-		}
-	}
-
-	return allocated
-}
+// AllocateZAIModels was moved to internal/office.AllocateZAIModels.
+// This var keeps the existing local-name call sites compiling without
+// churn during the migration; the canonical implementation lives in
+// internal/office/zai_allocation.go.
+var AllocateZAIModels = office.AllocateZAIModels
 
 // getProviderEnvVarsFor returns env vars for a specific provider/model combination.
 // Used for per-member overrides in office team spawning.

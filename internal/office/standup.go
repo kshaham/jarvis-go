@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // StandupMessage represents one entry in the standup transcript.
@@ -534,7 +536,9 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 		}
 
 		// Wait for leader response and process task assignments (Gap 3+4+5).
-		go m.processLeaderTaskResponse(slot, agent, agents, sessions, teamMission)
+		safego.Go("office.processLeaderTaskResponse", func() {
+			m.processLeaderTaskResponse(slot, agent, agents, sessions, teamMission)
+		})
 	}
 }
 
@@ -553,7 +557,14 @@ func (m *Manager) processLeaderTaskResponse(slot *waitSlot, leader *AgentState, 
 	case response = <-slot.ch():
 		slog.Info("Leader task response received", "leader", leader.Config.Name, "len", len(response))
 	case <-timeout.C:
-		slog.Warn("Leader task response timeout", "leader", leader.Config.Name)
+		// 12h-unattended fallback: pre-fix, a leader that failed to
+		// respond left every other agent idle until the next standup
+		// (which itself could fail). Broadcast a "self-direct"
+		// prompt to every non-leader agent so they keep working
+		// against the team mission instead of sitting silent.
+		slog.Warn("Leader task response timeout — broadcasting self-direct fallback",
+			"leader", leader.Config.Name)
+		m.broadcastSelfDirectFallback(allAgents, leader, sessions, teamMission)
 		return
 	}
 
@@ -703,6 +714,55 @@ func parseTaskLine(line string) *parsedTaskLine {
 		Description: description,
 		Priority:    priority,
 	}
+}
+
+// broadcastSelfDirectFallback runs when processLeaderTaskResponse
+// hits its 5-min timeout without a parseable leader response. Sends
+// each non-leader agent a "self-direct" prompt so they keep working
+// against the team mission instead of idling for the rest of the
+// standup interval.
+//
+// Pre-fix, a single unresponsive leader could waste the entire
+// remaining 12h window — agents waited for tasks that never arrived
+// and the next standup might fail the same way. This fallback keeps
+// the team productive degraded rather than blocked.
+//
+// Broadcasts office:standupLeaderTimeout so operators see the
+// degraded mode on the dashboard.
+func (m *Manager) broadcastSelfDirectFallback(allAgents []*AgentState, leader *AgentState, sessions SessionStore, teamMission string) {
+	if sessions == nil {
+		return
+	}
+	missionLine := ""
+	if teamMission != "" {
+		missionLine = "\n[Team Mission] " + teamMission
+	}
+	prompt := "[SELF-DIRECT FALLBACK] The team lead didn't respond to the standup task-assignment prompt within 5 minutes. " +
+		"To keep the team moving, pick the highest-value task from your own backlog " +
+		"(use `cm task list` to inspect) and resume work. If you have nothing queued, " +
+		"propose one concrete next step toward the team mission and start on it." + missionLine
+
+	notified := 0
+	for _, agent := range allAgents {
+		if agent == nil || leader != nil && agent.SessionID == leader.SessionID {
+			continue
+		}
+		if sessions.WriteInkPrompt(agent.SessionID, prompt) {
+			notified++
+		}
+	}
+
+	leaderName := ""
+	if leader != nil && leader.Config != nil {
+		leaderName = leader.Config.Name
+	}
+	m.broadcast("office:standupLeaderTimeout", map[string]interface{}{
+		"leader":           leaderName,
+		"selfDirectedAgents": notified,
+		"timestamp":        time.Now().UnixMilli(),
+	})
+	slog.Info("Self-direct fallback broadcast complete",
+		"leader", leaderName, "agentsNotified", notified)
 }
 
 // injectTaskQueue sends a task queue prompt to an agent's session.

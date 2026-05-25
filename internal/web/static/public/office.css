@@ -601,61 +601,9 @@
   margin: 4px 2px;
 }
 
-/* F4 · Budget pill + insights progress bar */
-.budget-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px;
-  border-radius: 99px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
-  font-size: 11px;
-  font-family: var(--mono-stack);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.budget-pill[data-tier="ok"]    { color: var(--success); border-color: rgba(34, 197, 94, 0.3); }
-.budget-pill[data-tier="mid"]   { color: var(--accent-hi); border-color: rgba(59, 130, 246, 0.35); }
-.budget-pill[data-tier="warn"]  { color: var(--warn); border-color: rgba(234, 179, 8, 0.45); background: rgba(234, 179, 8, 0.08); }
-.budget-pill[data-tier="alert"] { color: var(--error); border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.1); font-weight: 600; }
-.budget-pill .budget-pill-label {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  font-family: inherit;
-}
-
-.insight-budget-bar {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
-}
-.insight-budget-bar-track {
-  height: 6px;
-  background: var(--bg-elev);
-  border-radius: 99px;
-  overflow: hidden;
-}
-.insight-budget-bar-fill {
-  height: 100%;
-  background: var(--success);
-  border-radius: 99px;
-  transition: width 320ms ease-out, background-color 200ms ease-out;
-}
-.insight-budget-bar-fill[data-tier="mid"]   { background: var(--accent); }
-.insight-budget-bar-fill[data-tier="warn"]  { background: var(--warn); }
-.insight-budget-bar-fill[data-tier="alert"] { background: var(--error); }
-.insight-budget-bar-meta {
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--mono-stack);
-  font-size: 10px;
-  color: var(--text-muted);
-}
+/* (F4 · Budget pill + insights progress bar were removed when jarvis
+   switched to subscription-only providers; dollar caps no longer apply
+   so the UI element was retired with them.) */
 
 /* F5 · Quick-add task modal */
 .quick-add-modal .member-modal {
@@ -2170,6 +2118,47 @@ p, .agent-card-task, .agent-activity-item {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* R37 · session-mode badge ("via SDK" / "via hooks" / "via PTY").
+   Subtle outline so it groups visually with autonomy/learnings but
+   doesn't compete with score / status badges for attention. The
+   hooks variant gets a faint accent because it's the recommended
+   path post-2026-06-15. */
+.session-mode-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border, #2a2a30);
+  color: var(--text-muted, #888);
+  background: transparent;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.session-mode-badge.mode-hooks {
+  border-color: rgba(74, 158, 255, 0.45);
+  color: #6cb6ff;
+}
+.session-mode-badge.mode-sdk {
+  border-color: rgba(255, 200, 87, 0.35);
+  color: #b78d3a;
+}
+.session-mode-badge.mode-legacy {
+  border-color: rgba(140, 140, 140, 0.35);
+  color: #6c6c6c;
+}
+
+/* R37 · brief flash to draw operator attention to an agent that just
+   raised a Claude Code Notification (permission request etc).
+   Two-second pulse using box-shadow so it doesn't shift layout. */
+@keyframes agentCardFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 178, 64, 0.85); }
+  60%  { box-shadow: 0 0 0 8px rgba(255, 178, 64, 0.0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 178, 64, 0.0); }
+}
+.agent-card-flash {
+  animation: agentCardFlash 2.2s ease-out 1;
 }
 
 /* Tool indicator wrapper */
@@ -8396,4 +8385,105 @@ p, .agent-card-task, .agent-activity-item {
 .insight-narrative-body .hl-alert { color: var(--error); font-weight: 600; }
 
 /* ========== END Round 7 ========== */
+
+/* ========== Knowledge tab (Tier 4 self-improvement) ========== */
+.knowledge-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 12px 0 20px;
+}
+.knowledge-stat-tile {
+  background: var(--surface-2, #1c1d22);
+  border: 1px solid var(--border, rgba(255,255,255,0.06));
+  border-radius: 6px;
+  padding: 12px 14px;
+  text-align: center;
+}
+.knowledge-stat-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  line-height: 1.1;
+}
+.knowledge-stat-label {
+  font-size: 11px;
+  color: var(--text-secondary, #9ca3af);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.knowledge-section {
+  margin-top: 24px;
+}
+.knowledge-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--text-primary, #fff);
+}
+.knowledge-section-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #9ca3af);
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+.knowledge-table-wrap {
+  overflow-x: auto;
+}
+.knowledge-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.knowledge-table th,
+.knowledge-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+}
+.knowledge-table th {
+  font-weight: 600;
+  color: var(--text-secondary, #9ca3af);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+.knowledge-table td code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-primary, #fff);
+}
+.knowledge-empty {
+  text-align: center;
+  color: var(--text-secondary, #9ca3af);
+  padding: 18px 0;
+  font-style: italic;
+}
+.knowledge-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-secondary, #9ca3af);
+}
+.knowledge-pill-promoted {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+}
+.knowledge-pill-revoked {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+}
+.panel-btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.32);
+}
+.panel-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.22);
+}
+/* ========== END Knowledge tab ========== */
 

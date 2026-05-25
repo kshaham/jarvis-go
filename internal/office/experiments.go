@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/claudeman/jarvis-go/internal/library"
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // ExperimentRecord captures the outcome of one team session (spawn to shutdown).
@@ -29,6 +32,10 @@ func experimentsPath() string {
 }
 
 // RecordExperiment appends a record to the experiment log (append-only JSONL).
+// Also mirrors the record into the knowledge library as a markdown
+// projection so PageIndex can index team-level outcomes alongside
+// per-task experiences. The mirror runs in a safego goroutine so a
+// library failure can't affect the canonical jsonl write.
 func RecordExperiment(record ExperimentRecord) error {
 	path := experimentsPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -45,9 +52,56 @@ func RecordExperiment(record ExperimentRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(append(data, '\n'))
-	return err
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return err
+	}
+
+	// Mirror to library. Wrapped so failure here can't surface as
+	// an error to the canonical record's caller — the jsonl write
+	// already succeeded.
+	safego.Go("library.writeExperiment", func() {
+		libRec := library.ExperimentRecord{
+			ID:              experimentIDFor(record.Timestamp),
+			TeamTemplate:    record.TeamTemplate,
+			Mission:         record.Mission,
+			TaskCount:       record.TaskCount,
+			CompletedCount:  record.CompletedCount,
+			AvgScore:        record.AvgScore,
+			DurationMS:      durationMillis(record.Duration),
+			TopPerformer:    record.TopPerformer,
+			BottomPerformer: record.BottomPerformer,
+			Timestamp:       record.Timestamp,
+		}
+		if werr := library.WriteExperiment(libRec); werr != nil {
+			slog.Debug("library experiment write skipped", "err", werr)
+		}
+	})
+	return nil
 }
+
+// experimentIDFor builds a stable slug from the record timestamp.
+// Format: exp-YYYYMMDD-HHMMSS. Library writes overwrite when the
+// same instant produces the same ID — fine because RecordExperiment
+// is only called once per shutdown.
+func experimentIDFor(t time.Time) string {
+	return "exp-" + t.UTC().Format("20060102-150405")
+}
+
+// durationMillis converts the human-readable duration string the
+// JSONL record carries back into milliseconds for the library
+// projection. Tolerant of parse failures — a bad string just yields
+// 0 instead of failing the whole mirror.
+func durationMillis(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0
+	}
+	return d.Milliseconds()
+}
+
 
 // LoadExperimentHistory reads all experiment records from the JSONL log.
 // Returns an empty slice if the file is missing or unreadable.

@@ -2,6 +2,7 @@ package office
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -66,6 +67,83 @@ func learningsDir() string {
 // learningPath returns the file path for an agent's learning store.
 func learningPath(configID string) string {
 	return filepath.Join(learningsDir(), configID+".json")
+}
+
+// LearningFileEntry describes one learning file on disk. Surfaced
+// by ListLearningFiles for the dashboard's "agents I've taught
+// before" picker.
+type LearningFileEntry struct {
+	ConfigID string `json:"configId"`
+	File     string `json:"file"`
+	// Modified is RFC3339-formatted; empty when stat() failed.
+	Modified string `json:"modified"`
+}
+
+// ListLearningFiles scans the learnings directory and returns one
+// entry per *.json file. Returns an empty slice (not nil) when the
+// directory doesn't exist — the dashboard can render an empty list
+// without a guard.
+//
+// Pure file I/O. The handler previously inlined the same walk.
+func ListLearningFiles() []LearningFileEntry {
+	out := []LearningFileEntry{}
+	entries, err := os.ReadDir(learningsDir())
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		entry := LearningFileEntry{
+			ConfigID: strings.TrimSuffix(e.Name(), ".json"),
+			File:     e.Name(),
+		}
+		if info, infoErr := e.Info(); infoErr == nil {
+			entry.Modified = info.ModTime().Format(time.RFC3339)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// ErrLearningsNotFound is returned by LoadLearningsForUI when the
+// file doesn't exist. The handler maps this to an empty-array
+// response rather than a 404 — the dashboard treats "no learnings
+// yet" as the empty state.
+var ErrLearningsNotFound = errors.New("office: learnings file not found")
+
+// LoadLearningsForUI reads a config's learning file and returns the
+// canonical learnings array (the contents of the `learnings` field
+// in AgentLearningData) for the dashboard to render.
+//
+// Distinguished from LoadLearningData by the return shape: this
+// helper returns just the entries (whatever shape they're in on
+// disk), while LoadLearningData returns the full typed wrapper.
+//
+// Returns ErrLearningsNotFound when the file doesn't exist; the
+// handler maps this to the empty-state response. Other I/O / parse
+// errors are returned with context.
+func LoadLearningsForUI(configID string) (interface{}, error) {
+	data, err := os.ReadFile(learningPath(configID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrLearningsNotFound
+		}
+		return nil, fmt.Errorf("read learnings file: %w", err)
+	}
+	var parsed struct {
+		ConfigID  string      `json:"configId"`
+		Name      string      `json:"name"`
+		Learnings interface{} `json:"learnings"`
+	}
+	if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
+		return nil, fmt.Errorf("parse learnings file: %w", jsonErr)
+	}
+	if parsed.Learnings == nil {
+		return []interface{}{}, nil
+	}
+	return parsed.Learnings, nil
 }
 
 // LoadLearningData reads the full AgentLearningData for a given agent.

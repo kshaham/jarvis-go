@@ -123,6 +123,91 @@ func (w *Watcher) RemoveAgent(agentID string) bool {
 	return true
 }
 
+// OnHookStart registers a subagent that was just announced via the
+// Claude SubagentStart hook (R3.2). Faster than the 10-second scan
+// tick: dashboard shows the agent immediately instead of waiting for
+// the next filesystem walk. The scan loop continues to run -- when it
+// finds the JSONL file it fills in transcript-derived fields (model,
+// tokens, tool counts) on the same SubagentInfo record this method
+// created.
+//
+// agentType is Claude's documented matcher value (e.g. "Explore",
+// "general-purpose", or a custom name); we treat it as the agent's
+// human description until a richer one shows up in the transcript.
+// agentID is the unique subagent ID Claude assigns; same key the
+// scan loop uses, so the two paths converge naturally.
+func (w *Watcher) OnHookStart(sessionID, agentType, agentID string) {
+	if agentID == "" {
+		return
+	}
+	now := time.Now()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if existing, ok := w.agents[agentID]; ok {
+		// Already tracked (scan loop got there first, or duplicate
+		// hook). Just bump LastActivityAt + accessOrder so eviction
+		// doesn't drop a known-live agent.
+		existing.LastActivityAt = now
+		w.accessOrder[agentID] = now
+		return
+	}
+	w.agents[agentID] = &SubagentInfo{
+		AgentID:        agentID,
+		SessionID:      sessionID,
+		Description:    agentType,
+		Status:         StatusActive,
+		StartedAt:      now,
+		LastActivityAt: now,
+	}
+	w.accessOrder[agentID] = now
+	if len(w.agents) > maxTrackedAgents {
+		w.evictOldestLocked()
+	}
+	select {
+	case w.events <- SubagentDiscovered{Info: *w.agents[agentID]}:
+	default:
+		slog.Warn("subagent: events channel full; dropping discovered event", "agentId", agentID)
+	}
+}
+
+// OnHookStop marks a subagent as completed in response to the Claude
+// SubagentStop hook. If we haven't seen the agent yet (hook arrives
+// before scan), we still flip the bookkeeping so the dashboard
+// reflects the lifecycle.
+func (w *Watcher) OnHookStop(sessionID, agentID string) {
+	if agentID == "" {
+		return
+	}
+	now := time.Now()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	agent, exists := w.agents[agentID]
+	if !exists {
+		// Hook fired before any scan tick caught the file. Stub a
+		// minimal record so the SSE consumer sees a "completed" event.
+		agent = &SubagentInfo{
+			AgentID:        agentID,
+			SessionID:      sessionID,
+			Status:         StatusCompleted,
+			StartedAt:      now,
+			LastActivityAt: now,
+		}
+		w.agents[agentID] = agent
+	}
+	prevStart := agent.StartedAt
+	if prevStart.IsZero() {
+		prevStart = now
+	}
+	agent.Status = StatusCompleted
+	agent.LastActivityAt = now
+	w.accessOrder[agentID] = now
+	select {
+	case w.events <- SubagentCompleted{Info: *agent, Duration: now.Sub(prevStart)}:
+	default:
+		slog.Warn("subagent: events channel full; dropping completed event", "agentId", agentID)
+	}
+}
+
 func (w *Watcher) scanLoop() {
 	ticker := time.NewTicker(scanInterval)
 	defer ticker.Stop()

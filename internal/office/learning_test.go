@@ -2,6 +2,7 @@ package office
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,125 @@ func withTempLearningsDir(t *testing.T) (string, func()) {
 
 // TestLoadLearningData_Empty verifies that a missing file returns a zero-value
 // AgentLearningData with initialised (non-nil) slices.
+func TestListLearningFiles_EmptyDirReturnsEmptySlice(t *testing.T) {
+	_, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	got := ListLearningFiles()
+	if got == nil {
+		t.Error("expected non-nil slice")
+	}
+	if len(got) != 0 {
+		t.Errorf("len=%d want 0", len(got))
+	}
+}
+
+func TestListLearningFiles_ReturnsOneEntryPerJSONFile(t *testing.T) {
+	dir, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"alpha.json", "beta.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Drop a non-JSON file + a subdir to verify they're skipped.
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ListLearningFiles()
+	if len(got) != 2 {
+		t.Fatalf("len=%d want 2 (got %+v)", len(got), got)
+	}
+	ids := map[string]bool{}
+	for _, e := range got {
+		ids[e.ConfigID] = true
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		if !ids[want] {
+			t.Errorf("missing ConfigID %q in result: %+v", want, ids)
+		}
+	}
+}
+
+func TestLoadLearningsForUI_MissingFileReturnsErrLearningsNotFound(t *testing.T) {
+	_, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	_, err := LoadLearningsForUI("ghost-agent")
+	if !errors.Is(err, ErrLearningsNotFound) {
+		t.Errorf("expected ErrLearningsNotFound, got %v", err)
+	}
+}
+
+func TestLoadLearningsForUI_NullLearningsFieldReturnsEmptySlice(t *testing.T) {
+	dir, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "alpha.json"),
+		[]byte(`{"configId":"alpha","name":"Alpha","learnings":null}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadLearningsForUI("alpha")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	arr, ok := got.([]interface{})
+	if !ok {
+		t.Fatalf("expected []interface{}, got %T", got)
+	}
+	if len(arr) != 0 {
+		t.Errorf("len=%d want 0", len(arr))
+	}
+}
+
+func TestLoadLearningsForUI_PopulatedReturnsArray(t *testing.T) {
+	dir, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"configId":"alpha","name":"Alpha","learnings":[{"category":"x","content":"y"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "alpha.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadLearningsForUI("alpha")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	arr, ok := got.([]interface{})
+	if !ok {
+		t.Fatalf("expected []interface{}, got %T", got)
+	}
+	if len(arr) != 1 {
+		t.Errorf("len=%d want 1", len(arr))
+	}
+}
+
+func TestLoadLearningsForUI_MalformedJSONReturnsError(t *testing.T) {
+	dir, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte(`not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadLearningsForUI("bad")
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
+	}
+	if errors.Is(err, ErrLearningsNotFound) {
+		t.Errorf("malformed JSON should NOT return ErrLearningsNotFound")
+	}
+}
+
 func TestLoadLearningData_Empty(t *testing.T) {
 	_, cleanup := withTempLearningsDir(t)
 	defer cleanup()

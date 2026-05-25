@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/claudeman/jarvis-go/internal/safego"
 )
 
 // execCommand + execExitError indirect the os/exec types so tests can
@@ -54,6 +56,12 @@ type Manager struct {
 	wrapUpStartedAt    time.Time
 	autoStandupEnabled bool
 	curiosityEnabled   bool
+
+	// memifyLastRunAt gates the knowledge-library memify sweep so
+	// it fires roughly every memifyInterval instead of every idle
+	// tick. Zero on a fresh manager — the first eligible tick runs
+	// it.
+	memifyLastRunAt time.Time
 	// R25 · When paused, the recovery ticker skips nudging, replenishment,
 	// auto-standup, and auto-brainstorms. In-flight agent turns complete
 	// normally — pause is "no new input", not "suspend mid-step". Unpause
@@ -62,10 +70,6 @@ type Manager struct {
 	pausedAt    time.Time
 	pauseReason string
 	teamMission string
-	// Daily USD spend budget for the whole team. 0 = unset / no budget.
-	// Purely a UI signal — used by the header budget pill and the
-	// Insights progress bar. Persisted across restarts.
-	teamDailyBudget float64
 	// Dev instances keyed by slot name (default slot is "app"; fullstack
 	// teams can have e.g. "frontend" + "api"). One dev server per slot.
 	// Persisted individually at ~/.jarvis/office-memory/team-dev-<slot>.json.
@@ -77,6 +81,14 @@ type Manager struct {
 	// a "current team" banner while a team is running.
 	lastTemplateID    string
 	lastWorkingDir    string
+	// R3.6 · Optional PR linkage. When the operator spawned the team
+	// via the "work on PR #N" flow, the PR number lives here so the
+	// dashboard / mobile / external tooling can map PR -> session IDs
+	// (drives `claude --from-pr <n>` resume hints). Zero = no PR
+	// linkage. Persisted on the in-memory team state only — recreated
+	// on next spawn rather than disk-persisted because PRs are
+	// short-lived and the linkage rarely outlives a team session.
+	teamPRNumber int
 	lastBrainstormAt  time.Time
 	lastWaterCoolerAt time.Time
 	triageAttempts    map[string]int       // taskID -> triage attempt count
@@ -87,6 +99,22 @@ type Manager struct {
 	// checkBlockedTasksForLeaderTriage so orphaned entries from deleted
 	// agents don't linger forever.
 	lastRecoveryAt map[string]time.Time // sessionID -> last recovery prompt time (backoff)
+
+	// Q&A primitive (cm ask). Populated lazily by AskQuestion / AnswerQuestion
+	// in questions.go. pendingQuestions is keyed by question ID;
+	// lastAskAt enforces a per-asker, per-question-content cooldown so a
+	// stuck agent can't pin a teammate by re-asking the same question on
+	// every turn.
+	pendingQuestions map[string]*Question
+	lastAskAt        map[string]time.Time
+
+	// daemonURL is the base URL spawned `claude` processes use to reach
+	// this daemon's /api/claude/hooks/{sessionID}/{event} endpoints.
+	// Set by SetDaemonURL during server bootstrap; baked into the
+	// generated .claude/settings.local.json per spawn (see worktree.go).
+	// Empty means hooks-mode spawns will skip settings injection and
+	// fall back to legacy ModeClaude behaviour.
+	daemonURL string
 
 	idleTicker   *time.Ticker
 	monitorDone  chan struct{}
@@ -191,6 +219,8 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		triageAttempts:     make(map[string]int),
 		lastTriageAt:       make(map[string]time.Time),
 		lastRecoveryAt:     make(map[string]time.Time),
+		pendingQuestions:   make(map[string]*Question),
+		lastAskAt:          make(map[string]time.Time),
 		events:             make(chan OfficeEvent, 64),
 	}
 	mgr.loadPersistedMission()
@@ -263,7 +293,7 @@ func (m *Manager) HandleAgentDeath(sessionID string) {
 		}
 		m.mu.RUnlock()
 		if !otherLeadAlive {
-			go m.ClearTeamDevInstance(true)
+			safego.Go("office.clearTeamDevInstance", func() { m.ClearTeamDevInstance(true) })
 		}
 	}
 
@@ -653,7 +683,7 @@ func (m *Manager) SendMessage(from, to, content string) {
 
 	m.broadcast("office:message", msg)
 	m.metrics.TotalMessages.Add(1)
-	go m.persistMessages()
+	safego.Go("office.persistMessages", m.persistMessages)
 
 	// Deliver the message to the target session so the agent sees it.
 	if to != "" && sessions != nil {
@@ -677,6 +707,9 @@ func (m *Manager) GetMessages() []OfficeMessage {
 }
 
 // persistMessages writes the current messages to disk atomically.
+// Errors are logged (not returned) because the call site is a
+// fire-and-forget goroutine; silent failure would hide disk-full /
+// permission / corrupted-state issues operators care about.
 func (m *Manager) persistMessages() {
 	m.mu.RLock()
 	msgs := make([]OfficeMessage, len(m.messages))
@@ -685,17 +718,23 @@ func (m *Manager) persistMessages() {
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		slog.Warn("Could not resolve home dir for office message persistence", "error", err)
 		return
 	}
 	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Warn("Could not create office-memory dir", "dir", dir, "error", err)
+		return
+	}
 	data, err := json.Marshal(msgs)
 	if err != nil {
+		slog.Warn("Could not marshal office messages", "count", len(msgs), "error", err)
 		return
 	}
 	tmp := filepath.Join(dir, "messages.json.tmp")
 	target := filepath.Join(dir, "messages.json")
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		slog.Warn("Could not write office messages tmpfile", "path", tmp, "error", err)
 		return
 	}
 	if err := os.Rename(tmp, target); err != nil {
@@ -1057,6 +1096,23 @@ func (m *Manager) GetSpawnContext() (string, string) {
 	return m.lastTemplateID, m.lastWorkingDir
 }
 
+// SetTeamPRNumber records the PR number the current team is working
+// on (R3.6). Zero clears the linkage. Called from the spawn handler
+// after a successful spawn that included a PR number in the payload.
+func (m *Manager) SetTeamPRNumber(n int) {
+	m.mu.Lock()
+	m.teamPRNumber = n
+	m.mu.Unlock()
+}
+
+// GetTeamPRNumber returns the linked PR number, or 0 when the current
+// team isn't associated with a PR.
+func (m *Manager) GetTeamPRNumber() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.teamPRNumber
+}
+
 // SetTeamMission sets the team mission, persists it to disk, and broadcasts.
 func (m *Manager) SetTeamMission(s string) {
 	trimmed := strings.TrimSpace(s)
@@ -1099,12 +1155,6 @@ func (m *Manager) loadPersistedMission() {
 	missionPath := filepath.Join(homeDir, ".jarvis", "office-memory", "team-mission.txt")
 	if mission, present, loaded := loadTextFile(missionPath, m.broadcast); present && loaded {
 		m.teamMission = mission
-	}
-	// Daily budget lives in its own tiny file so the mission file stays
-	// human-readable plain text. Missing/invalid -> 0 (no budget).
-	budgetPath := filepath.Join(homeDir, ".jarvis", "office-memory", "team-daily-budget.txt")
-	if v, ok := loadFloat64File(budgetPath, m.broadcast); ok {
-		m.teamDailyBudget = v
 	}
 	// Dev instance slots — JSON files in ~/.jarvis/office-memory/ named
 	// team-dev-<slot>.json. Also migrate legacy R13/R14 flat files into
@@ -1180,30 +1230,6 @@ func (m *Manager) loadDevInstances() {
 	_ = os.Remove(filepath.Join(dir, "team-dev-url.txt"))
 	_ = os.Remove(filepath.Join(dir, "team-dev-pid.txt"))
 	_ = os.Remove(filepath.Join(dir, "team-dev-creds.txt"))
-}
-
-// SetTeamDailyBudget updates the daily spend budget (USD) and persists it.
-// 0 means "no budget" and hides the header pill on the frontend.
-func (m *Manager) SetTeamDailyBudget(v float64) {
-	if v < 0 {
-		v = 0
-	}
-	m.mu.Lock()
-	m.teamDailyBudget = v
-	m.mu.Unlock()
-
-	homeDir, _ := os.UserHomeDir()
-	dir := filepath.Join(homeDir, ".jarvis", "office-memory")
-	_ = os.MkdirAll(dir, 0o755)
-	tmpFile := filepath.Join(dir, "team-daily-budget.txt.tmp")
-	targetFile := filepath.Join(dir, "team-daily-budget.txt")
-	// R26 state review: log rename errors + clean up temp.
-	if err := os.WriteFile(tmpFile, []byte(strconv.FormatFloat(v, 'f', -1, 64)), 0o644); err != nil {
-		slog.Warn("failed to persist team daily budget (write tmp)", "err", err)
-	} else if err := os.Rename(tmpFile, targetFile); err != nil {
-		slog.Warn("failed to persist team daily budget (rename)", "err", err)
-		_ = os.Remove(tmpFile)
-	}
 }
 
 // devInstance is one dev-server slot for a team. Keyed by slot name in
@@ -1786,7 +1812,6 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	autoStandupEnabled := m.autoStandupEnabled
 	curiosityEnabled := m.curiosityEnabled
 	teamMission := m.teamMission
-	teamDailyBudget := m.teamDailyBudget
 	// Expose the default "app" slot URL for backward-compat consumers.
 	// The full slot map is available via /api/office/agent/dev-instance/all.
 	var teamDevURL string
@@ -1843,7 +1868,6 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 		"lastBrainstormAt":            lastBrainstormAtMs,
 		"metrics":                     m.metrics.Snapshot(),
 		"teamMission":                 teamMission,
-		"teamDailyBudget":             teamDailyBudget,
 		"teamDevURL":                  teamDevURL,
 	}
 }
@@ -1887,24 +1911,11 @@ func (m *Manager) UpdateOfficeSettings(settings map[string]interface{}) {
 	if v, ok := settings["teamMission"].(string); ok {
 		missionUpdate = v
 	}
-	// teamDailyBudget is applied after releasing the lock so the setter
-	// can persist + lock internally without re-entrant locking.
-	var budgetUpdate *float64
-	if v, ok := settings["teamDailyBudget"].(float64); ok {
-		clamped := v
-		if clamped < 0 {
-			clamped = 0
-		}
-		budgetUpdate = &clamped
-	}
 	m.mu.Unlock()
 
 	// SetTeamMission acquires its own lock, so call after releasing.
 	if missionUpdate != "" {
 		m.SetTeamMission(missionUpdate)
-	}
-	if budgetUpdate != nil {
-		m.SetTeamDailyBudget(*budgetUpdate)
 	}
 }
 
@@ -2011,6 +2022,7 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	provider := a.Provider
 	model := a.Model
 	activeTool := a.ActiveTool
+	sessionMode := a.SessionMode
 	a.mu.Unlock()
 
 	// lastActivityAt is the most recent of "last turn" or "right now" (if
@@ -2045,6 +2057,7 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 		"usage":          usage,
 		"provider":       provider,
 		"model":          model,
+		"sessionMode":    sessionMode, // "sdk" | "hooks" | "legacy" | ""; drives the via-mode badge
 		"lastActivityAt": lastActivityMs,
 		"workingDir":     "",
 		"activeTool":     activeTool,
@@ -2072,6 +2085,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	paused := m.paused
 	pausedSince := m.pausedAt
 	pauseReason := m.pauseReason
+	prNumber := m.teamPRNumber
 	m.mu.RUnlock()
 
 	roster := m.GetRoster()
@@ -2142,6 +2156,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"taskQueues":        taskQueues,
 		"recentAudit":       recentAudit,
 		"wrapUp":            wrapUp,
+		"prNumber":          prNumber,
 		"timestamp":         time.Now().UnixMilli(),
 	}
 }

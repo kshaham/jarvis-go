@@ -155,6 +155,8 @@ func (r *Router) dispatch(job dispatchJob) {
 		err = sendWebhook(r.ctx, r.httpClient, job.spec, job.d)
 	case ChannelLog:
 		err = sendLog(job.spec, job.d)
+	case ChannelExpoPush:
+		err = sendExpoPush(r.ctx, r.httpClient, job.spec, job.d)
 	default:
 		err = errUnknownChannel(job.spec.Type)
 	}

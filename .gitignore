@@ -1,0 +1,36 @@
+# Build outputs
+/jarvis
+/cm
+/jarvis-mcp
+/ptyserver
+/fakeclaude
+/bin/
+/dist/
+
+# Runtime state (operator-owned, bind-mounted into Docker)
+/jarvis-data/
+
+# Local env / secrets
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test artifacts
+*.log
+coverage.out
+
+# Telegram screenshot uploads / scratch
+/tmp-screenshots/
+
+# claude-flow metrics (host telemetry, not source)
+/.claude-flow/
+
+# P13.5 · React island scaffold (internal/web/spa/)
+/internal/web/spa/node_modules/
+/internal/web/spa/dist/
+/internal/web/static/public/react/

@@ -3,14 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"log/slog"
-	"math"
 	"net/http"
-	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/claudeman/jarvis-go/internal/metrics"
 	"github.com/claudeman/jarvis-go/internal/web/request"
 )
 
@@ -195,6 +193,7 @@ func (ctx *Context) GetSettingsAccounts(w http.ResponseWriter, r *http.Request) 
 		"defaultWorkingDir": settings["defaultWorkingDir"],
 		"claudeMode":        settings["claudeMode"],
 		"allowedTools":      settings["allowedTools"],
+		"officeSessionMode": settings["officeSessionMode"], // "sdk" | "hooks" | "legacy"; resolveOfficeSessionMode defaults missing/unknown to "sdk"
 	}
 	request.WriteJSON(w, http.StatusOK, result)
 }
@@ -285,54 +284,10 @@ func (ctx *Context) GetDebugMemory(w http.ResponseWriter, r *http.Request) {
 // GetSystemStats returns system-level statistics.
 // GET /api/system/stats
 func (ctx *Context) GetSystemStats(w http.ResponseWriter, r *http.Request) {
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
-	// RSS in MB (what top/htop shows) -- Sys is total bytes obtained from OS.
-	rssMB := float64(memStats.Sys) / 1024 / 1024
-
-	// CPU: read /proc/self/stat and compute average CPU % from utime+stime.
-	cpuPercent := 0.0
-	if data, err := os.ReadFile("/proc/self/stat"); err == nil {
-		fields := strings.Fields(string(data))
-		if len(fields) > 14 {
-			utime, _ := strconv.ParseFloat(fields[13], 64)
-			stime, _ := strconv.ParseFloat(fields[14], 64)
-			// Convert jiffies to seconds (100 Hz clock)
-			totalCPUSeconds := (utime + stime) / 100.0
-			uptimeSeconds := time.Since(serverStartTime).Seconds()
-			if uptimeSeconds > 0 {
-				cpuPercent = (totalCPUSeconds / uptimeSeconds) * 100.0 / float64(runtime.NumCPU())
-			}
-		}
-	}
-
-	// Frontend reads stats.memory.usedMB and stats.memory.percent
-	// Estimate total system memory from Sys + free (rough approximation)
-	totalMB := rssMB * 4 // Rough estimate: process uses ~25% of system
-	if totalMB < 1024 {
-		totalMB = 1024 // Minimum 1GB assumed
-	}
-	memPercent := (rssMB / totalMB) * 100
-	if memPercent > 100 {
-		memPercent = 100
-	}
-
-	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"cpu": math.Round(cpuPercent*10) / 10,
-		"memory": map[string]interface{}{
-			"usedMB":  math.Round(rssMB*10) / 10,
-			"totalMB": math.Round(totalMB*10) / 10,
-			"percent": math.Round(memPercent*10) / 10,
-		},
-		"goroutines": runtime.NumGoroutine(),
-		"cpus":       runtime.NumCPU(),
-		"goVersion":  runtime.Version(),
-		"allocMB":    float64(memStats.Alloc) / 1024 / 1024,
-		"sysMB":      rssMB,
-		"uptime":     time.Since(serverStartTime).String(),
-		"sessions":   ctx.SessionManager.GetSessionCount(),
-	})
+	// The /proc + runtime + MemStats reading lives in metrics; here
+	// we just feed it the handler-local startTime and the session
+	// count from the session manager.
+	request.WriteJSON(w, http.StatusOK, metrics.SystemStats(serverStartTime, ctx.SessionManager.GetSessionCount()))
 }
 
 // CleanupState performs state cleanup operations.

@@ -37,6 +37,55 @@ func TestAgentState_ActiveTask(t *testing.T) {
 	}
 }
 
+func TestAgentState_CompleteTask_HappyPath(t *testing.T) {
+	a := NewAgentState("s1", "vex", &TeamMemberConfig{})
+	a.AddTask(&Task{ID: "t1", Title: "Ship the feature", Status: TaskInProgress})
+
+	res := a.CompleteTask("t1")
+	if !res.Found {
+		t.Fatal("Found=false; expected true")
+	}
+	if res.AlreadyComplete {
+		t.Error("AlreadyComplete=true on first call; want false")
+	}
+	if res.Title != "Ship the feature" {
+		t.Errorf("Title=%q want Ship the feature", res.Title)
+	}
+	if res.Task == nil {
+		t.Fatal("Task=nil; want non-nil pointer")
+	}
+	if res.Task.Status != TaskCompleted {
+		t.Errorf("Status=%s want TaskCompleted", res.Task.Status)
+	}
+	if res.Task.CompletedAt.IsZero() {
+		t.Error("CompletedAt not set by applyTaskStatusLocked")
+	}
+}
+
+func TestAgentState_CompleteTask_AlreadyComplete(t *testing.T) {
+	a := NewAgentState("s1", "vex", &TeamMemberConfig{})
+	a.AddTask(&Task{ID: "t1", Title: "Done", Status: TaskCompleted})
+
+	res := a.CompleteTask("t1")
+	if !res.Found || !res.AlreadyComplete {
+		t.Errorf("Found=%v AlreadyComplete=%v; want both true",
+			res.Found, res.AlreadyComplete)
+	}
+}
+
+func TestAgentState_CompleteTask_NotFound(t *testing.T) {
+	a := NewAgentState("s1", "vex", &TeamMemberConfig{})
+	a.AddTask(&Task{ID: "t1", Status: TaskPending})
+
+	res := a.CompleteTask("ghost-task")
+	if res.Found {
+		t.Error("Found=true for missing task; want false")
+	}
+	if res.Task != nil {
+		t.Errorf("Task=%+v; want nil for missing task", res.Task)
+	}
+}
+
 func TestAgentState_PendingTaskCount(t *testing.T) {
 	a := NewAgentState("s1", "vex", &TeamMemberConfig{})
 	a.AddTask(&Task{ID: "t1", Status: TaskPending})

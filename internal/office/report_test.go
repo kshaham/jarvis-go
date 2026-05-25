@@ -30,6 +30,37 @@ func TestValidateReportFilename(t *testing.T) {
 	}
 }
 
+func TestGenerateAndBroadcastWrapUpReport_BroadcastsOnSuccess(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newTestManager()
+	var captured struct {
+		event string
+		meta  *WrapUpReportMeta
+	}
+	broadcast := func(event string, data interface{}) {
+		captured.event = event
+		captured.meta, _ = data.(*WrapUpReportMeta)
+	}
+	GenerateAndBroadcastWrapUpReport(m, "manual", "test", broadcast)
+	if captured.event != "office:reportGenerated" {
+		t.Errorf("event=%q want office:reportGenerated", captured.event)
+	}
+	if captured.meta == nil {
+		t.Fatal("no metadata broadcast")
+	}
+	if !ValidateReportFilename(captured.meta.Filename) {
+		t.Errorf("bad filename: %s", captured.meta.Filename)
+	}
+}
+
+func TestGenerateAndBroadcastWrapUpReport_NilBroadcastNoCrash(t *testing.T) {
+	// Documented contract: nil broadcast is safe (test path).
+	t.Setenv("HOME", t.TempDir())
+	m := newTestManager()
+	// Must not panic.
+	GenerateAndBroadcastWrapUpReport(m, "manual", "", nil)
+}
+
 func TestGenerateReport_EmptyTeam(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := newTestManager()

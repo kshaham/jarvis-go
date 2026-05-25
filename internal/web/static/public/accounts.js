@@ -154,7 +154,8 @@
       profile2Name: '',
       defaultWorkingDir: '',
       claudeMode: 'skip-permissions',
-      allowedTools: ''
+      allowedTools: '',
+      officeSessionMode: 'sdk' // R37: default sdk for back-compat with installs predating hooks-mode
     };
   }
 
@@ -202,6 +203,9 @@
     var allowedTools = getElement('appSettingsAllowedTools');
     if (allowedTools) allowedTools.value = settings.allowedTools || '';
 
+    var officeSessionMode = getElement('appSettingsOfficeSessionMode');
+    if (officeSessionMode) officeSessionMode.value = settings.officeSessionMode || 'sdk';
+
     updateProviderSettings();
     updateClaudeModeSettings();
     updateProfileNameDisplayImpl(); // Use non-debounced for initial populate
@@ -223,7 +227,8 @@
       profile2Name: (getElement('appSettingsProfile2Name') || {}).value || '',
       defaultWorkingDir: (getElement('appSettingsDefaultWorkingDir') || {}).value || '',
       claudeMode: (getElement('appSettingsClaudeMode') || {}).value || 'skip-permissions',
-      allowedTools: (getElement('appSettingsAllowedTools') || {}).value || ''
+      allowedTools: (getElement('appSettingsAllowedTools') || {}).value || '',
+      officeSessionMode: (getElement('appSettingsOfficeSessionMode') || {}).value || 'sdk'
     };
 
     // Save ONLY non-sensitive settings to localStorage (no API keys)
@@ -238,7 +243,8 @@
         profile2Name: settings.profile2Name,
         defaultWorkingDir: settings.defaultWorkingDir,
         claudeMode: settings.claudeMode,
-        allowedTools: settings.allowedTools
+        allowedTools: settings.allowedTools,
+        officeSessionMode: settings.officeSessionMode
       };
       localStorage.setItem('jarvis-account-settings-nonsensitive', JSON.stringify(nonSensitiveSettings));
       // Remove old key that may contain sensitive data

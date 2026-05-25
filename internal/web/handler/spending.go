@@ -14,8 +14,10 @@ package handler
 // What remains (purely informational):
 //   - todayCost helper, read from RecordDailyStats
 //   - GetSpendingStatus for the header cost widget in app.js
-//   - The Settings page teamDailyBudget field + office dashboard pill
-//     (driven by officeSettings.teamDailyBudget, not this module)
+//
+// The teamDailyBudget setting + office-page budget pill were removed
+// in a subsequent pass: jarvis runs against subscription-billed
+// providers exclusively, so the operator has no use for a dollar cap.
 //
 // Runaway defense still lives in the R18 per-session turn cap and R19
 // wedged-stop — both quota-agnostic and independent of billing model.

@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/claudeman/jarvis-go/internal/cases"
+	"github.com/claudeman/jarvis-go/internal/claudehooks"
 	"github.com/claudeman/jarvis-go/internal/integrations"
 	"github.com/claudeman/jarvis-go/internal/metrics"
 	"github.com/claudeman/jarvis-go/internal/notifications"
@@ -36,6 +37,33 @@ import (
 	"github.com/claudeman/jarvis-go/internal/web/static"
 )
 
+// officeV2PlaceholderHTML is served by /office-v2 when the React bundle
+// hasn't been built yet. Points operators at the build command. P13.5.
+const officeV2PlaceholderHTML = `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jarvis · Office (React) — not built</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#06080C; color:#E2E8F0; margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .card { max-width:560px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:32px; }
+  h1 { margin:0 0 12px; font-size:20px; font-weight:600; }
+  p  { margin:8px 0; line-height:1.5; color:#94A3B8; font-size:14px; }
+  pre { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); padding:12px 14px; border-radius:8px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:13px; color:#E2E8F0; overflow:auto; }
+  a  { color:#60A5FA; text-decoration:none; } a:hover { text-decoration:underline; }
+</style></head><body>
+<div class="card">
+  <h1>/office-v2 React bundle not built</h1>
+  <p>This route serves the new React island for the office dashboard. The build output (<code>internal/web/static/public/react/</code>) isn't on disk yet.</p>
+  <p>Build it once:</p>
+  <pre>cd internal/web/spa
+npm install
+npm run build</pre>
+  <p>Then reload this page. In the meantime, the classic UI is at <a href="/office">/office</a>.</p>
+  <p style="margin-top:16px;font-size:12px;color:#64748B">See <code>internal/web/spa/README.md</code> for the full dev workflow.</p>
+</div>
+</body></html>`
+
 // Server is the main HTTP server for Jarvis.
 type Server struct {
 	port                int
@@ -47,6 +75,8 @@ type Server struct {
 	csrfStore           *mw.CSRFStore
 	authManager         *auth.Manager
 	agentTokenMgr       *auth.AgentTokenManager
+	mobileTokenMgr      *auth.MobileTokenManager
+	toolPolicy          *claudehooks.ToolPolicyStore
 	officeManager       *office.Manager
 	stateStore          *state.AppState
 	screenManager       *pty.ScreenManager
@@ -101,6 +131,19 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 
 	projectsDir := filepath.Join(homeDir, ".claude", "projects")
 	subagentW := subagent.NewWatcher(ctx, projectsDir)
+
+	// P7.2.7 · Install the daemon-lifetime context as the parent for
+	// office-managed background goroutines (codegraph init, etc.) so
+	// a SIGTERM cancels in-flight subprocesses instead of orphaning
+	// them with their own internal timeouts.
+	office.SetRootContext(ctx)
+
+	// P11.3.10 · ECC embed visibility. Surfaced at boot so operators
+	// chasing a missing agent/command have an immediate answer
+	// ("ecc: 4 agents, 3 commands embedded" should match what they
+	// expect from docs/ECC.md).
+	slog.Info(office.EmbedSummaryForLogging())
+
 	subagentW.Start()
 
 	// Forward subagent events to SSE (panic-safe per-event loop body).
@@ -227,6 +270,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 		os.Exit(1)
 	}
 	agentTokenMgr := auth.NewAgentTokenManager(dataDir)
+	mobileTokenMgr := auth.NewMobileTokenManager(dataDir)
 
 	// Configure trusted-proxy CIDRs for X-Forwarded-For handling. Reads the
 	// `trustedProxyCIDRs` setting (string or []string); default empty means
@@ -260,6 +304,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 		csrfStore:          mw.NewCSRFStore(ctx),
 		authManager:        authMgr,
 		agentTokenMgr:      agentTokenMgr,
+		mobileTokenMgr:     mobileTokenMgr,
 		officeManager:      officeMgr,
 		stateStore:         stateStore,
 		screenManager:      screenMgr,
@@ -355,11 +400,12 @@ func (s *Server) Start() error {
 	router := s.setupRouter()
 
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf(":%d", s.port),
-		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0, // SSE needs unlimited write timeout
-		IdleTimeout:  120 * time.Second,
+		Addr:           fmt.Sprintf(":%d", s.port),
+		Handler:        router,
+		ReadTimeout:    30 * time.Second,
+		WriteTimeout:   0, // SSE needs unlimited write timeout
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 2 << 20, // 2 MB; defends against header-bomb DoS
 	}
 
 	// Start Telegram handler (polling/webhook)
@@ -388,12 +434,13 @@ func (s *Server) Start() error {
 		}
 		httpsPort := s.port + 1
 		tlsServer := &http.Server{
-			Addr:         fmt.Sprintf(":%d", httpsPort),
-			Handler:      router,
-			TLSConfig:    tlsCfg,
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 0,
-			IdleTimeout:  120 * time.Second,
+			Addr:           fmt.Sprintf(":%d", httpsPort),
+			Handler:        router,
+			TLSConfig:      tlsCfg,
+			ReadTimeout:    30 * time.Second,
+			WriteTimeout:   0,
+			IdleTimeout:    120 * time.Second,
+			MaxHeaderBytes: 2 << 20,
 		}
 		slog.Info("Starting HTTPS listener", "port", httpsPort, "tls_dir", filepath.Join(s.dataDir, "tls"))
 		go func() {
@@ -416,11 +463,19 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.notificationsRouter.Stop()
 	}
 	s.telegramHandler.Stop()
-	// R26 state review: AppState.save() debounces writes through a
-	// 500ms timer. Without an explicit Flush on shutdown, any setting
-	// / token-stats update from the last half-second is lost on a
-	// clean SIGTERM. Flush is safe to call multiple times and no-op
-	// when the debounce is idle.
+	// Stop the office's idle-monitoring ticker so the goroutine winds
+	// down with the daemon. Without this, the ticker leaks until
+	// process exit — usually harmless (the OS reclaims everything)
+	// but goroutine leaks show up in pprof and slow down graceful
+	// shutdown waits in tests + restart loops. Idempotent: the
+	// method early-returns when no monitor is running.
+	if s.officeManager != nil {
+		s.officeManager.StopIdleMonitoring()
+	}
+	// AppState.save() debounces writes through a 500ms timer. Without
+	// an explicit Flush on shutdown, any setting / token-stats update
+	// from the last half-second is lost on a clean SIGTERM. Flush is
+	// safe to call multiple times and no-op when the debounce is idle.
 	if s.stateStore != nil {
 		s.stateStore.Flush()
 	}
@@ -428,6 +483,20 @@ func (s *Server) Stop(ctx context.Context) error {
 }
 
 // SSEBroker returns the SSE broker for external event broadcasting.
+// daemonHooksURL returns the base URL spawned `claude` processes use
+// to reach this daemon. Always 127.0.0.1 — Claude Code runs locally
+// in the same host as Jarvis, and the loopback address bypasses any
+// network ACLs the operator might have on the bind interface.
+// Returns empty string if no port is configured (server hasn't
+// finished init yet); office spawns gracefully fall back to legacy
+// ModeClaude in that case.
+func (s *Server) daemonHooksURL() string {
+	if s.port == 0 {
+		return ""
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", s.port)
+}
+
 func (s *Server) SSEBroker() *sse.Broker {
 	return s.sseBroker
 }
@@ -441,8 +510,45 @@ func (s *Server) setupRouter() chi.Router {
 	r.Use(mw.RequestID)
 	r.Use(mw.RequestLogger)
 	r.Use(mw.SecurityHeaders(s.isHTTPS))
+	r.Use(mw.BodyLimit(mw.DefaultMaxBodyBytes))
 
 	intMon := integrations.NewMonitor()
+
+	// Wire up the Claude Code hooks dispatcher BEFORE building the
+	// handler context (we don't strictly need to, but keeping it
+	// near the OfficeManager init makes the dependency graph easy
+	// to follow). The OfficeManager satisfies AgentRegistry via the
+	// adapter file in internal/office/. Tool-loop observation hooks
+	// into the office's existing per-agent tool-loop detector path.
+	claudeHooksDispatcher := claudehooks.NewDispatcher(
+		s.officeManager,
+		// Adapt the (bool-returning) method to the (void) callback the
+		// dispatcher expects. Loss of the bool is intentional -- the
+		// SSE/dashboard signal is fired inside the method itself.
+		func(sessionID, name, resultHash string) {
+			_ = s.officeManager.ObserveAgentToolInvocation(sessionID, name, resultHash)
+		},
+	)
+	// Tool-policy store backs the PreToolUse deny filter. Loaded from
+	// ~/.jarvis/tool-policy.json (defaults applied when missing).
+	// Operators mutate it via /api/office/tool-policy.
+	s.toolPolicy = claudehooks.NewToolPolicyStore(filepath.Join(s.dataDir, "tool-policy.json"))
+	claudeHooksDispatcher.SetToolPolicy(s.toolPolicy)
+	// R3.2 · Subagent hooks drive the watcher so the dashboard sees
+	// lifecycle changes immediately instead of waiting for the
+	// 10-second filesystem-scan tick. Filesystem polling stays as
+	// the fallback for SDK-mode sessions without hooks.
+	if s.subagentWatcher != nil {
+		claudeHooksDispatcher.SetSubagentObservers(
+			s.subagentWatcher.OnHookStart,
+			s.subagentWatcher.OnHookStop,
+		)
+	}
+	// Bake the daemon's bind URL into the OfficeManager so hooks-mode
+	// spawns know where to point each agent's settings.local.json.
+	// http://127.0.0.1:<port> is reachable from any process spawned on
+	// this host (PTY / shell / SDK alike).
+	s.officeManager.SetDaemonURL(s.daemonHooksURL())
 
 	// Handler context with shared dependencies
 	h := &handler.Context{
@@ -459,6 +565,8 @@ func (s *Server) setupRouter() chi.Router {
 		TemplateStore:           s.templateStore,
 		TeamTemplateStore:       s.teamTemplateStore,
 		AgentTokenMgr:           s.agentTokenMgr,
+		MobileTokenMgr:          s.mobileTokenMgr,
+		ToolPolicy:              s.toolPolicy,
 		TelegramBot:             s.telegramBot,
 		TelegramHandler:         s.telegramHandler,
 		IntegrationMonitor:      intMon,
@@ -512,7 +620,7 @@ func (s *Server) setupRouter() chi.Router {
 	// scrapers can hit it with a session cookie or an agent token;
 	// per-scrape auth is a single HMAC check so cost is negligible.
 	r.Route("/metrics", func(r chi.Router) {
-		r.Use(mw.AuthWithAgentToken(s.authManager, s.agentTokenMgr))
+		r.Use(mw.AuthWithTokens(s.authManager, s.agentTokenMgr, s.mobileTokenMgr))
 		r.Handle("/", metrics.Handler())
 	})
 
@@ -544,6 +652,11 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/auth/status", h.GetAuthStatus)
 			r.Post("/auth/setup", h.AuthSetup)
 			r.Post("/auth/login", h.AuthLogin)
+			// Mobile-app login (issues a per-device bearer token). Same
+			// IP rate limiting as /auth/login. Logout + list + revoke
+			// require an authenticated caller and live in the protected
+			// group below.
+			r.Post("/auth/mobile/login", h.AuthMobileLogin)
 			// R26 security review: /auth/logout and /auth/change-password
 			// used to live here. Both are mutating, state-changing POSTs
 			// that need CSRF protection — moved below to the authenticated
@@ -563,6 +676,10 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/telegram-config", h.OfficeAgentGetTelegramConfig)
 				r.Get("/file-locks", h.OfficeAgentGetFileLocks)
 				r.Get("/skills", h.OfficeAgentGetSkills)
+				// R2.3 · per-session statusline fed by the worktree's
+				// .claude/statusline.sh, rendered at the bottom of the
+				// agent's own terminal.
+				r.Get("/statusline", h.OfficeAgentStatusLine)
 				r.Get("/skills/search", h.OfficeAgentSearchSkills)
 				r.Get("/skills/{name}", h.OfficeAgentGetSkillByName)
 				r.Get("/memory", h.OfficeAgentGetMemory)
@@ -579,6 +696,22 @@ func (s *Server) setupRouter() chi.Router {
 				// Mutating
 				r.Post("/standup/response", h.OfficeAgentStandupResponse)
 				r.Post("/message", h.OfficeAgentMessage)
+				// Q&A primitive (cm ask). Ask blocks for up to the
+				// caller's --wait while the manager rotates through
+				// the lead and a fallback teammate.
+				r.Post("/ask", h.OfficeAgentAsk)
+				r.Post("/ask/answer", h.OfficeAgentAskAnswer)
+				r.Get("/ask/list", h.OfficeAgentListQuestions)
+			})
+
+			// Claude Code hooks dispatcher. Spawned `claude` processes
+			// in hooks mode POST structured JSON events here per the
+			// .claude/settings.local.json injected at spawn time.
+			// Same agent-token middleware as /office/agent so a
+			// rogue process can't impersonate Claude.
+			r.Route("/claude/hooks", func(r chi.Router) {
+				r.Use(mw.AgentTokenAuth(s.agentTokenMgr))
+				r.Post("/{sessionId}/{event}", claudeHooksDispatcher.HandleEvent)
 				r.Post("/task-start", h.OfficeAgentTaskStart)
 				r.Post("/task-complete", h.OfficeAgentTaskComplete)
 				r.Post("/task-ack", h.OfficeAgentTaskAck)
@@ -619,10 +752,18 @@ func (s *Server) setupRouter() chi.Router {
 		// calls /api/status and /api/config from tools, and those calls should
 		// succeed as long as the in-session agent token is attached.
 		r.Group(func(r chi.Router) {
-			r.Use(mw.AuthWithAgentToken(s.authManager, s.agentTokenMgr))
+			r.Use(mw.AuthWithTokens(s.authManager, s.agentTokenMgr, s.mobileTokenMgr))
 
 			// SSE endpoint (long-lived, no CSRF)
 			r.Get("/events", s.sseBroker.Subscribe)
+
+			// Mobile-app token management. Logout revokes the caller's
+			// own token; list + revoke let operators (web or mobile)
+			// see and prune registered devices. Bearer-only paths so
+			// they skip CSRF, consistent with the agent-token routes.
+			r.Post("/auth/mobile/logout", h.AuthMobileLogout)
+			r.Get("/auth/mobile/tokens", h.AuthMobileListTokens)
+			r.Delete("/auth/mobile/tokens/{deviceId}", h.AuthMobileRevokeToken)
 
 			// Read-only session routes
 			r.Get("/status", h.Status)
@@ -704,6 +845,12 @@ func (s *Server) setupRouter() chi.Router {
 			// Notification routes (SSE event fan-out read views)
 			r.Get("/notifications/routes", h.ListNotificationRoutes)
 			r.Get("/notifications/routes/{id}", h.GetNotificationRoute)
+
+			// Knowledge-library read views (PageIndex-backed
+			// self-improvement loop, see internal/library).
+			r.Get("/knowledge/stats", h.GetKnowledgeStats)
+			r.Get("/knowledge/promotions", h.GetKnowledgePromotions)
+			r.Get("/knowledge/library", h.GetKnowledgeLibrary)
 
 			// Mutating routes (CSRF required)
 			r.Group(func(r chi.Router) {
@@ -839,7 +986,17 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/notifications/routes", h.CreateNotificationRoute)
 				r.Put("/notifications/routes/{id}", h.UpdateNotificationRoute)
 				r.Delete("/notifications/routes/{id}", h.DeleteNotificationRoute)
+				// Mobile push device registration. POSTing this creates one
+				// notifications route per default event pattern so the
+				// existing dispatcher fans push events out via Expo.
+				r.Post("/notifications/devices", h.RegisterPushDevice)
+				r.Delete("/notifications/devices/{deviceId}", h.UnregisterPushDevice)
 				r.Post("/notifications/routes/{id}/test", h.TestNotificationRoute)
+
+				// Knowledge-library operator override (revoke an
+				// auto-promoted skill). 24h cool-down before
+				// re-promotion is enforced in library.RunPromotion.
+				r.Post("/knowledge/revoke", h.PostKnowledgeRevoke)
 
 				// Session one-shot + clone.
 				r.Post("/sessions/one-shot", h.OneShotSession)
@@ -901,6 +1058,24 @@ func (s *Server) setupRouter() chi.Router {
 				// R34 · task screenshot attachments (operator-visible
 				// evidence for UI-keyword tasks).
 				r.Get("/task-screenshots/{filename}", h.OfficeGetTaskScreenshot)
+				// PreToolUse safety policy (operator-editable denylist).
+				r.Get("/tool-policy", h.GetToolPolicy)
+				// R3.6 · map a PR number back to its linked team (and
+				// the underlying session IDs). 404 when no team is
+				// currently working on the PR.
+				r.Get("/pr/{number}", h.OfficeLookupPR)
+				// R4.4 · `claude logs` / `claude attach` operator helpers.
+				// Read-only; stop is under the mutating group below.
+				r.Get("/claude-sessions/{sessionId}/logs", h.OfficeClaudeLogs)
+				r.Get("/claude-sessions/{sessionId}/attach-command", h.OfficeClaudeAttachCommand)
+				// P13.7 · per-agent recent-turn cost series for the
+				// sparkline widget on the agent card.
+				r.Get("/agent/{sessionId}/usage-series", h.OfficeAgentUsageSeries)
+				// P13.8 · team-wide search across messages + tasks
+				// (transcripts deferred to follow-up). POST because
+				// the query body can be large; behaviour is otherwise
+				// idempotent and cacheable.
+				r.Post("/search", h.OfficeSearch)
 
 				// Mutating office endpoints (CSRF required)
 				r.Group(func(r chi.Router) {
@@ -947,6 +1122,24 @@ func (s *Server) setupRouter() chi.Router {
 					r.Put("/member/{sessionId}/personality", h.OfficePutMemberPersonality)
 					r.Post("/brainstorm", h.OfficeBrainstorm)
 					r.Put("/telegram-config", h.OfficePutTelegramConfig)
+					// Operator-facing task mutations. Same handlers as the
+					// agent-token routes under /api/claude/hooks/*, exposed
+					// here so the mobile app (bearer auth, session cookie)
+					// can mutate tasks too. Body still carries sessionId so
+					// one handler serves both callers.
+					r.Post("/task/labels", h.OfficeAgentTaskLabels)
+					r.Post("/task/self-add", h.OfficeAgentTaskSelfAdd)
+					r.Post("/task/triage", h.OfficeAgentTaskTriage)
+					r.Post("/task/start", h.OfficeAgentTaskStart)
+					r.Post("/task/complete", h.OfficeAgentTaskComplete)
+					r.Post("/task/progress", h.OfficeAgentTaskProgress)
+					r.Post("/task/ack", h.OfficeAgentTaskAck)
+					// PreToolUse safety policy replace (operator-editable).
+					r.Put("/tool-policy", h.PutToolPolicy)
+					// R4.2 · mobile -> claude.ai web session bridge.
+					r.Post("/spawn-remote", h.OfficeSpawnRemote)
+					// R4.4 · `claude stop` shellout (mutating; under CSRF).
+					r.Post("/claude-sessions/{sessionId}/stop", h.OfficeClaudeStop)
 				})
 
 			})
@@ -969,6 +1162,23 @@ func (s *Server) setupRouter() chi.Router {
 	r.Get("/office", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/office.html", http.StatusFound)
 	})
+
+	// P13.5 · React island. Serves the built SPA shell at /office-v2 and
+	// rewrites any sub-route (e.g. /office-v2/agents/:id) onto the same
+	// index.html so client-side routing works. When the bundle hasn't
+	// been built yet, serves a placeholder page pointing at the README.
+	const reactPublicDir = "internal/web/static/public"
+	officeV2 := func(w http.ResponseWriter, r *http.Request) {
+		if !static.FileExists(reactPublicDir, "react/index.html") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(officeV2PlaceholderHTML))
+			return
+		}
+		r.URL.Path = "/react/index.html"
+		static.Handler(reactPublicDir).ServeHTTP(w, r)
+	}
+	r.Get("/office-v2", officeV2)
+	r.Get("/office-v2/*", officeV2)
 
 	// Static files (frontend)
 	publicDir := "internal/web/static/public" // dev path (relative to project root)
