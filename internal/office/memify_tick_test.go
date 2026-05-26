@@ -54,6 +54,12 @@ func newMemifyTestManager(t *testing.T, broker *recordedBroadcast) *Manager {
 // the shared-skills root (~/.claude/skills/) at temp dirs. Without
 // the skills redirect, promotion would write to the operator's
 // real ~/.claude/skills/ during the test.
+//
+// Also stubs out the LLM-enrichment binary so memify's claude -p
+// call doesn't actually run (which would shell out to real claude
+// + npm fetches into the temp HOME, polluting the cleanup).
+// The stubbed failure exercises memify's heuristic-fallback path,
+// which is the correct behaviour the tests assert against.
 func withTempLibraryAndSkillsDir(t *testing.T) (libRoot, skillsRoot string) {
 	t.Helper()
 	root := t.TempDir()
@@ -70,6 +76,13 @@ func withTempLibraryAndSkillsDir(t *testing.T) (libRoot, skillsRoot string) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	t.Cleanup(func() { os.Setenv("HOME", prevHome) })
+
+	// Point the LLM binary at /bin/false so any enrichment call
+	// fails fast (heuristic fallback) without shelling out to a
+	// real claude CLI that would fetch npm packages into HOME.
+	prevBin := library.SetLLMBinaryForTest("/bin/false")
+	t.Cleanup(func() { library.SetLLMBinaryForTest(prevBin) })
+
 	return root, filepath.Join(tmpHome, ".claude", "skills")
 }
 

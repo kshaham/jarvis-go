@@ -265,3 +265,144 @@ func TestClusterKey_EmptyInputsCollapseToPlaceholder(t *testing.T) {
 		t.Errorf("labels=%v want empty", labels)
 	}
 }
+
+func TestRunMemify_LLMBudgetEnrichesQualifyingCluster(t *testing.T) {
+	withTempLibrary(t)
+	installLLMStub(t, `{"result":"{\"title\":\"LLM-enriched workflow\",\"summary\":\"the gist\",\"steps\":[\"step alpha\",\"step beta\"],\"known_pitfalls\":[\"avoid foo\"]}"}`)
+
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		seedExperienceAt(t, "vex", "t-"+itoa(i), "Add JWT refresh",
+			[]string{"auth", "jwt"}, "/repo/internal/auth", "backend-engineer",
+			0.85, now.Add(-time.Duration(i)*time.Hour))
+	}
+
+	res, err := RunMemify(MemifyOptions{
+		NowFunc:   func() time.Time { return now },
+		LLMBudget: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.WorkflowsWritten != 1 {
+		t.Fatalf("WorkflowsWritten=%d want 1", res.WorkflowsWritten)
+	}
+	if res.LLMEnriched != 1 {
+		t.Errorf("LLMEnriched=%d want 1", res.LLMEnriched)
+	}
+	if res.LLMFailed != 0 {
+		t.Errorf("LLMFailed=%d want 0", res.LLMFailed)
+	}
+
+	body, err := os.ReadFile(filepath.Join(Dir(), "workflows", "auth.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# Workflow: LLM-enriched workflow",
+		"step alpha",
+		"step beta",
+		"avoid foo",
+		"_Summary_: the gist",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+}
+
+func TestRunMemify_LLMFailureFallsBackToHeuristic(t *testing.T) {
+	withTempLibrary(t)
+	installLLMFailingStub(t)
+
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		seedExperienceAt(t, "vex", "t-"+itoa(i), "Add JWT refresh",
+			[]string{"auth"}, "/repo", "backend", 0.85, now)
+	}
+
+	res, err := RunMemify(MemifyOptions{
+		NowFunc:   func() time.Time { return now },
+		LLMBudget: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.WorkflowsWritten != 1 {
+		t.Errorf("WorkflowsWritten=%d want 1 (heuristic fallback)", res.WorkflowsWritten)
+	}
+	if res.LLMEnriched != 0 {
+		t.Errorf("LLMEnriched=%d want 0", res.LLMEnriched)
+	}
+	if res.LLMFailed != 1 {
+		t.Errorf("LLMFailed=%d want 1", res.LLMFailed)
+	}
+
+	// Heuristic fields should be present in the workflow (no LLM
+	// content leaked).
+	body, _ := os.ReadFile(filepath.Join(Dir(), "workflows", "auth.md"))
+	if !strings.Contains(string(body), "Add JWT refresh") {
+		t.Errorf("heuristic Steps missing; body:\n%s", body)
+	}
+}
+
+func TestRunMemify_LLMBudgetZeroSkipsExtraction(t *testing.T) {
+	withTempLibrary(t)
+	// Even with a working stub, LLMBudget=0 must skip the LLM call.
+	installLLMStub(t, `{"result":"{\"title\":\"should not appear\",\"steps\":[\"x\"]}"}`)
+
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		seedExperienceAt(t, "vex", "t-"+itoa(i), "Add JWT refresh",
+			[]string{"auth"}, "/repo", "backend", 0.85, now)
+	}
+
+	res, err := RunMemify(MemifyOptions{
+		NowFunc: func() time.Time { return now },
+		// LLMBudget left at zero
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LLMEnriched != 0 || res.LLMFailed != 0 {
+		t.Errorf("LLM counters should be zero: enriched=%d failed=%d",
+			res.LLMEnriched, res.LLMFailed)
+	}
+	body, _ := os.ReadFile(filepath.Join(Dir(), "workflows", "auth.md"))
+	if strings.Contains(string(body), "should not appear") {
+		t.Errorf("LLM content leaked despite zero budget; body:\n%s", body)
+	}
+}
+
+func TestRunMemify_LLMBudgetCapsCallsAcrossClusters(t *testing.T) {
+	// Two clusters, budget=1 → only the first qualifying cluster
+	// gets enriched; the second falls back to heuristic.
+	withTempLibrary(t)
+	installLLMStub(t, `{"result":"{\"title\":\"enriched\",\"steps\":[\"step\"]}"}`)
+
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	// auth cluster (3 entries)
+	for i := 0; i < 3; i++ {
+		seedExperienceAt(t, "vex", "auth-"+itoa(i), "Auth task",
+			[]string{"auth"}, "/repo/auth", "backend", 0.85, now)
+	}
+	// ui cluster (3 entries)
+	for i := 0; i < 3; i++ {
+		seedExperienceAt(t, "kit", "ui-"+itoa(i), "UI task",
+			[]string{"ui"}, "/repo/web", "frontend", 0.85, now)
+	}
+
+	res, err := RunMemify(MemifyOptions{
+		NowFunc:   func() time.Time { return now },
+		LLMBudget: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.WorkflowsWritten != 2 {
+		t.Errorf("WorkflowsWritten=%d want 2", res.WorkflowsWritten)
+	}
+	if res.LLMEnriched != 1 {
+		t.Errorf("LLMEnriched=%d want exactly 1 (budget cap)", res.LLMEnriched)
+	}
+}

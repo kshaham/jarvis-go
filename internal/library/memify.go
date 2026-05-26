@@ -24,6 +24,7 @@ package library
 //     history.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,6 +53,20 @@ type MemifyOptions struct {
 	// Default 90 days.
 	DecayCutoffDays int
 
+	// LLMBudget caps how many clusters per memify pass go through
+	// the claude -p enrichment path. Each successful call
+	// decrements the budget; failed calls don't count. Zero =
+	// LLM extraction disabled (heuristic-only). Default 0 — the
+	// operator opts in via the team setting.
+	LLMBudget int
+
+	// LLMModel is the --model flag passed to claude -p. Empty
+	// means "use upstream default" (claude-sonnet for subscription
+	// auth, the operator's ANTHROPIC_DEFAULT_HAIKU_MODEL for haiku
+	// routing). Memify-time defaults to "" so the operator's
+	// existing config governs.
+	LLMModel string
+
 	// NowFunc lets tests inject a deterministic clock. nil →
 	// time.Now.
 	NowFunc func() time.Time
@@ -59,9 +74,11 @@ type MemifyOptions struct {
 
 // MemifyResult bundles what changed in a memify pass.
 type MemifyResult struct {
-	ClustersEvaluated int
-	WorkflowsWritten  int  // new + updated combined
+	ClustersEvaluated  int
+	WorkflowsWritten   int // new + updated combined
 	ExperiencesScanned int
+	LLMEnriched        int // workflows whose Steps/Pitfalls came from the LLM
+	LLMFailed          int // attempts that fell back to heuristic
 	// Slugs of workflows written this pass, in the order they
 	// were emitted. Useful for caller telemetry / SSE broadcasts.
 	WrittenSlugs []string
@@ -128,6 +145,9 @@ func RunMemify(opts MemifyOptions) (MemifyResult, error) {
 	result.ClustersEvaluated = len(clusters)
 
 	// Phase 3: emit workflows for clusters meeting the thresholds.
+	// LLM enrichment is bounded by opts.LLMBudget — once exhausted,
+	// remaining clusters fall back to the heuristic Workflow.
+	llmBudget := opts.LLMBudget
 	for _, cluster := range clusters {
 		if len(cluster.entries) < opts.MinClusterSize {
 			continue
@@ -137,6 +157,25 @@ func RunMemify(opts MemifyOptions) (MemifyResult, error) {
 			continue
 		}
 		wf := buildWorkflowFromCluster(cluster, avg, now)
+
+		// Optional LLM enrichment. Only attempted when budget
+		// allows; any failure is silent + falls through to the
+		// heuristic workflow (already populated in wf).
+		if llmBudget > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), llmExtractTimeout)
+			ext, lerr := extractWorkflowWithLLM(ctx, cluster, opts.LLMModel)
+			cancel()
+			if lerr == nil && ext != nil {
+				wf = mergeIntoWorkflow(wf, ext)
+				result.LLMEnriched++
+				llmBudget-- // count only successful calls
+			} else {
+				result.LLMFailed++
+				// Don't decrement budget on failure — preserves
+				// budget for later clusters that might succeed.
+			}
+		}
+
 		if err := WriteWorkflow(wf); err != nil {
 			continue
 		}

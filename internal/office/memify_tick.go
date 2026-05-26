@@ -26,6 +26,17 @@ import (
 // values delay self-improvement after a busy day.
 const memifyInterval = 6 * time.Hour
 
+// memifyLLMBudgetPerTick is the per-tick cap on LLM enrichment
+// calls. The user runs subscription billing so the dollar cost is
+// effectively zero, but each call has latency + a small chance of
+// upstream error — capping at 5 keeps memify bounded.
+//
+// Operators can opt out entirely by disabling the knowledge layer
+// (graceful degradation: library.RunMemify with budget=0 falls back
+// to the heuristic Workflow). Setting wire-up for per-team
+// override lives in a follow-up if needed.
+const memifyLLMBudgetPerTick = 5
+
 // maybeRunMemify runs a memify + promotion pass when the gate
 // timer has expired. Safe to call every idle tick — the gate is
 // the cheap path and pays the disk + write cost only when due.
@@ -58,7 +69,12 @@ func (m *Manager) maybeRunMemify() {
 // tests can call it directly without poking the gate timer.
 func (m *Manager) runMemifyTick() {
 	// Memify: consolidate raw experiences into workflow markdowns.
-	mres, err := library.RunMemify(library.MemifyOptions{})
+	// LLMBudget enables claude-haiku enrichment for the first N
+	// qualifying clusters; failures fall back to the heuristic
+	// workflow silently.
+	mres, err := library.RunMemify(library.MemifyOptions{
+		LLMBudget: memifyLLMBudgetPerTick,
+	})
 	if err != nil {
 		slog.Warn("memify pass failed", "err", err)
 		return
@@ -67,7 +83,9 @@ func (m *Manager) runMemifyTick() {
 		slog.Info("memify wrote workflows",
 			"count", mres.WorkflowsWritten,
 			"slugs", mres.WrittenSlugs,
-			"experiences_scanned", mres.ExperiencesScanned)
+			"experiences_scanned", mres.ExperiencesScanned,
+			"llm_enriched", mres.LLMEnriched,
+			"llm_failed", mres.LLMFailed)
 	}
 
 	// Promotion: graduate workflows whose ledger stats clear the
