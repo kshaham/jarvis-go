@@ -80,6 +80,17 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 		b.WriteString("\n")
 	}
 
+	// Anti-pattern hints — the failure-mode mirror of the workflow
+	// section above. Memify (T3.4) extracts these from low-outcome
+	// clusters; surfacing them here means agents see "don't repeat
+	// this mistake" guidance at exactly the moment they're picking
+	// an approach.
+	if hints := BuildAntiPatternHintsSection(config, workingDir); hints != "" {
+		b.WriteString("## What to Avoid\n")
+		b.WriteString(hints)
+		b.WriteString("\n")
+	}
+
 	// Teammate findings (compact)
 	if cross := BuildCrossAgentContextCompact(config.ID); cross != "" {
 		b.WriteString("## Teammate Insights\n")
@@ -313,4 +324,68 @@ func dashIfEmpty(s string) string {
 		return "(untitled task)"
 	}
 	return s
+}
+
+// kickstartAntiPatternK caps how many anti-patterns we surface at
+// kickstart. 1 is the right default — surfacing more than one
+// failure mode upfront tips the kickstart into pessimistic
+// over-correction. Agents who want a deeper read pull more via
+// the PageIndex MCP.
+const kickstartAntiPatternK = 1
+
+// BuildAntiPatternHintsSection renders the top-K most-relevant
+// anti-patterns from the library. Returns "" when no hits clear
+// the relevance threshold or no anti-patterns exist yet — same
+// graceful-degradation contract as BuildLibraryHintsSection.
+func BuildAntiPatternHintsSection(config *TeamMemberConfig, workingDir string) string {
+	if config == nil {
+		return ""
+	}
+	hits, err := library.SearchAntiPatterns(library.Query{
+		AgentRole:  config.Role,
+		WorkingDir: workingDir,
+		K:          kickstartAntiPatternK,
+	})
+	if err != nil {
+		slog.Debug("anti-pattern search at kickstart failed", "err", err, "role", config.Role)
+		return ""
+	}
+	return renderAntiPatternHintsAsMarkdown(hits)
+}
+
+// renderAntiPatternHintsAsMarkdown is the rendering half of
+// BuildAntiPatternHintsSection — separate so future paths (e.g.
+// the next-task prompt) can reuse it.
+func renderAntiPatternHintsAsMarkdown(hits []library.AntiPatternHit) string {
+	if len(hits) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Failure modes earlier agents hit on similar tasks. Read with ")
+	b.WriteString("`mcp__pageindex__get_page_content` if any look applicable; the ")
+	b.WriteString("library citation has the full root-cause analysis.\n\n")
+	for i, h := range hits {
+		title := h.Title
+		if title == "" {
+			title = h.Slug
+		}
+		fmt.Fprintf(&b, "%d. **%s**\n", i+1, title)
+		if h.WhyItFails != "" {
+			b.WriteString("   Why it fails: ")
+			b.WriteString(h.WhyItFails)
+			b.WriteString("\n")
+		}
+		// Top 2 avoid items keep the kickstart compact; more lives
+		// in the file the citation points at.
+		for j, avoid := range h.WhatToAvoid {
+			if j >= 2 {
+				break
+			}
+			b.WriteString("   - ")
+			b.WriteString(avoid)
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "   Source: `%s`\n", h.Path)
+	}
+	return b.String()
 }

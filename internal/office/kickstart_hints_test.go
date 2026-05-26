@@ -196,3 +196,91 @@ func TestPromptNextTask_NoHintWhenLibraryEmpty(t *testing.T) {
 		t.Errorf("unexpected hint with empty library:\n%s", rec.lastPrompt)
 	}
 }
+
+func TestBuildAntiPatternHintsSection_EmptyWhenNoAntiPatterns(t *testing.T) {
+	withTempLibraryForOffice(t)
+	cfg := &TeamMemberConfig{ID: "vex", Name: "Vex", Role: "backend"}
+	got := BuildAntiPatternHintsSection(cfg, "/repo/internal/auth")
+	if got != "" {
+		t.Errorf("expected empty section; got:\n%s", got)
+	}
+}
+
+func TestBuildAntiPatternHintsSection_RendersWhenHitsExist(t *testing.T) {
+	withTempLibraryForOffice(t)
+	ap := library.AntiPattern{
+		Slug:               "auth",
+		Title:              "Avoid: skipping cookie clear",
+		AvgOutcome:         0.15,
+		ObservationCount:   3,
+		AgentRole:          "backend-engineer",
+		TaskLabels:         []string{"auth"},
+		WorkingDirHints:    []string{"/repo/internal/auth"},
+		WhyItFails:         "stale auth state leaks across requests",
+		WhatToAvoid:        []string{"always clear refresh cookie", "never bypass middleware"},
+		WhatWentWrong:      []string{"agents skipped clearing"},
+		CreatedAt:          time.Now().Add(-time.Hour),
+	}
+	if err := library.WriteAntiPattern(ap); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &TeamMemberConfig{ID: "iris", Name: "Iris", Role: "backend-engineer"}
+	got := BuildAntiPatternHintsSection(cfg, "/repo/internal/auth")
+	if got == "" {
+		t.Fatal("expected non-empty section")
+	}
+	for _, want := range []string{
+		"Avoid: skipping cookie clear",
+		"stale auth state leaks across requests",
+		"always clear refresh cookie",
+		"never bypass middleware",
+		"anti-patterns/auth.md",
+		"mcp__pageindex__get_page_content",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("section missing %q\n--- section ---\n%s", want, got)
+		}
+	}
+}
+
+func TestBuildAntiPatternHintsSection_NilConfigEmpty(t *testing.T) {
+	withTempLibraryForOffice(t)
+	if got := BuildAntiPatternHintsSection(nil, "/anywhere"); got != "" {
+		t.Errorf("nil config should return empty; got:\n%s", got)
+	}
+}
+
+func TestBuildKickstartPrompt_IncludesAntiPatternSection(t *testing.T) {
+	withTempLibraryForOffice(t)
+	ap := library.AntiPattern{
+		Slug:            "planning",
+		Title:           "Avoid: under-scoped milestones",
+		AvgOutcome:      0.20,
+		AgentRole:       "strategic-lead",
+		TaskLabels:      []string{"planning"},
+		WorkingDirHints: []string{"/repo"},
+		WhyItFails:      "scope creep eats the sprint",
+		WhatToAvoid:     []string{"limit to 3 milestones"},
+		CreatedAt:       time.Now().Add(-time.Hour),
+	}
+	if err := library.WriteAntiPattern(ap); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &TeamMemberConfig{ID: "lead", Name: "Lead", Role: "strategic-lead", Tier: "strategic"}
+	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "ship the thing", "", true)
+	if !strings.Contains(prompt, "## What to Avoid") {
+		t.Errorf("kickstart missing 'What to Avoid' section\n--- prompt ---\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Avoid: under-scoped milestones") {
+		t.Errorf("kickstart missing seeded anti-pattern title\n--- prompt ---\n%s", prompt)
+	}
+}
+
+func TestBuildKickstartPrompt_AntiPatternAbsentWhenNoHits(t *testing.T) {
+	withTempLibraryForOffice(t)
+	cfg := &TeamMemberConfig{ID: "vex", Name: "Vex", Role: "backend-engineer"}
+	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "", "", false)
+	if strings.Contains(prompt, "## What to Avoid") {
+		t.Errorf("section should be absent on empty library; prompt:\n%s", prompt)
+	}
+}
