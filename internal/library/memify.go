@@ -46,6 +46,15 @@ type MemifyOptions struct {
 	// codify mediocre approaches as canonical workflows.
 	MinAvgOutcome float64
 
+	// MaxAvgOutcomeForAntiPattern is the upper cluster-mean
+	// threshold for anti-pattern generation. Clusters whose avg
+	// outcome is BELOW this value (and which meet MinClusterSize
+	// + include enough completed-or-failed experiences) graduate
+	// to anti-patterns/<slug>.md. Default 0.40 — significantly
+	// worse than the workflow floor, leaving a "mediocre"
+	// no-mans-land in [0.40, 0.70) that produces neither.
+	MaxAvgOutcomeForAntiPattern float64
+
 	// DecayCutoffDays marks experiences older than this with a
 	// valid_until frontmatter field on the next memify pass. The
 	// experience file isn't deleted; future search results just
@@ -74,23 +83,27 @@ type MemifyOptions struct {
 
 // MemifyResult bundles what changed in a memify pass.
 type MemifyResult struct {
-	ClustersEvaluated  int
-	WorkflowsWritten   int // new + updated combined
-	ExperiencesScanned int
-	LLMEnriched        int // workflows whose Steps/Pitfalls came from the LLM
-	LLMFailed          int // attempts that fell back to heuristic
+	ClustersEvaluated   int
+	WorkflowsWritten    int // new + updated combined
+	AntiPatternsWritten int // anti-patterns emitted from low-outcome clusters
+	ExperiencesScanned  int
+	LLMEnriched         int // workflows + anti-patterns whose content came from the LLM
+	LLMFailed           int // LLM attempts that fell back to heuristic
 	// Slugs of workflows written this pass, in the order they
 	// were emitted. Useful for caller telemetry / SSE broadcasts.
 	WrittenSlugs []string
+	// AntiPatternSlugs of anti-patterns emitted this pass.
+	AntiPatternSlugs []string
 }
 
 // defaultMemifyOptions returns the canonical settings used when
 // the idle-monitor tick fires.
 func defaultMemifyOptions() MemifyOptions {
 	return MemifyOptions{
-		MinClusterSize:  3,
-		MinAvgOutcome:   0.70,
-		DecayCutoffDays: 90,
+		MinClusterSize:              3,
+		MinAvgOutcome:               0.70,
+		MaxAvgOutcomeForAntiPattern: 0.40,
+		DecayCutoffDays:             90,
 	}
 }
 
@@ -103,6 +116,9 @@ func (o *MemifyOptions) applyDefaults() {
 	}
 	if o.MinAvgOutcome <= 0 {
 		o.MinAvgOutcome = d.MinAvgOutcome
+	}
+	if o.MaxAvgOutcomeForAntiPattern <= 0 {
+		o.MaxAvgOutcomeForAntiPattern = d.MaxAvgOutcomeForAntiPattern
 	}
 	if o.DecayCutoffDays <= 0 {
 		o.DecayCutoffDays = d.DecayCutoffDays
@@ -138,17 +154,17 @@ func RunMemify(opts MemifyOptions) (MemifyResult, error) {
 	}
 	result := MemifyResult{ExperiencesScanned: len(all)}
 
-	// Phase 2: cluster by (role, sorted_labels). Empty role and/or
-	// empty labels still cluster — agents without role tags will
-	// pool under a single "(any)" cluster.
-	clusters := clusterExperiences(all)
-	result.ClustersEvaluated = len(clusters)
+	// Phase 2a: cluster completed experiences for workflow extraction.
+	// Failed experiences excluded so they can't drag a cluster's avg
+	// outcome below the workflow threshold.
+	workflowClusters := clusterExperiences(all, false)
+	result.ClustersEvaluated = len(workflowClusters)
 
-	// Phase 3: emit workflows for clusters meeting the thresholds.
-	// LLM enrichment is bounded by opts.LLMBudget — once exhausted,
-	// remaining clusters fall back to the heuristic Workflow.
+	// Phase 3: emit workflows for high-outcome clusters. LLM
+	// enrichment is bounded by opts.LLMBudget — workflow clusters
+	// take precedence; remaining budget flows to anti-patterns.
 	llmBudget := opts.LLMBudget
-	for _, cluster := range clusters {
+	for _, cluster := range workflowClusters {
 		if len(cluster.entries) < opts.MinClusterSize {
 			continue
 		}
@@ -171,8 +187,6 @@ func RunMemify(opts MemifyOptions) (MemifyResult, error) {
 				llmBudget-- // count only successful calls
 			} else {
 				result.LLMFailed++
-				// Don't decrement budget on failure — preserves
-				// budget for later clusters that might succeed.
 			}
 		}
 
@@ -181,6 +195,43 @@ func RunMemify(opts MemifyOptions) (MemifyResult, error) {
 		}
 		result.WorkflowsWritten++
 		result.WrittenSlugs = append(result.WrittenSlugs, wf.Slug)
+	}
+
+	// Phase 4: emit anti-patterns from LOW-outcome clusters.
+	// Re-cluster including failed experiences so the failure signal
+	// has weight. The same slug naturally pairs with any workflow
+	// of the same (role, labels) — agents looking up "auth" via
+	// PageIndex see both surfaces.
+	antiClusters := clusterExperiences(all, true)
+	for _, cluster := range antiClusters {
+		if len(cluster.entries) < opts.MinClusterSize {
+			continue
+		}
+		avg := clusterAvgOutcome(cluster)
+		if avg >= opts.MaxAvgOutcomeForAntiPattern {
+			continue
+		}
+		ap := buildAntiPatternFromCluster(cluster, avg, now)
+
+		// LLM enrichment, sharing the same budget as workflows.
+		if llmBudget > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), llmExtractTimeout)
+			ext, lerr := extractAntiPatternWithLLM(ctx, cluster, opts.LLMModel)
+			cancel()
+			if lerr == nil && ext != nil {
+				ap = mergeIntoAntiPattern(ap, ext)
+				result.LLMEnriched++
+				llmBudget--
+			} else {
+				result.LLMFailed++
+			}
+		}
+
+		if err := WriteAntiPattern(ap); err != nil {
+			continue
+		}
+		result.AntiPatternsWritten++
+		result.AntiPatternSlugs = append(result.AntiPatternSlugs, ap.Slug)
 	}
 
 	// Phase 4: decay old experiences.
@@ -304,16 +355,25 @@ func clusterKey(role string, labels []string) (string, []string) {
 // entries are sorted by CompletedAt descending so workflow
 // rendering pulls the most recent + most informative contributors.
 //
+// includeFailed selects whether failed experiences enter the
+// clusters. Workflow building passes false (failures shouldn't drag
+// down a high-outcome cluster's avg); anti-pattern building passes
+// true (failures ARE the signal we want to cluster on).
+//
 // Returns clusters in deterministic order (sorted by key) so the
 // memify pass produces stable output across runs.
-func clusterExperiences(all []*experienceMeta) []*experienceCluster {
+func clusterExperiences(all []*experienceMeta, includeFailed bool) []*experienceCluster {
 	byKey := map[string]*experienceCluster{}
 	for _, e := range all {
-		// Only cluster completed experiences with a real outcome.
-		// Aborted / in-progress / extremely-stale-zero records are
-		// excluded so they can't pull a cluster's avg outcome below
-		// the threshold and block promotion.
-		if e.CompletionStatus != "completed" {
+		switch e.CompletionStatus {
+		case "completed":
+			// always in
+		case "failed":
+			if !includeFailed {
+				continue
+			}
+		default:
+			// abandoned / in-progress / unknown — exclude
 			continue
 		}
 		key, sorted := clusterKey(e.AgentRole, e.TaskLabels)
@@ -397,6 +457,64 @@ func buildWorkflowFromCluster(c *experienceCluster, avg float64, now time.Time) 
 		Steps:                steps,
 		CreatedAt:            now,
 	}
+}
+
+// buildAntiPatternFromCluster projects a low-outcome cluster into
+// an AntiPattern doc. Slug matches the corresponding workflow slug
+// (same workflowSlugFor() function) so PageIndex pairs them.
+//
+// Heuristic content: WhatWentWrong = top-3 most-recent task titles
+// + their approach summaries (the things that didn't work).
+// WhatToAvoid is left empty for the heuristic path — only the LLM
+// enrichment fills this with actionable guidance.
+func buildAntiPatternFromCluster(c *experienceCluster, avg float64, now time.Time) AntiPattern {
+	slug := workflowSlugFor(c)
+	title := "Avoid: " + antiPatternTitleSuffix(c)
+
+	contribTaskIDs := []string{}
+	workingDirSet := map[string]struct{}{}
+	observations := []string{}
+	for i, e := range c.entries {
+		contribTaskIDs = append(contribTaskIDs, e.TaskID)
+		if e.WorkingDir != "" {
+			workingDirSet[e.WorkingDir] = struct{}{}
+		}
+		if i < 3 && e.ApproachSummary != "" {
+			observations = append(observations,
+				fmt.Sprintf("%s (outcome %.2f) — %s",
+					e.TaskTitle, e.OutcomeScore, e.ApproachSummary))
+		}
+	}
+	workingDirs := make([]string, 0, len(workingDirSet))
+	for d := range workingDirSet {
+		workingDirs = append(workingDirs, d)
+	}
+	sort.Strings(workingDirs)
+
+	return AntiPattern{
+		Slug:               slug,
+		Title:              title,
+		DerivedFromTaskIDs: contribTaskIDs,
+		AvgOutcome:         avg,
+		ObservationCount:   len(c.entries),
+		AgentRole:          c.role,
+		TaskLabels:         c.labels,
+		WorkingDirHints:    workingDirs,
+		WhatWentWrong:      observations,
+		CreatedAt:          now,
+	}
+}
+
+// antiPatternTitleSuffix builds the descriptive half of an
+// anti-pattern title (the "Avoid: <suffix>" sentence).
+func antiPatternTitleSuffix(c *experienceCluster) string {
+	if len(c.labels) > 0 {
+		return strings.Title(c.labels[0]) + " task pitfalls"
+	}
+	if c.role != "" {
+		return strings.Title(c.role) + " pitfalls"
+	}
+	return "common team pitfalls"
 }
 
 // workflowSlugFor builds a stable filename slug for the cluster.

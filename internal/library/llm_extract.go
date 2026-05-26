@@ -218,6 +218,138 @@ func stripCodeFence(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// ExtractedAntiPattern is the parallel-to-ExtractedWorkflow shape
+// the LLM produces for low-outcome clusters.
+type ExtractedAntiPattern struct {
+	Title         string   `json:"title"`
+	WhyItFails    string   `json:"why_it_fails"`
+	WhatToAvoid   []string `json:"what_to_avoid"`
+	WhatWentWrong []string `json:"what_went_wrong"`
+}
+
+// extractAntiPatternWithLLM is the failure-case analog of
+// extractWorkflowWithLLM. Same shell-out shape (claude -p
+// --output-format json) but the prompt asks for what to avoid
+// rather than what to do.
+func extractAntiPatternWithLLM(ctx context.Context, cluster *experienceCluster, model string) (*ExtractedAntiPattern, error) {
+	if cluster == nil || len(cluster.entries) == 0 {
+		return nil, &llmExtractError{stage: "empty cluster"}
+	}
+
+	prompt := buildAntiPatternPrompt(cluster)
+
+	callCtx, cancel := context.WithTimeout(ctx, llmExtractTimeout)
+	defer cancel()
+
+	args := []string{"-p", prompt, "--output-format", "json"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	cmd := exec.CommandContext(callCtx, llmBinary, args...)
+	out, err := cmd.Output()
+	if err != nil {
+		if callCtx.Err() == context.DeadlineExceeded {
+			return nil, &llmExtractError{stage: "timeout", err: callCtx.Err()}
+		}
+		return nil, &llmExtractError{stage: "exec", err: err}
+	}
+
+	// Same two-shape acceptance as the workflow path.
+	var envelope struct {
+		Result string `json:"result"`
+	}
+	if jerr := json.Unmarshal(out, &envelope); jerr == nil && envelope.Result != "" {
+		body := stripCodeFence(envelope.Result)
+		var ext ExtractedAntiPattern
+		if derr := json.Unmarshal([]byte(body), &ext); derr != nil {
+			return nil, &llmExtractError{stage: "result decode", err: derr}
+		}
+		if ext.Title == "" && len(ext.WhatToAvoid) == 0 {
+			return nil, &llmExtractError{stage: "empty response"}
+		}
+		return &ext, nil
+	}
+	var direct ExtractedAntiPattern
+	if derr := json.Unmarshal(out, &direct); derr != nil {
+		return nil, &llmExtractError{stage: "decode", err: derr}
+	}
+	if direct.Title == "" && len(direct.WhatToAvoid) == 0 {
+		return nil, &llmExtractError{stage: "empty response"}
+	}
+	return &direct, nil
+}
+
+// buildAntiPatternPrompt renders the low-outcome cluster into the
+// prompt body. Asks for a fixed JSON shape matching
+// ExtractedAntiPattern.
+func buildAntiPatternPrompt(c *experienceCluster) string {
+	var b strings.Builder
+	b.WriteString("You are consolidating a cluster of FAILED or LOW-OUTCOME task experiences from an AI engineering team into a reusable anti-pattern lesson.\n\n")
+	b.WriteString("Cluster shape:\n")
+	if c.role != "" {
+		fmt.Fprintf(&b, "- Agent role: %s\n", c.role)
+	}
+	if len(c.labels) > 0 {
+		fmt.Fprintf(&b, "- Task labels: %s\n", strings.Join(c.labels, ", "))
+	}
+	b.WriteString("\nFailed experiences (most recent first):\n\n")
+	limit := 8
+	if len(c.entries) < limit {
+		limit = len(c.entries)
+	}
+	for i := 0; i < limit; i++ {
+		e := c.entries[i]
+		fmt.Fprintf(&b, "%d. **%s** (outcome %.2f, status %s)\n",
+			i+1, e.TaskTitle, e.OutcomeScore, e.CompletionStatus)
+		if e.ApproachSummary != "" {
+			fmt.Fprintf(&b, "   What was tried: %s\n", e.ApproachSummary)
+		}
+		if e.WorkingDir != "" {
+			fmt.Fprintf(&b, "   Dir: %s\n", e.WorkingDir)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(`Synthesise an anti-pattern lesson future agents can read to avoid the same mistakes. Return ONLY a JSON object with this shape:
+
+{
+  "title": "short, descriptive anti-pattern title (e.g. 'Closing the refresh cookie too early')",
+  "why_it_fails": "1-2 sentence root-cause explanation",
+  "what_went_wrong": ["concrete observation from the cluster", "..."],
+  "what_to_avoid": ["actionable guidance an agent can follow", "..."]
+}
+
+Rules:
+- what_to_avoid must be actionable ("don't X" or "before Y, do Z") — not vague.
+- what_went_wrong should reflect specific signals visible in the experiences.
+- 2-5 items per list is ideal.
+- If the cluster's failure mode is unclear (mixed signals), return empty lists.
+- No markdown, no commentary outside the JSON object.`)
+	return b.String()
+}
+
+// mergeIntoAntiPattern overlays LLM fields onto the heuristic
+// AntiPattern. Identity/provenance fields (Slug, DerivedFromTaskIDs,
+// AvgOutcome, ObservationCount, AgentRole, TaskLabels,
+// WorkingDirHints, CreatedAt) are authoritative.
+func mergeIntoAntiPattern(base AntiPattern, ext *ExtractedAntiPattern) AntiPattern {
+	if ext == nil {
+		return base
+	}
+	if ext.Title != "" {
+		base.Title = ext.Title
+	}
+	if ext.WhyItFails != "" {
+		base.WhyItFails = ext.WhyItFails
+	}
+	if len(ext.WhatWentWrong) > 0 {
+		base.WhatWentWrong = ext.WhatWentWrong
+	}
+	if len(ext.WhatToAvoid) > 0 {
+		base.WhatToAvoid = ext.WhatToAvoid
+	}
+	return base
+}
+
 // mergeIntoWorkflow takes the heuristic Workflow and overlays the
 // LLM-extracted fields where they're non-empty. Heuristic fields
 // (Slug, DerivedFromTaskIDs, AvgOutcome, ReuseCountAtCreation,

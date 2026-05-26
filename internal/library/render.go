@@ -413,6 +413,76 @@ func (o *orderedFrontmatter) render() string {
 	return b.String()
 }
 
+// renderAntiPattern produces the markdown for a consolidated
+// anti-pattern. Parallel to renderWorkflow but with "what failed"
+// + "what to avoid" + a why-it-fails explanation.
+func renderAntiPattern(ap AntiPattern) string {
+	var b strings.Builder
+
+	fm := orderedFrontmatter{}
+	fm.add("kind", "anti-pattern")
+	fm.add("anti_pattern_slug", ap.Slug)
+	fm.add("title", ap.Title)
+	fm.addStringSlice("derived_from", ap.DerivedFromTaskIDs)
+	fm.addFloat("avg_outcome", ap.AvgOutcome)
+	fm.addInt("observation_count", ap.ObservationCount)
+	fm.add("agent_role", ap.AgentRole)
+	fm.addStringSlice("task_labels", ap.TaskLabels)
+	fm.addStringSlice("working_dir_hints", ap.WorkingDirHints)
+	fm.addTime("created_at", ap.CreatedAt)
+	b.WriteString(fm.render())
+
+	b.WriteString("# Anti-pattern: ")
+	b.WriteString(orPlaceholder(ap.Title, ap.Slug))
+	b.WriteString("\n\n")
+
+	b.WriteString("## When this fires\n\n")
+	if ap.AgentRole != "" {
+		b.WriteString("- Agent role: ")
+		b.WriteString(ap.AgentRole)
+		b.WriteString("\n")
+	}
+	if len(ap.TaskLabels) > 0 {
+		b.WriteString("- Task labels: ")
+		b.WriteString(strings.Join(ap.TaskLabels, ", "))
+		b.WriteString("\n")
+	}
+	if len(ap.WorkingDirHints) > 0 {
+		b.WriteString("- Working dir hints: ")
+		b.WriteString(strings.Join(ap.WorkingDirHints, ", "))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	if ap.WhyItFails != "" {
+		b.WriteString("## Why it fails\n\n")
+		b.WriteString(ap.WhyItFails)
+		b.WriteString("\n\n")
+	}
+
+	if len(ap.WhatWentWrong) > 0 {
+		b.WriteString("## What went wrong (observations)\n\n")
+		for _, w := range ap.WhatWentWrong {
+			b.WriteString("- ")
+			b.WriteString(w)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(ap.WhatToAvoid) > 0 {
+		b.WriteString("## What to avoid\n\n")
+		for _, w := range ap.WhatToAvoid {
+			b.WriteString("- ")
+			b.WriteString(w)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
 // yamlScalarString returns a YAML-safe scalar. Quotes the value when
 // it contains characters that would confuse the YAML parser (colon,
 // brackets, quotes, leading dash, etc.). Otherwise returns the bare

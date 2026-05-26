@@ -62,7 +62,7 @@ func Dir() string {
 		}
 		root := filepath.Join(home, ".jarvis", "office-memory", "library")
 		for _, sub := range []string{
-			"experiences", "workflows", "standups", "experiments",
+			"experiences", "workflows", "standups", "experiments", "anti-patterns",
 		} {
 			if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
 				return
@@ -198,6 +198,30 @@ type ExperimentRecord struct {
 	Timestamp      time.Time
 }
 
+// AntiPattern is the parallel-to-Workflow shape for failure
+// lessons. Memify derives these from clusters of LOW-outcome
+// experiences (avg < lowOutcomeThreshold) so PageIndex can surface
+// "don't do this" guidance alongside the positive workflow it has
+// for the same (role, labels).
+//
+// Slug matches the corresponding workflow slug so an agent looking
+// up "auth" via the MCP gets BOTH "what worked" and "what to
+// avoid" in the same tree branch.
+type AntiPattern struct {
+	Slug                 string
+	Title                string
+	DerivedFromTaskIDs   []string
+	AvgOutcome           float64 // expect < lowOutcomeThreshold
+	ObservationCount     int     // size of the low-outcome cluster
+	AgentRole            string
+	TaskLabels           []string
+	WorkingDirHints      []string
+	WhatWentWrong        []string // observations from the cluster
+	WhatToAvoid          []string // actionable guidance
+	WhyItFails           string   // root-cause explanation
+	CreatedAt            time.Time
+}
+
 // experiencePath returns the absolute path for the given (configID,
 // taskID) pair. Caller MUST verify root != "" before using the
 // returned path.
@@ -218,6 +242,11 @@ func standupPath(root, id string) string {
 // experimentPath returns the absolute path for an experiment doc.
 func experimentPath(root, id string) string {
 	return filepath.Join(root, "experiments", sanitize(id)+".md")
+}
+
+// antiPatternPath returns the absolute path for an anti-pattern.
+func antiPatternPath(root, slug string) string {
+	return filepath.Join(root, "anti-patterns", sanitize(slug)+".md")
 }
 
 // sanitize replaces every character outside [a-zA-Z0-9_-] with '-'.
@@ -351,5 +380,19 @@ func WriteExperiment(rec ExperimentRecord) error {
 	}
 	path := experimentPath(root, rec.ID)
 	body := renderExperiment(rec)
+	return writeAtomic(path, []byte(body))
+}
+
+// WriteAntiPattern renders ap into anti-patterns/<slug>.md
+// atomically. Same overwrite-freely semantics as WriteWorkflow —
+// memify rebuilds these on each tick as the low-outcome cluster
+// composition changes.
+func WriteAntiPattern(ap AntiPattern) error {
+	root := Dir()
+	if root == "" {
+		return fmt.Errorf("library root unavailable")
+	}
+	path := antiPatternPath(root, ap.Slug)
+	body := renderAntiPattern(ap)
 	return writeAtomic(path, []byte(body))
 }
