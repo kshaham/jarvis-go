@@ -208,8 +208,9 @@ func SetupWorktreesWithHooks(cfg WorktreeHooksConfig) map[string]string {
 		}
 
 		data, err := claudehooks.BuildSettings(claudehooks.SettingsParams{
-			SessionID: info.SessionID,
-			DaemonURL: cfg.DaemonURL,
+			SessionID:  info.SessionID,
+			DaemonURL:  cfg.DaemonURL,
+			McpServers: hooksModeMcpServers(),
 		})
 		if err != nil {
 			slog.Warn("hooks-mode: BuildSettings failed; skipping injection",
@@ -411,4 +412,29 @@ func ensureWorktreesGitignored(gitignorePath, workingDir string) {
 	_, _ = runGit(gitCommitOpTimeout, workingDir, "commit", "-m", "chore: gitignore agent worktrees")
 
 	slog.Info("Added .worktrees/ to .gitignore")
+}
+
+// hooksModeMcpServers returns the MCP server map injected into every
+// hooks-mode agent's .claude/settings.local.json. Mirrors what the
+// SDK-mode spawn path adds to pty.SessionConfig.McpServers so both
+// deployment shapes give agents the same tool surface.
+//
+// Today: just PageIndex (the knowledge-library MCP). codegraph + cgc
+// + ECC are SDK-mode-only because their existing wiring path in
+// handler/spawn_agent.go runs after we know the per-agent SDK
+// session ID. Adding them here would duplicate that lookup; the
+// hooks-mode parity story for those is a follow-up.
+//
+// Returns nil when PageIndex isn't available so BuildSettings emits
+// the JSON without the mcpServers key (graceful degradation matching
+// every other optional integration).
+func hooksModeMcpServers() map[string]any {
+	if !PageIndexAvailable() {
+		return nil
+	}
+	cfg := PageIndexMcpConfig(LibraryDir())
+	if cfg == nil {
+		return nil
+	}
+	return map[string]any{"pageindex": cfg}
 }

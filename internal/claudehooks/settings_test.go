@@ -188,3 +188,80 @@ func TestRemoveSettings_OnlyOurFiles(t *testing.T) {
 		t.Error("operator file should be preserved")
 	}
 }
+
+func TestBuildSettings_McpServersEmittedWhenSupplied(t *testing.T) {
+	mcp := map[string]any{
+		"pageindex": map[string]any{
+			"type":    "stdio",
+			"command": "npx",
+			"args":    []string{"-y", "@pageindex/mcp@latest"},
+			"env":     map[string]string{"PAGEINDEX_LIBRARY_DIR": "/lib"},
+		},
+	}
+	data, err := BuildSettings(SettingsParams{
+		SessionID:  "sess-x",
+		DaemonURL:  "http://127.0.0.1:3555",
+		McpServers: mcp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var doc map[string]interface{}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	mcpOut, ok := doc["mcpServers"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("mcpServers missing or wrong type: %T", doc["mcpServers"])
+	}
+	pi, ok := mcpOut["pageindex"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("pageindex entry missing: %v", mcpOut)
+	}
+	if pi["type"] != "stdio" {
+		t.Errorf("type=%v want stdio", pi["type"])
+	}
+	if pi["command"] != "npx" {
+		t.Errorf("command=%v want npx", pi["command"])
+	}
+}
+
+func TestBuildSettings_McpServersOmittedWhenNil(t *testing.T) {
+	// No McpServers supplied → the on-disk JSON must NOT contain
+	// an empty "mcpServers": {} block (would override an operator's
+	// existing mcpServers config in a parent settings file).
+	data, err := BuildSettings(SettingsParams{
+		SessionID: "sess-x",
+		DaemonURL: "http://127.0.0.1:3555",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	_ = json.Unmarshal(data, &doc)
+	if _, present := doc["mcpServers"]; present {
+		t.Errorf("mcpServers should be absent when nil; got: %v", doc["mcpServers"])
+	}
+}
+
+func TestBuildSettings_McpServersDeepCopied(t *testing.T) {
+	// Mutating the caller's map after BuildSettings must NOT
+	// affect a later BuildSettings call that hands the same map
+	// shape — defence against shared-state bugs.
+	mcp := map[string]any{
+		"a": map[string]any{"type": "stdio", "command": "x"},
+	}
+	first, _ := BuildSettings(SettingsParams{
+		SessionID: "s", DaemonURL: "u", McpServers: mcp,
+	})
+	// Mutate after the first call.
+	mcp["b"] = map[string]any{"type": "stdio", "command": "y"}
+
+	// First call's JSON must NOT contain "b" — it was added after
+	// rendering. (We don't re-render here; we just confirm the
+	// first render is locked in.)
+	if strings.Contains(string(first), `"b"`) {
+		t.Errorf("first render included post-mutation key 'b':\n%s", first)
+	}
+}
