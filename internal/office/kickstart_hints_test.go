@@ -284,3 +284,65 @@ func TestBuildKickstartPrompt_AntiPatternAbsentWhenNoHits(t *testing.T) {
 		t.Errorf("section should be absent on empty library; prompt:\n%s", prompt)
 	}
 }
+
+func TestPromptNextTask_AppendsAntiPatternHint(t *testing.T) {
+	withTempLibraryForOffice(t)
+	// Seed an anti-pattern matching the agent's role + labels.
+	ap := library.AntiPattern{
+		Slug:            "auth",
+		Title:           "Avoid: skipping cookie clear",
+		AvgOutcome:      0.15,
+		AgentRole:       "backend-engineer",
+		TaskLabels:      []string{"auth", "jwt"},
+		WorkingDirHints: []string{"/repo/internal/auth"},
+		WhyItFails:      "stale auth state leaks across requests",
+		WhatToAvoid:     []string{"always clear refresh cookie", "never bypass middleware"},
+		CreatedAt:       time.Now().Add(-time.Hour),
+	}
+	if err := library.WriteAntiPattern(ap); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &nextTaskHintRecordingStore{}
+	m := NewManager(rec, func(string, interface{}) {}, nil)
+	m.RegisterAgent("sess-iris-001", "iris",
+		&TeamMemberConfig{ID: "iris", Name: "Iris", Role: "backend-engineer"})
+	agent := m.GetAgent("sess-iris-001")
+	if agent == nil {
+		t.Fatal("agent not registered")
+	}
+	agent.SetWorktreePath("/repo/internal/auth")
+	agent.AddTask(&Task{
+		ID:     "task-new",
+		Title:  "Add JWT refresh v2",
+		Status: TaskPending,
+		Labels: []string{"auth", "jwt"},
+	})
+
+	m.PromptNextTask("sess-iris-001", "Add JWT refresh v2", "task-new")
+
+	if !strings.Contains(rec.lastPrompt, "[NEXT TASK]") {
+		t.Errorf("missing standard next-task header:\n%s", rec.lastPrompt)
+	}
+	if !strings.Contains(rec.lastPrompt, "[AVOID]") {
+		t.Errorf("missing anti-pattern hint header:\n%s", rec.lastPrompt)
+	}
+	if !strings.Contains(rec.lastPrompt, "Avoid: skipping cookie clear") {
+		t.Errorf("anti-pattern title missing:\n%s", rec.lastPrompt)
+	}
+	if !strings.Contains(rec.lastPrompt, "always clear refresh cookie") {
+		t.Errorf("anti-pattern guidance missing:\n%s", rec.lastPrompt)
+	}
+}
+
+func TestPromptNextTask_NoAntiPatternHintWhenLibraryEmpty(t *testing.T) {
+	withTempLibraryForOffice(t)
+	rec := &nextTaskHintRecordingStore{}
+	m := NewManager(rec, func(string, interface{}) {}, nil)
+	m.RegisterAgent("sess-001", "alpha",
+		&TeamMemberConfig{ID: "alpha", Name: "Alpha", Role: "backend"})
+	m.PromptNextTask("sess-001", "Some task", "t-1")
+	if strings.Contains(rec.lastPrompt, "[AVOID]") {
+		t.Errorf("unexpected anti-pattern hint with empty library:\n%s", rec.lastPrompt)
+	}
+}

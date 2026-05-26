@@ -337,6 +337,9 @@ func (m *Manager) PromptNextTask(sessionID, taskTitle, taskID string) {
 	if hint := m.nextTaskHint(sessionID, taskID, taskTitle); hint != "" {
 		prompt = prompt + "\n\n" + hint
 	}
+	if avoid := m.nextTaskAntiPatternHint(sessionID, taskID, taskTitle); avoid != "" {
+		prompt = prompt + "\n\n" + avoid
+	}
 	sessions.WriteInkPrompt(sessionID, prompt)
 }
 
@@ -376,6 +379,61 @@ func (m *Manager) nextTaskHint(sessionID, taskID, taskTitle string) string {
 	if h.ApproachSummary != "" {
 		b.WriteString("\nApproach: ")
 		b.WriteString(h.ApproachSummary)
+	}
+	fmt.Fprintf(&b, "\nFull doc: `%s` (read via mcp__pageindex__get_page_content)", h.Path)
+	return b.String()
+}
+
+// nextTaskAntiPatternHint is the failure-mode analog of
+// nextTaskHint. Looks up the agent + task by IDs, queries
+// library.SearchAntiPatterns with the same role/labels/dir, returns
+// the top-1 anti-pattern as a "[AVOID]" snippet. Empty string
+// when no match clears the relevance threshold — the kickstart
+// path remains the primary surface for these hints; this is the
+// per-task moment reminder.
+//
+// One hit cap (same as nextTaskHint) keeps the next-task prompt
+// focused. The two-hit cap on bullets keeps the prompt budget tight.
+func (m *Manager) nextTaskAntiPatternHint(sessionID, taskID, taskTitle string) string {
+	agent := m.GetAgent(sessionID)
+	if agent == nil || agent.Config == nil {
+		return ""
+	}
+	var labels []string
+	for _, t := range agent.GetTasks() {
+		if t != nil && t.ID == taskID {
+			labels = t.Labels
+			break
+		}
+	}
+	hits, err := library.SearchAntiPatterns(library.Query{
+		AgentRole:  agent.Config.Role,
+		TaskTitle:  taskTitle,
+		TaskLabels: labels,
+		WorkingDir: agent.GetWorktreePath(),
+		K:          1,
+	})
+	if err != nil || len(hits) == 0 {
+		return ""
+	}
+	h := hits[0]
+	var b strings.Builder
+	b.WriteString("[AVOID] ")
+	title := h.Title
+	if title == "" {
+		title = h.Slug
+	}
+	b.WriteString(title)
+	if h.WhyItFails != "" {
+		b.WriteString("\nWhy it fails: ")
+		b.WriteString(h.WhyItFails)
+	}
+	for i, avoid := range h.WhatToAvoid {
+		if i >= 2 {
+			break
+		}
+		b.WriteString("\n- ")
+		b.WriteString(avoid)
 	}
 	fmt.Fprintf(&b, "\nFull doc: `%s` (read via mcp__pageindex__get_page_content)", h.Path)
 	return b.String()
