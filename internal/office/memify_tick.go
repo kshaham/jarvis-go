@@ -115,6 +115,21 @@ func (m *Manager) runMemifyTick() {
 	if len(pres.Failed) > 0 {
 		slog.Warn("knowledge promotion had failures", "failed", pres.Failed)
 	}
+
+	// Purge: delete experiences past valid_until + grace period.
+	// Caps deletes per tick so a sudden glut of expired files
+	// can't slam the disk. Memify-only marker (valid_until) is
+	// the gate — files that never decayed are never touched.
+	purged, perr := library.PurgeExpiredExperiences(library.PurgeOptions{})
+	if perr != nil {
+		slog.Warn("knowledge purge failed", "err", perr)
+	} else if purged.Deleted > 0 || purged.Failed > 0 {
+		slog.Info("knowledge purge",
+			"scanned", purged.Scanned,
+			"deleted", purged.Deleted,
+			"skipped", purged.Skipped,
+			"failed", purged.Failed)
+	}
 }
 
 // promoteSkillWriter is the SkillWriter callback library invokes
