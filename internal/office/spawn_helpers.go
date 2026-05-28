@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/office/spawnpayload"
-	"github.com/claudeman/jarvis-go/internal/strs"
-	"github.com/claudeman/jarvis-go/internal/teamtemplates"
+	"github.com/kshaham/jarvis/internal/office/spawnpayload"
+	"github.com/kshaham/jarvis/internal/strs"
+	"github.com/kshaham/jarvis/internal/teamtemplates"
 	"github.com/google/uuid"
 )
 

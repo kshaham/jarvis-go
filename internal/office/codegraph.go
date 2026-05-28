@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // codegraphBinaryName is the executable jarvis shells out to. Variable

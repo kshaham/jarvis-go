@@ -14,27 +14,28 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/cases"
-	"github.com/claudeman/jarvis-go/internal/claudehooks"
-	"github.com/claudeman/jarvis-go/internal/integrations"
-	"github.com/claudeman/jarvis-go/internal/metrics"
-	"github.com/claudeman/jarvis-go/internal/notifications"
-	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/ralph"
-	"github.com/claudeman/jarvis-go/internal/respawn"
-	"github.com/claudeman/jarvis-go/internal/runsummary"
-	"github.com/claudeman/jarvis-go/internal/scheduler"
-	"github.com/claudeman/jarvis-go/internal/state"
-	"github.com/claudeman/jarvis-go/internal/subagent"
-	"github.com/claudeman/jarvis-go/internal/teamtemplates"
-	"github.com/claudeman/jarvis-go/internal/telegram"
-	"github.com/claudeman/jarvis-go/internal/templates"
-	"github.com/claudeman/jarvis-go/internal/web/auth"
-	"github.com/claudeman/jarvis-go/internal/web/handler"
-	mw "github.com/claudeman/jarvis-go/internal/web/middleware"
-	"github.com/claudeman/jarvis-go/internal/web/sse"
-	"github.com/claudeman/jarvis-go/internal/web/static"
+	"github.com/kshaham/jarvis/internal/cases"
+	"github.com/kshaham/jarvis/internal/claudehooks"
+	"github.com/kshaham/jarvis/internal/integrations"
+	"github.com/kshaham/jarvis/internal/metrics"
+	"github.com/kshaham/jarvis/internal/notifications"
+	"github.com/kshaham/jarvis/internal/office"
+	"github.com/kshaham/jarvis/internal/peers"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/ralph"
+	"github.com/kshaham/jarvis/internal/respawn"
+	"github.com/kshaham/jarvis/internal/runsummary"
+	"github.com/kshaham/jarvis/internal/scheduler"
+	"github.com/kshaham/jarvis/internal/state"
+	"github.com/kshaham/jarvis/internal/subagent"
+	"github.com/kshaham/jarvis/internal/teamtemplates"
+	"github.com/kshaham/jarvis/internal/telegram"
+	"github.com/kshaham/jarvis/internal/templates"
+	"github.com/kshaham/jarvis/internal/web/auth"
+	"github.com/kshaham/jarvis/internal/web/handler"
+	mw "github.com/kshaham/jarvis/internal/web/middleware"
+	"github.com/kshaham/jarvis/internal/web/sse"
+	"github.com/kshaham/jarvis/internal/web/static"
 )
 
 // officeV2PlaceholderHTML is served by /office-v2 when the React bundle
@@ -59,7 +60,7 @@ const officeV2PlaceholderHTML = `<!DOCTYPE html>
   <pre>cd internal/web/spa
 npm install
 npm run build</pre>
-  <p>Then reload this page. In the meantime, the classic UI is at <a href="/office">/office</a>.</p>
+  <p>Then reload this page. In the meantime, the classic UI is at <a href="/office-classic">/office-classic</a>.</p>
   <p style="margin-top:16px;font-size:12px;color:#64748B">See <code>internal/web/spa/README.md</code> for the full dev workflow.</p>
 </div>
 </body></html>`
@@ -91,6 +92,7 @@ type Server struct {
 	telegramBot         *telegram.Bot
 	telegramHandler     *telegram.Handler
 	handlerCtx          *handler.Context
+	peers               *handler.Peers
 }
 
 // NewServer creates a new web server.
@@ -602,6 +604,32 @@ func (s *Server) setupRouter() chi.Router {
 	h.NotificationsRouter = s.notificationsRouter
 	s.handlerCtx = h
 
+	// Inter-team relay infrastructure. Identity is generated on first
+	// use (~/.jarvis/identity.json), registry lives at peers.json,
+	// relay messages persist under ~/.jarvis/relay/. The Service binds
+	// the office manager as the live-team message injector so inbound
+	// relay messages reach running agents next turn.
+	idStore := peers.NewIdentityStore(peers.DefaultIdentityPath())
+	peerReg, peersErr := peers.NewRegistry(peers.DefaultRegistryPath())
+	if peersErr != nil {
+		slog.Warn("peers: registry load failed, continuing with empty in-memory registry", "err", peersErr)
+		peerReg, _ = peers.NewRegistry("")
+	}
+	relayStore := peers.NewStore(peers.DefaultRelayDir())
+	relaySvc := &peers.Service{
+		Identity:  idStore,
+		Registry:  peerReg,
+		Store:     relayStore,
+		Client:    peers.NewClient(),
+		Injector:  s.officeManager,
+		Broadcast: s.sseBroker.Broadcast,
+	}
+	s.peers = &handler.Peers{
+		Identity: idStore,
+		Registry: peerReg,
+		Relay:    relaySvc,
+	}
+
 	// Wire office <-> telegram integration
 	s.telegramHandler.SetOfficeBridge(s.officeManager)
 	{
@@ -663,6 +691,16 @@ func (s *Server) setupRouter() chi.Router {
 			// CSRF-protected group.
 			// Telegram webhook (auth via secret in URL path)
 			r.Post("/telegram/webhook/{secret}", s.telegramHandler.WebhookHandler)
+
+			// Public peer identity probe — other jarvis instances hit
+			// this during paste-token registration to verify the URL
+			// resolves to a real jarvis. Returns peerId + displayName
+			// only; never the local pair tokens.
+			r.Get("/identity", s.peers.IdentityShow)
+			// Inbound relay messages from peer jarvis instances. Auth
+			// happens inside the handler via the Bearer pair token —
+			// the operator's session cookie isn't applicable here.
+			r.Post("/relay/inbox", s.peers.RelayInboxIn)
 
 			// Agent endpoints called by the `cm` CLI and jarvis-mcp inside
 			// spawned sessions. Protected by an HMAC-grade process token
@@ -852,6 +890,11 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/knowledge/promotions", h.GetKnowledgePromotions)
 			r.Get("/knowledge/library", h.GetKnowledgeLibrary)
 
+			// Inter-team relay — operator-facing read views.
+			r.Get("/identity/me", s.peers.IdentityShowDetailed)
+			r.Get("/peers", s.peers.PeersList)
+			r.Get("/relay/messages", s.peers.RelayList)
+
 			// Mutating routes (CSRF required)
 			r.Group(func(r chi.Router) {
 				r.Use(mw.CSRF(s.csrfStore))
@@ -986,6 +1029,15 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/notifications/routes", h.CreateNotificationRoute)
 				r.Put("/notifications/routes/{id}", h.UpdateNotificationRoute)
 				r.Delete("/notifications/routes/{id}", h.DeleteNotificationRoute)
+
+				// Inter-team relay — operator-driven mutations.
+				r.Put("/identity/me", s.peers.IdentityUpdate)
+				r.Post("/identity/token", s.peers.IdentityToken)
+				r.Post("/peers", s.peers.PeersAdd)
+				r.Delete("/peers/{peerID}", s.peers.PeersDelete)
+				r.Post("/peers/{peerID}/ping", s.peers.PeersPing)
+				r.Post("/relay/send", s.peers.RelaySend)
+				r.Post("/relay/messages/{id}/read", s.peers.RelayMarkRead)
 				// Mobile push device registration. POSTing this creates one
 				// notifications route per default event pattern so the
 				// existing dispatcher fans push events out via Expo.
@@ -1158,8 +1210,24 @@ func (s *Server) setupRouter() chi.Router {
 		})
 	})
 
-	// Redirect /office to /office.html (matches Node.js behavior)
+	// Phase 5 of the SPA refresh: /office is now the canonical URL of
+	// the React island. Deep-linked tabs / hash anchors on /office#...
+	// resolve to the SPA's root view (which has its own router), so
+	// stale bookmarks land somewhere sensible rather than 404.
+	//
+	// The legacy vanilla shell remains reachable at /office-classic
+	// for any feature gaps the SPA hasn't covered yet.
 	r.Get("/office", func(w http.ResponseWriter, r *http.Request) {
+		target := "/office-v2"
+		if r.URL.RawQuery != "" {
+			target = target + "?" + r.URL.RawQuery
+		}
+		if r.URL.Fragment != "" {
+			target = target + "#" + r.URL.Fragment
+		}
+		http.Redirect(w, r, target, http.StatusFound)
+	})
+	r.Get("/office-classic", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/office.html", http.StatusFound)
 	})
 

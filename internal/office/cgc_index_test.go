@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/testutil/stubbin"
+	"github.com/kshaham/jarvis/internal/testutil/stubbin"
 )
 
 // waitForFile polls until path exists or the deadline elapses.

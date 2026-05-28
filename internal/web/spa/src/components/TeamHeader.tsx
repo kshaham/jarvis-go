@@ -1,4 +1,5 @@
 import { useOfficeStatus } from '@/hooks/useOfficeStatus';
+import { Metric, SSEPulse } from '@/components/motion';
 
 export function TeamHeader() {
   const { data } = useOfficeStatus();
@@ -6,36 +7,73 @@ export function TeamHeader() {
   const memberCount = team?.members?.length || 0;
 
   return (
-    <header className="sticky top-0 z-10 border-b border-white/5 bg-[#06080C]/80 backdrop-blur supports-[backdrop-filter]:bg-[#06080C]/60">
+    <header
+      className="sticky top-0 z-10 border-b backdrop-blur"
+      style={{
+        borderColor: 'var(--border-subtle)',
+        background: 'rgba(6,8,12,0.8)',
+      }}
+    >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
         <div className="flex items-center gap-3">
-          <div className="h-7 w-7 rounded-md bg-gradient-to-br from-sky-400 to-blue-600" />
+          {/* Brand mark — electric violet to signature-accent the surface. */}
+          <div
+            className="h-7 w-7 rounded-md"
+            style={{
+              background:
+                'linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)',
+            }}
+          />
           <div>
-            <div className="text-sm font-semibold text-slate-100">Jarvis · Office</div>
-            <div className="text-[11px] text-slate-500">React beta /office-v2</div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Jarvis · Office
+            </div>
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              React beta /office-v2
+            </div>
           </div>
         </div>
 
-        {team && (
-          <div className="flex items-center gap-3 text-xs text-slate-300">
-            {team.mission && (
-              <span className="hidden max-w-[40ch] truncate sm:inline-block text-slate-400">
-                {team.mission}
-              </span>
-            )}
-            {team.prNumber ? (
-              <span className="rounded bg-status-info/15 px-2 py-0.5 text-status-info">
-                PR #{team.prNumber}
-              </span>
-            ) : null}
-            {team.paused && (
-              <span className="rounded bg-status-warn/15 px-2 py-0.5 text-status-warn">
-                Paused
-              </span>
-            )}
-            <span className="ds-tabular text-slate-400">{memberCount} agents</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3 text-xs">
+          {team?.mission && (
+            <span
+              className="hidden max-w-[40ch] truncate sm:inline-block"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {team.mission}
+            </span>
+          )}
+          {team?.prNumber ? (
+            <span
+              className="rounded px-2 py-0.5"
+              style={{
+                background: 'var(--accent-muted)',
+                color: 'var(--accent)',
+              }}
+            >
+              PR #{team.prNumber}
+            </span>
+          ) : null}
+          {team?.paused && (
+            <span
+              className="rounded px-2 py-0.5"
+              style={{
+                background: 'rgba(255,180,84,0.16)',
+                color: 'var(--status-warn)',
+              }}
+            >
+              Paused
+            </span>
+          )}
+          {team && (
+            <span className="inline-flex items-baseline gap-1" style={{ color: 'var(--text-secondary)' }}>
+              <Metric value={memberCount} size={12} tone="primary" />
+              <span style={{ color: 'var(--text-muted)' }}>agents</span>
+            </span>
+          )}
+          {/* Live SSE indicator — the heartbeat of the office. */}
+          <SSEPulse />
+        </div>
       </div>
     </header>
   );

@@ -3,13 +3,14 @@ package office
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/library"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // ExperimentRecord captures the outcome of one team session (spawn to shutdown).
@@ -46,14 +47,20 @@ func RecordExperiment(record ExperimentRecord) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
+	// On the write path we need the close error: a buffered append that
+	// only surfaces a disk-full / EIO at flush time would otherwise be
+	// silently dropped by `defer f.Close()`.
 	data, err := json.Marshal(record)
 	if err != nil {
+		_ = f.Close()
 		return err
 	}
 	if _, err := f.Write(append(data, '\n')); err != nil {
+		_ = f.Close()
 		return err
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close experiment log: %w", err)
 	}
 
 	// Mirror to library. Wrapped so failure here can't surface as

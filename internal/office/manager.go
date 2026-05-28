@@ -20,7 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // execCommand + execExitError indirect the os/exec types so tests can
@@ -695,6 +695,48 @@ func (m *Manager) SendMessage(from, to, content string) {
 		teamMsg := "[Team Message from " + fromName + "]: " + sanitized
 		sessions.WriteViaScreen(to, teamMsg+"\r")
 	}
+}
+
+// InjectRelayMessage delivers a cross-team message from another
+// jarvis instance into the live team. Picks a strategic-tier lead as
+// the recipient (falling back to the first available agent) so the
+// peer team's broadcast reaches a single inbox rather than spamming
+// every agent. Returns true if a live agent received the inject;
+// false if no team is spawned (the relay layer will still have
+// queued the message to disk, so the next spawn picks it up).
+//
+// The synthetic sender id "relay:<peerID>" lets the prompt builder
+// recognise the source and render appropriate context to the agent.
+func (m *Manager) InjectRelayMessage(fromPeerID, fromDisplayName, content string) (live bool) {
+	if !m.IsTeamSpawned() {
+		return false
+	}
+	roster := m.GetRoster()
+	var target *AgentState
+	for _, a := range roster {
+		if a == nil || a.Config == nil {
+			continue
+		}
+		if a.Config.Tier == "strategic" {
+			target = a
+			break
+		}
+	}
+	if target == nil && len(roster) > 0 {
+		target = roster[0]
+	}
+	if target == nil {
+		return false
+	}
+	sanitized := sanitizeForTerminal(content)
+	header := "📨 Relay from peer team \"" + fromDisplayName + "\""
+	body := header + "\n\n" + sanitized
+	syntheticFrom := "relay:" + fromPeerID
+	// SendMessage handles the OfficeMessage append, SSE broadcast, and
+	// WriteViaScreen delivery — reuse it so relay traffic flows through
+	// the same audit log as regular team messages.
+	m.SendMessage(syntheticFrom, target.SessionID, body)
+	return true
 }
 
 // GetMessages returns recent messages.
@@ -2369,9 +2411,16 @@ func AppendAgentMemory(configID, workingDir, entry string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.WriteString(entry)
-	return err
+	// Surface close errors: a buffered append that fails to flush at
+	// Close() (disk full / EIO) would otherwise be lost behind defer.
+	if _, err := f.WriteString(entry); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close agent memory: %w", err)
+	}
+	return nil
 }
 
 // AppendMissionInsight appends a discovered insight to the team mission and

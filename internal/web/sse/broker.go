@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/claudeman/jarvis-go/internal/metrics"
+	"github.com/kshaham/jarvis/internal/metrics"
 )
 
 // replayBufferSize bounds how many recent events are kept for replay to

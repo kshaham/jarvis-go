@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/web/auth"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/web/auth"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // Mobile-app authentication. These endpoints sit alongside the session-cookie

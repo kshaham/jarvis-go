@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/web/middleware"
-	"github.com/claudeman/jarvis-go/internal/web/sse"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/web/middleware"
+	"github.com/kshaham/jarvis/internal/web/sse"
 )
 
 func newTestContext() *Context {

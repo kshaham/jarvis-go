@@ -23,7 +23,7 @@ Two critical facts:
 
 ## The 6 commands you actually need
 
-All commands run from `~/claudeman/` on the server (or wherever the `docker-compose.yml` lives).
+All commands run from wherever the `docker-compose.yml` lives.
 
 ### 1. `docker compose ps` -- what's actually running
 

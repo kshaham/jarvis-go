@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/claudeman/jarvis-go/internal/web/auth"
+	"github.com/kshaham/jarvis/internal/web/auth"
 )
 
 // Auth middleware validates session cookies on every request.

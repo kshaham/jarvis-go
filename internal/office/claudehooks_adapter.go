@@ -12,7 +12,7 @@ package office
 //     here instead of hunting through manager.go.
 
 import (
-	"github.com/claudeman/jarvis-go/internal/claudehooks"
+	"github.com/kshaham/jarvis/internal/claudehooks"
 )
 
 // Compile-time check that *Manager satisfies the AgentRegistry contract.

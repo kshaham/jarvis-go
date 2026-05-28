@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // StandupMessage represents one entry in the standup transcript.

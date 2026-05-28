@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/metrics"
+	"github.com/kshaham/jarvis/internal/metrics"
 )
 
 // RequestLogger logs each HTTP request with method, path, status, duration,

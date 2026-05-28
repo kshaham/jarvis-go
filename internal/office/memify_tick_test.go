@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
+	"github.com/kshaham/jarvis/internal/library"
 )
 
 // recordingBroadcastManager builds a Manager with a broadcast func

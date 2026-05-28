@@ -37,11 +37,14 @@
       hint: 'or click "Spawn team" in the header',
       run: () => {
         // Trigger an existing spawn-modal button if present, else
-        // bounce to /office where the spawn flow lives.
+        // bounce to the classic-office spawn flow. The new SPA at
+        // /office-v2 doesn't host the spawn modal yet — the React
+        // port is incremental and falls back here for unmigrated
+        // workflows.
         const btn = document.getElementById('spawnTeamBtn')
                   || document.querySelector('[data-action="spawn-team"]');
         if (btn) btn.click();
-        else window.location.href = '/office?spawn=1';
+        else window.location.href = '/office-classic?spawn=1';
       },
     },
     {

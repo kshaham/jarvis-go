@@ -27,9 +27,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
-	"github.com/claudeman/jarvis-go/internal/logscrub"
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/library"
+	"github.com/kshaham/jarvis/internal/logscrub"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // NeedsReviewLabel is the label that triggers ultrareview. Tasks

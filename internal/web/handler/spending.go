@@ -26,8 +26,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/state"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/state"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // todayCost returns the running USD total for today, taken from the daily

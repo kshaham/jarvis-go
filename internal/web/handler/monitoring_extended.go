@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/claudeauth"
-	"github.com/claudeman/jarvis-go/internal/web/auth"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/claudeauth"
+	"github.com/kshaham/jarvis/internal/web/auth"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // GetAuthStatus returns the current authentication status.

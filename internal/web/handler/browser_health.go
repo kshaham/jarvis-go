@@ -16,7 +16,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 type browserHealthResponse struct {

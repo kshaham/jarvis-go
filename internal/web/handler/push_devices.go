@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/notifications"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/notifications"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // Mobile push-notification device registration.

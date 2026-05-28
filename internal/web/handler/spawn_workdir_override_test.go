@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/claudeman/jarvis-go/internal/state"
+	"github.com/kshaham/jarvis/internal/state"
 )
 
 func TestResolveWorkingDir_AcceptsAllowlisted(t *testing.T) {

@@ -8,10 +8,9 @@ import (
 
 // waitForCondition polls fn every ~5ms until it returns true or the
 // deadline elapses. Replaces the brittle `time.Sleep(N); assert ...`
-// pattern that flakes under CI load — see Phase 9.1 in
-// the design plan.
-// Failure message includes the elapsed wait so flake diagnostics get
-// a real signal instead of "assertion failed at line N".
+// pattern that flakes under CI load. Failure message includes the
+// elapsed wait so flake diagnostics get a real signal instead of
+// "assertion failed at line N".
 func waitForCondition(t *testing.T, fn func() bool, timeout time.Duration, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

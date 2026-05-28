@@ -26,7 +26,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/claudeman/jarvis-go/internal/strs"
+	"github.com/kshaham/jarvis/internal/strs"
 )
 
 //go:embed ecc_agents/*.md

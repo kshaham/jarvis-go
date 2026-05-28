@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // Controller manages the respawn state machine for a single session.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/testutil/stubbin"
+	"github.com/kshaham/jarvis/internal/testutil/stubbin"
 )
 
 // installLLMStub swaps llmBinary for a script that prints

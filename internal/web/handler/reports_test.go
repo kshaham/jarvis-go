@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/office"
+	"github.com/kshaham/jarvis/internal/office"
 )
 
 func TestOfficeListReports_Empty(t *testing.T) {

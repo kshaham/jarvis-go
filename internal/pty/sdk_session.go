@@ -19,8 +19,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/shaharia-lab/claude-agent-sdk-go/claude"
 
-	"github.com/claudeman/jarvis-go/internal/logscrub"
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/logscrub"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // SDKSession wraps the Claude Agent SDK for programmatic agent interaction.

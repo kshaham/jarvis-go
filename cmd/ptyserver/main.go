@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/claudeman/jarvis-go/internal/pty"
+	"github.com/kshaham/jarvis/internal/pty"
 )
 
 func main() {

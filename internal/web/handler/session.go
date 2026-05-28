@@ -15,13 +15,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/ralph"
-	"github.com/claudeman/jarvis-go/internal/respawn"
-	"github.com/claudeman/jarvis-go/internal/runsummary"
-	"github.com/claudeman/jarvis-go/internal/state"
-	"github.com/claudeman/jarvis-go/internal/web/request"
-	"github.com/claudeman/jarvis-go/internal/web/sse"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/ralph"
+	"github.com/kshaham/jarvis/internal/respawn"
+	"github.com/kshaham/jarvis/internal/runsummary"
+	"github.com/kshaham/jarvis/internal/state"
+	"github.com/kshaham/jarvis/internal/web/request"
+	"github.com/kshaham/jarvis/internal/web/sse"
 )
 
 // respawnSessionWriter adapts a pty.Session to the respawn.SessionWriter interface.

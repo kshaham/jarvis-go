@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/claudeman/jarvis-go/internal/office"
+	"github.com/kshaham/jarvis/internal/office"
 )
 
 func TestOfficeAgentOnboarding_HappyPath(t *testing.T) {

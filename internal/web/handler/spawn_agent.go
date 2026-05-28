@@ -7,9 +7,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/teamtemplates"
+	"github.com/kshaham/jarvis/internal/office"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/teamtemplates"
 	"github.com/google/uuid"
 )
 

@@ -1,4 +1,4 @@
-module github.com/claudeman/jarvis-go
+module github.com/kshaham/jarvis
 
 go 1.25.0
 

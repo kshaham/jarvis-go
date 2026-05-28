@@ -9,8 +9,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/office"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // OfficeGetTaskGraph returns the aggregated dependency DAG.

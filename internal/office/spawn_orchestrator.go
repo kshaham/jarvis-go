@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
-	"github.com/claudeman/jarvis-go/internal/office/spawnpayload"
-	"github.com/claudeman/jarvis-go/internal/teamtemplates"
+	"github.com/kshaham/jarvis/internal/library"
+	"github.com/kshaham/jarvis/internal/office/spawnpayload"
+	"github.com/kshaham/jarvis/internal/teamtemplates"
 )
 
 // Spawn-orchestrator migration

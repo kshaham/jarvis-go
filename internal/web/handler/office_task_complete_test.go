@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/testutil/stubbin"
-	"github.com/claudeman/jarvis-go/internal/web/sse"
+	"github.com/kshaham/jarvis/internal/office"
+	"github.com/kshaham/jarvis/internal/testutil/stubbin"
+	"github.com/kshaham/jarvis/internal/web/sse"
 )
 
 // TestTaskHasNeedsReviewLabel_OnRealTaskShape is a regression guard

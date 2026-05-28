@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/office/spawnpayload"
-	"github.com/claudeman/jarvis-go/internal/teamtemplates"
+	"github.com/kshaham/jarvis/internal/office/spawnpayload"
+	"github.com/kshaham/jarvis/internal/teamtemplates"
 )
 
 // stubLookup returns a TemplateLookup backed by a fixed map.

@@ -17,10 +17,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/respawn"
-	"github.com/claudeman/jarvis-go/internal/secpath"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/respawn"
+	"github.com/kshaham/jarvis/internal/secpath"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // resolveSessionFilePath maps a query-supplied workdir-relative path

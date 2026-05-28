@@ -44,3 +44,351 @@ export interface OfficeStatus {
     timestamp: number;
   }>;
 }
+
+// ---------------------------------------------------------------------
+// Inter-team relay
+// ---------------------------------------------------------------------
+
+export type PeerStatus = 'unknown' | 'ok' | 'unreachable' | 'unauthorized';
+
+export interface Peer {
+  peerId: string;
+  displayName: string;
+  publicUrl: string;
+  pairToken: string;
+  addedAt: string;
+  lastSeenAt?: string;
+  status: PeerStatus;
+  lastError?: string;
+  // Server-augmented: count of unread inbound messages from this peer.
+  unreadInbound?: number;
+}
+
+export interface LocalIdentity {
+  peerId: string;
+  displayName: string;
+  publicUrl: string;
+  createdAt: string;
+}
+
+export type RelayAttachmentKind = 'experience' | 'workflow' | 'task' | 'missionExcerpt';
+
+export interface RelayAttachment {
+  kind: RelayAttachmentKind;
+  ref: string;
+  title: string;
+  body: string;
+}
+
+export interface RelayMessage {
+  id: string;
+  fromPeerId: string;
+  fromDisplayName: string;
+  toPeerId: string;
+  content: string;
+  attachments?: RelayAttachment[];
+  createdAt: string;
+  deliveredAt?: string;
+  readAt?: string;
+  direction: 'inbound' | 'outbound';
+}
+
+// ---------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------
+
+export type TaskStatus =
+  | 'pending'
+  | 'acknowledged'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'blocked'
+  | 'handoff_pending';
+
+export type TaskPriority = 'high' | 'medium' | 'low';
+
+export interface TaskProgressEntry {
+  timestamp: string;
+  note: string;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  priority?: TaskPriority;
+  assignedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  source?: string;
+  blockedBy?: string[];
+  blockerDescription?: string;
+  progressLog?: TaskProgressEntry[];
+  labels?: string[];
+  finalCostUSD?: number;
+  finalTurnCount?: number;
+}
+
+export interface TaskQueue {
+  sessionId: string;
+  agentName: string;
+  tasks: Task[];
+}
+
+export interface TaskQueuesResponse {
+  queues: TaskQueue[];
+}
+
+// ---------------------------------------------------------------------
+// Messages (chat)
+// ---------------------------------------------------------------------
+
+export interface OfficeMessageWire {
+  id: string;
+  fromSessionId: string;
+  toSessionId?: string;
+  fromName?: string;
+  toName?: string;
+  content: string;
+  timestamp: string;
+}
+
+// ---------------------------------------------------------------------
+// Standup
+// ---------------------------------------------------------------------
+
+export interface StandupTranscriptEntry {
+  sessionId: string;
+  speakerName?: string;
+  content: string;
+  timestamp: string;
+  kind?: string;
+}
+
+export interface Standup {
+  id?: string;
+  active: boolean;
+  startedAt?: string;
+  endedAt?: string;
+  participants: string[];
+  currentSpeakerId?: string;
+  transcript: StandupTranscriptEntry[];
+}
+
+// ---------------------------------------------------------------------
+// Timeline / Activity
+// ---------------------------------------------------------------------
+
+export interface TimelineEntry {
+  timestamp: string;
+  kind: string;
+  agentId?: string;
+  agentName?: string;
+  title: string;
+  summary?: string;
+  data?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------
+// Knowledge
+// ---------------------------------------------------------------------
+
+export interface KnowledgeStats {
+  experiences?: number;
+  workflows?: number;
+  standups?: number;
+  promoted?: number;
+  revoked?: number;
+  pageIndexStatus?: string;
+}
+
+export interface KnowledgePromotion {
+  id: string;
+  kind: string;
+  title: string;
+  promotedAt?: string;
+  reuseCount?: number;
+  avgOutcome?: number;
+  revoked?: boolean;
+}
+
+// ---------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------
+
+export interface SavedReport {
+  filename: string;
+  generatedAt?: string;
+  size?: number;
+  preview?: string;
+}
+
+// ---------------------------------------------------------------------
+// Office settings
+// ---------------------------------------------------------------------
+
+export interface OfficeSettings {
+  mission?: string;
+  autoStandup?: {
+    enabled?: boolean;
+    intervalHours?: number;
+    intervalMinutes?: number;
+    nextAt?: string;
+  };
+  brainstorm?: {
+    cooldownMinutes?: number;
+    responseTimeoutSeconds?: number;
+  };
+  idleDetection?: {
+    enabled?: boolean;
+    thresholdMinutes?: number;
+  };
+  meetings?: {
+    inactivityTimeoutSeconds?: number;
+    standupResponseTimeoutSeconds?: number;
+  };
+  fileLocks?: {
+    lockExpiryMinutes?: number;
+  };
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------
+// Dev instances
+// ---------------------------------------------------------------------
+
+export interface DevInstance {
+  slot: string;
+  url?: string;
+  pid?: number;
+  healthFailures?: number;
+  lastCheckAt?: string;
+  nextCheckAt?: string;
+  credentials?: Record<string, string>;
+}
+
+// ---------------------------------------------------------------------
+// File locks
+// ---------------------------------------------------------------------
+
+export interface FileLock {
+  path: string;
+  owner: string;
+  ownerName?: string;
+  acquiredAt: string;
+  expiresAt?: string;
+}
+
+// ---------------------------------------------------------------------
+// Snapshots
+// ---------------------------------------------------------------------
+
+export interface Snapshot {
+  name: string;
+  createdAt: string;
+  members?: number;
+  mission?: string;
+  templateId?: string;
+}
+
+// ---------------------------------------------------------------------
+// Team templates (used by spawn flow)
+// ---------------------------------------------------------------------
+
+export interface TeamTemplateMember {
+  id?: string;
+  name: string;
+  role: string;
+  tier?: 'strategic' | 'worker' | 'support';
+  color?: string;
+  emoji?: string;
+  personality?: string;
+  systemPrompt?: string;
+  skills?: string[];
+  workingDir?: string;
+  maxTurns?: number;
+  spawnDelaySeconds?: number;
+  provider?: string;
+  model?: string;
+}
+
+export interface TeamTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  isBuiltIn?: boolean;
+  members: TeamTemplateMember[];
+  defaultProvider?: string;
+  defaultModel?: string;
+  perpetualImprovement?: boolean;
+  telegram?: {
+    enabled?: boolean;
+    intervalMinutes?: number;
+  };
+}
+
+// ---------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------
+
+export interface MetricsSnapshot {
+  standupsCompleted?: number;
+  tasksDone?: number;
+  bugsFiled?: number;
+  bugsFixed?: number;
+  recoveries?: number;
+  stuckAlerts?: number;
+  avgResponsePct?: number;
+  totalCostUSD?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalMessages?: number;
+  uptimeByAgent?: Record<string, number>;
+}
+
+// ---------------------------------------------------------------------
+// Labels rollup (insights)
+// ---------------------------------------------------------------------
+
+export interface LabelRollup {
+  label: string;
+  taskCount?: number;
+  totalCostUSD?: number;
+  avgTurns?: number;
+}
+
+// ---------------------------------------------------------------------
+// Standup history
+// ---------------------------------------------------------------------
+
+export interface StandupHistoryEntry {
+  id: string;
+  startedAt: string;
+  endedAt?: string;
+  participants?: string[];
+  messageCount?: number;
+}
+
+// ---------------------------------------------------------------------
+// Browser health (R34)
+// ---------------------------------------------------------------------
+
+export interface BrowserHealth {
+  ok: boolean;
+  status: string;
+  message?: string;
+  lastCheckedAt?: string;
+}
+
+// ---------------------------------------------------------------------
+// Whiteboard
+// ---------------------------------------------------------------------
+
+export interface Whiteboard {
+  text?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}

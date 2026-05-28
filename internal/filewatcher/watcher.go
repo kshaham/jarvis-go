@@ -11,7 +11,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 type fileStat struct {

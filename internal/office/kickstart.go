@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/claudeman/jarvis-go/internal/library"
+	"github.com/kshaham/jarvis/internal/library"
 )
 
 // memoryInjectMaxChars caps how much per-agent memory we inject into the

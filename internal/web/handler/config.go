@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/metrics"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/metrics"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 var serverStartTime = time.Now()

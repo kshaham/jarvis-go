@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/web"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/web"
 )
 
 var version = "dev"

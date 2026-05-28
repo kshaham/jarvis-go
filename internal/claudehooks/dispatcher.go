@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/strs"
+	"github.com/kshaham/jarvis/internal/strs"
 	"github.com/go-chi/chi/v5"
 )
 

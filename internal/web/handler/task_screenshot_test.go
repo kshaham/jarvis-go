@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/office"
+	"github.com/kshaham/jarvis/internal/office"
 )
 
 var tinyPNG = []byte{

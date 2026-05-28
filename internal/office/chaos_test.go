@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // Chaos test for 12h-unattended-operation confidence.

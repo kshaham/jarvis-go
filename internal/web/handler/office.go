@@ -17,13 +17,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/claudeman/jarvis-go/internal/library"
-	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/office/spawnpayload"
-	"github.com/claudeman/jarvis-go/internal/safego"
-	"github.com/claudeman/jarvis-go/internal/strs"
-	"github.com/claudeman/jarvis-go/internal/teamtemplates"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/library"
+	"github.com/kshaham/jarvis/internal/office"
+	"github.com/kshaham/jarvis/internal/office/spawnpayload"
+	"github.com/kshaham/jarvis/internal/safego"
+	"github.com/kshaham/jarvis/internal/strs"
+	"github.com/kshaham/jarvis/internal/teamtemplates"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // safeName validates that a name contains only safe characters for use in file paths.
@@ -1682,6 +1682,10 @@ func (ctx *Context) OfficeGetStandup(w http.ResponseWriter, r *http.Request) {
 
 // OfficePostStandup starts a new standup.
 func (ctx *Context) OfficePostStandup(w http.ResponseWriter, r *http.Request) {
+	// Cap body so a malicious client can't stream gigabytes into the
+	// decoder — the legitimate payload is a few hundred bytes of
+	// action/participants JSON.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	// Decode optional body for action-based control (start/stop)
 	var body map[string]interface{}
 	_ = json.NewDecoder(r.Body).Decode(&body) // ignore error for empty body

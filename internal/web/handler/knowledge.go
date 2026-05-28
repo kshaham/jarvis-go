@@ -28,10 +28,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
-	"github.com/claudeman/jarvis-go/internal/office"
-	"github.com/claudeman/jarvis-go/internal/secpath"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/library"
+	"github.com/kshaham/jarvis/internal/office"
+	"github.com/kshaham/jarvis/internal/secpath"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // knowledgeMaxFileBytes caps the size of any single library file

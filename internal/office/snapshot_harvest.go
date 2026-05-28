@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/claudeman/jarvis-go/internal/office/spawnpayload"
+	"github.com/kshaham/jarvis/internal/office/spawnpayload"
 )
 
 // ErrSnapshotEmpty is returned by ValidateSnapshotForRestore when

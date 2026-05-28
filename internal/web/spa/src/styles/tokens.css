@@ -1,0 +1,137 @@
+/* "Office" design tokens — web side.
+ *
+ * Mirrors jarvis-mobile/src/theme/tokens.ts so a value here is the same
+ * value there. Source of truth is the design plan
+ * (internal); both surfaces import these tokens
+ * (web via :root vars, mobile via theme module). Dark-first; light
+ * mode opt-in via [data-theme="light"].
+ */
+
+:root {
+  /* Surface */
+  --bg-app: #06080c;
+  --bg-surface: #0c0f14;
+  --bg-elevated: #11151c;
+  --bg-pressed: #171c25;
+
+  /* Lines */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text */
+  --text-primary: #ecedee;
+  --text-secondary: #a1a4ab;
+  --text-muted: #6e7178;
+  --text-faint: #3f434b;
+
+  /* Accent — electric violet. The one signature color.
+     Used sparingly: selection rings, primary CTA, link underline,
+     SSE live indicator. */
+  --accent: #7c5cff;
+  --accent-muted: rgba(124, 92, 255, 0.18);
+  --accent-strong: #9b80ff;
+
+  /* Status */
+  --status-working: #3ddc97;
+  --status-idle: #6e7178;
+  --status-meeting: #ffb454;
+  --status-stuck: #ff5a5f;
+  --status-success: #3ddc97;
+  --status-warn: #ffb454;
+  --status-error: #ff5a5f;
+
+  /* Spacing — 4-pt grid */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+  --space-9: 64px;
+  --space-10: 96px;
+
+  /* Radii — 14 is the "card" radius; 22 is the floating command bar */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-card: 14px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
+
+  /* Type */
+  --font-sans:
+    'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:
+    'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-11: 11px;
+  --text-12: 12px;
+  --text-13: 13px;
+  --text-15: 15px;
+  --text-17: 17px;
+  --text-20: 20px;
+  --text-24: 24px;
+  --text-32: 32px;
+  --text-48: 48px;
+
+  /* Motion — same spring constants as mobile. Note: CSS can't express
+     spring physics directly; these are documentation. The Motion lib
+     reads them via JS where it matters. */
+  --duration-instant: 80ms;
+  --duration-short: 180ms;
+  --duration-long: 320ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-quint: cubic-bezier(0.83, 0, 0.17, 1);
+
+  /* Stagger — 24ms between consecutive list items mounting */
+  --stagger-list: 24ms;
+
+  /* Layout widths */
+  --width-content: 1180px;        /* main content max-width */
+  --width-wide-modal: 1100px;     /* compose-relay modal */
+
+  /* Elevation tiers — three only. Depth comes from blur + border, not
+     drop shadows on flat cards. */
+  --elev-card-inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --elev-popover-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+  --elev-command-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+  --elev-command-blur: 24px;
+}
+
+[data-theme='light'] {
+  --bg-app: #fafafb;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f5f5f7;
+  --bg-pressed: #ebebee;
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-default: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --text-primary: #0a0b0d;
+  --text-secondary: #5a5d63;
+  --text-muted: #9a9da3;
+  --text-faint: #bcbfc4;
+  --accent: #5b3fe0;
+  --accent-muted: rgba(91, 63, 224, 0.12);
+  --accent-strong: #4929c7;
+  --status-working: #1e9f6e;
+  --status-success: #1e9f6e;
+  --status-meeting: #d9892c;
+  --status-warn: #d9892c;
+  --status-stuck: #d63b40;
+  --status-error: #d63b40;
+}
+
+/* Respect operator preference. Inside this query Motion will fall back
+   to opacity-only transitions; all transform/scale animations become
+   no-ops. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-short: 0ms;
+    --duration-long: 0ms;
+  }
+}

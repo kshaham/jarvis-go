@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/logscrub"
-	"github.com/claudeman/jarvis-go/internal/strs"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/logscrub"
+	"github.com/kshaham/jarvis/internal/strs"
+	"github.com/kshaham/jarvis/internal/web/request"
 	"github.com/go-chi/chi/v5"
 )
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
+	"github.com/kshaham/jarvis/internal/library"
 )
 
 // withTempLibraryForOffice points library.Dir() at a temp dir for

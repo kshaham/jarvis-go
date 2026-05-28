@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/claudeman/jarvis-go/internal/office/spawnpayload"
+	"github.com/kshaham/jarvis/internal/office/spawnpayload"
 )
 
 // FinalizeTeamSpawn wires up a Manager's post-spawn-loop state.

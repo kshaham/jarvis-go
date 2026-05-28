@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // CGC (CodeGraphContext, the Python MCP server) and codegraph (the

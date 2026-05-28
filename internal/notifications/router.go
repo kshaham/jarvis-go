@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/metrics"
+	"github.com/kshaham/jarvis/internal/metrics"
 )
 
 // dispatcherWorkers bounds how many concurrent channel sends can be in
@@ -81,10 +81,13 @@ func (r *Router) Stop() {
 func (r *Router) OnEvent(event string, data json.RawMessage) {
 	// Decode payload loosely so match-on-session-id can inspect it. Errors
 	// here are non-fatal -- we still match on event type even if the payload
-	// doesn't unmarshal.
+	// doesn't unmarshal -- but log them so corrupt broker payloads are
+	// discoverable rather than silent.
 	var payload map[string]interface{}
 	if len(data) > 0 {
-		_ = json.Unmarshal(data, &payload)
+		if err := json.Unmarshal(data, &payload); err != nil {
+			slog.Debug("notifications: payload unmarshal failed", "event", event, "err", err)
+		}
 	}
 
 	sessionID := extractSessionID(payload)

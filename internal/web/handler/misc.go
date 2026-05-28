@@ -22,10 +22,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/claudeman/jarvis-go/internal/cases"
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/safeexec"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/cases"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/safeexec"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // --- Templates ---
@@ -781,7 +781,14 @@ func (ctx *Context) Run(w http.ResponseWriter, r *http.Request) {
 		}
 		body.WorkingDir = resolved
 	}
-	cmd := exec.Command(absPath, args...)
+	// Cap subprocess wall time so a hung child can't block the HTTP
+	// handler indefinitely. 30s comfortably covers every safeexec-
+	// allowed command; anything slower is the misbehaving-binary case
+	// we want to abort. Derived from r.Context() so client disconnect
+	// also tears the subprocess down.
+	cmdCtx, cmdCancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cmdCancel()
+	cmd := exec.CommandContext(cmdCtx, absPath, args...)
 	if body.WorkingDir != "" {
 		cmd.Dir = body.WorkingDir
 	}

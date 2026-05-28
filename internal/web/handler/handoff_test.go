@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/office"
+	"github.com/kshaham/jarvis/internal/office"
 )
 
 func seedHandoffTeam(t *testing.T) (*Context, *office.AgentState, *office.AgentState, *office.Task) {

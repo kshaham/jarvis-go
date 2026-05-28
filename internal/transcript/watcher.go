@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 const (

@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/claudeman/jarvis-go/internal/claudehooks"
-	"github.com/claudeman/jarvis-go/internal/web/middleware"
-	"github.com/claudeman/jarvis-go/internal/web/sse"
+	"github.com/kshaham/jarvis/internal/claudehooks"
+	"github.com/kshaham/jarvis/internal/web/middleware"
+	"github.com/kshaham/jarvis/internal/web/sse"
 )
 
 func newToolPolicyCtx(t *testing.T) *Context {

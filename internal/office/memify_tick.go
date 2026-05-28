@@ -16,8 +16,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/library"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // memifyInterval is the minimum wall-clock spacing between memify

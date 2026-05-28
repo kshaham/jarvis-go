@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // One-shot session timeouts.

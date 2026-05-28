@@ -33,9 +33,11 @@ import (
 )
 
 // dirOnce + libDir cache the resolved library root. Tests override
-// via SetDirForTest below.
+// via SetDirForTest below. dirOnce is a pointer so SetDirForTest can
+// swap in a fresh Once without copying lock state (vet flagged the
+// previous by-value snapshot).
 var (
-	dirOnce sync.Once
+	dirOnce = &sync.Once{}
 	libDir  string
 )
 
@@ -80,8 +82,9 @@ func SetDirForTest(path string) (restore func()) {
 	prev := libDir
 	prevOnce := dirOnce
 	libDir = path
-	dirOnce = sync.Once{}
-	dirOnce.Do(func() {}) // mark as resolved so Dir returns libDir directly
+	fresh := &sync.Once{}
+	fresh.Do(func() {}) // mark as resolved so Dir returns libDir directly
+	dirOnce = fresh
 	return func() {
 		libDir = prev
 		dirOnce = prevOnce

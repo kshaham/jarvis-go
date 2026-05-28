@@ -1,14 +1,14 @@
+import { motion, useReducedMotion } from 'motion/react';
+
 import { cn } from '@/lib/cn';
 import { StatusPill } from './StatusPill';
+import { Metric } from './motion';
+import { spring } from '@/lib/motion';
 import type { OfficeMember } from '@/api/types';
 
 interface Props {
   member: OfficeMember;
-}
-
-function formatCost(cents: number): string {
-  if (cents >= 100) return '$' + (cents / 100).toFixed(2);
-  return Math.round(cents) + 'c';
+  onSelect?: (member: OfficeMember) => void;
 }
 
 function timeAgo(ts?: number): string {
@@ -31,19 +31,37 @@ const avatarBg: Record<string, string> = {
   red: 'bg-red-500/20 text-red-300',
 };
 
-export function AgentCard({ member }: Props) {
-  const cost = (member.totalCost || 0) * 100;
+export function AgentCard({ member, onSelect }: Props) {
+  const cost = member.totalCost || 0;
   const color = avatarBg[member.avatarColor || 'blue'] || avatarBg.blue;
   const avatar = member.avatarEmoji || member.avatarInitial || member.name?.[0] || '?';
+  const reduce = useReducedMotion();
+  // working status gets a 2px breathing left-edge accent — the
+  // "this agent is active right now" signal.
+  const accentEdge =
+    member.status === 'working' ? 'var(--status-working)' :
+    member.status === 'stuck' ? 'var(--status-stuck)' :
+    'transparent';
 
+  const isInteractive = !!onSelect;
   return (
-    <article
+    <motion.article
+      onClick={isInteractive ? () => onSelect!(member) : undefined}
+      whileHover={reduce ? {} : { y: -2, borderColor: 'var(--border-strong)' }}
+      transition={spring.smooth}
       className={cn(
-        'group relative flex flex-col gap-3 rounded-xl border border-white/5 bg-white/[0.025] p-4',
-        'transition hover:border-white/15 hover:bg-white/[0.04]',
-        'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_1px_rgba(0,0,0,0.06)]',
+        'group relative flex flex-col gap-3 rounded-[14px] border p-4',
+        'transition-colors',
         member.paused && 'opacity-60',
       )}
+      style={{
+        cursor: isInteractive ? 'pointer' : 'default',
+        borderColor: 'var(--border-subtle)',
+        background: 'var(--bg-elevated)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        // Left-edge accent painted via a pseudo-style background.
+        backgroundImage: `linear-gradient(to right, ${accentEdge} 0, ${accentEdge} 2px, transparent 2px)`,
+      }}
     >
       <div className="flex items-start gap-3">
         <div
@@ -55,28 +73,51 @@ export function AgentCard({ member }: Props) {
           {avatar}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-slate-100">{member.name}</div>
-          <div className="truncate text-xs text-slate-400">{member.role}</div>
+          <div className="truncate text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {member.name}
+          </div>
+          <div className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>
+            {member.role}
+          </div>
         </div>
         <StatusPill status={member.status} />
       </div>
 
-      <div className="flex items-center justify-between text-[11px] text-slate-400">
-        <span className="ds-tabular">{formatCost(cost)}</span>
+      <div className="flex items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
+        {/* Cost ticks digit-by-digit as more tokens get billed. */}
+        <Metric
+          value={cost}
+          format={{ style: 'currency', currency: 'USD', minimumFractionDigits: 2 }}
+          size={11}
+          tone="muted"
+        />
         <span>{timeAgo(member.lastActivityAt)}</span>
       </div>
 
       {member.score?.grade && (
         <div className="flex items-center gap-2 text-[11px]">
-          <span className="rounded bg-white/5 px-1.5 py-0.5 font-semibold text-slate-200">
+          <span
+            className="rounded px-1.5 py-0.5 font-semibold"
+            style={{
+              background: 'var(--bg-pressed)',
+              color: 'var(--text-primary)',
+            }}
+          >
             {member.score.grade}
           </span>
-          <span className="text-slate-400 ds-tabular">
-            {Math.round((member.score.overallScore || 0) * 100)}% overall
+          <span className="inline-flex items-baseline gap-1" style={{ color: 'var(--text-muted)' }}>
+            <Metric
+              value={(member.score.overallScore || 0) * 100}
+              format={{ maximumFractionDigits: 0 }}
+              suffix="%"
+              size={11}
+              tone="muted"
+            />
+            overall
           </span>
         </div>
       )}
-    </article>
+    </motion.article>
   );
 }
 

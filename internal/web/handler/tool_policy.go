@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/claudeman/jarvis-go/internal/claudehooks"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/claudehooks"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // Operator-facing endpoints for the PreToolUse tool-policy. GET shows

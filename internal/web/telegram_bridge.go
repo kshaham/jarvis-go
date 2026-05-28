@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/pty"
-	"github.com/claudeman/jarvis-go/internal/telegram"
+	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/telegram"
 )
 
 // telegramBridge implements telegram.ServerBridge by delegating to the session manager.

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/claudeman/jarvis-go/internal/testutil/stubbin"
+	"github.com/kshaham/jarvis/internal/testutil/stubbin"
 )
 
 func installSpawnRemoteStub(t *testing.T, output string) string {

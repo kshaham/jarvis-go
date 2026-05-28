@@ -13,8 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/robfig/cron/v3"
 
-	"github.com/claudeman/jarvis-go/internal/scheduler"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/scheduler"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // webhookTimeout bounds outbound HTTP calls for webhook-type jobs. 30s is

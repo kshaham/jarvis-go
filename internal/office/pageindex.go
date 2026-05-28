@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/library"
+	"github.com/kshaham/jarvis/internal/library"
 )
 
 // PageIndex MCP version pinned for reproducibility. Updating means

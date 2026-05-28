@@ -1,5 +1,6 @@
 import { cn } from '@/lib/cn';
 import type { AgentStatus } from '@/api/types';
+import { StatusDot } from '@/components/motion';
 
 const colorMap: Record<AgentStatus, string> = {
   working: 'bg-status-working/15 text-status-working ring-status-working/30',
@@ -8,13 +9,9 @@ const colorMap: Record<AgentStatus, string> = {
   stuck: 'bg-status-stuck/15 text-status-stuck ring-status-stuck/30',
 };
 
-const dotMap: Record<AgentStatus, string> = {
-  working: 'bg-status-working animate-pulse',
-  idle: 'bg-status-idle',
-  meeting: 'bg-status-meeting animate-pulse',
-  stuck: 'bg-status-stuck',
-};
-
+// StatusPill — colored chip with an animated StatusDot. The dot
+// breathes when the agent is working, pulses urgently when stuck,
+// and ripples on every status crossover (signature beat).
 export function StatusPill({ status }: { status: AgentStatus }) {
   return (
     <span
@@ -23,7 +20,7 @@ export function StatusPill({ status }: { status: AgentStatus }) {
         colorMap[status],
       )}
     >
-      <span className={cn('h-1.5 w-1.5 rounded-full', dotMap[status])} />
+      <StatusDot status={status} size={6} />
       {status}
     </span>
   );

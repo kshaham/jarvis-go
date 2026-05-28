@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/logscrub"
-	"github.com/claudeman/jarvis-go/internal/web/request"
+	"github.com/kshaham/jarvis/internal/logscrub"
+	"github.com/kshaham/jarvis/internal/web/request"
 )
 
 // R4.2 · OfficeSpawnRemote shells out to `claude --remote "<task>"` so

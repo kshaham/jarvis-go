@@ -15,7 +15,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/google/uuid"
 
-	"github.com/claudeman/jarvis-go/internal/safego"
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // vtScreenCols / vtScreenRows match the PTY winsize used at session

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/claudehooks"
+	"github.com/kshaham/jarvis/internal/claudehooks"
 )
 
 // Git subprocess timeouts. A hung git (ssh-key prompt, .git/index

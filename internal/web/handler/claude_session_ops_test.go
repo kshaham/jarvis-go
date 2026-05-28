@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claudeman/jarvis-go/internal/testutil/stubbin"
-	"github.com/claudeman/jarvis-go/internal/web/sse"
+	"github.com/kshaham/jarvis/internal/testutil/stubbin"
+	"github.com/kshaham/jarvis/internal/web/sse"
 	"github.com/go-chi/chi/v5"
 )
 

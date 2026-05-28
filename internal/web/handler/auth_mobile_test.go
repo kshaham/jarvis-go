@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/claudeman/jarvis-go/internal/web/auth"
-	"github.com/claudeman/jarvis-go/internal/web/middleware"
+	"github.com/kshaham/jarvis/internal/web/auth"
+	"github.com/kshaham/jarvis/internal/web/middleware"
 )
 
 // newMobileAuthContext spins up an isolated Context with a password
