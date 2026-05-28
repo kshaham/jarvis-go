@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
@@ -50,8 +50,11 @@ export function SpawnScreen() {
 
   // When the operator picks a template, hydrate the per-member
   // overrides + the team-wide defaults from the template.
+  // Runs in an effect so React schedules the state updates rather
+  // than re-rendering mid-render.
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
-  if (tpl && hydratedFor !== tpl.id) {
+  useEffect(() => {
+    if (!tpl || hydratedFor === tpl.id) return;
     const hydrated = tpl.members.map((m: TeamTemplateMember, i) =>
       memberFromTemplate(m, `${tpl.id}-${i}`),
     );
@@ -65,7 +68,7 @@ export function SpawnScreen() {
       setTelegramInterval(tpl.telegram.intervalMinutes ?? 60);
     }
     setHydratedFor(tpl.id);
-  }
+  }, [tpl, hydratedFor]);
 
   const filteredTemplates = useMemo(() => {
     const q = query.trim().toLowerCase();
