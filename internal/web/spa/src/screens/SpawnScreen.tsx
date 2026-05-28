@@ -3,8 +3,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
 import { Metric, Press } from '../components/motion';
+import { DefaultsSection } from '../components/spawn/DefaultsSection';
+import { Field, inputStyle, SectionCard } from '../components/spawn/formPrimitives';
+import { MissionSection } from '../components/spawn/MissionSection';
 import { TemplateCard } from '../components/spawn/TemplateCard';
 import { TemplateChip } from '../components/spawn/TemplateChip';
+import { recordRecentWorkdir, WorkdirSection } from '../components/spawn/WorkdirSection';
 import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
 import type { TeamTemplate, TeamTemplateMember } from '../api/types';
@@ -127,6 +131,9 @@ export function SpawnScreen() {
       return fetchJSON('/api/office/spawn-team', { method: 'POST', body });
     },
     onSuccess: () => {
+      if (!newProject && workingDir.trim()) {
+        recordRecentWorkdir(workingDir.trim());
+      }
       qc.invalidateQueries({ queryKey: ['office', 'status'] });
       navigate('/');
     },
@@ -434,104 +441,29 @@ function ConfigureStep(props: {
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <SectionCard title="Mission" hint="What's this team working on? Up to 1000 chars.">
-        <textarea
-          value={mission}
-          onChange={(e) => setMission(e.target.value.slice(0, 1000))}
-          rows={4}
-          placeholder="e.g. Migrate the auth service to the new identity provider."
-          style={inputStyle}
-        />
-      </SectionCard>
+      <MissionSection value={mission} onChange={setMission} templateName={tpl.name} />
 
-      <SectionCard title="Working directory">
-        <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            <input
-              type="radio"
-              name="workdir-mode"
-              checked={!newProject}
-              onChange={() => setNewProject(false)}
-              style={{ marginRight: 6 }}
-            />
-            Existing folder
-          </label>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            <input
-              type="radio"
-              name="workdir-mode"
-              checked={newProject}
-              onChange={() => setNewProject(true)}
-              style={{ marginRight: 6 }}
-            />
-            New project
-          </label>
-        </div>
-        {newProject ? (
-          <input
-            value={projectName}
-            onChange={(e) => {
-              const v = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
-              setProjectName(v.slice(0, 64));
-            }}
-            placeholder="project-name (alphanum / _ / -, ≤ 64 chars)"
-            style={inputStyle}
-          />
-        ) : (
-          <input
-            value={workingDir}
-            onChange={(e) => setWorkingDir(e.target.value)}
-            placeholder="/path/to/repo"
-            style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
-          />
-        )}
-      </SectionCard>
+      <WorkdirSection
+        newProject={newProject}
+        setNewProject={setNewProject}
+        workingDir={workingDir}
+        setWorkingDir={setWorkingDir}
+        projectName={projectName}
+        setProjectName={setProjectName}
+      />
 
-      <SectionCard title="Defaults">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          <Field label="Provider">
-            <select value={defaultProvider} onChange={(e) => setDefaultProvider(e.target.value)} style={inputStyle}>
-              <option value="claude-subscription">Claude (subscription)</option>
-              <option value="claude-api">Claude API</option>
-              <option value="zai-glm">ZAI GLM</option>
-            </select>
-          </Field>
-          <Field label="Model">
-            <input
-              value={defaultModel}
-              onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder="auto"
-              style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
-            />
-          </Field>
-          <Toggle
-            label="Perpetual improvement"
-            value={perpetual}
-            onChange={setPerpetual}
-            hint="Auto-restart agents that finish their queue."
-          />
-          <Toggle
-            label="Telegram notifications"
-            value={telegramEnabled}
-            onChange={setTelegramEnabled}
-          />
-          {telegramEnabled ? (
-            <Field label="Telegram interval (min)">
-              <select
-                value={telegramInterval}
-                onChange={(e) => setTelegramInterval(Number(e.target.value))}
-                style={inputStyle}
-              >
-                {[30, 60, 120, 240].map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : null}
-        </div>
-      </SectionCard>
+      <DefaultsSection
+        defaultProvider={defaultProvider}
+        setDefaultProvider={setDefaultProvider}
+        defaultModel={defaultModel}
+        setDefaultModel={setDefaultModel}
+        perpetual={perpetual}
+        setPerpetual={setPerpetual}
+        telegramEnabled={telegramEnabled}
+        setTelegramEnabled={setTelegramEnabled}
+        telegramInterval={telegramInterval}
+        setTelegramInterval={setTelegramInterval}
+      />
 
       <SectionCard
         title={`Members (${members.length})`}
@@ -817,85 +749,6 @@ function ReviewStep({
   );
 }
 
-function SectionCard({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      style={{
-        padding: 14,
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-card)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-      }}
-    >
-      <header>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-          {title}
-        </h2>
-        {hint ? (
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>{hint}</p>
-        ) : null}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
-        {label}
-      </span>
-      {children}
-      {hint ? <span style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.4 }}>{hint}</span> : null}
-    </label>
-  );
-}
-
-function Toggle({
-  label,
-  value,
-  onChange,
-  hint,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-  hint?: string;
-}) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
-        {label}
-      </span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-primary)' }}>
-        <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
-        {value ? 'On' : 'Off'}
-      </span>
-      {hint ? <span style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.4 }}>{hint}</span> : null}
-    </label>
-  );
-}
-
 function ReviewRow({
   label,
   value,
@@ -924,14 +777,3 @@ function ReviewRow({
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  padding: 8,
-  background: 'var(--bg-app)',
-  border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-md)',
-  color: 'var(--text-primary)',
-  fontSize: 13,
-  outline: 'none',
-  width: '100%',
-  fontFamily: 'inherit',
-};
