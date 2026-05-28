@@ -66,7 +66,7 @@ The SPA has no test suite yet (the mobile app does — see the companion repo).
 
 ## 🧭 Architecture in one paragraph
 
-`jarvis` is a Go daemon that orchestrates Claude Code agents (the "office"). Operators interact via a CLI (`cm`), a React SPA (`/office-v2`), and a companion React Native mobile app. The daemon manages agent lifecycles, persists a knowledge library to `~/.jarvis/`, and exposes an HTTP + SSE API. Deep dive in [`README.md`](README.md#-architecture) and the agent-runtime walkthrough in [`EXPLAINER.md`](EXPLAINER.md).
+`jarvis` is a Go daemon that orchestrates Claude Code agents (the "office"). Operators interact via a CLI (`cm`), a React SPA (`/office-v2`), and a companion React Native mobile app. The daemon manages agent lifecycles, persists a knowledge library to `~/.jarvis/`, and exposes an HTTP + SSE API. Deep dive in [`README.md`](README.md#architecture) and the agent-runtime walkthrough in [`EXPLAINER.md`](EXPLAINER.md).
 
 ## 🔌 Adding a new feature
 

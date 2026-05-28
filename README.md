@@ -1,12 +1,46 @@
-# Jarvis Go
+<div align="center">
 
-> Multi-agent orchestration platform -- manage teams of autonomous Claude Code agents working on real codebases.
+```
+     ██  █████  ██████  ██    ██ ██ ███████
+     ██ ██   ██ ██   ██ ██    ██ ██ ██
+     ██ ███████ ██████  ██    ██ ██ ███████
+██   ██ ██   ██ ██   ██  ██  ██  ██      ██
+ █████  ██   ██ ██   ██   ████   ██ ███████
+```
 
-![Go 1.25](https://img.shields.io/badge/go-1.25-blue) ![License MIT](https://img.shields.io/badge/license-MIT-green) ![Tests 600+](https://img.shields.io/badge/tests-600%2B-brightgreen) ![Fixes 95+](https://img.shields.io/badge/fixes-95%2B-purple)
+# 🤖 Jarvis Go
+
+**Multi-agent orchestration platform — manage teams of autonomous Claude Code agents working on real codebases.**
+
+[![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Status alpha](https://img.shields.io/badge/status-alpha-orange)]()
+[![Tests 600+](https://img.shields.io/badge/tests-600%2B-brightgreen)]()
+[![Hardened 95+ fixes](https://img.shields.io/badge/hardened-95%2B%20fixes-purple)]()
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-blue)](CONTRIBUTING.md)
+[![Docker ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+
+</div>
 
 ---
 
-## Overview
+## 🎯 Features at a glance
+
+| | Feature | What it does |
+|:-:|---|---|
+| 🤖 | **Multi-agent teams** | 7 prebuilt templates, 43 agent configs across full-stack, backend, frontend, research, innovation |
+| ♻️ | **Self-improvement loop** | Per-agent learning store, auto-distillation at 30 entries, cross-team skill sharing |
+| 🪟 | **Dual session modes** | Claude Agent SDK (persistent multi-turn) + PTY fallback, side-by-side |
+| 🔁 | **Perpetual RALPH** | Agents never idle — they find TODOs, write tests, refactor, generate their own tasks |
+| 🕸️ | **CodeGraph integration** | MCP-backed call-graph queries cut context use **5–10×** vs reading whole files |
+| 🔌 | **48+ MCP tools** | Full `office_*` surface for tasks, memory, skills, messaging, sessions, planning |
+| 💬 | **Telegram remote** | Two-way chat with the team lead from your phone, periodic office summaries |
+| 📋 | **Kanban + handoffs** | 5-column board with dependencies, priorities, structured agent-to-agent handoffs |
+| 🔐 | **Hardened** | 95+ bug fixes across 10 review rounds — goroutine leaks, data races, XSS, CSRF, path traversal |
+
+---
+
+## 🚀 Overview
 
 Jarvis Go is a production-grade multi-agent orchestration system implemented in pure Go with zero CGO dependencies. It runs a web server that manages both **Claude Agent SDK** sessions (persistent multi-turn) and traditional **PTY** sessions hosting Claude Code agents, coordinates them as a virtual office team with self-improvement feedback loops, and provides a browser-based dashboard for monitoring and control.
 
@@ -30,7 +64,7 @@ Jarvis Go is a production-grade multi-agent orchestration system implemented in 
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 jarvis-go/
@@ -78,9 +112,44 @@ a persistent `claude.NewSession()` subprocess that stays alive across all turns
 (kickstart, standup, brainstorm, replenishment), while PTY sessions use traditional
 screen-scraping for fallback compatibility.
 
+### Runtime data flow
+
+```mermaid
+graph TD
+    User([👤 Operator])
+    User -->|HTTPS + cookie auth| Web[🌐 Web Server<br/><i>internal/web</i>]
+    User -->|chat| TG[💬 Telegram Bot<br/><i>internal/telegram</i>]
+    User -->|terminal| CM[🖥️ cm CLI<br/><i>cmd/cm</i>]
+    User -->|stdio| MCP[🔌 jarvis-mcp<br/><i>cmd/jarvis-mcp</i>]
+
+    Web --> Office[🏛️ Office Manager<br/><i>internal/office</i>]
+    TG --> Office
+    CM --> Office
+    MCP --> Office
+
+    Office --> SDK[🧬 SDK Sessions<br/>persistent multi-turn]
+    Office --> PTY[🪟 PTY Sessions<br/>screen-scraped]
+
+    SDK --> Claude[🤖 claude CLI]
+    PTY --> Claude
+
+    Office --> Lib[(📚 Knowledge Library<br/>~/.jarvis/)]
+    Office --> Hooks[🪝 Claude Hooks<br/><i>internal/claudehooks</i>]
+    Office --> Graph[🕸️ CodeGraph MCP<br/><i>per-session</i>]
+
+    Web -.->|SSE stream| User
+
+    classDef edge fill:#1f2937,stroke:#374151,color:#e5e7eb;
+    classDef core fill:#0b3a55,stroke:#1d4ed8,color:#e5e7eb;
+    classDef external fill:#3b0764,stroke:#7c3aed,color:#e5e7eb;
+    class Web,TG,CM,MCP edge;
+    class Office,SDK,PTY,Hooks,Graph,Lib core;
+    class Claude external;
+```
+
 ---
 
-## Quick Start
+## ⚡ Quick Start
 
 ### Build
 
@@ -206,7 +275,7 @@ Tokens persist to `~/.jarvis/mobile-tokens.json` with `0600` permissions. Only t
 
 ---
 
-## Office Agent System
+## 🤖 Office Agent System
 
 ### Team Templates
 
@@ -318,7 +387,7 @@ Tasks labelled `needs-review` (via `cm label <taskId> needs-review`) trigger an 
 
 ---
 
-## Agent Autonomy
+## 🧠 Agent Autonomy
 
 ### 12 Monitoring Functions
 
@@ -366,7 +435,7 @@ The manager tracks wrap-up state. During wrap-up, the monitoring loop monitors a
 
 ---
 
-## Self-Improvement
+## ♻️ Self-Improvement
 
 Agents accumulate knowledge through a structured reflection loop stored in `~/.jarvis/learnings/<configId>.json`.
 
@@ -455,7 +524,7 @@ Discoveries feed into the learning store with the `curiosity` category and trigg
 
 ---
 
-## Task Management
+## 📋 Task Management
 
 ### 5-Column Kanban
 
@@ -501,7 +570,7 @@ Strategic-tier agents receive task assignment requests via `cm leader-tasks resp
 
 ---
 
-## cm CLI Reference
+## 🖥️ cm CLI Reference
 
 The `cm` binary is compiled and injected into every agent session. It communicates with the Jarvis server over HTTP using `JARVIS_API_URL` and `JARVIS_SESSION_ID`.
 
@@ -553,7 +622,7 @@ The `cm` binary is compiled and injected into every agent session. It communicat
 
 ---
 
-## Telegram Integration
+## 💬 Telegram Integration
 
 ### Setup
 
@@ -591,7 +660,7 @@ When the office team is active, Telegram receives periodic updates (configurable
 
 ---
 
-## MCP Server
+## 🔌 MCP Server
 
 The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio transport. It exposes **44+ tools** split into two categories: **agent-facing `office_*` tools** that use `JARVIS_SESSION_ID` automatically (for in-session agents), and **orchestration tools** for external controllers (Claude Desktop, other Claude Code instances).
 
@@ -739,7 +808,7 @@ pass `disableEcc: true` in the spawn request. See `docs/ECC.md`.
 
 ---
 
-## Claude Agent SDK (Go) Sessions
+## 🧬 Claude Agent SDK (Go) Sessions
 
 Jarvis uses the [Claude Agent SDK for Go](https://github.com/shaharia-lab/claude-agent-sdk-go) to run agents in **persistent multi-turn sessions**. This replaces the traditional single-shot `claude.Query()` model with a long-lived `claude.NewSession()` subprocess that stays alive across all turns.
 
@@ -773,7 +842,7 @@ If SDK session creation fails, `spawnAgentSession` falls back to creating a trad
 
 ---
 
-## CodeGraphContext (CGC) Integration
+## 🕸️ CodeGraphContext (CGC) Integration
 
 Agents are spawned with an additional MCP server: [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext). CGC builds a knowledge graph of the codebase (functions, classes, relationships, dependencies) in an embedded KuzuDB and exposes query tools via MCP.
 
@@ -807,7 +876,7 @@ cgc init   # Initialize KuzuDB (first time only)
 
 ---
 
-## ECC Bundle
+## 📦 ECC Bundle
 
 Jarvis vendors a curated subset of the [ECC](https://github.com/affaan-m/ECC)
 project (MIT, attribution in `THIRD_PARTY_LICENSES.md`) so spawned
@@ -839,7 +908,7 @@ refresh workflow: `docs/ECC.md`.
 
 ---
 
-## Tool Policy
+## 🛡️ Tool Policy
 
 Every spawned team enforces an operator-controlled allow/deny matrix
 before every tool call, via Claude Code's `PreToolUse` hook. The
@@ -867,7 +936,7 @@ PreToolUse hook), `internal/web/handler/tool_policy.go` (HTTP).
 
 ---
 
-## Z.AI Coding Plan
+## 🌐 Z.AI Coding Plan
 
 Jarvis supports [Z.AI](https://z.ai) as an Anthropic-compatible provider, enabling GLM models via the Coding Plan endpoint.
 
@@ -921,7 +990,7 @@ Each agent gets its own `ANTHROPIC_DEFAULT_SONNET_MODEL` environment variable in
 
 ---
 
-## UI Features
+## 🎨 UI Features
 
 The embedded frontend provides a single-page dashboard served from `internal/web/static/`.
 
@@ -1056,7 +1125,7 @@ The spawn modal includes a **Perpetual Improvement Mode** checkbox (default: che
 
 ---
 
-## Session Management (PTY + SDK)
+## 🪟 Session Management (PTY + SDK)
 
 Jarvis supports **two session types** via a shared `SessionStore` interface:
 
@@ -1088,7 +1157,7 @@ The RALPH (Recognize, Assess, Log, Plan, Handle) tracker monitors each session's
 
 ---
 
-## API Reference
+## 📡 API Reference
 
 All endpoints are prefixed with `/api`. Mutating endpoints (POST/PUT/DELETE) require a CSRF token from `GET /api/csrf-token` except agent callbacks (called by `cm` CLI) and `POST /api/hook-event`.
 
@@ -1215,7 +1284,7 @@ These endpoints are placed outside the auth middleware group so in-session agent
 
 ---
 
-## Testing
+## 🧪 Testing
 
 ```bash
 # Run all tests
@@ -1244,7 +1313,7 @@ All tests pass with `go test -race ./...` (full race-detector coverage).
 
 ---
 
-## Security & Resilience
+## 🔐 Security & Resilience
 
 Jarvis has undergone **10 comprehensive code review rounds** with **95+ bug fixes** across security, correctness, concurrency, and resource management. Every change is race-tested and the codebase is hardened against common failure modes.
 
@@ -1293,7 +1362,7 @@ Jarvis has undergone **10 comprehensive code review rounds** with **95+ bug fixe
 
 ---
 
-## Development
+## 🛠️ Development
 
 ### Prerequisites
 

@@ -7,7 +7,7 @@ persistent state under `~/.jarvis/` (or a bind-mounted equivalent).
 
 ---
 
-## 0. Prerequisites + install bundled skills
+## ✅ 0. Prerequisites + install bundled skills
 
 ### Runtime prerequisites
 
@@ -41,7 +41,7 @@ For Docker / systemd installs run this on the host (or inside the
 container) before bringing jarvis up. Skipping is non-fatal but
 degrades agent prompt quality.
 
-## 1. Docker Compose (fastest)
+## 🐳 1. Docker Compose (fastest)
 
 ```bash
 git clone <your-fork> && cd jarvis-go
@@ -66,7 +66,7 @@ Edit `docker-compose.yml` to:
 
 ---
 
-## 2. Docker standalone
+## 📦 2. Docker standalone
 
 Build once:
 
@@ -95,7 +95,7 @@ docker run --rm -d \
 
 ---
 
-## 3. Bare-metal systemd
+## 🐧 3. Bare-metal systemd
 
 ```bash
 # 1. Build or fetch the binary
@@ -146,7 +146,7 @@ The build output is embedded automatically via the existing
 
 ---
 
-## 4. Reverse proxy
+## 🔀 4. Reverse proxy
 
 SSE connections are long-lived and need special proxy care.
 
@@ -220,7 +220,7 @@ is ignored and rate-limit identities are the proxy's IP.
 
 ---
 
-## 5. Prometheus scrape config
+## 📈 5. Prometheus scrape config
 
 ```yaml
 scrape_configs:
@@ -241,7 +241,7 @@ Relevant series to alert on:
 
 ---
 
-## 6. Backup & restore
+## 💾 6. Backup & restore
 
 Everything durable lives under `~/.jarvis/` (or your bind-mount equivalent):
 
@@ -266,7 +266,7 @@ mid-write corruption.
 
 ---
 
-## 7. Upgrades
+## ⬆️ 7. Upgrades
 
 State files are forward-compatible: running a newer `jarvis` against an
 existing `.jarvis/` directory Just Works. Process:
@@ -288,16 +288,16 @@ and restarting. This is rarely needed but documented so operators can.
 
 ---
 
-## 8. Log levels at runtime
+## 📜 8. Log levels at runtime
 
 `JARVIS_LOG_LEVEL` (`debug`, `info`, `warn`, `error`) and `JARVIS_LOG_FORMAT`
 (`text`, `json`) are read at startup. Change them and restart — runtime
 toggling is a follow-up feature.
 
-## 9. Mobile app access
+## 📱 9. Mobile app access
 
-The Expo app at `claudeman/jarvis-mobile/` authenticates via per-device
-bearer tokens. The flow:
+The companion Expo app (`jarvis-mobile`, published as a sibling repo)
+authenticates via per-device bearer tokens. The flow:
 
 1. The operator (you) sets the server URL in the app — `http://192.168.x.x:3555`
    for LAN or `https://jarvis.your-domain.com` behind your reverse proxy.
@@ -320,7 +320,7 @@ When publishing the server to the public internet, terminate TLS at your
 reverse proxy (see §4) — mobile clients should never connect over plain
 HTTP outside the LAN.
 
-## 10. Troubleshooting
+## 🩺 10. Troubleshooting
 
 - **`X-Request-ID` header appears in every response** — use this to correlate
   a frontend error to a specific log line. `grep` the journal for the ID.
