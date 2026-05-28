@@ -30,6 +30,12 @@ coverage.out
 # claude-flow metrics (host telemetry, not source)
 /.claude-flow/
 
+# CodeGraph index (per-machine SQLite, rebuilt by `codegraph init`)
+.codegraph/
+
+# Cursor IDE rules (local tooling preference, not part of the project)
+.cursor/
+
 # P13.5 · React island scaffold (internal/web/spa/)
 /internal/web/spa/node_modules/
 /internal/web/spa/dist/
