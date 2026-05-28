@@ -138,15 +138,7 @@ export function SpawnScreen() {
       </header>
 
       {hasTemplate ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr)',
-            gap: 16,
-            alignItems: 'flex-start',
-          }}
-          className="spawn-shell"
-        >
+        <div className="spawn-shell">
           <TemplateChip tpl={tpl} onChange={() => setTemplateId('')} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             <ConfigureStep

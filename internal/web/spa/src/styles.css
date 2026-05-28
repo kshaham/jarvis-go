@@ -36,3 +36,18 @@
     font-feature-settings: 'tnum' 1;
   }
 }
+
+/* Spawn screen — collapse the two-pane layout under 900px so the
+ * template chip stacks above the configure form instead of cramping
+ * the right pane down to a sliver. */
+.spawn-shell {
+  display: grid;
+  gap: 16px;
+  align-items: flex-start;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+}
+@media (max-width: 900px) {
+  .spawn-shell {
+    grid-template-columns: 1fr;
+  }
+}

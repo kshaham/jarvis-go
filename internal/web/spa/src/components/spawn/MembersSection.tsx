@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import type { TeamTemplate } from '../../api/types';
+import { RevealItem } from '../motion';
 import { SectionCard } from './formPrimitives';
 import { MemberEditor, isMemberEdited, memberFromTemplate } from './MemberEditor';
 import type { MemberEdit } from './MemberEditor';
@@ -72,29 +73,41 @@ export function MembersSection({
       <div
         role="listbox"
         aria-label="Team roster"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+          e.preventDefault();
+          const idx = members.findIndex((m) => m.id === selectedMemberId);
+          if (idx < 0) return;
+          const delta = e.key === 'ArrowRight' ? 1 : -1;
+          const next = members[(idx + delta + members.length) % members.length];
+          if (next) setSelectedMemberId(next.id);
+        }}
         style={{
           display: 'flex',
           gap: 8,
           overflowX: 'auto',
           padding: 2,
           marginBottom: 6,
+          outline: 'none',
         }}
       >
-        {members.map((m) => {
+        {members.map((m, i) => {
           const base = baseById.get(m.id);
           const edited = base ? isMemberEdited(m, base) : false;
           return (
-            <MemberTile
-              key={m.id}
-              name={m.name}
-              role={m.role}
-              emoji={base?.emoji}
-              color={base?.color}
-              tier={m.tier ?? (base?.tier as Tier | undefined)}
-              selected={m.id === selectedMemberId}
-              edited={edited}
-              onClick={() => setSelectedMemberId(m.id)}
-            />
+            <RevealItem key={m.id} index={i} yOffset={6}>
+              <MemberTile
+                name={m.name}
+                role={m.role}
+                emoji={base?.emoji}
+                color={base?.color}
+                tier={m.tier ?? (base?.tier as Tier | undefined)}
+                selected={m.id === selectedMemberId}
+                edited={edited}
+                onClick={() => setSelectedMemberId(m.id)}
+              />
+            </RevealItem>
           );
         })}
       </div>
