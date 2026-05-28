@@ -1242,7 +1242,11 @@ func (s *Server) setupRouter() chi.Router {
 			_, _ = w.Write([]byte(officeV2PlaceholderHTML))
 			return
 		}
-		r.URL.Path = "/react/index.html"
+		// Route to the React dir (trailing slash). FileServer would 301
+		// "/react/index.html" to "./" to canonicalize, breaking the page
+		// behind the auth wall; "/react/" makes it serve index.html in
+		// place with no redirect.
+		r.URL.Path = "/react/"
 		static.Handler(reactPublicDir).ServeHTTP(w, r)
 	}
 	r.Get("/office-v2", officeV2)
