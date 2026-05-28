@@ -4,7 +4,10 @@ import { useNavigate } from 'react-router-dom';
 
 import { Metric, Press } from '../components/motion';
 import { DefaultsSection } from '../components/spawn/DefaultsSection';
-import { Field, inputStyle, SectionCard } from '../components/spawn/formPrimitives';
+import { SectionCard } from '../components/spawn/formPrimitives';
+import { memberFromTemplate } from '../components/spawn/MemberEditor';
+import type { MemberEdit } from '../components/spawn/MemberEditor';
+import { MembersSection } from '../components/spawn/MembersSection';
 import { MissionSection } from '../components/spawn/MissionSection';
 import { TemplateCard } from '../components/spawn/TemplateCard';
 import { TemplateChip } from '../components/spawn/TemplateChip';
@@ -14,22 +17,6 @@ import { useTeamTemplates } from '../hooks/useOfficeData';
 import type { TeamTemplate, TeamTemplateMember } from '../api/types';
 
 type Step = 'template' | 'configure' | 'review';
-
-// Per-member overrides the operator can edit in the Configure step.
-// Only the fields we expose; the rest fall through to the template's
-// default. Mirrors the subset of spawnpayload.MemberOverride that
-// matters for the common case — full fidelity is reachable via the
-// template editor in the classic UI (not yet ported).
-type MemberEdit = {
-  id: string;
-  name: string;
-  role: string;
-  personality: string;
-  systemPrompt: string;
-  maxTurns?: number;
-  provider?: string;
-  model?: string;
-};
 
 // SpawnScreen — the wizard formerly known as the spawn-team modal.
 // Three steps with a progress trail at the top.
@@ -59,23 +46,17 @@ export function SpawnScreen() {
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramInterval, setTelegramInterval] = useState(60);
   const [members, setMembers] = useState<MemberEdit[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
 
   // When the operator picks a template, hydrate the per-member
   // overrides + the team-wide defaults from the template.
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   if (tpl && hydratedFor !== tpl.id) {
-    setMembers(
-      tpl.members.map((m: TeamTemplateMember, i) => ({
-        id: m.id ?? `${tpl.id}-${i}`,
-        name: m.name,
-        role: m.role,
-        personality: m.personality ?? '',
-        systemPrompt: m.systemPrompt ?? '',
-        maxTurns: m.maxTurns,
-        provider: m.provider,
-        model: m.model,
-      })),
+    const hydrated = tpl.members.map((m: TeamTemplateMember, i) =>
+      memberFromTemplate(m, `${tpl.id}-${i}`),
     );
+    setMembers(hydrated);
+    setSelectedMemberId(hydrated[0]?.id ?? null);
     if (tpl.defaultProvider) setDefaultProvider(tpl.defaultProvider);
     if (tpl.defaultModel) setDefaultModel(tpl.defaultModel);
     if (typeof tpl.perpetualImprovement === 'boolean') setPerpetual(tpl.perpetualImprovement);
@@ -198,6 +179,8 @@ export function SpawnScreen() {
                 setTelegramInterval={setTelegramInterval}
                 members={members}
                 setMembers={setMembers}
+                selectedMemberId={selectedMemberId}
+                setSelectedMemberId={setSelectedMemberId}
                 onBack={() => setStep('template')}
                 onNext={() => setStep('review')}
               />
@@ -410,6 +393,8 @@ function ConfigureStep(props: {
   setTelegramInterval: (n: number) => void;
   members: MemberEdit[];
   setMembers: (m: MemberEdit[]) => void;
+  selectedMemberId: string | null;
+  setSelectedMemberId: (id: string | null) => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -435,6 +420,8 @@ function ConfigureStep(props: {
     setTelegramInterval,
     members,
     setMembers,
+    selectedMemberId,
+    setSelectedMemberId,
     onBack,
     onNext,
   } = props;
@@ -465,24 +452,15 @@ function ConfigureStep(props: {
         setTelegramInterval={setTelegramInterval}
       />
 
-      <SectionCard
-        title={`Members (${members.length})`}
-        hint={`From template "${tpl.name}". Edit per-member overrides below.`}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {members.map((m, i) => (
-            <MemberRow
-              key={m.id}
-              member={m}
-              onChange={(next) => {
-                const copy = [...members];
-                copy[i] = next;
-                setMembers(copy);
-              }}
-            />
-          ))}
-        </div>
-      </SectionCard>
+      <MembersSection
+        tpl={tpl}
+        members={members}
+        setMembers={setMembers}
+        selectedMemberId={selectedMemberId}
+        setSelectedMemberId={setSelectedMemberId}
+        defaultProvider={defaultProvider}
+        defaultModel={defaultModel}
+      />
 
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <Press pressScale={0.96} onClick={onBack}>
@@ -521,109 +499,6 @@ function ConfigureStep(props: {
         </Press>
       </div>
     </section>
-  );
-}
-
-function MemberRow({
-  member,
-  onChange,
-}: {
-  member: MemberEdit;
-  onChange: (next: MemberEdit) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <article
-      style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-md)',
-        padding: 10,
-      }}
-    >
-      <header
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          display: 'flex',
-          gap: 10,
-          alignItems: 'center',
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }}>
-          {member.name} · <span style={{ color: 'var(--text-muted)' }}>{member.role}</span>
-        </span>
-        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{open ? '▾' : '▸'}</span>
-      </header>
-      {open ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-            <Field label="Name">
-              <input
-                value={member.name}
-                onChange={(e) => onChange({ ...member, name: e.target.value })}
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Role">
-              <input
-                value={member.role}
-                onChange={(e) => onChange({ ...member, role: e.target.value })}
-                style={inputStyle}
-              />
-            </Field>
-          </div>
-          <Field label="Personality">
-            <textarea
-              value={member.personality}
-              onChange={(e) => onChange({ ...member, personality: e.target.value })}
-              rows={2}
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="System prompt">
-            <textarea
-              value={member.systemPrompt}
-              onChange={(e) => onChange({ ...member, systemPrompt: e.target.value })}
-              rows={2}
-              style={inputStyle}
-            />
-          </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-            <Field label="Max turns">
-              <input
-                type="number"
-                value={member.maxTurns ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    ...member,
-                    maxTurns: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-                placeholder="default"
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Provider">
-              <input
-                value={member.provider ?? ''}
-                onChange={(e) => onChange({ ...member, provider: e.target.value || undefined })}
-                placeholder="(team default)"
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Model">
-              <input
-                value={member.model ?? ''}
-                onChange={(e) => onChange({ ...member, model: e.target.value || undefined })}
-                placeholder="(team default)"
-                style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
-              />
-            </Field>
-          </div>
-        </div>
-      ) : null}
-    </article>
   );
 }
 
