@@ -28,7 +28,7 @@ export function TimelineScreen() {
   const timeline = useTimeline(200);
   const [kind, setKind] = useState('');
 
-  const entries = timeline.data?.entries ?? [];
+  const entries = useMemo(() => timeline.data?.entries ?? [], [timeline.data?.entries]);
   const filtered = useMemo(() => {
     if (!kind) return entries;
     return entries.filter((e) => e.kind === kind);

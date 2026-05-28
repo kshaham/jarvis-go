@@ -12,7 +12,7 @@ export function MeetingsScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
-  const list = history.data?.history ?? [];
+  const list = useMemo(() => history.data?.history ?? [], [history.data?.history]);
   // Default-select most recent
   const effectiveId = selectedId || list[0]?.id || null;
   const detail = useStandupDetail(effectiveId);

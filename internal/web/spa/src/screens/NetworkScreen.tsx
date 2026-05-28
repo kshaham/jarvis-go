@@ -36,7 +36,7 @@ const TICK_LIMIT = 200;
 export function NetworkScreen() {
   const status = useOfficeStatus();
   const messages = useOfficeMessages();
-  const members = status.data?.members ?? [];
+  const members = useMemo(() => status.data?.members ?? [], [status.data?.members]);
 
   const [hideIdle, setHideIdle] = useState(false);
   const [activeOnly, setActiveOnly] = useState(false);
@@ -94,7 +94,11 @@ export function NetworkScreen() {
       if (!ids.has(k)) m.delete(k);
     }
     for (const mem of visibleMembers) {
-      if (!m.has(mem.sessionId)) {
+      const existing = m.get(mem.sessionId);
+      if (existing) {
+        // Keep position, refresh the member ref so status / cost render fresh.
+        existing.member = mem;
+      } else {
         m.set(mem.sessionId, {
           id: mem.sessionId,
           member: mem,
@@ -103,10 +107,6 @@ export function NetworkScreen() {
           vx: 0,
           vy: 0,
         });
-      } else {
-        // Keep position, refresh the member ref so status / cost render fresh.
-        const n = m.get(mem.sessionId)!;
-        n.member = mem;
       }
     }
     tickRef.current = 0; // restart the cooldown

@@ -19,14 +19,17 @@ export function MessagesScreen() {
   const status = useOfficeStatus();
   const qc = useQueryClient();
 
-  const members = status.data?.members ?? [];
+  const members = useMemo(() => status.data?.members ?? [], [status.data?.members]);
   const memberLookup = useMemo(() => {
     const map = new Map<string, OfficeMember>();
     for (const m of members) map.set(m.sessionId, m);
     return map;
   }, [members]);
 
-  const allMessages = messagesQ.data?.messages ?? [];
+  const allMessages = useMemo(
+    () => messagesQ.data?.messages ?? [],
+    [messagesQ.data?.messages],
+  );
 
   const [selectedAgent, setSelectedAgent] = useState<string>('');
   const [fromAgent, setFromAgent] = useState<string>(''); // operator's chosen sender

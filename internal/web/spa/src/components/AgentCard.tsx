@@ -46,7 +46,7 @@ export function AgentCard({ member, onSelect }: Props) {
   const isInteractive = !!onSelect;
   return (
     <motion.article
-      onClick={isInteractive ? () => onSelect!(member) : undefined}
+      onClick={onSelect ? () => onSelect(member) : undefined}
       whileHover={reduce ? {} : { y: -2, borderColor: 'var(--border-strong)' }}
       transition={spring.smooth}
       className={cn(

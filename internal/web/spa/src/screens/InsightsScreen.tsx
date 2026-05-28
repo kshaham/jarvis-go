@@ -19,7 +19,7 @@ export function InsightsScreen() {
   const labels = useLabelsRollup();
 
   const m = metrics.data?.metrics ?? {};
-  const members = status.data?.members ?? [];
+  const members = useMemo(() => status.data?.members ?? [], [status.data?.members]);
 
   // Cost-per-agent leaderboard, sorted descending.
   const costByAgent = useMemo(() => {
