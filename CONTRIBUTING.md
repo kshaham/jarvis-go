@@ -66,7 +66,7 @@ The SPA has no test suite yet (the mobile app does — see the companion repo).
 
 ## 🧭 Architecture in one paragraph
 
-`jarvis` is a Go daemon that orchestrates Claude Code agents (the "office"). Operators interact via a CLI (`cm`), a React SPA (`/office-v2`), and a companion React Native mobile app. The daemon manages agent lifecycles, persists a knowledge library to `~/.jarvis/`, and exposes an HTTP + SSE API. Deep dive in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+`jarvis` is a Go daemon that orchestrates Claude Code agents (the "office"). Operators interact via a CLI (`cm`), a React SPA (`/office-v2`), and a companion React Native mobile app. The daemon manages agent lifecycles, persists a knowledge library to `~/.jarvis/`, and exposes an HTTP + SSE API. Deep dive in [`README.md`](README.md#-architecture) and the agent-runtime walkthrough in [`EXPLAINER.md`](EXPLAINER.md).
 
 ## 🔌 Adding a new feature
 
@@ -81,7 +81,7 @@ A typical "new screen with one new API endpoint" PR touches:
 7. `internal/web/spa/src/App.tsx` — route registration
 8. `internal/web/spa/src/components/AppShell.tsx` — left-rail entry
 
-See [`docs/SPA.md`](docs/SPA.md) for the design tokens + motion primitives the SPA expects every screen to use.
+The SPA's design tokens live in `internal/web/spa/src/styles/tokens.css` and motion primitives in `internal/web/spa/src/components/motion/`. Every screen should source from those, not redefine its own.
 
 ## 🤝 Code review
 
