@@ -23,6 +23,8 @@ const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: st
   },
 ];
 
+const KNOWN_VALUES = new Set<string>(PROVIDERS.map((p) => p.value));
+
 const INTERVALS = [30, 60, 120, 240];
 
 export function DefaultsSection({
@@ -48,20 +50,27 @@ export function DefaultsSection({
   telegramInterval: number;
   setTelegramInterval: (n: number) => void;
 }) {
-  const activeProvider =
-    (PROVIDERS.find((p) => p.value === defaultProvider) ?? PROVIDERS[0]);
+  const activeProvider = KNOWN_VALUES.has(defaultProvider)
+    ? PROVIDERS.find((p) => p.value === defaultProvider) ?? null
+    : null;
+  const providerHint = activeProvider
+    ? activeProvider.hint
+    : `Custom provider: ${defaultProvider || '(none)'}`;
+  const modelPlaceholder = activeProvider?.placeholder ?? '(provider default)';
 
   return (
     <SectionCard
       title="Defaults"
       hint="Applies to every member unless overridden in the editor below."
     >
-      <Field label="Provider" hint={activeProvider.hint}>
-        <ChipGroup<Provider>
+      <Field label="Provider" hint={providerHint}>
+        <ChipGroup<Provider | ''>
           ariaLabel="Default provider"
           options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
-          value={activeProvider.value}
-          onChange={(v) => setDefaultProvider(v)}
+          value={activeProvider ? activeProvider.value : ''}
+          onChange={(v) => {
+            if (v) setDefaultProvider(v);
+          }}
         />
       </Field>
 
@@ -69,7 +78,7 @@ export function DefaultsSection({
         <input
           value={defaultModel}
           onChange={(e) => setDefaultModel(e.target.value)}
-          placeholder={activeProvider.placeholder}
+          placeholder={modelPlaceholder}
           aria-label="Default model"
           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
         />

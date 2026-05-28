@@ -1,15 +1,9 @@
 import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
 import { Avatar } from './Avatar';
+import { leadOf } from './templateHelpers';
 import { TierCounts } from './TierBadge';
 import type { Tier } from './TierBadge';
-
-function leadOf(tpl: TeamTemplate) {
-  return (
-    tpl.members.find((m) => (m.tier as Tier | undefined) === 'strategic') ??
-    tpl.members[0]
-  );
-}
 
 export function TemplateChip({
   tpl,

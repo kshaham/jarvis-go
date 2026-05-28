@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { TeamTemplate } from '../../api/types';
 import { Press } from '../motion';
 import { AvatarStack } from './Avatar';
@@ -83,12 +84,14 @@ export function ReviewSummary({
           ? 'Z.AI · GLM'
           : defaultProvider;
 
-  const baseById = new Map(
-    tpl.members.map((m, i) => [m.id ?? `${tpl.id}-${i}`, m] as const),
+  const baseById = useMemo(
+    () => new Map(tpl.members.map((m, i) => [m.id ?? `${tpl.id}-${i}`, m] as const)),
+    [tpl],
   );
   const stack = members.map((m) => {
     const base = baseById.get(m.id);
     return {
+      id: m.id,
       name: m.name,
       emoji: base?.emoji,
       color: base?.color,
@@ -96,6 +99,7 @@ export function ReviewSummary({
     };
   });
   const tiers = members.map((m) => ({ tier: m.tier ?? (baseById.get(m.id)?.tier as Tier | undefined) }));
+  const spawnDisabled = !validity.ok || pending;
 
   return (
     <div
@@ -153,24 +157,26 @@ export function ReviewSummary({
 
         <span style={{ flex: 1 }} />
 
-        <Press pressScale={0.97} onClick={validity.ok && !pending ? onSpawn : undefined}>
-          <span
-            title={validity.ok ? '' : validity.reason}
-            style={{
-              padding: '10px 20px',
-              background: validity.ok ? 'var(--accent)' : 'var(--bg-pressed)',
-              color: validity.ok ? '#fff' : 'var(--text-muted)',
-              border: validity.ok ? 'none' : '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: validity.ok && !pending ? 'pointer' : 'not-allowed',
-              opacity: pending ? 0.7 : 1,
-              transition: 'background 120ms ease, opacity 120ms ease',
-            }}
-          >
-            {pending ? 'Spawning…' : 'Spawn team'}
-          </span>
+        <Press
+          pressScale={spawnDisabled ? 1 : 0.97}
+          onClick={spawnDisabled ? undefined : onSpawn}
+          disabled={spawnDisabled}
+          aria-disabled={spawnDisabled}
+          title={validity.ok ? '' : validity.reason}
+          style={{
+            padding: '10px 20px',
+            background: validity.ok ? 'var(--accent)' : 'var(--bg-pressed)',
+            color: validity.ok ? '#fff' : 'var(--text-muted)',
+            border: validity.ok ? 'none' : '1px solid var(--border-default)',
+            borderRadius: 'var(--radius-md)',
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: spawnDisabled ? 'not-allowed' : 'pointer',
+            opacity: pending ? 0.7 : 1,
+            transition: 'background 120ms ease, opacity 120ms ease',
+          }}
+        >
+          {pending ? 'Spawning…' : 'Spawn team'}
         </Press>
       </div>
 

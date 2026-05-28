@@ -2,17 +2,9 @@ import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
 import { Press } from '../motion';
 import { Avatar, AvatarStack } from './Avatar';
+import { leadOf } from './templateHelpers';
 import { TierCounts } from './TierBadge';
 import type { Tier } from './TierBadge';
-
-// Pick the avatar that "represents" the template: prefer a strategic
-// member (the lead), fall back to the first member.
-function leadOf(tpl: TeamTemplate) {
-  return (
-    tpl.members.find((m) => (m.tier as Tier | undefined) === 'strategic') ??
-    tpl.members[0]
-  );
-}
 
 export function TemplateCard({
   tpl,

@@ -92,14 +92,16 @@ export function Avatar({
 }
 
 // Stacked horizontal cluster of small avatars. Caps at `max`, with a
-// `+N` overflow chip after.
+// `+N` overflow chip after. Each member's optional `id` is used as
+// the React key; falls back to a name+emoji composite so reordering
+// the array doesn't shuffle avatars.
 export function AvatarStack({
   members,
   max = 5,
   size = 'sm',
   style,
 }: {
-  members: { name?: string; emoji?: string; color?: string; tier?: Tier }[];
+  members: { id?: string; name?: string; emoji?: string; color?: string; tier?: Tier }[];
   max?: number;
   size?: Size;
   style?: CSSProperties;
@@ -116,18 +118,21 @@ export function AvatarStack({
         ...style,
       }}
     >
-      {shown.map((m, i) => (
-        <span
-          key={i}
-          style={{
-            marginLeft: i === 0 ? 0 : -8,
-            zIndex: shown.length - i,
-            position: 'relative',
-          }}
-        >
-          <Avatar {...m} size={size} ring />
-        </span>
-      ))}
+      {shown.map((m, i) => {
+        const key = m.id ?? `${m.name ?? '_'}|${m.emoji ?? ''}|${i}`;
+        return (
+          <span
+            key={key}
+            style={{
+              marginLeft: i === 0 ? 0 : -8,
+              zIndex: shown.length - i,
+              position: 'relative',
+            }}
+          >
+            <Avatar {...m} size={size} ring />
+          </span>
+        );
+      })}
       {overflow > 0 ? (
         <span
           style={{
