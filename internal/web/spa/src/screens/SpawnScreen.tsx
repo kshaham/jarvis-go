@@ -2,13 +2,13 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
-import { Metric, Press } from '../components/motion';
+import { Press } from '../components/motion';
 import { DefaultsSection } from '../components/spawn/DefaultsSection';
-import { SectionCard } from '../components/spawn/formPrimitives';
 import { memberFromTemplate } from '../components/spawn/MemberEditor';
 import type { MemberEdit } from '../components/spawn/MemberEditor';
 import { MembersSection } from '../components/spawn/MembersSection';
 import { MissionSection } from '../components/spawn/MissionSection';
+import { ReviewSummary, validateSpawnState } from '../components/spawn/ReviewSummary';
 import { TemplateCard } from '../components/spawn/TemplateCard';
 import { TemplateChip } from '../components/spawn/TemplateChip';
 import { recordRecentWorkdir, WorkdirSection } from '../components/spawn/WorkdirSection';
@@ -16,16 +16,16 @@ import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
 import type { TeamTemplate, TeamTemplateMember } from '../api/types';
 
-type Step = 'template' | 'configure' | 'review';
-
 // SpawnScreen — the wizard formerly known as the spawn-team modal.
-// Three steps with a progress trail at the top.
+// Two panes: template picker on the left, configure form + sticky
+// review bar on the right. Selecting a template collapses the picker
+// to a slim chip; clicking that chip's Change button clears the
+// selection and expands the picker back.
 export function SpawnScreen() {
   const templates = useTeamTemplates();
   const qc = useQueryClient();
   const navigate = useNavigate();
 
-  const [step, setStep] = useState<Step>('template');
   const [templateId, setTemplateId] = useState<string>('');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string>('');
@@ -147,63 +147,52 @@ export function SpawnScreen() {
           }}
           className="spawn-shell"
         >
-          <TemplateChip
-            tpl={tpl}
-            onChange={() => {
-              setTemplateId('');
-              setStep('template');
-            }}
-          />
+          <TemplateChip tpl={tpl} onChange={() => setTemplateId('')} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-            <StepTrail step={step} setStep={setStep} hasTemplate={hasTemplate} />
-            {step === 'configure' && (
-              <ConfigureStep
-                tpl={tpl}
-                mission={mission}
-                setMission={setMission}
-                workingDir={workingDir}
-                setWorkingDir={setWorkingDir}
-                newProject={newProject}
-                setNewProject={setNewProject}
-                projectName={projectName}
-                setProjectName={setProjectName}
-                perpetual={perpetual}
-                setPerpetual={setPerpetual}
-                defaultProvider={defaultProvider}
-                setDefaultProvider={setDefaultProvider}
-                defaultModel={defaultModel}
-                setDefaultModel={setDefaultModel}
-                telegramEnabled={telegramEnabled}
-                setTelegramEnabled={setTelegramEnabled}
-                telegramInterval={telegramInterval}
-                setTelegramInterval={setTelegramInterval}
-                members={members}
-                setMembers={setMembers}
-                selectedMemberId={selectedMemberId}
-                setSelectedMemberId={setSelectedMemberId}
-                onBack={() => setStep('template')}
-                onNext={() => setStep('review')}
-              />
-            )}
-            {step === 'review' && (
-              <ReviewStep
-                tpl={tpl}
-                mission={mission}
-                workingDir={workingDir}
-                newProject={newProject}
-                projectName={projectName}
-                perpetual={perpetual}
-                defaultProvider={defaultProvider}
-                defaultModel={defaultModel}
-                telegramEnabled={telegramEnabled}
-                telegramInterval={telegramInterval}
-                members={members}
-                onBack={() => setStep('configure')}
-                onSpawn={() => spawn.mutate()}
-                pending={spawn.isPending}
-                error={spawn.error instanceof Error ? spawn.error.message : null}
-              />
-            )}
+            <ConfigureStep
+              tpl={tpl}
+              mission={mission}
+              setMission={setMission}
+              workingDir={workingDir}
+              setWorkingDir={setWorkingDir}
+              newProject={newProject}
+              setNewProject={setNewProject}
+              projectName={projectName}
+              setProjectName={setProjectName}
+              perpetual={perpetual}
+              setPerpetual={setPerpetual}
+              defaultProvider={defaultProvider}
+              setDefaultProvider={setDefaultProvider}
+              defaultModel={defaultModel}
+              setDefaultModel={setDefaultModel}
+              telegramEnabled={telegramEnabled}
+              setTelegramEnabled={setTelegramEnabled}
+              telegramInterval={telegramInterval}
+              setTelegramInterval={setTelegramInterval}
+              members={members}
+              setMembers={setMembers}
+              selectedMemberId={selectedMemberId}
+              setSelectedMemberId={setSelectedMemberId}
+            />
+            <ReviewSummary
+              tpl={tpl}
+              members={members}
+              defaultProvider={defaultProvider}
+              defaultModel={defaultModel}
+              newProject={newProject}
+              workingDir={workingDir}
+              projectName={projectName}
+              validity={validateSpawnState({
+                templateId,
+                mission,
+                newProject,
+                workingDir,
+                projectName,
+              })}
+              pending={spawn.isPending}
+              error={spawn.error instanceof Error ? spawn.error.message : null}
+              onSpawn={() => spawn.mutate()}
+            />
           </div>
         </div>
       ) : (
@@ -215,58 +204,11 @@ export function SpawnScreen() {
           categories={categories}
           templates={filteredTemplates}
           selected={templateId}
-          onSelect={(id) => {
-            setTemplateId(id);
-            setStep('configure');
-          }}
+          onSelect={(id) => setTemplateId(id)}
           loading={templates.isLoading}
         />
       )}
     </section>
-  );
-}
-
-function StepTrail({
-  step,
-  setStep,
-  hasTemplate,
-}: {
-  step: Step;
-  setStep: (s: Step) => void;
-  hasTemplate: boolean;
-}) {
-  const items: { id: Step; label: string }[] = [
-    { id: 'template', label: '1. Template' },
-    { id: 'configure', label: '2. Configure' },
-    { id: 'review', label: '3. Review' },
-  ];
-  return (
-    <nav style={{ display: 'flex', gap: 6 }}>
-      {items.map((it, i) => {
-        const active = step === it.id;
-        const allowed = i === 0 || hasTemplate;
-        return (
-          <button
-            key={it.id}
-            onClick={() => allowed && setStep(it.id)}
-            disabled={!allowed}
-            style={{
-              padding: '8px 16px',
-              background: active ? 'var(--accent-muted)' : 'var(--bg-surface)',
-              border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border-default)'),
-              borderRadius: 'var(--radius-md)',
-              color: active ? 'var(--accent)' : 'var(--text-muted)',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: allowed ? 'pointer' : 'not-allowed',
-              opacity: allowed ? 1 : 0.4,
-            }}
-          >
-            {it.label}
-          </button>
-        );
-      })}
-    </nav>
   );
 }
 
@@ -395,8 +337,6 @@ function ConfigureStep(props: {
   setMembers: (m: MemberEdit[]) => void;
   selectedMemberId: string | null;
   setSelectedMemberId: (id: string | null) => void;
-  onBack: () => void;
-  onNext: () => void;
 }) {
   const {
     tpl,
@@ -422,8 +362,6 @@ function ConfigureStep(props: {
     setMembers,
     selectedMemberId,
     setSelectedMemberId,
-    onBack,
-    onNext,
   } = props;
 
   return (
@@ -461,194 +399,7 @@ function ConfigureStep(props: {
         defaultProvider={defaultProvider}
         defaultModel={defaultModel}
       />
-
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <Press pressScale={0.96} onClick={onBack}>
-          <span
-            style={{
-              padding: '8px 14px',
-              background: 'var(--bg-pressed)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-primary)',
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            ← Template
-          </span>
-        </Press>
-        <Press
-          pressScale={0.96}
-          onClick={onNext}
-          disabled={!mission.trim()}
-        >
-          <span
-            style={{
-              padding: '8px 16px',
-              background: 'var(--accent)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 13,
-              fontWeight: 600,
-              opacity: mission.trim() ? 1 : 0.5,
-            }}
-          >
-            Review →
-          </span>
-        </Press>
-      </div>
     </section>
-  );
-}
-
-function ReviewStep({
-  tpl,
-  mission,
-  workingDir,
-  newProject,
-  projectName,
-  perpetual,
-  defaultProvider,
-  defaultModel,
-  telegramEnabled,
-  telegramInterval,
-  members,
-  onBack,
-  onSpawn,
-  pending,
-  error,
-}: {
-  tpl: TeamTemplate;
-  mission: string;
-  workingDir: string;
-  newProject: boolean;
-  projectName: string;
-  perpetual: boolean;
-  defaultProvider: string;
-  defaultModel: string;
-  telegramEnabled: boolean;
-  telegramInterval: number;
-  members: MemberEdit[];
-  onBack: () => void;
-  onSpawn: () => void;
-  pending: boolean;
-  error: string | null;
-}) {
-  return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <SectionCard title="Summary">
-        <ReviewRow label="Template" value={tpl.name} />
-        <ReviewRow label="Mission" value={mission || '—'} preformatted />
-        <ReviewRow label="Workdir" value={newProject ? `new ⇒ /app/workspace/${projectName}` : workingDir || '—'} />
-        <ReviewRow label="Provider / model" value={`${defaultProvider}${defaultModel ? ' · ' + defaultModel : ''}`} />
-        <ReviewRow label="Perpetual mode" value={perpetual ? 'on' : 'off'} />
-        <ReviewRow label="Telegram" value={telegramEnabled ? `every ${telegramInterval}m` : 'off'} />
-        <ReviewRow label="Members" value={<Metric value={members.length} size={13} />} />
-      </SectionCard>
-      <SectionCard title="Members">
-        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {members.map((m) => (
-            <li
-              key={m.id}
-              style={{
-                padding: 8,
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: 12,
-                color: 'var(--text-secondary)',
-                display: 'flex',
-                gap: 10,
-              }}
-            >
-              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{m.name}</span>
-              <span>{m.role}</span>
-              {m.model ? (
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-                  {m.model}
-                </span>
-              ) : null}
-              {m.maxTurns ? <span>maxTurns: {m.maxTurns}</span> : null}
-            </li>
-          ))}
-        </ul>
-      </SectionCard>
-      {error ? (
-        <div
-          style={{
-            padding: 10,
-            background: 'rgba(255,90,95,0.08)',
-            border: '1px solid var(--status-error)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--status-error)',
-            fontSize: 12,
-          }}
-        >
-          {error}
-        </div>
-      ) : null}
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <Press pressScale={0.96} onClick={onBack}>
-          <span
-            style={{
-              padding: '8px 14px',
-              background: 'var(--bg-pressed)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-primary)',
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            ← Configure
-          </span>
-        </Press>
-        <Press pressScale={0.96} onClick={onSpawn} disabled={pending}>
-          <span
-            style={{
-              padding: '10px 18px',
-              background: 'var(--accent)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 14,
-              fontWeight: 700,
-              opacity: pending ? 0.6 : 1,
-            }}
-          >
-            {pending ? 'Spawning…' : 'Spawn team'}
-          </span>
-        </Press>
-      </div>
-    </section>
-  );
-}
-
-function ReviewRow({
-  label,
-  value,
-  preformatted,
-}: {
-  label: string;
-  value: React.ReactNode;
-  preformatted?: boolean;
-}) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 14, alignItems: 'baseline' }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 13,
-          color: 'var(--text-primary)',
-          whiteSpace: preformatted ? 'pre-wrap' : 'normal',
-          fontFamily: 'inherit',
-        }}
-      >
-        {value}
-      </span>
-    </div>
   );
 }
 
