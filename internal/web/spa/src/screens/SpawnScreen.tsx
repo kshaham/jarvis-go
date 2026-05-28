@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { Metric, Press } from '../components/motion';
 import { TemplateCard } from '../components/spawn/TemplateCard';
+import { TemplateChip } from '../components/spawn/TemplateChip';
 import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
 import type { TeamTemplate, TeamTemplateMember } from '../api/types';
@@ -131,6 +132,12 @@ export function SpawnScreen() {
     },
   });
 
+  // The new layout pivots on whether a template is chosen. Before
+  // selection: left pane = full TemplateStep, right pane empty. After
+  // selection: left collapses to a slim TemplateChip, right pane shows
+  // Configure (and Review when the operator advances).
+  const hasTemplate = !!tpl;
+
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <header>
@@ -142,9 +149,74 @@ export function SpawnScreen() {
         </p>
       </header>
 
-      <StepTrail step={step} setStep={setStep} hasTemplate={!!templateId} />
-
-      {step === 'template' && (
+      {hasTemplate ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr)',
+            gap: 16,
+            alignItems: 'flex-start',
+          }}
+          className="spawn-shell"
+        >
+          <TemplateChip
+            tpl={tpl}
+            onChange={() => {
+              setTemplateId('');
+              setStep('template');
+            }}
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+            <StepTrail step={step} setStep={setStep} hasTemplate={hasTemplate} />
+            {step === 'configure' && (
+              <ConfigureStep
+                tpl={tpl}
+                mission={mission}
+                setMission={setMission}
+                workingDir={workingDir}
+                setWorkingDir={setWorkingDir}
+                newProject={newProject}
+                setNewProject={setNewProject}
+                projectName={projectName}
+                setProjectName={setProjectName}
+                perpetual={perpetual}
+                setPerpetual={setPerpetual}
+                defaultProvider={defaultProvider}
+                setDefaultProvider={setDefaultProvider}
+                defaultModel={defaultModel}
+                setDefaultModel={setDefaultModel}
+                telegramEnabled={telegramEnabled}
+                setTelegramEnabled={setTelegramEnabled}
+                telegramInterval={telegramInterval}
+                setTelegramInterval={setTelegramInterval}
+                members={members}
+                setMembers={setMembers}
+                onBack={() => setStep('template')}
+                onNext={() => setStep('review')}
+              />
+            )}
+            {step === 'review' && (
+              <ReviewStep
+                tpl={tpl}
+                mission={mission}
+                workingDir={workingDir}
+                newProject={newProject}
+                projectName={projectName}
+                perpetual={perpetual}
+                defaultProvider={defaultProvider}
+                defaultModel={defaultModel}
+                telegramEnabled={telegramEnabled}
+                telegramInterval={telegramInterval}
+                members={members}
+                onBack={() => setStep('configure')}
+                onSpawn={() => spawn.mutate()}
+                pending={spawn.isPending}
+                error={spawn.error instanceof Error ? spawn.error.message : null}
+              />
+            )}
+          </div>
+        </div>
+      ) : (
         <TemplateStep
           query={query}
           setQuery={setQuery}
@@ -158,54 +230,6 @@ export function SpawnScreen() {
             setStep('configure');
           }}
           loading={templates.isLoading}
-        />
-      )}
-
-      {step === 'configure' && tpl && (
-        <ConfigureStep
-          tpl={tpl}
-          mission={mission}
-          setMission={setMission}
-          workingDir={workingDir}
-          setWorkingDir={setWorkingDir}
-          newProject={newProject}
-          setNewProject={setNewProject}
-          projectName={projectName}
-          setProjectName={setProjectName}
-          perpetual={perpetual}
-          setPerpetual={setPerpetual}
-          defaultProvider={defaultProvider}
-          setDefaultProvider={setDefaultProvider}
-          defaultModel={defaultModel}
-          setDefaultModel={setDefaultModel}
-          telegramEnabled={telegramEnabled}
-          setTelegramEnabled={setTelegramEnabled}
-          telegramInterval={telegramInterval}
-          setTelegramInterval={setTelegramInterval}
-          members={members}
-          setMembers={setMembers}
-          onBack={() => setStep('template')}
-          onNext={() => setStep('review')}
-        />
-      )}
-
-      {step === 'review' && tpl && (
-        <ReviewStep
-          tpl={tpl}
-          mission={mission}
-          workingDir={workingDir}
-          newProject={newProject}
-          projectName={projectName}
-          perpetual={perpetual}
-          defaultProvider={defaultProvider}
-          defaultModel={defaultModel}
-          telegramEnabled={telegramEnabled}
-          telegramInterval={telegramInterval}
-          members={members}
-          onBack={() => setStep('configure')}
-          onSpawn={() => spawn.mutate()}
-          pending={spawn.isPending}
-          error={spawn.error instanceof Error ? spawn.error.message : null}
         />
       )}
     </section>
