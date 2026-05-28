@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
 import { Metric, Press } from '../components/motion';
+import { TemplateCard } from '../components/spawn/TemplateCard';
 import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
 import type { TeamTemplate, TeamTemplateMember } from '../api/types';
@@ -342,42 +343,14 @@ function TemplateStep({
             gap: 10,
           }}
         >
-          {templates.map((t) => {
-            const active = t.id === selected;
-            return (
-              <Press
-                key={t.id}
-                pressScale={0.97}
-                onClick={() => onSelect(t.id)}
-              >
-                <article
-                  style={{
-                    padding: 12,
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border-subtle)'),
-                    borderRadius: 'var(--radius-md)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                  }}
-                >
-                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {t.name}
-                  </span>
-                  {t.description ? (
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                      {t.description}
-                    </span>
-                  ) : null}
-                  <span style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--text-faint)' }}>
-                    {t.category ? <span>{t.category}</span> : null}
-                    <span>· {t.members.length} member{t.members.length === 1 ? '' : 's'}</span>
-                  </span>
-                </article>
-              </Press>
-            );
-          })}
+          {templates.map((t) => (
+            <TemplateCard
+              key={t.id}
+              tpl={t}
+              selected={t.id === selected}
+              onSelect={() => onSelect(t.id)}
+            />
+          ))}
         </div>
       )}
     </section>
