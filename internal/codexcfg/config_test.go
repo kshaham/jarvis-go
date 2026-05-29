@@ -20,6 +20,42 @@ func TestMapReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestRender_FeatureKnobs(t *testing.T) {
+	out := Render(Config{
+		Model:            "gpt-5.4",
+		SandboxMode:      "danger-full-access",
+		ApprovalPolicy:   "never",
+		WebSearch:        "live",
+		Personality:      "none",
+		AgentsMaxThreads: 4,
+		AgentsMaxDepth:   1,
+	})
+	for _, want := range []string{
+		"web_search = \"live\"",
+		"personality = \"none\"",
+		"[agents]",
+		"max_threads = 4",
+		"max_depth = 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Render missing %q\n---\n%s", want, out)
+		}
+	}
+	// All top-level keys must precede the [agents] table (valid TOML).
+	if idx := strings.Index(out, "[agents]"); idx >= 0 {
+		if strings.Index(out, "web_search") > idx || strings.Index(out, "personality") > idx {
+			t.Errorf("top-level keys must come before [agents] table:\n%s", out)
+		}
+	}
+	// Empty knobs omit their keys entirely.
+	bare := Render(Config{Model: "gpt-5.4"})
+	for _, absent := range []string{"web_search", "personality", "[agents]"} {
+		if strings.Contains(bare, absent) {
+			t.Errorf("bare config should omit %q, got:\n%s", absent, bare)
+		}
+	}
+}
+
 func TestRender_CustomProvider(t *testing.T) {
 	out := Render(Config{
 		Model:           "gpt-5.5",

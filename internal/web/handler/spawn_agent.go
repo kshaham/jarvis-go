@@ -535,6 +535,15 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	}
 	codexHome := filepath.Join(home, ".jarvis", "codex", sessionID)
 
+	// Web search (Codex 0.135 top-level `web_search`): real OpenAI endpoints
+	// (codex/subscription) get "live" so agents can look up current docs, APIs,
+	// and errors. The custom internal endpoint may not implement OpenAI's
+	// hosted web_search tool, so disable it there to avoid per-turn failures.
+	webSearch := "live"
+	if provider == "openai-custom" {
+		webSearch = "disabled"
+	}
+
 	cfg := codexcfg.Config{
 		Model:           model,
 		ReasoningEffort: codexcfg.MapReasoningEffort(tuning.Effort),
@@ -542,6 +551,15 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 		ApprovalPolicy:  "never",
 		Provider:        prov,
 		MCPServers:      codexMCPFromMap(leanCodexMCPServers(ctx.buildOfficeMCPServers(req, sessionID, agentToken))),
+		WebSearch:       webSearch,
+		// Disable Codex's built-in persona so the per-member personality jarvis
+		// injects in the kickstart drives voice (and keeps output task-focused).
+		Personality: "none",
+		// Bound Codex's stable multi-agent fan-out: up to 4 concurrent
+		// subagents, no recursion (depth 1). The Codex kickstart tells agents
+		// when to use it (see BuildStableSystemPromptCodex).
+		AgentsMaxThreads: 4,
+		AgentsMaxDepth:   1,
 	}
 	if _, werr := codexcfg.Write(codexHome, cfg); werr != nil {
 		slog.Error("Failed to write Codex config.toml", "name", member.Name, "error", werr)

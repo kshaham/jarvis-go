@@ -48,6 +48,23 @@ type Config struct {
 	ApprovalPolicy  string // e.g. "never"
 	Provider        *Provider
 	MCPServers      map[string]MCPServer
+
+	// WebSearch sets the top-level `web_search` mode: disabled|cached|live
+	// (Codex 0.135 — the search_tool feature flag is gone; this replaces it).
+	// "live" lets agents fetch current docs/APIs/errors; "" omits the key
+	// (Codex defaults to "live" under a full-access sandbox).
+	WebSearch string
+
+	// Personality sets the top-level `personality`: none|friendly|pragmatic.
+	// jarvis uses "none" so the per-member persona it injects in the prompt
+	// drives voice, not Codex's built-in persona layer. "" omits the key.
+	Personality string
+
+	// AgentsMaxThreads / AgentsMaxDepth bound Codex's stable multi_agent
+	// fan-out (the [agents] table: spawn_agent/wait_agent/... tools). 0 omits
+	// the field (Codex defaults: max_threads=6, max_depth=1).
+	AgentsMaxThreads int
+	AgentsMaxDepth   int
 }
 
 // MapReasoningEffort converts jarvis's effort tier (low|medium|high|max) to
@@ -121,6 +138,24 @@ func Render(c Config) string {
 	}
 	if c.SandboxMode != "" {
 		fmt.Fprintf(&b, "sandbox_mode = %s\n", tomlStr(c.SandboxMode))
+	}
+	if c.WebSearch != "" {
+		fmt.Fprintf(&b, "web_search = %s\n", tomlStr(c.WebSearch))
+	}
+	if c.Personality != "" {
+		fmt.Fprintf(&b, "personality = %s\n", tomlStr(c.Personality))
+	}
+
+	// [agents] bounds for Codex's multi-agent fan-out. Written before the
+	// other tables so all top-level keys above precede every [table] (TOML).
+	if c.AgentsMaxThreads > 0 || c.AgentsMaxDepth > 0 {
+		b.WriteString("\n[agents]\n")
+		if c.AgentsMaxThreads > 0 {
+			fmt.Fprintf(&b, "max_threads = %d\n", c.AgentsMaxThreads)
+		}
+		if c.AgentsMaxDepth > 0 {
+			fmt.Fprintf(&b, "max_depth = %d\n", c.AgentsMaxDepth)
+		}
 	}
 
 	if c.Provider != nil {

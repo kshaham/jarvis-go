@@ -225,6 +225,11 @@ func buildStableSystemPrompt(tier, teamMission, harness string) string {
 	if !isCodex {
 		b.WriteString("## Dynamic Workflows (large fan-out work)\n")
 		b.WriteString("For big, parallelizable tasks -- codebase-wide audits, migrations, sweeping refactors, multi-source research -- you can run a **dynamic workflow**: describe the task and include the word \"workflow\", and Claude Code writes a JS orchestration script that fans out subagents (up to ~16 concurrent, 1,000 total per run) in a background runtime, returning only the final result to your context. Reach for it when a task is genuinely large and decomposable; it costs substantially more tokens than a normal turn, so prefer ordinary work for small tasks and respect your cost cap.\n\n")
+	} else {
+		b.WriteString("## Codex Capabilities\n")
+		b.WriteString("- Web search: you have a live web-search tool. Use it to look up current library APIs, docs, and unfamiliar error messages rather than guessing from memory.\n")
+		b.WriteString("- Subagents: for large, parallelizable work (codebase-wide audits, migrations, sweeping multi-file refactors) you can spawn subagents via the `spawn_agent` tool (up to 4 concurrent; use `wait_agent` to collect results). Each subagent spends additional tokens, so reserve fan-out for genuinely large, decomposable tasks and respect your cost cap -- do ordinary work inline.\n")
+		b.WriteString("- Editing + shell: apply changes via your built-in file-edit and shell tools; keep edits scoped and verify with a build/test before claiming completion.\n\n")
 	}
 
 	b.WriteString("## Team Messaging\n")
