@@ -91,31 +91,41 @@ func TestCodexConsumeJSONL_Error(t *testing.T) {
 }
 
 func TestCodexExecArgs_NoApprovalFlagAndShape(t *testing.T) {
-	// `codex exec` (>= the deployed 0.135.0) hard-errors on --ask-for-approval;
-	// approval comes from config.toml approval_policy. Guard against anyone
-	// re-adding the flag, and pin the rest of the invocation shape.
+	// Both turn shapes (verified against codex-cli 0.135.0) must omit
+	// --ask-for-approval; resume turns must additionally omit --sandbox and
+	// -C (the `resume` subcommand rejects them). Pin both invocations.
 	first := codexExecArgs("", "/work/dir", "do a thing")
+	wantFirst := []string{"exec", "--json", "--skip-git-repo-check", "--sandbox", "danger-full-access", "-C", "/work/dir", "do a thing"}
+	if len(first) != len(wantFirst) {
+		t.Fatalf("first-turn args=%v want %v", first, wantFirst)
+	}
+	for i := range wantFirst {
+		if first[i] != wantFirst[i] {
+			t.Errorf("first-turn args[%d]=%q want %q", i, first[i], wantFirst[i])
+		}
+	}
+
+	resumed := codexExecArgs("thread-123", "/work/dir", "next")
+	wantResume := []string{"exec", "resume", "thread-123", "--json", "--skip-git-repo-check", "next"}
+	if len(resumed) != len(wantResume) {
+		t.Fatalf("resume args=%v want %v", resumed, wantResume)
+	}
+	for i := range wantResume {
+		if resumed[i] != wantResume[i] {
+			t.Errorf("resume args[%d]=%q want %q", i, resumed[i], wantResume[i])
+		}
+	}
+
+	// Invariants: no --ask-for-approval anywhere; resume carries no --sandbox/-C.
 	for _, a := range first {
 		if a == "--ask-for-approval" {
-			t.Fatalf("codexExecArgs must NOT pass --ask-for-approval (rejected by codex exec); got %v", first)
+			t.Errorf("first-turn must not pass --ask-for-approval; got %v", first)
 		}
 	}
-	if first[0] != "exec" {
-		t.Errorf("args[0]=%q want exec", first[0])
-	}
-	want := []string{"exec", "--json", "--skip-git-repo-check", "--sandbox", "danger-full-access", "-C", "/work/dir", "do a thing"}
-	if len(first) != len(want) {
-		t.Fatalf("first-turn args=%v want %v", first, want)
-	}
-	for i := range want {
-		if first[i] != want[i] {
-			t.Errorf("first-turn args[%d]=%q want %q", i, first[i], want[i])
+	for _, a := range resumed {
+		if a == "--ask-for-approval" || a == "--sandbox" || a == "-s" || a == "-C" || a == "--cd" {
+			t.Errorf("resume turn must not pass %q (codex exec resume rejects it); got %v", a, resumed)
 		}
-	}
-	// Resume turns insert `resume <threadID>` right after the subcommand.
-	resumed := codexExecArgs("thread-123", "/work/dir", "next")
-	if resumed[1] != "resume" || resumed[2] != "thread-123" {
-		t.Errorf("resume args=%v want [exec resume thread-123 ...]", resumed)
 	}
 }
 

@@ -181,29 +181,34 @@ func (s *CodexSession) worker(ctx context.Context) {
 // resume is the captured thread id ("" on the first turn). workingDir is the
 // agent cwd; prompt is the turn input.
 //
-// IMPORTANT: `codex exec` (verified against codex-cli 0.135.0) does NOT accept
-// an `--ask-for-approval` flag — that lives only on the interactive command.
-// Approval is instead driven by `approval_policy` in the per-agent
-// CODEX_HOME/config.toml (codexcfg writes "never"). Passing
-// `--ask-for-approval` makes exec hard-error with "unexpected argument", which
-// fails every turn. Accepted exec flags here: --json, --skip-git-repo-check,
-// -s/--sandbox <mode>, -C/--cd <dir>, -m/--model. Keep this list aligned with
-// `codex exec --help`; the regression test in codex_session_test.go asserts
-// the no-approval-flag invariant.
+// Flag sets differ between the first turn (`codex exec`) and resume turns
+// (`codex exec resume`) — both verified against codex-cli 0.135.0:
+//
+//   - NEITHER accepts `--ask-for-approval` (interactive-only). Approval is
+//     driven by `approval_policy` in the per-agent CODEX_HOME/config.toml
+//     (codexcfg writes "never"). Passing it hard-errors "unexpected argument".
+//   - `codex exec` accepts -s/--sandbox <mode> and -C/--cd <dir>.
+//   - `codex exec resume` does NOT accept -s/--sandbox or -C/--cd — sandbox
+//     comes from config.toml's sandbox_mode and cwd from the process working
+//     dir (cmd.Dir). Passing --sandbox to a resume turn hard-errors, which
+//     previously failed every turn after the first.
+//   - Both accept --json and --skip-git-repo-check.
+//
+// Keep aligned with `codex exec --help` / `codex exec resume --help`; the
+// regression test in codex_session_test.go pins both shapes.
 func codexExecArgs(resume, workingDir, prompt string) []string {
-	args := []string{"exec"}
 	if resume != "" {
-		// Subsequent turns resume the captured thread (preserves transcript).
-		args = append(args, "resume", resume)
+		// Resume the captured thread (preserves transcript + prompt cache).
+		return []string{"exec", "resume", resume, "--json", "--skip-git-repo-check", prompt}
 	}
-	args = append(args,
+	return []string{
+		"exec",
 		"--json",
 		"--skip-git-repo-check",
 		"--sandbox", "danger-full-access", // we run in a hardened container
 		"-C", workingDir,
 		prompt,
-	)
-	return args
+	}
 }
 
 // runTurn spawns one `codex exec` invocation and consumes its JSONL stream.
