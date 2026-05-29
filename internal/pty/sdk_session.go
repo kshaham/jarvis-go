@@ -207,28 +207,35 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	// internally and the file path wins). This double-attach is safe
 	// and keeps the in-process kickstart path functional during the
 	// rollout.
+	// IMPORTANT: WithExtraArgs serialises each key VERBATIM (no `--` prepend —
+	// see claude-agent-sdk-go options.go), so every key MUST already include
+	// its leading `--`. Bare keys (e.g. "exclude-dynamic-system-prompt-sections")
+	// arrive as positional args; since claude's `--mcp-config` is variadic
+	// (>= ~2.1.156) it then swallows the bare token as a second MCP config path,
+	// producing "Invalid MCP configuration: MCP config file not found: <token>"
+	// and killing the session at startup. The `--` prefix makes them flags so
+	// --mcp-config stops consuming at the next one.
 	extraArgs := map[string]string{}
 	if s.systemPromptFile != "" {
-		extraArgs["system-prompt-file"] = s.systemPromptFile
+		extraArgs["--system-prompt-file"] = s.systemPromptFile
 	}
 	if s.appendSystemPromptFile != "" {
-		extraArgs["append-system-prompt-file"] = s.appendSystemPromptFile
+		extraArgs["--append-system-prompt-file"] = s.appendSystemPromptFile
 	}
 	if s.excludeDynamicSystemPromptSections {
-		// Empty value on a boolean CLI flag; the SDK serialises this as
-		// a bare --exclude-dynamic-system-prompt-sections argument.
-		extraArgs["exclude-dynamic-system-prompt-sections"] = ""
+		// Boolean flag (empty value) -> bare `--exclude-dynamic-system-prompt-sections`.
+		extraArgs["--exclude-dynamic-system-prompt-sections"] = ""
 	}
 	// R3.6 · --from-pr loads PR context into the system prompt. Pushed
 	// through WithExtraArgs because the SDK doesn't expose a typed
 	// option yet.
 	if s.fromPRNumber > 0 {
-		extraArgs["from-pr"] = strconv.Itoa(s.fromPRNumber)
+		extraArgs["--from-pr"] = strconv.Itoa(s.fromPRNumber)
 	}
 	// R4.1 · --chrome turns on Claude's built-in browser-automation
 	// tools. Pushed through WithExtraArgs (bare flag, no value).
 	if s.chromeEnabled {
-		extraArgs["chrome"] = ""
+		extraArgs["--chrome"] = ""
 	}
 	// R4.3 · --channels subscribes to MCP channel notifications.
 	//
@@ -244,7 +251,7 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	// officeSessionMode=hooks (PTY) where the repeated-flag pattern
 	// works. Single-channel SDK teams continue to function unchanged.
 	if len(s.channels) > 0 {
-		extraArgs["channels"] = s.channels[0]
+		extraArgs["--channels"] = s.channels[0]
 		if len(s.channels) > 1 {
 			slog.Warn("SDK session can only subscribe to 1 channel via WithExtraArgs; forwarding first only; set officeSessionMode=hooks for multi-channel",
 				"session", s.ID,
