@@ -362,6 +362,33 @@ func (ctx *Context) buildOfficeMCPServers(req spawnTeamRequest, sessionID, agent
 	return mcpServers
 }
 
+// codexMCPAllowlist is the lean MCP set Codex agents get. Codex sends EVERY
+// connected server's full tool schema to the model on EVERY turn (no Anthropic-
+// style prompt caching), so the full 6-server office set adds a large fixed
+// per-turn input-token cost and trips the OpenAI per-minute token (TPM) limit
+// after only a few turns. We keep office coordination (jarvis) + code
+// intelligence (codegraph*) and drop the situational npx servers — context7
+// (docs), sequential-thinking, shadcn (UI), pageindex (memory). Codex agents
+// reach the same office operations via the `cm` CLI over Bash regardless, and
+// have native shell/file/web tools, so the dropped servers degrade gracefully.
+// (The Claude/SDK harness is unaffected — it keeps the full set.)
+var codexMCPAllowlist = map[string]bool{
+	"jarvis":           true,
+	"codegraph":        true,
+	"codegraphcontext": true,
+}
+
+// leanCodexMCPServers filters the full office MCP map down to codexMCPAllowlist.
+func leanCodexMCPServers(full map[string]any) map[string]any {
+	lean := make(map[string]any, len(full))
+	for name, cfg := range full {
+		if codexMCPAllowlist[name] {
+			lean[name] = cfg
+		}
+	}
+	return lean
+}
+
 // codexMCPFromMap translates the Claude-shaped MCP map (built by
 // buildOfficeMCPServers) into the codexcfg.MCPServer shape used to render
 // [mcp_servers.<name>] TOML blocks. Only stdio entries with a command are
@@ -470,7 +497,7 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 		SandboxMode:     "danger-full-access",
 		ApprovalPolicy:  "never",
 		Provider:        prov,
-		MCPServers:      codexMCPFromMap(ctx.buildOfficeMCPServers(req, sessionID, agentToken)),
+		MCPServers:      codexMCPFromMap(leanCodexMCPServers(ctx.buildOfficeMCPServers(req, sessionID, agentToken))),
 	}
 	if _, werr := codexcfg.Write(codexHome, cfg); werr != nil {
 		slog.Error("Failed to write Codex config.toml", "name", member.Name, "error", werr)
