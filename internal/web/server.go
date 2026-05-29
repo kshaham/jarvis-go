@@ -330,23 +330,29 @@ type sessionStoreAdapter struct {
 }
 
 func (a *sessionStoreAdapter) WriteViaScreen(sessionID, input string) bool {
-	// Try PTY session first, then SDK session
+	// Try PTY session first, then SDK, then Codex
 	if s, ok := a.sm.GetSession(sessionID); ok {
 		return s.WriteViaScreen(input)
 	}
 	if sdk, ok := a.sm.GetSDKSession(sessionID); ok {
 		return sdk.WriteViaScreen(input)
 	}
+	if cx, ok := a.sm.GetCodexSession(sessionID); ok {
+		return cx.WriteViaScreen(input)
+	}
 	return false
 }
 
 func (a *sessionStoreAdapter) WriteInkPrompt(sessionID, prompt string) bool {
-	// Try PTY session first, then SDK session
+	// Try PTY session first, then SDK, then Codex
 	if s, ok := a.sm.GetSession(sessionID); ok {
 		return s.WriteInkPrompt(prompt)
 	}
 	if sdk, ok := a.sm.GetSDKSession(sessionID); ok {
 		return sdk.WriteInkPrompt(prompt)
+	}
+	if cx, ok := a.sm.GetCodexSession(sessionID); ok {
+		return cx.WriteInkPrompt(prompt)
 	}
 	return false
 }
@@ -362,6 +368,12 @@ func (a *sessionStoreAdapter) IsSessionAlive(sessionID string) bool {
 	if _, ok := a.sm.GetSDKSession(sessionID); ok {
 		return true
 	}
+	// Codex-harness agents live in the codex session map. Without this the
+	// recovery monitor (IsSessionAlive == false) reaps every Codex agent a
+	// few seconds after spawn via HandleAgentDeath.
+	if _, ok := a.sm.GetCodexSession(sessionID); ok {
+		return true
+	}
 	return false
 }
 
@@ -371,6 +383,9 @@ func (a *sessionStoreAdapter) IsSessionWorking(sessionID string) bool {
 	}
 	if sdk, ok := a.sm.GetSDKSession(sessionID); ok {
 		return sdk.IsWorking()
+	}
+	if cx, ok := a.sm.GetCodexSession(sessionID); ok {
+		return cx.IsWorking()
 	}
 	return false
 }
@@ -382,6 +397,9 @@ func (a *sessionStoreAdapter) IsSessionWorking(sessionID string) bool {
 func (a *sessionStoreAdapter) StopSession(sessionID string) error {
 	if _, ok := a.sm.GetSDKSession(sessionID); ok {
 		return a.sm.StopSDKSession(sessionID)
+	}
+	if _, ok := a.sm.GetCodexSession(sessionID); ok {
+		return a.sm.StopCodexSession(sessionID)
 	}
 	if _, ok := a.sm.GetSession(sessionID); ok {
 		return a.sm.StopSession(context.Background(), sessionID)

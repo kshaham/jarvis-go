@@ -869,6 +869,9 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 		} else if sdk, found := ctx.SessionManager.GetSDKSession(sessionID); found {
 			sdk.WriteInkPrompt(shutdownMsg)
 			_ = ctx.SessionManager.StopSDKSession(sessionID)
+		} else if cx, found := ctx.SessionManager.GetCodexSession(sessionID); found {
+			cx.WriteInkPrompt(shutdownMsg)
+			_ = ctx.SessionManager.StopCodexSession(sessionID)
 		}
 		ctx.cleanupSessionResources(sessionID)
 	})
@@ -2732,13 +2735,16 @@ func (ctx *Context) OfficeAgentDeleteSkill(w http.ResponseWriter, r *http.Reques
 	ok(w, map[string]interface{}{"deleted": name})
 }
 
-// getSessionWorkingDir returns the working directory for a session (PTY or SDK).
+// getSessionWorkingDir returns the working directory for a session (PTY, SDK, or Codex).
 func (ctx *Context) getSessionWorkingDir(sessionID string) string {
 	if s, found := ctx.SessionManager.GetSession(sessionID); found {
 		return s.WorkingDir
 	}
 	if sdk, found := ctx.SessionManager.GetSDKSession(sessionID); found {
 		return sdk.WorkingDir
+	}
+	if cx, found := ctx.SessionManager.GetCodexSession(sessionID); found {
+		return cx.WorkingDir
 	}
 	return ""
 }

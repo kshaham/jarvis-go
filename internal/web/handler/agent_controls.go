@@ -97,6 +97,10 @@ func (ctx *Context) stopAgentSessionByID(sessionID string) {
 		_ = sm.StopSDKSession(sessionID)
 		return
 	}
+	if _, ok := sm.GetCodexSession(sessionID); ok {
+		_ = sm.StopCodexSession(sessionID)
+		return
+	}
 	if _, ok := sm.GetSession(sessionID); ok {
 		_ = sm.StopSession(context.Background(), sessionID)
 	}
@@ -117,6 +121,9 @@ func (ctx *Context) writeSessionPrompt(sessionID, prompt string) bool {
 	}
 	if sdk, found := sm.GetSDKSession(sessionID); found {
 		return sdk.WriteInkPrompt(prompt)
+	}
+	if cx, found := sm.GetCodexSession(sessionID); found {
+		return cx.WriteInkPrompt(prompt)
 	}
 	return false
 }
