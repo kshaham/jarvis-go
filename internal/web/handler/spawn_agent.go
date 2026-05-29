@@ -6,8 +6,11 @@ package handler
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"github.com/google/uuid"
+	"github.com/kshaham/jarvis/internal/codexcfg"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/pty"
 	"github.com/kshaham/jarvis/internal/teamtemplates"
@@ -29,7 +32,15 @@ type spawnAgentSpec struct {
 // R23 · The optional `ov` carries per-member MaxTurns from the spawn
 // modal. R24 removed the MaxCostUSD counterpart. When nil, defaults
 // apply (defaultMaxTurnsPerSession).
-func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool, ov *memberOverride, spec spawnAgentSpec) (string, string) {
+func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool, ov *memberOverride, provider, model string, spec spawnAgentSpec) (string, string) {
+	// Codex harness short-circuit. When the resolved provider is an OpenAI
+	// provider (openai-codex / openai-custom) the whole agent runs on the
+	// Codex CLI instead of Claude Code — a different backend (ModeCodexExec),
+	// config (CODEX_HOME/config.toml), and kickstart. None of the Claude SDK /
+	// PTY / hooks branches below apply, so route here first.
+	if office.HarnessFor(provider) == "codex" {
+		return ctx.spawnCodexAgentSession(member, req, envVars, teamConfigs, perpetual, ov, provider, model)
+	}
 	// Per-team Dynamic Workflows kill switch. Workflows are ON by default
 	// (Claude Code paid-plan default); when the operator opts out we inject
 	// CLAUDE_CODE_DISABLE_WORKFLOWS=1, honored on every surface (SDK,
@@ -67,97 +78,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		if ctx.AgentTokenMgr != nil {
 			agentToken = ctx.AgentTokenMgr.Token()
 		}
-		mcpJarvisEnv := map[string]string{
-			"JARVIS_API_URL":    "http://localhost:3555",
-			"JARVIS_SESSION_ID": sessionID,
-		}
-		if agentToken != "" {
-			mcpJarvisEnv["JARVIS_AGENT_TOKEN"] = agentToken
-		}
-		mcpServers := map[string]any{
-			"jarvis": map[string]any{
-				"type":    "stdio",
-				"command": "jarvis-mcp",
-				"env":     mcpJarvisEnv,
-			},
-			"codegraphcontext": map[string]any{
-				"type":    "stdio",
-				"command": "cgc",
-				"args":    []string{"mcp", "start"},
-			},
-		}
-		// P6.3 · codegraph MCP. Gated on (a) the binary being on PATH
-		// and (b) the operator not opting out via DisableCodegraph.
-		// The actual .codegraph/ index is initialised once per
-		// workingDir by spawnTeamFromRequest before this loop runs
-		// (background goroutine; doesn't block spawn).
-		if !codegraphOptOut(req) && office.CodegraphBinaryAvailable() {
-			mcpServers["codegraph"] = map[string]any{
-				"type":    "stdio",
-				"command": "codegraph",
-				"args":    []string{"serve", "--mcp", "--path", req.WorkingDir},
-			}
-		}
-		// P10.4 · ECC MCPs (Context7 + Sequential Thinking). Both run
-		// via `npx -y <package>@<version>` so we additionally gate on
-		// NpxAvailable() — a missing Node toolchain silently drops the
-		// entries instead of poisoning the spawn with a dead MCP that
-		// would fail mid-handshake. Disable via spawn request's
-		// disableEcc field (same posture as disableCodegraph).
-		//
-		// P11.1.1 · Versions are pinned to prevent supply-chain
-		// auto-upgrade if either package is compromised on the npm
-		// registry. Refresh workflow: run
-		//   npm view @upstash/context7-mcp version
-		//   npm view @modelcontextprotocol/server-sequential-thinking version
-		//   npm view @jpisnice/shadcn-ui-mcp-server version
-		// to find the current latest, update all pins below, regenerate
-		// skills/ecc/CHECKSUMS.sha256, and document the bump in
-		// docs/ECC.md. Last refreshed: 2026-05-24.
-		const (
-			context7Version           = "3.0.0"
-			sequentialThinkingVersion = "2025.12.18"
-			shadcnUIVersion           = "2.0.0" // P13.1
-		)
-		if !eccOptOut(req) && office.NpxAvailable() {
-			mcpServers["context7"] = map[string]any{
-				"type":    "stdio",
-				"command": "npx",
-				"args":    []string{"-y", "@upstash/context7-mcp@" + context7Version},
-			}
-			mcpServers["sequential-thinking"] = map[string]any{
-				"type":    "stdio",
-				"command": "npx",
-				"args":    []string{"-y", "@modelcontextprotocol/server-sequential-thinking@" + sequentialThinkingVersion},
-			}
-			// P13.1 · shadcn-ui MCP. Metadata-only — gives the agent
-			// list/search/view tools against the shadcn registries plus
-			// install commands + accessibility audit checklists. Useful
-			// any time an agent is touching UI work (web dashboard
-			// redesign, future React island, mobile RN inspiration).
-			mcpServers["shadcn"] = map[string]any{
-				"type":    "stdio",
-				"command": "npx",
-				"args":    []string{"-y", "@jpisnice/shadcn-ui-mcp-server@" + shadcnUIVersion},
-			}
-		}
-		// Knowledge library MCP (PageIndex). Gives every agent
-		// mcp__pageindex__get_document_structure +
-		// mcp__pageindex__get_page_content tools pointed at the
-		// per-jarvis markdown library that captures past experiences,
-		// workflows, standups, and wrap-up reports. Agents can
-		// navigate prior runs via LLM-driven tree search instead of
-		// reinventing approaches every time.
-		//
-		// Gated on PageIndexAvailable() (which itself gates on
-		// NpxAvailable + a one-shot @pageindex/mcp warm-cache probe).
-		// Library dir comes from office.LibraryDir() which sets up
-		// ~/.jarvis/office-memory/library/ on first call.
-		if office.PageIndexAvailable() {
-			if cfg := office.PageIndexMcpConfig(office.LibraryDir()); cfg != nil {
-				mcpServers["pageindex"] = cfg
-			}
-		}
+		mcpServers := ctx.buildOfficeMCPServers(req, sessionID, agentToken)
 		// Also inject Jarvis env into subprocess so `cm` bash commands work.
 		agentEnv := make(map[string]string, len(envVars)+3)
 		for k, v := range envVars {
@@ -337,4 +258,266 @@ func spawnAgentSessionWithHooks(ctx *Context, member teamtemplates.TeamTemplateM
 	go forwardSessionEvents(session, ctx)
 	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
 	return session.ID, "hooks"
+}
+
+// buildOfficeMCPServers builds the per-agent MCP server map shared by the
+// Claude SDK and Codex spawn paths so both backends expose the SAME tool
+// surface (jarvis-mcp, codegraph, context7, sequential-thinking, shadcn,
+// pageindex). Returns the Claude-shaped `map[string]any`
+// ({type,command,args,env}); the Codex path translates it via
+// codexMCPFromMap. sessionID + agentToken are threaded into the jarvis-mcp
+// env so `cm` / jarvis-mcp authenticate as this agent.
+func (ctx *Context) buildOfficeMCPServers(req spawnTeamRequest, sessionID, agentToken string) map[string]any {
+	mcpJarvisEnv := map[string]string{
+		"JARVIS_API_URL":    "http://localhost:3555",
+		"JARVIS_SESSION_ID": sessionID,
+	}
+	if agentToken != "" {
+		mcpJarvisEnv["JARVIS_AGENT_TOKEN"] = agentToken
+	}
+	mcpServers := map[string]any{
+		"jarvis": map[string]any{
+			"type":    "stdio",
+			"command": "jarvis-mcp",
+			"env":     mcpJarvisEnv,
+		},
+		"codegraphcontext": map[string]any{
+			"type":    "stdio",
+			"command": "cgc",
+			"args":    []string{"mcp", "start"},
+		},
+	}
+	// P6.3 · codegraph MCP. Gated on (a) the binary being on PATH
+	// and (b) the operator not opting out via DisableCodegraph.
+	// The actual .codegraph/ index is initialised once per
+	// workingDir by spawnTeamFromRequest before this loop runs
+	// (background goroutine; doesn't block spawn).
+	if !codegraphOptOut(req) && office.CodegraphBinaryAvailable() {
+		mcpServers["codegraph"] = map[string]any{
+			"type":    "stdio",
+			"command": "codegraph",
+			"args":    []string{"serve", "--mcp", "--path", req.WorkingDir},
+		}
+	}
+	// P10.4 · ECC MCPs (Context7 + Sequential Thinking). Both run
+	// via `npx -y <package>@<version>` so we additionally gate on
+	// NpxAvailable() — a missing Node toolchain silently drops the
+	// entries instead of poisoning the spawn with a dead MCP that
+	// would fail mid-handshake. Disable via spawn request's
+	// disableEcc field (same posture as disableCodegraph).
+	//
+	// P11.1.1 · Versions are pinned to prevent supply-chain
+	// auto-upgrade if either package is compromised on the npm
+	// registry. Refresh workflow: run
+	//   npm view @upstash/context7-mcp version
+	//   npm view @modelcontextprotocol/server-sequential-thinking version
+	//   npm view @jpisnice/shadcn-ui-mcp-server version
+	// to find the current latest, update all pins below, regenerate
+	// skills/ecc/CHECKSUMS.sha256, and document the bump in
+	// docs/ECC.md. Last refreshed: 2026-05-24.
+	const (
+		context7Version           = "3.0.0"
+		sequentialThinkingVersion = "2025.12.18"
+		shadcnUIVersion           = "2.0.0" // P13.1
+	)
+	if !eccOptOut(req) && office.NpxAvailable() {
+		mcpServers["context7"] = map[string]any{
+			"type":    "stdio",
+			"command": "npx",
+			"args":    []string{"-y", "@upstash/context7-mcp@" + context7Version},
+		}
+		mcpServers["sequential-thinking"] = map[string]any{
+			"type":    "stdio",
+			"command": "npx",
+			"args":    []string{"-y", "@modelcontextprotocol/server-sequential-thinking@" + sequentialThinkingVersion},
+		}
+		// P13.1 · shadcn-ui MCP. Metadata-only — gives the agent
+		// list/search/view tools against the shadcn registries plus
+		// install commands + accessibility audit checklists. Useful
+		// any time an agent is touching UI work (web dashboard
+		// redesign, future React island, mobile RN inspiration).
+		mcpServers["shadcn"] = map[string]any{
+			"type":    "stdio",
+			"command": "npx",
+			"args":    []string{"-y", "@jpisnice/shadcn-ui-mcp-server@" + shadcnUIVersion},
+		}
+	}
+	// Knowledge library MCP (PageIndex). Gives every agent
+	// mcp__pageindex__get_document_structure +
+	// mcp__pageindex__get_page_content tools pointed at the
+	// per-jarvis markdown library that captures past experiences,
+	// workflows, standups, and wrap-up reports. Agents can
+	// navigate prior runs via LLM-driven tree search instead of
+	// reinventing approaches every time.
+	//
+	// Gated on PageIndexAvailable() (which itself gates on
+	// NpxAvailable + a one-shot @pageindex/mcp warm-cache probe).
+	// Library dir comes from office.LibraryDir() which sets up
+	// ~/.jarvis/office-memory/library/ on first call.
+	if office.PageIndexAvailable() {
+		if cfg := office.PageIndexMcpConfig(office.LibraryDir()); cfg != nil {
+			mcpServers["pageindex"] = cfg
+		}
+	}
+	return mcpServers
+}
+
+// codexMCPFromMap translates the Claude-shaped MCP map (built by
+// buildOfficeMCPServers) into the codexcfg.MCPServer shape used to render
+// [mcp_servers.<name>] TOML blocks. Only stdio entries with a command are
+// carried over (Codex stdio servers); unknown shapes are skipped.
+func codexMCPFromMap(in map[string]any) map[string]codexcfg.MCPServer {
+	out := make(map[string]codexcfg.MCPServer, len(in))
+	for name, raw := range in {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		command, _ := entry["command"].(string)
+		if command == "" {
+			continue
+		}
+		srv := codexcfg.MCPServer{Command: command}
+		if args, ok := entry["args"].([]string); ok {
+			srv.Args = args
+		}
+		if env, ok := entry["env"].(map[string]string); ok {
+			srv.Env = env
+		}
+		out[name] = srv
+	}
+	return out
+}
+
+// spawnCodexAgentSession is the Codex-harness spawn path (ModeCodexExec). It
+// writes a per-agent CODEX_HOME/config.toml (provider + model + sandbox + MCP),
+// builds the Codex-flavored system prompt, starts a CodexSession, and wires its
+// events to SSE. Returns (sessionID, "codex") or ("", "") on failure.
+func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, ov *memberOverride, provider, model string) (string, string) {
+	sessionID := uuid.New().String()
+	agentToken := ""
+	if ctx.AgentTokenMgr != nil {
+		agentToken = ctx.AgentTokenMgr.Token()
+	}
+
+	// Codex-flavored system prompt: stable prefix (no /goal, /compact, Dynamic
+	// Workflows) + the provider-agnostic per-agent kickstart, folded into one
+	// string (Codex has no separate append-system-prompt channel).
+	agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
+	kickstart := office.BuildKickstartPrompt(
+		&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
+		req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
+	)
+	stablePrefix := office.BuildStableSystemPromptCodex(member.Tier, req.Mission)
+	systemPrompt := stablePrefix + "\n\n" + kickstart
+
+	// Resolve model (caller passes the resolved per-member model; default to
+	// the flagship if somehow empty) and reasoning effort.
+	if model == "" {
+		model = "gpt-5.5"
+	}
+	tuning := resolveSessionTuning(req, member.Tier, ov)
+
+	// Provider block. The Phase-0 spike proved that even api.openai.com needs
+	// a custom [model_providers] block with env_key + requires_openai_auth=false
+	// to Bearer-auth in headless `codex exec`. So whenever we have an API key
+	// (operator setting or the shared deployment key), emit the custom block.
+	// Only openai-codex with NO key falls back to the built-in `openai`
+	// provider (ChatGPT-subscription auth via `codex login`).
+	settings := ctx.StateStore.GetSettings()
+	hasKey := envVars["OPENAI_API_KEY"] != ""
+	var prov *codexcfg.Provider
+	switch provider {
+	case "openai-custom":
+		baseURL, _ := settings["openaiBaseUrl"].(string)
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		prov = &codexcfg.Provider{
+			ID:                 "jarvis-openai",
+			Name:               "Jarvis OpenAI",
+			BaseURL:            baseURL,
+			EnvKey:             "OPENAI_API_KEY",
+			WireAPI:            "responses",
+			RequiresOpenAIAuth: false,
+		}
+	default: // openai-codex
+		if hasKey {
+			prov = &codexcfg.Provider{
+				ID:                 "jarvis-openai",
+				Name:               "OpenAI",
+				BaseURL:            "https://api.openai.com/v1",
+				EnvKey:             "OPENAI_API_KEY",
+				WireAPI:            "responses",
+				RequiresOpenAIAuth: false,
+			}
+		}
+		// else: nil provider -> built-in openai (codex login / auth.json)
+	}
+
+	// Per-agent CODEX_HOME under ~/.jarvis/codex/<sessionID>/ (isolates the
+	// config.toml + rollout logs from other agents and the operator's own
+	// ~/.codex). Written before the session starts.
+	home, herr := os.UserHomeDir()
+	if herr != nil || home == "" {
+		home = req.WorkingDir
+	}
+	codexHome := filepath.Join(home, ".jarvis", "codex", sessionID)
+
+	cfg := codexcfg.Config{
+		Model:           model,
+		ReasoningEffort: codexcfg.MapReasoningEffort(tuning.Effort),
+		SandboxMode:     "danger-full-access",
+		ApprovalPolicy:  "never",
+		Provider:        prov,
+		MCPServers:      codexMCPFromMap(ctx.buildOfficeMCPServers(req, sessionID, agentToken)),
+	}
+	if _, werr := codexcfg.Write(codexHome, cfg); werr != nil {
+		slog.Error("Failed to write Codex config.toml", "name", member.Name, "error", werr)
+		return "", ""
+	}
+
+	// Subprocess env: provider env (OPENAI_API_KEY/CODEX_API_KEY) + jarvis vars
+	// so `cm` works + CODEX_HOME (also set by the driver, belt-and-suspenders).
+	agentEnv := make(map[string]string, len(envVars)+4)
+	for k, v := range envVars {
+		agentEnv[k] = v
+	}
+	agentEnv["JARVIS_API_URL"] = "http://localhost:3555"
+	agentEnv["JARVIS_SESSION_ID"] = sessionID
+	if agentToken != "" {
+		agentEnv["JARVIS_AGENT_TOKEN"] = agentToken
+	}
+	agentEnv["CODEX_HOME"] = codexHome
+
+	maxTurns := defaultMaxTurnsPerSession
+	if ov != nil && ov.MaxTurns > 0 {
+		maxTurns = ov.MaxTurns
+	}
+
+	codexSession, err := ctx.SessionManager.CreateCodexSession(
+		context.Background(),
+		pty.SessionConfig{
+			ID:                 sessionID,
+			WorkingDir:         req.WorkingDir,
+			Mode:               pty.ModeCodexExec,
+			Name:               member.Name,
+			ProviderEnv:        agentEnv,
+			SystemPrompt:       systemPrompt,
+			Model:              model,
+			Effort:             tuning.Effort,
+			MaxTurnsPerSession: maxTurns,
+			CodexHome:          codexHome,
+		},
+	)
+	if err != nil {
+		slog.Error("Failed to create Codex session", "name", member.Name, "error", err)
+		return "", ""
+	}
+	go forwardCodexSessionEvents(codexSession, ctx)
+	ctx.SSEBroker.Broadcast("session:created", map[string]interface{}{
+		"id": codexSession.ID, "name": member.Name, "workingDir": req.WorkingDir,
+		"mode": "codex-exec", "status": "idle", "createdAt": codexSession.CreatedAt.UnixMilli(),
+	})
+	return codexSession.ID, "codex"
 }

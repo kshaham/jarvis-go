@@ -681,13 +681,31 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		}
 		spawnReq.WorkingDir = resolvedDir
 
+		// Resolve the per-member provider + model BEFORE spawning so the
+		// spawn path can branch on the harness (Claude vs Codex). Same
+		// precedence rules reused below for RegisterAgentWithProvider.
+		zaiSonnet := ""
+		if isZAI && sonnetAlloc != nil {
+			zaiSonnet = sonnetAlloc[member.ID]
+		}
+		resolvedProvider, resolvedModel := office.ResolveMemberProviderModel(
+			member, memberOv, provider, zaiSonnet,
+		)
+		// If this member resolves to the Codex harness but the env block
+		// picked above doesn't carry an OpenAI key (e.g. a template pinned
+		// openai-* on an otherwise-Claude team), rebuild it for the resolved
+		// provider so OPENAI_API_KEY / CODEX_API_KEY are present.
+		if office.HarnessFor(resolvedProvider) == "codex" && envVars["OPENAI_API_KEY"] == "" {
+			envVars = ctx.getProviderEnvVarsFor(resolvedProvider, resolvedModel, "")
+		}
+
 		spec := spawnAgentSpec{}
 		if hooksMode {
 			spec.HooksEnabled = true
 			spec.PreassignedSessionID = preassignedIDs[member.ID]
 			spec.PerAgentCwd = hooksAgentCwd[member.ID]
 		}
-		sessionID, usedMode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, useSDK, memberOv, spec)
+		sessionID, usedMode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, useSDK, memberOv, resolvedProvider, resolvedModel, spec)
 		if sessionID == "" {
 			errors = append(errors, fmt.Sprintf("Failed to create session for %s", member.Name))
 			continue
@@ -701,20 +719,6 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		}
 		office.SpawnDelaySleep(member.Name, spawnDelayMs, i == len(members)-1)
 
-		// Resolve the per-member provider + model using the same
-		// precedence rules as the rest of the spawn flow.
-		var ovPtr *memberOverride
-		if ov, has := memberOverrideMap[member.ID]; has {
-			ov := ov
-			ovPtr = &ov
-		}
-		zaiSonnet := ""
-		if isZAI && sonnetAlloc != nil {
-			zaiSonnet = sonnetAlloc[member.ID]
-		}
-		resolvedProvider, resolvedModel := office.ResolveMemberProviderModel(
-			member, ovPtr, provider, zaiSonnet,
-		)
 		// One Manager call replaces the prior RegisterAgent + GetAgent
 		// + SetProvider + SetSessionMode quartet. Internal "pty" →
 		// "legacy" normalisation also moved inside.

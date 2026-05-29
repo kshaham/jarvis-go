@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/state"
 	"github.com/kshaham/jarvis/internal/web"
 )
 
@@ -150,6 +151,10 @@ func runWeb() {
 
 	// Initialize core layers
 	sessionManager := pty.NewSessionManager(pty.MaxConcurrentSessions)
+	// Wire Codex turn-cost computation to the shared pricing table (kept as a
+	// package var on pty to avoid a pty -> state import dependency). Without
+	// this, Codex EventTokens.Cost would always be 0.
+	pty.CodexCostFunc = state.ComputeCost
 	server := web.NewServer(ctx, port, https, sessionManager)
 
 	// Start server in background

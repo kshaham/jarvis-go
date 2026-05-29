@@ -278,12 +278,37 @@ func ResolveMemberProviderModel(
 		switch provider {
 		case "claude-subscription", "", "claude-api":
 			model = "claude-opus-4-8"
+		case "openai-codex", "openai-custom":
+			// Strategic Codex agents default to the flagship gpt-5.5;
+			// workers fall through to gpt-5.4-mini below.
+			model = "gpt-5.5"
+		}
+	}
+	// Codex workers (no template/override/strategic default) get the cheaper
+	// gpt-5.4-mini so a team doesn't run every member on the flagship.
+	if model == "" {
+		switch provider {
+		case "openai-codex", "openai-custom":
+			model = "gpt-5.4-mini"
 		}
 	}
 	if model == "" && zaiSonnet != "" {
 		model = zaiSonnet
 	}
 	return provider, model
+}
+
+// HarnessFor maps a provider id to the agent backend ("harness") that runs
+// it. Claude providers (and zai-glm, which speaks the Anthropic wire
+// protocol) run on the Claude Code harness; the OpenAI providers run on the
+// Codex CLI harness. Callers branch the spawn path on this.
+func HarnessFor(provider string) string {
+	switch provider {
+	case "openai-codex", "openai-custom":
+		return "codex"
+	default:
+		return "claude"
+	}
 }
 
 // ProviderEnvBuilder is the callback shape BuildPerMemberEnvOverrides

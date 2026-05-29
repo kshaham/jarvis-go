@@ -281,6 +281,9 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	if sm != nil {
 		if sdk, ok := sm.GetSDKSession(req.SessionID); ok {
 			sdkWorkingDir = sdk.WorkingDir
+		} else if cx, ok := sm.GetCodexSession(req.SessionID); ok {
+			// Codex-harness agent: same restart flow, different backend.
+			sdkWorkingDir = cx.WorkingDir
 		}
 	}
 	workingDir := office.ResolveRestartWorkingDir(agent, sdkWorkingDir)
@@ -296,6 +299,9 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	// in-flight EventExit runs against the old ID cleanly.
 	if sm != nil {
 		_ = sm.StopSDKSession(req.SessionID)
+		// Also stop a Codex-backed session if that's what this agent ran on
+		// (one of the two is a no-op "not found" — harmless).
+		_ = sm.StopCodexSession(req.SessionID)
 	}
 
 	spawnReq := spawnTeamRequest{
@@ -313,7 +319,11 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	// session would see a stale URL pointed at the old sessionID.
 	// Operators wanting to flip an agent into hooks mode mid-team
 	// should kill the team and respawn.
-	newSessionID, mode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, true, nil, spawnAgentSpec{})
+	// Preserve the agent's original harness on restart: pass its recorded
+	// provider/model so a Codex agent respawns on Codex (and a Claude agent
+	// on Claude). If the resolved provider is a Codex one, getProviderEnvVars
+	// above already emitted OPENAI_API_KEY for it.
+	newSessionID, mode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, true, nil, agent.Provider, agent.Model, spawnAgentSpec{})
 	if newSessionID == "" {
 		request.WriteError(w, http.StatusInternalServerError, "failed to create replacement session")
 		return

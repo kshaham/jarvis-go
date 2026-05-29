@@ -441,6 +441,69 @@ func TestResolveMemberProviderModel_ZAISonnetDoesNotOverrideExplicitModel(t *tes
 	}
 }
 
+func TestResolveMemberProviderModel_StrategicOpenAIDefaultsToFlagship(t *testing.T) {
+	// Strategic-tier lead on an OpenAI provider with no pinned model →
+	// defaults to the flagship gpt-5.5 (Codex harness).
+	for _, prov := range []string{"openai-codex", "openai-custom"} {
+		_, model := ResolveMemberProviderModel(
+			teamtemplates.TeamTemplateMember{ID: "lead", Tier: "strategic"},
+			nil,
+			prov,
+			"",
+		)
+		if model != "gpt-5.5" {
+			t.Errorf("provider=%q strategic model=%q want gpt-5.5", prov, model)
+		}
+	}
+}
+
+func TestResolveMemberProviderModel_WorkerOpenAIDefaultsToMini(t *testing.T) {
+	// Worker-tier OpenAI member with no pinned model → cheaper gpt-5.4-mini
+	// so a Codex team doesn't run every member on the flagship.
+	for _, prov := range []string{"openai-codex", "openai-custom"} {
+		_, model := ResolveMemberProviderModel(
+			teamtemplates.TeamTemplateMember{ID: "w1", Tier: "worker"},
+			nil,
+			prov,
+			"",
+		)
+		if model != "gpt-5.4-mini" {
+			t.Errorf("provider=%q worker model=%q want gpt-5.4-mini", prov, model)
+		}
+	}
+}
+
+func TestResolveMemberProviderModel_ExplicitOpenAIModelWins(t *testing.T) {
+	// An explicit pin beats both the strategic-flagship and worker-mini
+	// defaults for OpenAI providers.
+	_, model := ResolveMemberProviderModel(
+		teamtemplates.TeamTemplateMember{ID: "lead", Tier: "strategic", Model: "gpt-5.3-codex"},
+		nil,
+		"openai-codex",
+		"",
+	)
+	if model != "gpt-5.3-codex" {
+		t.Errorf("model=%q want gpt-5.3-codex (explicit pin beats default)", model)
+	}
+}
+
+func TestHarnessFor(t *testing.T) {
+	cases := map[string]string{
+		"openai-codex":        "codex",
+		"openai-custom":       "codex",
+		"claude-subscription": "claude",
+		"claude-api":          "claude",
+		"zai-glm":             "claude",
+		"":                    "claude",
+		"something-unknown":   "claude",
+	}
+	for provider, want := range cases {
+		if got := HarnessFor(provider); got != want {
+			t.Errorf("HarnessFor(%q)=%q want %q", provider, got, want)
+		}
+	}
+}
+
 // recordingEnvBuilder is a ProviderEnvBuilder stub that records each
 // (provider, model, sonnet) triple it sees. Used to verify the loop
 // passes per-member values through correctly.

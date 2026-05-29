@@ -203,6 +203,21 @@ func (ctx *Context) getProviderEnvVars() map[string]string {
 		if key, ok := settings["claudeApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_API_KEY"] = key
 		}
+	case "openai-codex", "openai-custom":
+		// Codex backend. Key precedence: operator setting > shared
+		// deployment key (server .env OPENAI_API_KEY). The per-agent
+		// config.toml references env_key="OPENAI_API_KEY" (sent as Bearer).
+		// Codex sessions must NOT receive ANTHROPIC_* model vars, so drop
+		// the Opus pin set above.
+		key, _ := settings["openaiApiKey"].(string)
+		if key == "" {
+			key = os.Getenv("OPENAI_API_KEY")
+		}
+		if key != "" {
+			env["OPENAI_API_KEY"] = key
+			env["CODEX_API_KEY"] = key
+		}
+		delete(env, "ANTHROPIC_DEFAULT_OPUS_MODEL")
 	case "zai-glm":
 		if key, ok := settings["zaiApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_AUTH_TOKEN"] = key
@@ -261,6 +276,21 @@ func (ctx *Context) getProviderEnvVarsFor(provider, model, sonnetOverride string
 		if key, ok := settings["claudeApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_API_KEY"] = key
 		}
+	case "openai-codex", "openai-custom":
+		// Codex backend. Key precedence: operator setting > shared
+		// deployment key (server .env OPENAI_API_KEY). The per-agent
+		// config.toml references env_key="OPENAI_API_KEY" (sent as Bearer).
+		// Codex sessions must NOT receive ANTHROPIC_* model vars, so drop
+		// the Opus pin set above.
+		key, _ := settings["openaiApiKey"].(string)
+		if key == "" {
+			key = os.Getenv("OPENAI_API_KEY")
+		}
+		if key != "" {
+			env["OPENAI_API_KEY"] = key
+			env["CODEX_API_KEY"] = key
+		}
+		delete(env, "ANTHROPIC_DEFAULT_OPUS_MODEL")
 	case "zai-glm":
 		if key, ok := settings["zaiApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_AUTH_TOKEN"] = key

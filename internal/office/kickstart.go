@@ -163,9 +163,33 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 // Tier-aware: strategic agents get the dev-lead topic listed in the
 // router; workers don't.
 func BuildStableSystemPrompt(tier, teamMission string) string {
+	return buildStableSystemPrompt(tier, teamMission, "claude")
+}
+
+// BuildStableSystemPromptCodex is the Codex-harness variant of the stable
+// system prefix. It drops Claude Code-only primitives -- the `/goal`
+// evaluator, `/compact`, and Dynamic Workflows JS fan-out -- which have no
+// equivalent under `codex exec`, while keeping every provider-agnostic rule
+// (`cm` task lifecycle, memory, knowledge search, messaging). Unlike the
+// Claude path, this prefix is folded directly into the Codex system prompt
+// (no Anthropic ephemeral-cache reuse to optimize for).
+func BuildStableSystemPromptCodex(tier, teamMission string) string {
+	return buildStableSystemPrompt(tier, teamMission, "codex")
+}
+
+// buildStableSystemPrompt is the harness-parameterized implementation behind
+// BuildStableSystemPrompt (harness="claude") and BuildStableSystemPromptCodex
+// (harness="codex").
+func buildStableSystemPrompt(tier, teamMission, harness string) string {
+	isCodex := harness == "codex"
 	var b strings.Builder
 	b.WriteString("# Jarvis Team Operating Context\n\n")
-	b.WriteString("You are part of an autonomous multi-agent team coordinated by Jarvis. The sections below are shared across every teammate and every turn -- they do not change mid-session. Anthropic's prompt cache discounts this prefix on subsequent turns, so its size is not a per-turn concern.\n\n")
+	b.WriteString("You are part of an autonomous multi-agent team coordinated by Jarvis. The sections below are shared across every teammate and every turn -- they do not change mid-session.")
+	if isCodex {
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString(" Anthropic's prompt cache discounts this prefix on subsequent turns, so its size is not a per-turn concern.\n\n")
+	}
 
 	if teamMission != "" {
 		b.WriteString("## Team Mission\n")
@@ -184,14 +208,24 @@ func BuildStableSystemPrompt(tier, teamMission string) string {
 	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
 	b.WriteString("- Before duplicating work: `cm knowledge search <keywords>` -- searches every teammate's memory + learnings + standups + whiteboard.\n")
 	b.WriteString("- Before any browser verification: `cm dev url` (and `cm dev creds` if login-gated). Don't spin up competing dev servers.\n")
-	b.WriteString("- Keep memory fresh: `cm memory section <name> \"<content>\"` / `cm memory append \"<entry>\"`. At ~70% context run `/compact` after saving state to memory.\n")
-	// R37 · Self-sustaining task primitives. Lives in the cached prefix
-	// so every agent sees the two escape hatches without paying for the
-	// full skill bodies on every turn.
-	b.WriteString("- For multi-step tasks, wrap your work in `/goal <criteria>` so Claude Code's evaluator decides when you're done. If you get stuck, ask the team: `cm ask \"<question>\" --about <taskId> --wait 5m` (lead-first, fallback teammate, blocks until answered or timeout). Read `cm skill read office-goal-loop` and `cm skill read office-ask-for-help` once.\n\n")
+	if isCodex {
+		// Codex has no /compact or /goal evaluator. Keep memory + ask-for-help
+		// (both `cm`-driven, provider-agnostic); substitute a running-plan
+		// note for the /goal loop.
+		b.WriteString("- Keep memory fresh: `cm memory section <name> \"<content>\"` / `cm memory append \"<entry>\"`. Save state to memory before your context runs low.\n")
+		b.WriteString("- For multi-step tasks, maintain and update a running plan as you progress. If you get stuck, ask the team: `cm ask \"<question>\" --about <taskId> --wait 5m` (lead-first, fallback teammate, blocks until answered or timeout). Read `cm skill read office-ask-for-help` once.\n\n")
+	} else {
+		b.WriteString("- Keep memory fresh: `cm memory section <name> \"<content>\"` / `cm memory append \"<entry>\"`. At ~70% context run `/compact` after saving state to memory.\n")
+		// R37 · Self-sustaining task primitives. Lives in the cached prefix
+		// so every agent sees the two escape hatches without paying for the
+		// full skill bodies on every turn.
+		b.WriteString("- For multi-step tasks, wrap your work in `/goal <criteria>` so Claude Code's evaluator decides when you're done. If you get stuck, ask the team: `cm ask \"<question>\" --about <taskId> --wait 5m` (lead-first, fallback teammate, blocks until answered or timeout). Read `cm skill read office-goal-loop` and `cm skill read office-ask-for-help` once.\n\n")
+	}
 
-	b.WriteString("## Dynamic Workflows (large fan-out work)\n")
-	b.WriteString("For big, parallelizable tasks -- codebase-wide audits, migrations, sweeping refactors, multi-source research -- you can run a **dynamic workflow**: describe the task and include the word \"workflow\", and Claude Code writes a JS orchestration script that fans out subagents (up to ~16 concurrent, 1,000 total per run) in a background runtime, returning only the final result to your context. Reach for it when a task is genuinely large and decomposable; it costs substantially more tokens than a normal turn, so prefer ordinary work for small tasks and respect your cost cap.\n\n")
+	if !isCodex {
+		b.WriteString("## Dynamic Workflows (large fan-out work)\n")
+		b.WriteString("For big, parallelizable tasks -- codebase-wide audits, migrations, sweeping refactors, multi-source research -- you can run a **dynamic workflow**: describe the task and include the word \"workflow\", and Claude Code writes a JS orchestration script that fans out subagents (up to ~16 concurrent, 1,000 total per run) in a background runtime, returning only the final result to your context. Reach for it when a task is genuinely large and decomposable; it costs substantially more tokens than a normal turn, so prefer ordinary work for small tasks and respect your cost cap.\n\n")
+	}
 
 	b.WriteString("## Team Messaging\n")
 	b.WriteString("Team messages arrive as `[Team Message from <name>]: <content>`. Reply with `cm message <sessionId> \"...\"`. `cm roster` lists sessionIds.\n")

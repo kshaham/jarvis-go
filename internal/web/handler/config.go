@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -121,6 +122,9 @@ func MaskSensitiveSettings(raw map[string]interface{}) map[string]interface{} {
 	if _, ok := out["zaiApiKey"]; ok {
 		out["zaiApiKey"] = maskSecret(out["zaiApiKey"])
 	}
+	if _, ok := out["openaiApiKey"]; ok {
+		out["openaiApiKey"] = maskSecret(out["openaiApiKey"])
+	}
 	if tg, ok := out["telegram"].(map[string]interface{}); ok {
 		tgCopy := make(map[string]interface{}, len(tg))
 		for k, v := range tg {
@@ -183,7 +187,19 @@ func (ctx *Context) GetSettingsAccounts(w http.ResponseWriter, r *http.Request) 
 		"provider":          settings["provider"],
 		"claudeApiKey":      maskSecret(settings["claudeApiKey"]),
 		"zaiApiKey":         maskSecret(settings["zaiApiKey"]),
-		"zaiModel":          settings["zaiModel"],
+		"openaiApiKey":      maskSecret(settings["openaiApiKey"]),
+		"openaiBaseUrl":     settings["openaiBaseUrl"],
+		// openaiKeyConfigured tells the spawn UI to show OpenAI/Codex as
+		// "configured" (prefilled) without leaking the key value. True when an
+		// operator set openaiApiKey OR the deployment provides a shared
+		// OPENAI_API_KEY (server .env). Subscription mode (codex login) is separate.
+		"openaiKeyConfigured": func() bool {
+			if s, _ := settings["openaiApiKey"].(string); s != "" {
+				return true
+			}
+			return os.Getenv("OPENAI_API_KEY") != ""
+		}(),
+		"zaiModel": settings["zaiModel"],
 		"zaiSonnetModel":    settings["zaiSonnetModel"],
 		"zaiHaikuModel":     settings["zaiHaikuModel"],
 		"zaiBaseUrl":        settings["zaiBaseUrl"],
@@ -218,6 +234,7 @@ func (ctx *Context) CreateSettingsAccount(w http.ResponseWriter, r *http.Request
 	secretFields := map[string]bool{
 		"claudeApiKey": true,
 		"zaiApiKey":    true,
+		"openaiApiKey": true,
 	}
 	updates := make(map[string]interface{})
 	for key, value := range body {

@@ -569,11 +569,24 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 // forwardSDKSessionEvents reads events from an SDK session and broadcasts them via SSE.
 // Simpler than the PTY version -- no ANSI parsing, no terminal batching.
 func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
-	sessionID := session.ID
-	broker := ctx.SSEBroker
-	slog.Info("Starting SDK event forwarding for session", "sessionId", sessionID)
+	forwardAgentEvents(session.ID, session.Events(), session.DroppedEvents, ctx)
+}
 
-	for event := range session.Events() {
+// forwardCodexSessionEvents bridges a Codex (codex exec --json) session's
+// events to SSE. Codex emits the same pty.Event* set as the SDK backend, so
+// the body is shared via forwardAgentEvents.
+func forwardCodexSessionEvents(session *pty.CodexSession, ctx *Context) {
+	forwardAgentEvents(session.ID, session.Events(), session.DroppedEvents, ctx)
+}
+
+// forwardAgentEvents is the backend-agnostic SSE forwarder body shared by the
+// SDK and Codex sessions. dropped reports the session's dropped-event count
+// (a method value off the concrete session) so per-agent UI can surface it.
+func forwardAgentEvents(sessionID string, events <-chan pty.SessionEvent, dropped func() uint64, ctx *Context) {
+	broker := ctx.SSEBroker
+	slog.Info("Starting agent event forwarding for session", "sessionId", sessionID)
+
+	for event := range events {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -611,7 +624,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				})
 				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 					agent.SetSDKWorking(false)
-					agent.SetEventsDropped(session.DroppedEvents())
+					agent.SetEventsDropped(dropped())
 					// R35 · Flush the turn-text buffer and dispatch to
 					// any registered lead-reply callback (Telegram
 					// handler). No-op when the callback is nil or the
@@ -637,7 +650,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				})
 				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 					agent.SetSDKWorking(true)
-					agent.SetEventsDropped(session.DroppedEvents())
+					agent.SetEventsDropped(dropped())
 					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 						broker.Broadcast("office:memberUpdated", payload)
 					}
@@ -654,7 +667,7 @@ func forwardSDKSessionEvents(session *pty.SDKSession, ctx *Context) {
 				// Per-agent accumulation for office UI (cost bars, sparklines).
 				if agent := ctx.OfficeManager.GetAgent(sessionID); agent != nil {
 					agent.RecordTurnUsage(e.Input, e.Output, e.Cost)
-					agent.SetEventsDropped(session.DroppedEvents())
+					agent.SetEventsDropped(dropped())
 					if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
 						broker.Broadcast("office:memberUpdated", payload)
 					}
