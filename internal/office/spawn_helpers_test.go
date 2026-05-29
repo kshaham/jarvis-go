@@ -489,6 +489,24 @@ func TestResolveMemberProviderModel_SubscriptionNoForcedModel(t *testing.T) {
 	}
 }
 
+func TestResolveMemberProviderModel_SubscriptionOverrideOnZaiTeamNoGLM(t *testing.T) {
+	// Team default is zai-glm (so the allocator handed this member a GLM
+	// sonnet), but the member overrode to openai-subscription. The GLM model
+	// must NOT leak into the subscription member — it stays empty (plan default).
+	provider, model := ResolveMemberProviderModel(
+		teamtemplates.TeamTemplateMember{ID: "m", Tier: "worker"},
+		&spawnpayload.MemberOverride{Provider: "openai-subscription"},
+		"zai-glm",     // team-wide default
+		"glm-5.1",     // zaiSonnet from the allocator
+	)
+	if provider != "openai-subscription" {
+		t.Errorf("provider=%q want openai-subscription", provider)
+	}
+	if model != "" {
+		t.Errorf("subscription model=%q want empty (plan default); GLM must not leak in", model)
+	}
+}
+
 func TestResolveMemberProviderModel_ExplicitOpenAIModelWins(t *testing.T) {
 	// An explicit pin beats both the strategic-flagship and worker-mini
 	// defaults for OpenAI providers.

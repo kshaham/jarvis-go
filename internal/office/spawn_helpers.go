@@ -293,7 +293,13 @@ func ResolveMemberProviderModel(
 			model = "gpt-5.4"
 		}
 	}
-	if model == "" && zaiSonnet != "" {
+	// Z.AI rate-limit allocator fallback — applies ONLY to zai-glm members.
+	// When the TEAM default is zai-glm the allocator runs for every member, so
+	// a member that overrode to a different provider (e.g. openai-subscription,
+	// which intentionally has no forced default) must NOT inherit a GLM model
+	// here. Without the provider guard a subscription agent would be pinned to
+	// "glm-5.1" and fail against OpenAI.
+	if model == "" && zaiSonnet != "" && provider == "zai-glm" {
 		model = zaiSonnet
 	}
 	return provider, model
