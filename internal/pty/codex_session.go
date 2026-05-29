@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -224,6 +225,18 @@ func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
 	cmd.Dir = s.WorkingDir
 	cmd.Env = s.buildEnv()
 	cmd.Stdin = nil // /dev/null — codex exec hangs reading an open stdin
+	// Run the turn in its own process group and kill the WHOLE group on
+	// ctx-cancel. The `codex` binary is a Node launcher that spawns the
+	// platform binary as a child; the default CommandContext kill only reaps
+	// the launcher and orphans that child, which keeps running (and spending)
+	// after Stop()/shutdown-team. Setpgid + kill(-pgid) reaps both.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
