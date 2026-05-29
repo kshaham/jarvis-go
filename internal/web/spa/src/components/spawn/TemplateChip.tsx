@@ -20,9 +20,12 @@ export function TemplateChip({
     <aside
       style={{
         padding: 12,
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-subtle)',
+        background: 'var(--lg-fill)',
+        border: '1px solid var(--lg-rim)',
         borderRadius: 'var(--radius-card)',
+        WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+        backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+        boxShadow: 'var(--lg-shadow-rest)',
         display: 'flex',
         alignItems: 'center',
         gap: 12,

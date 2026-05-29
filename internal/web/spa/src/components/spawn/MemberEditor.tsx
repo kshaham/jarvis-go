@@ -81,7 +81,6 @@ export function MemberEditor({
           </Button>
         ) : null
       }
-      style={{ background: 'var(--bg-elevated)' }}
     >
       <header style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Avatar

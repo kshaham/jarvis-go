@@ -37,10 +37,13 @@ ReactDOM.createRoot(rootEl).render(
         closeButton
         toastOptions={{
           style: {
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-strong)',
+            background: 'var(--lg-panel-bg)',
+            border: '1px solid var(--lg-rim-strong)',
             color: 'var(--text-primary)',
             borderRadius: 'var(--radius-md)',
+            WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+            backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+            boxShadow: 'var(--elev-popover-shadow), var(--lg-specular-convex)',
           },
         }}
       />

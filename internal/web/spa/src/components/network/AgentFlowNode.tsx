@@ -20,7 +20,9 @@ export function AgentFlowNode({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        'surface-card flex items-center gap-2 px-3 py-2',
+        // Solid surface: graph nodes sit on an animating canvas, so skip the
+        // per-node backdrop blur (perf) while keeping the card chrome.
+        'surface-card surface-card--solid flex items-center gap-2 px-3 py-2',
         member.status === 'working' && 'shadow-glow-sm',
       )}
       style={{ borderColor: selected ? 'var(--accent)' : undefined, minWidth: 132 }}

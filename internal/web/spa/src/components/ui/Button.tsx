@@ -5,23 +5,24 @@ import { Press } from '@/components/motion/Press';
 import { cn } from '@/lib/cn';
 
 // Button — the canonical CTA. Built on Press so it keeps the magnetic
-// 0.96 tap + reduced-motion behavior, with cva variants for the four
-// semantic roles. Replaces ad-hoc <button style={{…}}> across screens.
+// 0.96 tap + reduced-motion behavior. The liquid-glass material (fill,
+// rim, specular sheen, blur) lives in the `.lg-button` class family in
+// styles.css; cva just selects the variant modifier + sizing. The pill
+// radius comes from `.lg-button`. Replaces ad-hoc <button style={{…}}>.
 const button = cva(
-  'inline-flex items-center justify-center gap-2 rounded-md font-semibold focus-ring transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+  'lg-button inline-flex items-center justify-center gap-2 font-semibold disabled:opacity-50 disabled:cursor-not-allowed',
   {
     variants: {
       variant: {
-        primary: 'bg-accent text-white hover:shadow-glow-sm',
-        secondary:
-          'border bg-[var(--bg-elevated)] border-[var(--border-default)] text-[var(--text-primary)] hover:border-[var(--border-strong)]',
-        ghost: 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]',
-        danger:
-          'border border-status-error/40 text-status-error hover:bg-status-error hover:text-white',
+        // Neutral glass is the base `.lg-button` (used by secondary).
+        primary: 'lg-button--primary',
+        secondary: '',
+        ghost: 'lg-button--ghost',
+        danger: 'lg-button--danger',
       },
       size: {
-        sm: 'px-3 py-1.5 text-xs',
-        md: 'px-4 py-2 text-sm',
+        sm: 'px-3.5 py-1.5 text-xs',
+        md: 'px-5 py-2 text-sm',
       },
     },
     defaultVariants: { variant: 'primary', size: 'md' },

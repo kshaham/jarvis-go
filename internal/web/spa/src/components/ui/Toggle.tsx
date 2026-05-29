@@ -31,12 +31,18 @@ export function Toggle({
           height: 24,
           padding: 2,
           borderRadius: 999,
-          background: value ? 'var(--accent)' : 'var(--bg-pressed)',
-          border: '1px solid ' + (value ? 'var(--accent)' : 'var(--border-default)'),
+          background: value ? 'rgb(var(--accent-rgb) / 0.9)' : 'var(--lg-fill)',
+          border: '1px solid ' + (value ? 'rgb(var(--accent-rgb))' : 'var(--lg-rim)'),
+          boxShadow: value
+            ? 'var(--lg-specular-concave), var(--glow-violet-sm)'
+            : 'var(--lg-specular-concave)',
+          WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+          backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
           cursor: 'pointer',
-          transition: 'background 120ms ease, border-color 120ms ease',
+          transition: 'background 160ms cubic-bezier(0.16,1,0.3,1), border-color 160ms ease, box-shadow 160ms ease',
         }}
       >
+        {/* Glossy convex knob — a light-catching glass bead. */}
         <span
           aria-hidden
           style={{
@@ -46,9 +52,10 @@ export function Toggle({
             width: 18,
             height: 18,
             borderRadius: 999,
-            background: '#fff',
-            transition: 'left 140ms ease',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #dfe3e7 100%)',
+            transition: 'left 180ms cubic-bezier(0.16,1,0.3,1)',
+            boxShadow:
+              '0 1px 2px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -2px 3px rgba(0,0,0,0.12)',
           }}
         />
       </button>

@@ -14,12 +14,15 @@ export { Section as SectionCard, Field, Toggle, ChipGroup, SegmentedControl } fr
 // CSS class so focus/hover affordances stay consistent.
 export const inputStyle: CSSProperties = {
   padding: 8,
-  background: 'var(--bg-app)',
-  border: '1px solid var(--border-default)',
+  background: 'var(--lg-fill)',
+  border: '1px solid var(--lg-rim)',
   borderRadius: 'var(--radius-md)',
   color: 'var(--text-primary)',
   fontSize: 13,
   outline: 'none',
   width: '100%',
   fontFamily: 'inherit',
+  WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  boxShadow: 'var(--lg-specular-concave)',
 };

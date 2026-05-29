@@ -112,13 +112,16 @@ export function NetworkScreen() {
           <Press pressScale={0.96} onClick={() => setRelayoutSeed((s) => s + 1)}>
             <span
               style={{
-                padding: '6px 12px',
-                background: 'var(--bg-pressed)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-sm)',
+                padding: '6px 14px',
+                background: 'var(--lg-fill)',
+                border: '1px solid var(--lg-rim)',
+                borderRadius: 'var(--radius-pill)',
                 color: 'var(--text-primary)',
                 fontSize: 12,
                 fontWeight: 600,
+                WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+                backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+                boxShadow: 'var(--lg-shadow-rest)',
               }}
             >
               Relayout
@@ -147,7 +150,7 @@ export function NetworkScreen() {
       </div>
 
       <div
-        className="surface-card"
+        className="surface-card surface-card--solid"
         style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}
       >
         <ReactFlowProvider>
@@ -393,12 +396,15 @@ function ToggleChip({
       <span
         style={{
           padding: '6px 12px',
-          background: active ? 'var(--accent-muted)' : 'var(--bg-surface)',
-          border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border-default)'),
+          background: active ? 'var(--lg-fill-accent)' : 'var(--lg-fill)',
+          border: '1px solid ' + (active ? 'rgb(var(--accent-rgb) / 0.6)' : 'var(--lg-rim)'),
           borderRadius: 999,
-          color: active ? 'var(--accent)' : 'var(--text-muted)',
+          color: active ? 'var(--accent)' : 'var(--text-secondary)',
           fontSize: 11,
           fontWeight: 600,
+          WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+          backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+          boxShadow: active ? 'var(--lg-shadow-rest), var(--glow-violet-sm)' : 'var(--lg-shadow-rest)',
         }}
       >
         {label}

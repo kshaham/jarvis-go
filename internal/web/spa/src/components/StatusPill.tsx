@@ -17,6 +17,9 @@ export function StatusPill({ status }: { status: AgentStatus }) {
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1',
+        // Subtle top-edge sheen so the pill reads as the same glass material
+        // as the tiles it sits on, without a second blur layer.
+        'shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]',
         colorMap[status],
       )}
     >

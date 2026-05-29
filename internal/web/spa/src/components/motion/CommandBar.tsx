@@ -130,6 +130,7 @@ export function CommandBar({ open, onClose, actions }: Props) {
       size="md"
       title="Command palette"
       hideHeader
+      refract
     >
       <Command label="Command palette" loop>
         <Command.Input

@@ -24,12 +24,19 @@ export function EmptyState({
         'flex flex-col items-center justify-center gap-3 rounded-[14px] border border-dashed p-10 text-center',
         className,
       )}
-      style={{ borderColor: 'var(--border-default)' }}
+      style={{ borderColor: 'var(--lg-rim-strong)' }}
     >
       {icon ? (
+        // Convex glass bead — inner highlight + accent bloom simulate depth
+        // without nesting a second backdrop-filter (perf + artifact-safe).
         <div
           className="grid h-12 w-12 place-items-center rounded-full"
-          style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
+          style={{
+            background: 'var(--lg-fill-accent)',
+            border: '1px solid rgb(var(--accent-rgb) / 0.35)',
+            boxShadow: 'var(--lg-specular-convex), 0 4px 16px rgb(var(--accent-rgb) / 0.2)',
+            color: 'var(--accent)',
+          }}
         >
           {icon}
         </div>

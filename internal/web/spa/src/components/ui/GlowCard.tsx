@@ -57,8 +57,11 @@ export function GlowCard({
         glass ? 'glass-card' : 'surface-card',
         spotlightOn && 'spotlight',
         interactive && 'transition-shadow duration-200',
-        live && 'shadow-glow-sm',
-        interactive && (live ? 'hover:shadow-glow-md' : 'hover:shadow-glow-sm'),
+        // Live keeps the glass depth shadow AND gains the violet bloom
+        // (composite token), so the specular/float aren't lost. Hover
+        // rises the whole stack one tier.
+        live && 'shadow-lg-live',
+        interactive && (live ? 'hover:shadow-lg-live-hover' : 'hover:shadow-lg-hover'),
         className,
       )}
       {...rest}

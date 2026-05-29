@@ -57,10 +57,26 @@ export default {
         'elev-1': 'var(--elev-1)',
         'elev-2': 'var(--elev-2)',
         'elev-3': 'var(--elev-3)',
+        // Liquid Glass composite shadows (outer float + inset specular).
+        'lg-rest': 'var(--lg-shadow-rest)',
+        'lg-hover': 'var(--lg-shadow-hover)',
+        'lg-press': 'var(--lg-shadow-press)',
+        // Live surfaces keep their glass depth AND gain the violet bloom.
+        'lg-live': 'var(--lg-shadow-rest), var(--glow-violet-sm)',
+        'lg-live-hover': 'var(--lg-shadow-hover), var(--glow-violet-md)',
+        'lg-convex': 'var(--lg-specular-convex)',
+        'lg-concave': 'var(--lg-specular-concave)',
+        'lg-edge': 'var(--lg-edge-catch)',
       },
       backdropBlur: {
         glass: 'var(--glass-blur)',
         'glass-strong': 'var(--glass-blur-strong)',
+        // Liquid Glass blur tiers.
+        tile: 'var(--lg-blur-tile)',
+        chrome: 'var(--lg-blur-chrome)',
+      },
+      backgroundImage: {
+        'lg-sheen': 'var(--lg-sheen)',
       },
       keyframes: {
         'aurora-drift': {

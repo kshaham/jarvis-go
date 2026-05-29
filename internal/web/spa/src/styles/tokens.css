@@ -165,6 +165,78 @@
   /* Ambient animation timing (CSS-animation path; reduced-motion kills). */
   --aurora-drift-duration: 34s;
   --shimmer-duration: 1.4s;
+
+  /* ── Liquid Glass material (iOS-26 style; web depth layer) ────────────
+     Additive over the Aurora layer. The look = translucent fill + backdrop
+     blur (+ saturate to keep the aurora vivid) + a top-lit rim hairline +
+     specular highlights (inset shadows) + a soft outer float shadow.
+     Convex surfaces (buttons/tiles) catch light at the TOP edge and bulge
+     toward the viewer; concave surfaces (inputs) feel recessed. All built
+     from cross-browser primitives; refraction is an optional enhancement
+     layered on top (see --lg-refract in styles.css). */
+
+  /* Blur tiers + saturation. Chrome = bounded interactive elements +
+     overlays; tile = always-on data cards (lighter, for perf + legibility). */
+  --lg-saturate: 175%;
+  --lg-blur-tile: 11px;
+  --lg-blur-chrome: 18px;
+
+  /* Fills — a faint white tint over the frosted aurora; three interaction
+     states. Kept low-alpha so blurred backdrop colour reads through. */
+  --lg-fill: rgba(255, 255, 255, 0.07);
+  --lg-fill-hover: rgba(255, 255, 255, 0.11);
+  --lg-fill-active: rgba(255, 255, 255, 0.15);
+
+  /* Tinted glass — primary CTA (accent) + destructive (danger). */
+  --lg-fill-accent: rgba(34, 197, 94, 0.17);
+  --lg-fill-accent-hover: rgba(34, 197, 94, 0.26);
+  --lg-fill-danger: rgba(255, 90, 95, 0.14);
+  --lg-fill-danger-hover: rgba(255, 90, 95, 0.22);
+
+  /* Rim — the bright hairline edge of the glass. */
+  --lg-rim: rgba(255, 255, 255, 0.17);
+  --lg-rim-strong: rgba(255, 255, 255, 0.3);
+
+  /* Specular highlight stacks (inset box-shadows). */
+  --lg-specular-convex:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 -12px 20px -14px rgba(0, 0, 0, 0.55);
+  --lg-specular-concave:
+    inset 0 1.5px 3px 0 rgba(0, 0, 0, 0.42),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.07);
+  /* Bright corner light-catch — top-left + bottom-right edges (the signature
+     liquid-glass rim glint). */
+  --lg-edge-catch:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.2),
+    inset -1px -1px 0 0 rgba(255, 255, 255, 0.07);
+
+  /* Composite float shadows (outer drop + convex specular). */
+  --lg-shadow-rest:
+    0 1px 1px rgba(0, 0, 0, 0.3),
+    0 8px 24px -12px rgba(0, 0, 0, 0.55),
+    var(--lg-specular-convex);
+  --lg-shadow-hover:
+    0 2px 5px rgba(0, 0, 0, 0.32),
+    0 18px 44px -14px rgba(0, 0, 0, 0.62),
+    var(--lg-specular-convex);
+  --lg-shadow-press:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    var(--lg-specular-concave);
+
+  /* Top-sheen gradient painted by the ::before highlight on glass surfaces —
+     a soft light wash catching the top edge. */
+  --lg-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.06) 16%,
+    rgba(255, 255, 255, 0) 42%
+  );
+
+  /* Overlay panels (modals, command bar) — a more opaque frosted base than
+     the tile fill so nested controls keep contrast over the blurred page. */
+  --lg-panel-bg: rgba(9, 42, 33, 0.72);
+  --lg-panel-footer: rgba(255, 255, 255, 0.035);
 }
 
 [data-theme='light'] {
@@ -221,6 +293,48 @@
 
   --focus-ring-color: rgba(10, 122, 82, 0.5);
   --spotlight-color: rgba(10, 122, 82, 0.08);
+
+  /* Liquid Glass — light-mode material. Glass over a light surface is a
+     white-heavy translucency with a faint dark rim for definition; the
+     bright top-edge highlight comes from the convex specular. */
+  --lg-fill: rgba(255, 255, 255, 0.55);
+  --lg-fill-hover: rgba(255, 255, 255, 0.72);
+  --lg-fill-active: rgba(255, 255, 255, 0.85);
+  --lg-fill-accent: rgba(10, 122, 82, 0.14);
+  --lg-fill-accent-hover: rgba(10, 122, 82, 0.22);
+  --lg-fill-danger: rgba(214, 59, 64, 0.12);
+  --lg-fill-danger-hover: rgba(214, 59, 64, 0.18);
+  --lg-rim: rgba(0, 0, 0, 0.08);
+  --lg-rim-strong: rgba(0, 0, 0, 0.14);
+  --lg-specular-convex:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+    inset 0 -12px 20px -16px rgba(0, 0, 0, 0.12);
+  --lg-specular-concave:
+    inset 0 1.5px 3px 0 rgba(0, 0, 0, 0.08),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.8);
+  --lg-edge-catch:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.95),
+    inset -1px -1px 0 0 rgba(255, 255, 255, 0.55);
+  --lg-shadow-rest:
+    0 1px 1px rgba(0, 0, 0, 0.04),
+    0 8px 24px -12px rgba(0, 0, 0, 0.14),
+    var(--lg-specular-convex);
+  --lg-shadow-hover:
+    0 2px 5px rgba(0, 0, 0, 0.06),
+    0 18px 44px -14px rgba(0, 0, 0, 0.18),
+    var(--lg-specular-convex);
+  --lg-shadow-press:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    var(--lg-specular-concave);
+  --lg-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.85) 0%,
+    rgba(255, 255, 255, 0.35) 16%,
+    rgba(255, 255, 255, 0) 42%
+  );
+  --lg-panel-bg: rgba(255, 255, 255, 0.82);
+  --lg-panel-footer: rgba(0, 0, 0, 0.025);
 }
 
 /* Respect operator preference. Inside this query Motion will fall back

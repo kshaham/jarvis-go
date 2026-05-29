@@ -35,6 +35,10 @@ type Props = {
   hideHeader?: boolean;
   // Adds a violet glow to the panel — for "live"/working contexts.
   glow?: boolean;
+  // Adds the optional SVG light-bending refraction to the panel (hero
+  // surfaces only, e.g. the ⌘K palette). Falls back to plain glass blur
+  // outside Chromium.
+  refract?: boolean;
 };
 
 // Modal — the canonical office-redesign dialog primitive. Built on
@@ -53,6 +57,7 @@ export function Modal({
   footer,
   hideHeader,
   glow = false,
+  refract = false,
 }: Props) {
   const reduce = useReducedMotion();
   return (
@@ -80,6 +85,7 @@ export function Modal({
             <Dialog.Content asChild aria-describedby={description ? 'modal-desc' : undefined}>
               <motion.div
                 key="content"
+                className={refract ? 'lg-refract' : undefined}
                 // Horizontal centering is done via Motion's own `x`
                 // (not a CSS transform, which Motion overrides when it
                 // animates scale/y).
@@ -100,12 +106,26 @@ export function Modal({
                   maxHeight: '84vh',
                   display: 'flex',
                   flexDirection: 'column',
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-strong)',
+                  // Liquid-glass panel — a frosted, rim-lit surface over the
+                  // blurred page. The convex specular adds the top highlight
+                  // (no ::after needed on an inline-styled element).
+                  background: 'var(--lg-panel-bg)',
+                  border: '1px solid var(--lg-rim-strong)',
                   borderRadius: 'var(--radius-xl)',
+                  // When refracting, let the `.lg-refract` class own the
+                  // backdrop-filter (inline would beat the class). Otherwise
+                  // apply the plain glass blur here.
+                  ...(refract
+                    ? {}
+                    : {
+                        WebkitBackdropFilter:
+                          'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+                        backdropFilter:
+                          'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+                      }),
                   boxShadow: glow
-                    ? 'var(--elev-command-shadow), var(--glow-violet-md)'
-                    : 'var(--elev-command-shadow)',
+                    ? 'var(--elev-command-shadow), var(--glow-violet-md), var(--lg-specular-convex)'
+                    : 'var(--elev-command-shadow), var(--lg-specular-convex)',
                   overflow: 'hidden',
                   // Radix focuses the content container on open; suppress
                   // the default browser outline (inner controls keep their
@@ -164,11 +184,11 @@ export function Modal({
                   <footer
                     style={{
                       padding: '14px 22px',
-                      borderTop: '1px solid var(--border-subtle)',
+                      borderTop: '1px solid var(--lg-rim)',
                       display: 'flex',
                       justifyContent: 'flex-end',
                       gap: 10,
-                      background: 'var(--bg-surface)',
+                      background: 'var(--lg-panel-footer)',
                     }}
                   >
                     {footer}

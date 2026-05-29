@@ -38,8 +38,10 @@ export function TemplateCard({
       }}
       className="focus-ring flex cursor-pointer flex-col gap-2.5 p-3"
       style={{
-        background: selected ? 'var(--accent-muted)' : 'var(--bg-elevated)',
-        border: '1px solid ' + (selected ? 'rgb(var(--accent-rgb))' : 'var(--border-subtle)'),
+        // Let GlowCard's glass show through when unselected; selected tiles
+        // wear the accent glass fill + accent rim.
+        background: selected ? 'var(--lg-fill-accent)' : undefined,
+        border: selected ? '1px solid rgb(var(--accent-rgb) / 0.6)' : undefined,
         ...style,
       }}
     >

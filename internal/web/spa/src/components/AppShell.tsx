@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { TeamHeader } from './TeamHeader';
-import { CommandBar, Metric, Press } from './motion';
-import { AuroraBackground, ConnectionBanner, TopProgress } from './ui';
+import { CommandBar, Metric } from './motion';
+import { AuroraBackground, Button, ConnectionBanner, TopProgress } from './ui';
 import { QuickAddTaskModal } from './QuickAddTaskModal';
 import { ShortcutsModal } from './ShortcutsModal';
 import { spring } from '../lib/motion';
@@ -138,32 +138,23 @@ export function AppShell({ children }: { children?: ReactNode }) {
           style={{
             width: 220,
             padding: 16,
-            borderRight: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)',
+            borderRight: '1px solid var(--lg-rim)',
+            background: 'var(--lg-fill)',
+            WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+            backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
           }}
         >
           {/* Top-of-rail spawn CTA — the action operators reach for
               most often. Routes to the SPA's spawn wizard so the
               classic UI isn't needed for new teams. */}
-          <Press pressScale={0.96} onClick={() => navigate('/spawn')}>
-            <span
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '10px 12px',
-                background: 'var(--accent)',
-                color: '#fff',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 13,
-                fontWeight: 700,
-                marginBottom: 10,
-                cursor: 'pointer',
-              }}
-            >
-              + Spawn team
-            </span>
-          </Press>
+          <Button
+            variant="primary"
+            onClick={() => navigate('/spawn')}
+            className="w-full justify-center"
+            style={{ marginBottom: 10 }}
+          >
+            + Spawn team
+          </Button>
           {items.map((item) => (
             <NavLink
               key={item.to}
@@ -178,7 +169,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                 // Active background is the sliding layoutId pill below
                 // (or a static fill under reduced motion).
-                background: isActive && reduce ? 'var(--accent-muted)' : undefined,
+                background: isActive && reduce ? 'var(--lg-fill-accent)' : undefined,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 10,
@@ -199,8 +190,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
                         position: 'absolute',
                         inset: 0,
                         borderRadius: 'var(--radius-md)',
-                        background: 'var(--accent-muted)',
-                        boxShadow: 'inset 2px 0 0 var(--accent)',
+                        background: 'var(--lg-fill-accent)',
+                        border: '1px solid rgb(var(--accent-rgb) / 0.35)',
+                        boxShadow:
+                          'inset 2px 0 0 var(--accent), var(--lg-specular-convex), var(--glow-violet-sm)',
                         zIndex: 0,
                       }}
                     />
@@ -221,9 +214,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
                         width: 24,
                         height: 24,
                         borderRadius: 6,
-                        border: '1px solid var(--border-default)',
-                        background: isActive ? 'var(--accent)' : 'var(--bg-elevated)',
-                        color: isActive ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid ' + (isActive ? 'rgb(var(--accent-rgb) / 0.6)' : 'var(--lg-rim)'),
+                        background: isActive ? 'rgb(var(--accent-rgb) / 0.92)' : 'var(--lg-fill)',
+                        color: isActive ? '#04150e' : 'var(--text-secondary)',
+                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -262,14 +256,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
           <div style={{ flex: 1 }} />
           <button
             onClick={() => setQuickAddOpen(true)}
+            className="focus-ring lg-button"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 8,
               padding: '8px 10px',
               borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-default)',
-              background: 'var(--bg-elevated)',
               color: 'var(--text-secondary)',
               fontSize: 12,
               fontWeight: 600,
@@ -291,14 +284,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </button>
           <button
             onClick={() => setCommandOpen(true)}
+            className="focus-ring lg-button"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 8,
               padding: '8px 10px',
               borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-default)',
-              background: 'var(--bg-elevated)',
               color: 'var(--text-secondary)',
               fontSize: 12,
               fontWeight: 600,

@@ -63,7 +63,7 @@ export function WhiteboardScreen() {
       </header>
 
       <div
-        className="surface-card"
+        className="surface-card surface-card--solid"
         style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}
       >
         {wb.isLoading ? (

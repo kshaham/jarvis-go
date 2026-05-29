@@ -21,13 +21,8 @@ export function Chip({
     <Press
       pressScale={0.94}
       onClick={onClick}
-      className={cn('chip transition-colors', className)}
-      style={{
-        background: active ? 'var(--accent-muted)' : 'var(--bg-surface)',
-        border: '1px solid ' + (active ? 'rgb(var(--accent-rgb))' : 'var(--border-default)'),
-        color: active ? 'var(--accent)' : 'var(--text-muted)',
-        cursor: 'pointer',
-      }}
+      data-active={active}
+      className={cn('chip lg-chip', className)}
     >
       {children}
     </Press>
@@ -56,15 +51,10 @@ export function ChipGroup<T extends string>({
             type="button"
             role="radio"
             aria-checked={selected}
+            data-active={selected}
             onClick={() => onChange(opt.value)}
             title={opt.hint}
-            className="chip focus-ring transition-colors"
-            style={{
-              background: selected ? 'var(--accent-muted)' : 'var(--bg-elevated)',
-              border: '1px solid ' + (selected ? 'rgb(var(--accent-rgb))' : 'var(--border-default)'),
-              color: selected ? 'var(--accent)' : 'var(--text-secondary)',
-              cursor: 'pointer',
-            }}
+            className="chip lg-chip focus-ring"
           >
             {opt.label}
           </button>

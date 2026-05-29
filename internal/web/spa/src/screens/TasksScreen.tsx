@@ -192,10 +192,14 @@ function Column({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-subtle)',
+        // Glass kanban lane — translucent over the aurora, accent-coded top.
+        background: 'var(--lg-fill)',
+        border: '1px solid var(--lg-rim)',
         borderTop: '2px solid ' + borderTone,
         borderRadius: 'var(--radius-card)',
+        WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+        backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+        boxShadow: 'var(--lg-shadow-rest)',
         padding: 10,
         gap: 10,
         minHeight: 0,

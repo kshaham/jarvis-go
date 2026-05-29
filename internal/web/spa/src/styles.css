@@ -27,6 +27,11 @@
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.16);
   }
+  /* Accent-tinted text selection — a small signature touch. */
+  ::selection {
+    background: var(--accent-muted);
+    color: var(--text-primary);
+  }
 }
 
 @layer components {
@@ -35,29 +40,185 @@
     font-feature-settings: 'tnum' 1;
   }
 
-  /* Elevated opaque surface — the default "card" chrome. No blur, so
-     it's cheap to use on large always-on panels. */
-  .surface-card {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
+  /* ── Liquid Glass surfaces ─────────────────────────────────────────
+     The default "card" chrome is now translucent liquid glass: a faint
+     tinted fill over a blurred+saturated backdrop, a top-lit rim, a
+     specular sheen (::after, painted behind content via z-index:-1), and
+     a soft composite float shadow. `isolation:isolate` keeps the sheen's
+     stacking local (and composes with the cursor `.spotlight` ::before).
+     Tile blur tier is intentionally lighter than chrome for legibility +
+     perf on always-on data panels. */
+  .surface-card,
+  .lg-surface {
+    position: relative;
+    isolation: isolate;
+    background: var(--lg-fill);
+    border: 1px solid var(--lg-rim);
     border-radius: var(--radius-card);
+    -webkit-backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    box-shadow: var(--lg-shadow-rest);
+  }
+  .surface-card::after,
+  .lg-surface::after,
+  .glass-card::after,
+  .lg-button::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--lg-sheen);
+    pointer-events: none;
+    z-index: -1;
+  }
+  /* Opt-out for moving-canvas / very dense panels (Network graph,
+     Whiteboard) where backdrop blur over an animating surface is wasteful.
+     Falls back to the cheap opaque elevated surface. */
+  .surface-card--solid {
+    background: var(--bg-elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     box-shadow: var(--elev-1);
   }
-
-  /* Glassmorphic variant — backdrop blur. Reserve for floating/overlay
-     surfaces (modals, command bar, popovers); never large panels. */
-  .glass-card {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-card);
-    -webkit-backdrop-filter: blur(var(--glass-blur));
-    backdrop-filter: blur(var(--glass-blur));
-    box-shadow: var(--elev-2);
+  .surface-card--solid::after {
+    display: none;
   }
-  .glass-card--strong {
-    background: var(--glass-bg-strong);
-    -webkit-backdrop-filter: blur(var(--glass-blur-strong));
-    backdrop-filter: blur(var(--glass-blur-strong));
+
+  /* Deep chrome glass — floating/overlay surfaces (modals, command bar,
+     popovers). Heavier blur tier than tiles. */
+  .glass-card,
+  .lg-glass {
+    position: relative;
+    isolation: isolate;
+    background: var(--lg-fill);
+    border: 1px solid var(--lg-rim);
+    border-radius: var(--radius-card);
+    -webkit-backdrop-filter: blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate));
+    box-shadow: var(--lg-shadow-rest);
+  }
+  .lg-glass::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--lg-sheen);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .glass-card--strong,
+  .lg-glass--strong {
+    background: var(--lg-fill-hover);
+    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--lg-saturate));
+  }
+
+  /* ── Liquid Glass button ───────────────────────────────────────────
+     Convex sheen (light caught at the top edge). Layout (flex/font/size)
+     is applied by the Button component's utilities; this owns the
+     material. Variants tint the fill + rim. */
+  .lg-button {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid var(--lg-rim);
+    border-radius: var(--radius-pill);
+    background: var(--lg-fill);
+    color: var(--text-primary);
+    -webkit-backdrop-filter: blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate));
+    box-shadow: var(--lg-shadow-rest);
+    transition:
+      background var(--duration-short) var(--ease-out-expo),
+      border-color var(--duration-short) var(--ease-out-expo),
+      box-shadow var(--duration-short) var(--ease-out-expo),
+      color var(--duration-short) var(--ease-out-expo);
+  }
+  /* Specular shine sweep — a skewed light band glides across on hover.
+     Lives on ::before (sheen is on ::after), behind content (z-index:-1),
+     clipped by the button's overflow:hidden. */
+  .lg-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -150%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(
+      120deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.28) 50%,
+      transparent 100%
+    );
+    transform: skewX(-18deg);
+    pointer-events: none;
+    z-index: -1;
+    transition: left 620ms var(--ease-out-expo);
+  }
+  .lg-button:hover::before {
+    left: 150%;
+  }
+  .lg-button:hover {
+    background: var(--lg-fill-hover);
+    border-color: var(--lg-rim-strong);
+    box-shadow: var(--lg-shadow-hover);
+  }
+  .lg-button:active {
+    background: var(--lg-fill-active);
+    box-shadow: var(--lg-shadow-press);
+  }
+  .lg-button--primary {
+    background:
+      linear-gradient(180deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--accent-rgb) / 0.14));
+    border-color: rgb(var(--accent-rgb) / 0.55);
+    color: #eafff5;
+    box-shadow: var(--lg-shadow-rest), var(--glow-violet-sm);
+  }
+  .lg-button--primary:hover {
+    background:
+      linear-gradient(180deg, rgb(var(--accent-rgb) / 0.38), rgb(var(--accent-rgb) / 0.2));
+    border-color: rgb(var(--accent-rgb) / 0.75);
+    box-shadow: var(--lg-shadow-hover), var(--glow-violet-md);
+  }
+  .lg-button--danger {
+    background: var(--lg-fill-danger);
+    border-color: rgb(var(--status-error-rgb) / 0.5);
+    color: var(--status-error);
+  }
+  .lg-button--danger:hover {
+    background: var(--lg-fill-danger-hover);
+    border-color: rgb(var(--status-error-rgb) / 0.8);
+    box-shadow: var(--lg-shadow-hover), var(--glow-error);
+  }
+  /* Ghost — chromeless at rest, materialises into glass on hover. */
+  .lg-button--ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .lg-button--ghost::after,
+  .lg-button--ghost::before {
+    display: none;
+  }
+  .lg-button--ghost:hover {
+    background: var(--lg-fill);
+    border-color: var(--lg-rim);
+    color: var(--text-primary);
+    -webkit-backdrop-filter: blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate));
+    box-shadow: var(--lg-shadow-rest);
+  }
+
+  /* Optional refraction (light-bending edges) — Chromium adds the SVG
+     displacement; Safari/Firefox parse it as invalid and fall back to the
+     base glass class's blur (so refract elements MUST also carry .lg-glass
+     / .lg-button). Reserved for a few hero elements. */
+  .lg-refract {
+    -webkit-backdrop-filter: blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate));
+    backdrop-filter: url(#lg-refraction) blur(7px) saturate(var(--lg-saturate));
   }
 
   /* Cursor-follow spotlight. Host sets --mx/--my (px) on pointer move;
@@ -90,30 +251,38 @@
     z-index: 1;
   }
 
-  /* Form input — token-driven, with hover + focus affordances. */
+  /* Form input — concave liquid glass. The recessed (concave) specular
+     makes the control read as "pressed in", the opposite of the convex
+     buttons/tiles; focus lifts the fill and adds the accent glow ring. */
   .field {
     width: 100%;
     padding: 8px 10px;
-    background: var(--bg-app);
-    border: 1px solid var(--border-default);
+    background: var(--lg-fill);
+    border: 1px solid var(--lg-rim);
     border-radius: var(--radius-md);
     color: var(--text-primary);
     font-size: 13px;
     font-family: inherit;
     outline: none;
+    -webkit-backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    box-shadow: var(--lg-specular-concave);
     transition:
-      border-color 120ms ease,
-      box-shadow 120ms ease;
+      border-color 150ms var(--ease-out-expo),
+      box-shadow 150ms var(--ease-out-expo),
+      background 150ms var(--ease-out-expo);
   }
   .field::placeholder {
     color: var(--text-faint);
   }
   .field:hover {
-    border-color: var(--border-strong);
+    border-color: var(--lg-rim-strong);
   }
-  .field:focus-visible {
+  .field:focus-visible,
+  .field:focus {
     border-color: rgb(var(--accent-rgb));
-    box-shadow: 0 0 0 3px var(--accent-muted);
+    background: var(--lg-fill-hover);
+    box-shadow: var(--lg-specular-concave), 0 0 0 3px var(--accent-muted);
   }
 
   /* Universal keyboard focus ring — apply to any focusable element. */
@@ -131,6 +300,76 @@
     font-size: var(--text-11);
     font-weight: 600;
     line-height: 1;
+  }
+
+  /* ── Liquid Glass pills + segmented track ──────────────────────────
+     .lg-chip is a glass filter pill (rest / active). .lg-segment is the
+     recessed track; the selected segment is a raised glass thumb the
+     component slides with a layoutId spring. */
+  .lg-chip {
+    position: relative;
+    isolation: isolate;
+    border: 1px solid var(--lg-rim);
+    background: var(--lg-fill);
+    color: var(--text-secondary);
+    -webkit-backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    box-shadow: var(--lg-shadow-rest);
+    cursor: pointer;
+    transition:
+      background var(--duration-short) var(--ease-out-expo),
+      border-color var(--duration-short) var(--ease-out-expo),
+      color var(--duration-short) var(--ease-out-expo),
+      box-shadow var(--duration-short) var(--ease-out-expo);
+  }
+  .lg-chip:hover {
+    border-color: var(--lg-rim-strong);
+    background: var(--lg-fill-hover);
+    color: var(--text-primary);
+  }
+  .lg-chip[data-active='true'] {
+    background: var(--lg-fill-accent);
+    border-color: rgb(var(--accent-rgb) / 0.6);
+    color: var(--accent);
+    box-shadow: var(--lg-shadow-rest), var(--glow-violet-sm);
+  }
+
+  .lg-segment {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    background: var(--lg-fill);
+    border: 1px solid var(--lg-rim);
+    border-radius: var(--radius-md);
+    -webkit-backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur-tile)) saturate(var(--lg-saturate));
+    box-shadow: var(--lg-specular-concave);
+  }
+  .lg-segment__btn {
+    position: relative;
+    isolation: isolate;
+    padding: 6px 14px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color var(--duration-short) var(--ease-out-expo);
+  }
+  .lg-segment__btn[aria-selected='true'] {
+    color: var(--text-primary);
+  }
+  /* The sliding glass thumb (motion.span with layoutId). */
+  .lg-segment__thumb {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: var(--radius-sm);
+    background: var(--lg-fill-active);
+    border: 1px solid var(--lg-rim);
+    box-shadow: var(--lg-specular-convex);
   }
 
   /* Shimmer skeleton — replaces ad-hoc animate-pulse blocks. */
@@ -274,7 +513,54 @@
   .skeleton::after {
     animation: none !important;
   }
-  .spotlight::before {
+  .spotlight::before,
+  .lg-button::before {
     transition: none;
+  }
+}
+
+/* ── Liquid Glass accessibility / compatibility fallbacks ─────────────
+   Operators who prefer reduced transparency (or browsers without
+   backdrop-filter) get the legible opaque elevated surface — translucency
+   and blur drop out, contrast is preserved. */
+@media (prefers-reduced-transparency: reduce) {
+  .surface-card,
+  .lg-surface,
+  .glass-card,
+  .lg-glass,
+  .lg-glass--strong,
+  .glass-card--strong,
+  .lg-button,
+  .lg-button--ghost:hover,
+  .field,
+  .lg-chip,
+  .lg-segment {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background: var(--bg-elevated) !important;
+  }
+  .lg-button--primary {
+    background: var(--accent) !important;
+    color: #fff !important;
+  }
+  .surface-card::after,
+  .lg-surface::after,
+  .glass-card::after,
+  .lg-glass::after,
+  .lg-button::after {
+    display: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .surface-card,
+  .lg-surface,
+  .glass-card,
+  .lg-glass,
+  .lg-button,
+  .field,
+  .lg-chip,
+  .lg-segment {
+    background: var(--bg-elevated);
   }
 }

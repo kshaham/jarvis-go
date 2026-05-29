@@ -46,8 +46,8 @@ export function MemberTile({
       className={cn('flex cursor-pointer items-start gap-3 p-3')}
       style={{
         minHeight: 88,
-        background: selected ? 'var(--accent-muted)' : 'var(--bg-elevated)',
-        border: '1px solid ' + (selected ? 'rgb(var(--accent-rgb))' : 'var(--border-subtle)'),
+        background: selected ? 'var(--lg-fill-accent)' : undefined,
+        border: selected ? '1px solid rgb(var(--accent-rgb) / 0.6)' : undefined,
         ...style,
       }}
     >

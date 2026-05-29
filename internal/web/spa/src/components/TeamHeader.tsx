@@ -9,20 +9,25 @@ export function TeamHeader() {
 
   return (
     <header
-      className="sticky top-0 z-10 border-b backdrop-blur"
+      className="sticky top-0 z-10 border-b"
       style={{
-        borderColor: 'var(--border-subtle)',
-        background: 'rgba(3,20,14,0.8)',
+        borderColor: 'var(--lg-rim)',
+        background: 'rgba(3,20,14,0.55)',
+        WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+        backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+        boxShadow: '0 1px 0 0 rgba(255,255,255,0.04)',
       }}
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
         <div className="flex items-center gap-3">
-          {/* Brand mark — electric violet to signature-accent the surface. */}
+          {/* Brand mark — accent glass chip with a top sheen + bloom. */}
           <div
             className="h-7 w-7 rounded-md"
             style={{
               background:
                 'linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)',
+              boxShadow:
+                'inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 10px rgb(var(--accent-rgb) / 0.4)',
             }}
           />
           <div>
@@ -48,7 +53,9 @@ export function TeamHeader() {
             <span
               className="rounded px-2 py-0.5"
               style={{
-                background: 'var(--accent-muted)',
+                background: 'var(--lg-fill-accent)',
+                border: '1px solid rgb(var(--accent-rgb) / 0.4)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
                 color: 'var(--accent)',
               }}
             >
@@ -59,7 +66,9 @@ export function TeamHeader() {
             <span
               className="rounded px-2 py-0.5"
               style={{
-                background: 'rgba(255,180,84,0.16)',
+                background: 'rgb(var(--status-warn-rgb) / 0.16)',
+                border: '1px solid rgb(var(--status-warn-rgb) / 0.35)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
                 color: 'var(--status-warn)',
               }}
             >
