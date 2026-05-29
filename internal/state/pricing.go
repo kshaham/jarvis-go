@@ -25,6 +25,13 @@ var modelPricing = map[string]ModelPricing{
 	"glm-5":   {InputPerMillion: 0.60, OutputPerMillion: 2.20},
 	"glm-4.7": {InputPerMillion: 0.50, OutputPerMillion: 1.50},
 	"glm-4.5": {InputPerMillion: 0.10, OutputPerMillion: 0.30},
+	// OpenAI GPT-5.x family (Codex backend). APPROXIMATE — confirm against
+	// platform.openai.com/pricing. Exact "-mini" keys win via the exact-match
+	// pass before the "gpt-5" prefix catch-all (avoids the non-deterministic
+	// prefix-iteration order). reasoning_output_tokens are billed as output.
+	"gpt-5.4-mini": {InputPerMillion: 0.25, OutputPerMillion: 2.00},
+	"gpt-5-mini":   {InputPerMillion: 0.25, OutputPerMillion: 2.00},
+	"gpt-5":        {InputPerMillion: 1.25, OutputPerMillion: 10.00},
 }
 
 // defaultPricing is used when the model string is empty or unknown so we still
