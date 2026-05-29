@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { CalendarClock, SearchX } from 'lucide-react';
 
 import { Metric, RevealItem } from '../components/motion';
+import { EmptyState, GlowCard, Input, Skeleton } from '../components/ui';
 import { relativeTime } from '../lib/relativeTime';
 import { useStandupDetail, useStandupHistory } from '../hooks/useOfficeData';
 
@@ -11,6 +14,8 @@ export function MeetingsScreen() {
   const history = useStandupHistory();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+
+  const [listRef] = useAutoAnimate<HTMLDivElement>();
 
   const list = useMemo(() => history.data?.history ?? [], [history.data?.history]);
   // Default-select most recent
@@ -40,7 +45,7 @@ export function MeetingsScreen() {
           </p>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          <Metric value={list.length} size={12} /> standups
+          <Metric value={list.length} size={12} pulseOnChange /> standups
         </span>
       </header>
 
@@ -66,59 +71,62 @@ export function MeetingsScreen() {
             overflow: 'hidden',
           }}
         >
-          <input
+          <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search standups…"
-            style={{
-              padding: 8,
-              background: 'var(--bg-app)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-primary)',
-              fontSize: 12,
-              outline: 'none',
-            }}
           />
-          <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {filtered.length === 0 ? (
-              <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-                No standups match.
-              </div>
-            ) : (
-              filtered.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setSelectedId(s.id)}
-                  style={{
-                    textAlign: 'left',
-                    padding: 10,
-                    background: s.id === effectiveId ? 'var(--accent-muted)' : 'transparent',
-                    border: '1px solid ' + (s.id === effectiveId ? 'var(--accent)' : 'transparent'),
-                    borderRadius: 'var(--radius-md)',
-                    cursor: 'pointer',
-                    color: 'inherit',
-                    font: 'inherit',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 2,
-                  }}
-                >
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {new Date(s.startedAt).toLocaleString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {(s.participants?.length ?? 0)} participant{s.participants?.length === 1 ? '' : 's'} ·{' '}
-                    {(s.messageCount ?? 0)} turns ·{' '}
-                    {relativeTime(s.startedAt)}
-                  </span>
-                </button>
+          <div
+            ref={listRef}
+            style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}
+          >
+            {history.isLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} style={{ height: 52, borderRadius: 'var(--radius-md)' }} />
               ))
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                icon={<SearchX size={22} />}
+                title={query.trim() ? 'No matches' : 'No standups yet'}
+                description={
+                  query.trim()
+                    ? 'No standups match your search.'
+                    : 'Completed standups appear here as the team meets.'
+                }
+              />
+            ) : (
+              filtered.map((s) => {
+                const active = s.id === effectiveId;
+                return (
+                  <GlowCard
+                    key={s.id}
+                    interactive
+                    live={active}
+                    onClick={() => setSelectedId(s.id)}
+                    className="cursor-pointer p-2.5"
+                    style={{
+                      borderColor: active ? 'var(--accent)' : undefined,
+                      background: active ? 'var(--accent-muted)' : undefined,
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {new Date(s.startedAt).toLocaleString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {(s.participants?.length ?? 0)} participant{s.participants?.length === 1 ? '' : 's'} ·{' '}
+                        {(s.messageCount ?? 0)} turns ·{' '}
+                        {relativeTime(s.startedAt)}
+                      </span>
+                    </div>
+                  </GlowCard>
+                );
+              })
             )}
           </div>
         </aside>
@@ -137,22 +145,25 @@ export function MeetingsScreen() {
           }}
         >
           {!effectiveId ? (
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-              }}
-            >
-              Select a standup to read its transcript.
-            </div>
+            <EmptyState
+              className="flex-1"
+              icon={<CalendarClock size={22} />}
+              title="No standup selected"
+              description="Select a standup from the list to read its transcript."
+            />
           ) : detail.isLoading ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} style={{ height: 72, borderRadius: 'var(--radius-md)' }} />
+              ))}
+            </div>
           ) : transcript.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Empty transcript.</div>
+            <EmptyState
+              className="flex-1"
+              icon={<CalendarClock size={22} />}
+              title="Empty transcript"
+              description="This standup has no recorded turns."
+            />
           ) : (
             <div
               style={{
@@ -182,14 +193,7 @@ export function MeetingsScreen() {
                   </div>
                 ) : (
                   <RevealItem key={`turn-${i}`} index={Math.min(i, 12)}>
-                    <div
-                      style={{
-                        padding: 12,
-                        background: 'var(--bg-elevated)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-md)',
-                      }}
-                    >
+                    <GlowCard interactive className="p-3">
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                           {node.entry.speakerName ?? node.entry.sessionId}
@@ -199,7 +203,7 @@ export function MeetingsScreen() {
                       <div style={{ marginTop: 6, fontSize: 13, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
                         {node.entry.content}
                       </div>
-                    </div>
+                    </GlowCard>
                   </RevealItem>
                 ),
               )}

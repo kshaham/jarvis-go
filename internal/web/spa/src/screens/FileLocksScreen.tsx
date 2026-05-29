@@ -1,6 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { Lock } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { Metric, Press, RevealItem } from '../components/motion';
+import { Metric } from '../components/motion';
+import { Button, GlowCard, EmptyState } from '../components/ui';
 import { fetchJSON } from '../api/client';
 import { useFileLocks } from '../hooks/useOfficeData';
 import { relativeTime } from '../lib/relativeTime';
@@ -11,11 +15,18 @@ import { relativeTime } from '../lib/relativeTime';
 export function FileLocksScreen() {
   const fl = useFileLocks();
   const qc = useQueryClient();
+  // AutoAnimate owns enter/exit/reorder of the live list as locks are
+  // acquired or released over SSE (respects reduced motion).
+  const [listRef] = useAutoAnimate<HTMLUListElement>();
 
   const release = useMutation({
     mutationFn: (path: string) =>
       fetchJSON(`/api/office/file-locks/${encodeURIComponent(path)}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['office', 'file-locks'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['office', 'file-locks'] });
+      toast.success('Lock released');
+    },
+    onError: () => toast.error('Failed to release lock'),
   });
 
   const list = fl.data?.locks ?? [];
@@ -32,14 +43,19 @@ export function FileLocksScreen() {
           </p>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          <Metric value={list.length} size={12} /> active
+          <Metric value={list.length} size={12} pulseOnChange /> active
         </span>
       </header>
 
       {list.length === 0 ? (
-        <Empty />
+        <EmptyState
+          icon={<Lock size={22} />}
+          title="No active locks"
+          description="When an agent locks a file to serialize a write, it appears here until released."
+        />
       ) : (
         <ul
+          ref={listRef}
           style={{
             listStyle: 'none',
             padding: 0,
@@ -49,19 +65,9 @@ export function FileLocksScreen() {
             gap: 6,
           }}
         >
-          {list.map((lock, i) => (
-            <RevealItem key={lock.path} index={i}>
-              <li
-                style={{
-                  padding: 12,
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  display: 'flex',
-                  gap: 12,
-                  alignItems: 'center',
-                }}
-              >
+          {list.map((lock) => (
+            <li key={lock.path} style={{ listStyle: 'none' }}>
+              <GlowCard interactive className="flex items-center gap-3 p-3">
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span
                     style={{
@@ -81,52 +87,24 @@ export function FileLocksScreen() {
                     {lock.expiresAt ? ` · expires ${relativeTime(lock.expiresAt)}` : ''}
                   </span>
                 </span>
-                <Press
+                <Button
+                  variant="danger"
+                  size="sm"
                   pressScale={0.94}
+                  disabled={release.isPending}
                   onClick={() => {
                     if (window.confirm(`Force-release ${lock.path}? Whoever held it loses their lock.`)) {
                       release.mutate(lock.path);
                     }
                   }}
-                  disabled={release.isPending}
                 >
-                  <span
-                    style={{
-                      padding: '6px 12px',
-                      background: 'transparent',
-                      border: '1px solid var(--border-default)',
-                      borderRadius: 'var(--radius-sm)',
-                      color: 'var(--status-warn)',
-                      fontSize: 11,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Force release
-                  </span>
-                </Press>
-              </li>
-            </RevealItem>
+                  Force release
+                </Button>
+              </GlowCard>
+            </li>
           ))}
         </ul>
       )}
     </section>
-  );
-}
-
-function Empty() {
-  return (
-    <div
-      style={{
-        padding: 32,
-        textAlign: 'center',
-        color: 'var(--text-muted)',
-        fontSize: 13,
-        background: 'var(--bg-elevated)',
-        border: '1px dashed var(--border-default)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
-      No active locks.
-    </div>
   );
 }

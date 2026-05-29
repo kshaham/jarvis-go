@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import { LayoutTemplate } from 'lucide-react';
 
-import { Press } from '../components/motion';
+import { Chip, EmptyState, Input, Section, Skeleton } from '@/components/ui';
 import { DefaultsSection } from '../components/spawn/DefaultsSection';
 import { memberFromTemplate } from '../components/spawn/MemberEditor';
 import type { MemberEdit } from '../components/spawn/MemberEditor';
@@ -119,7 +121,11 @@ export function SpawnScreen() {
         recordRecentWorkdir(workingDir.trim());
       }
       qc.invalidateQueries({ queryKey: ['office', 'status'] });
+      toast.success('Team spawned');
       navigate('/');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to spawn team');
     },
   });
 
@@ -138,6 +144,7 @@ export function SpawnScreen() {
         <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
           Pick a template, configure the mission and members, then spawn.
         </p>
+        <StepIndicator step={hasTemplate ? 2 : 1} />
       </header>
 
       {hasTemplate ? (
@@ -207,6 +214,53 @@ export function SpawnScreen() {
   );
 }
 
+// StepIndicator — orients the two-page flow (Template → Configure). The
+// active step is violet; a completed step keeps a filled marker.
+function StepIndicator({ step }: { step: 1 | 2 }) {
+  const steps: { n: 1 | 2; label: string }[] = [
+    { n: 1, label: 'Template' },
+    { n: 2, label: 'Configure' },
+  ];
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+      {steps.map((s, i) => (
+        <Fragment key={s.n}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              color: step === s.n ? 'var(--accent)' : 'var(--text-muted)',
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 18,
+                height: 18,
+                borderRadius: 999,
+                fontSize: 10,
+                fontWeight: 700,
+                background: step >= s.n ? 'var(--accent)' : 'var(--bg-elevated)',
+                color: step >= s.n ? '#fff' : 'var(--text-muted)',
+                border: '1px solid ' + (step >= s.n ? 'var(--accent)' : 'var(--border-default)'),
+              }}
+            >
+              {s.n}
+            </span>
+            {s.label}
+          </span>
+          {i < steps.length - 1 ? <span style={{ color: 'var(--text-faint)' }}>→</span> : null}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
 function TemplateStep({
   query,
   setQuery,
@@ -229,68 +283,50 @@ function TemplateStep({
   loading: boolean;
 }) {
   return (
-    <section
-      style={{
-        padding: 16,
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-card)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 14,
-      }}
-    >
+    <Section>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
+        <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search templates…"
-          style={{
-            flex: '1 1 220px',
-            padding: 8,
-            background: 'var(--bg-app)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--text-primary)',
-            fontSize: 13,
-            outline: 'none',
-          }}
+          aria-label="Search templates"
+          style={{ flex: '1 1 220px', width: 'auto' }}
         />
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div role="radiogroup" aria-label="Template category" style={{ display: 'flex', gap: 6 }}>
           {['', ...categories].map((cat) => {
             const active = cat === category;
             return (
-              <Press key={cat || 'all'} pressScale={0.95} onClick={() => setCategory(cat)}>
-                <span
-                  style={{
-                    padding: '6px 12px',
-                    background: active ? 'var(--accent-muted)' : 'var(--bg-elevated)',
-                    border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border-default)'),
-                    borderRadius: 999,
-                    color: active ? 'var(--accent)' : 'var(--text-muted)',
-                    fontSize: 12,
-                    fontWeight: 600,
-                  }}
-                >
-                  {cat || 'All'}
-                </span>
-              </Press>
+              <Chip key={cat || 'all'} active={active} onClick={() => setCategory(cat)}>
+                {cat || 'All'}
+              </Chip>
             );
           })}
         </div>
       </div>
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading templates…</div>
-      ) : templates.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 12 }}>
-          No templates match.
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gap: 10,
+          }}
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
+            <TemplateCardSkeleton key={i} />
+          ))}
         </div>
+      ) : templates.length === 0 ? (
+        <EmptyState
+          icon={<LayoutTemplate size={22} />}
+          title="No templates match"
+          description="Try clearing the search or switching back to the All category."
+        />
       ) : (
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
             gap: 10,
           }}
         >
@@ -304,7 +340,27 @@ function TemplateStep({
           ))}
         </div>
       )}
-    </section>
+    </Section>
+  );
+}
+
+// Loading placeholder for a single template card — mirrors the card's
+// shape (avatar + title, two text lines, footer row) so the grid keeps
+// its rhythm while templates fetch.
+function TemplateCardSkeleton() {
+  return (
+    <div className="surface-card flex flex-col gap-2.5 p-3">
+      <div className="flex items-center gap-2.5">
+        <Skeleton className="h-10 w-10 shrink-0 rounded-md" />
+        <Skeleton className="h-3.5 w-32" />
+      </div>
+      <Skeleton className="h-2.5 w-full" />
+      <Skeleton className="h-2.5 w-3/4" />
+      <div className="mt-1 flex items-center justify-between">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-4 w-12 rounded-full" />
+      </div>
+    </div>
   );
 }
 

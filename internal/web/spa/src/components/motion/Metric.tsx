@@ -1,4 +1,6 @@
 import NumberFlow, { type Format } from '@number-flow/react';
+import { motion, useAnimationControls, useReducedMotion } from 'motion/react';
+import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 
 type Tone = 'primary' | 'muted' | 'accent' | 'success' | 'warning' | 'danger';
@@ -18,6 +20,10 @@ type Props = {
   size?: 11 | 12 | 13 | 15 | 17 | 20 | 24 | 32 | 48;
   // Token-driven color. Default 'primary' (var(--text-primary)).
   tone?: Tone;
+  // When true, flash a brief glow + scale pulse whenever the value
+  // changes (draws the eye to live updates). Opt-in; off by default so
+  // existing call sites are unaffected. No-op under reduced motion.
+  pulseOnChange?: boolean;
   className?: string;
   style?: CSSProperties;
 };
@@ -42,10 +48,30 @@ export function Metric({
   suffix,
   size = 15,
   tone = 'primary',
+  pulseOnChange = false,
   className,
   style,
 }: Props) {
-  return (
+  const reduce = useReducedMotion();
+  const controls = useAnimationControls();
+  const prev = useRef(value);
+
+  useEffect(() => {
+    if (pulseOnChange && !reduce && prev.current !== value) {
+      controls.start({
+        scale: [1, 1.08, 1],
+        textShadow: [
+          '0 0 0px rgba(124,92,255,0)',
+          '0 0 10px rgba(124,92,255,0.7)',
+          '0 0 0px rgba(124,92,255,0)',
+        ],
+        transition: { duration: 0.5, ease: 'easeOut' },
+      });
+    }
+    prev.current = value;
+  }, [value, pulseOnChange, reduce, controls]);
+
+  const numberFlow = (
     <NumberFlow
       value={value}
       format={format}
@@ -60,5 +86,13 @@ export function Metric({
         ...style,
       }}
     />
+  );
+
+  if (!pulseOnChange) return numberFlow;
+
+  return (
+    <motion.span animate={controls} style={{ display: 'inline-block' }}>
+      {numberFlow}
+    </motion.span>
   );
 }

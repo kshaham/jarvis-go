@@ -62,7 +62,7 @@ export function MembersSection({
   return (
     <SectionCard
       title={`Members (${members.length})`}
-      hint="Click a tile to edit. Yellow dot means overridden."
+      hint="Click a card to edit. Amber pill = overridden from the template."
       trailing={
         <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
           <TierBadge tier="strategic" variant="dot" />
@@ -77,22 +77,23 @@ export function MembersSection({
       <div
         role="listbox"
         aria-label="Team roster"
+        aria-activedescendant={selectedMemberId ? `member-tile-${selectedMemberId}` : undefined}
         tabIndex={0}
         onKeyDown={(e) => {
-          if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+          if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
           e.preventDefault();
           const idx = members.findIndex((m) => m.id === selectedMemberId);
           if (idx < 0) return;
-          const delta = e.key === 'ArrowRight' ? 1 : -1;
+          const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
           const next = members[(idx + delta + members.length) % members.length];
           if (next) setSelectedMemberId(next.id);
         }}
         style={{
-          display: 'flex',
-          gap: 8,
-          overflowX: 'auto',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+          gap: 10,
           padding: 2,
-          marginBottom: 6,
+          marginBottom: 12,
           outline: 'none',
         }}
       >
@@ -100,8 +101,9 @@ export function MembersSection({
           const base = baseById.get(m.id);
           const edited = base ? isMemberEdited(m, base) : false;
           return (
-            <RevealItem key={m.id} index={i} yOffset={6}>
+            <RevealItem key={m.id} index={i} yOffset={6} style={{ minWidth: 0 }}>
               <MemberTile
+                id={`member-tile-${m.id}`}
                 name={m.name}
                 role={m.role}
                 emoji={base?.emoji}
@@ -110,6 +112,7 @@ export function MembersSection({
                 selected={m.id === selectedMemberId}
                 edited={edited}
                 onClick={() => setSelectedMemberId(m.id)}
+                style={{ width: '100%' }}
               />
             </RevealItem>
           );
@@ -137,7 +140,7 @@ export function MembersSection({
             textAlign: 'center',
           }}
         >
-          Select a tile above to edit that member.
+          Select a card above to edit that member.
         </div>
       )}
     </SectionCard>

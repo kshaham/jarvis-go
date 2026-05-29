@@ -1,3 +1,4 @@
+import { Input } from '@/components/ui';
 import { ChipGroup, Field, inputStyle, SectionCard, Toggle } from './formPrimitives';
 
 type Provider = 'claude-subscription' | 'claude-api' | 'zai-glm';
@@ -75,12 +76,12 @@ export function DefaultsSection({
       </Field>
 
       <Field label="Model" hint="Leave blank for the provider default.">
-        <input
+        <Input
           value={defaultModel}
           onChange={(e) => setDefaultModel(e.target.value)}
           placeholder={modelPlaceholder}
           aria-label="Default model"
-          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+          style={{ fontFamily: 'var(--font-mono)' }}
         />
       </Field>
 

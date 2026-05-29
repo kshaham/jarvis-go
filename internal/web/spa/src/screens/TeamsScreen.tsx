@@ -1,9 +1,12 @@
-import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { toast } from 'sonner';
+import { UsersRound, X } from 'lucide-react';
 
-import { Metric, Press, RevealItem, StatusDot } from '../components/motion';
+import { Metric, StatusDot } from '../components/motion';
 import { Modal } from '../components/motion/Modal';
+import { Button, EmptyState, Field, GlowCard, Input, Skeleton } from '../components/ui';
 import { spring } from '../lib/motion';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import {
@@ -26,6 +29,9 @@ export function TeamsScreen() {
   const peerList = peers.data?.peers ?? [];
   const memberCount = status.data?.teamSpawned ? status.data.members?.length || 0 : 0;
   const [editOpen, setEditOpen] = useState(false);
+  // AutoAnimate owns enter/exit/reorder of the peer grid as peers are
+  // added/removed or reorder over SSE (respects reduced motion).
+  const [gridRef] = useAutoAnimate<HTMLDivElement>();
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -46,39 +52,18 @@ export function TeamsScreen() {
           </p>
         </div>
         <Link to="/peers/new" style={{ textDecoration: 'none' }}>
-          <Press pressScale={0.97}>
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '10px 16px',
-                background: 'var(--accent)',
-                color: '#fff',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 14,
-                fontWeight: 600,
-              }}
-            >
-              + Add peer team
-            </span>
-          </Press>
+          <Button variant="primary">+ Add peer team</Button>
         </Link>
       </header>
 
       {/* Local team hero */}
-      <motion.section
+      <GlowCard
+        live
+        spotlight
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={spring.smooth}
-        style={{
-          padding: 20,
-          borderRadius: 'var(--radius-card)',
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border-subtle)',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
+        className="flex flex-col gap-4 p-5"
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div
@@ -129,22 +114,9 @@ export function TeamsScreen() {
               {identity.data?.peerId || '—'}
             </div>
           </div>
-          <Press pressScale={0.96} onClick={() => setEditOpen(true)}>
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '8px 14px',
-                background: 'var(--bg-pressed)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              Edit identity
-            </span>
-          </Press>
+          <Button variant="secondary" onClick={() => setEditOpen(true)}>
+            Edit identity
+          </Button>
         </div>
 
         {status.data?.mission ? (
@@ -178,7 +150,7 @@ export function TeamsScreen() {
             text={identity.data?.publicUrl || 'unset'}
           />
         </div>
-      </motion.section>
+      </GlowCard>
 
       {/* Peer grid */}
       <section>
@@ -193,14 +165,12 @@ export function TeamsScreen() {
           <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: 'var(--text-primary)' }}>
             Peer teams
           </h2>
-          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-            <Metric value={peerList.length} size={12} /> registered
+          <span className="inline-flex items-baseline gap-1" style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            <Metric value={peerList.length} size={12} tone="muted" pulseOnChange /> registered
           </span>
         </header>
 
-        {peerList.length === 0 ? (
-          <EmptyPeers />
-        ) : (
+        {peers.isLoading ? (
           <div
             style={{
               display: 'grid',
@@ -208,10 +178,32 @@ export function TeamsScreen() {
               gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
             }}
           >
-            {peerList.map((peer, i) => (
-              <RevealItem key={peer.peerId} index={i}>
-                <PeerCard peer={peer} />
-              </RevealItem>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <PeerCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : peerList.length === 0 ? (
+          <EmptyState
+            icon={<UsersRound size={22} />}
+            title="No peer teams yet"
+            description="Add another jarvis instance as a peer and you can exchange messages + knowledge between teams."
+            action={
+              <Link to="/peers/new" style={{ textDecoration: 'none' }}>
+                <Button variant="primary">Add a peer →</Button>
+              </Link>
+            }
+          />
+        ) : (
+          <div
+            ref={gridRef}
+            style={{
+              display: 'grid',
+              gap: 14,
+              gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            }}
+          >
+            {peerList.map((peer) => (
+              <PeerCard key={peer.peerId} peer={peer} />
             ))}
           </div>
         )}
@@ -246,7 +238,7 @@ function StatTile({
         {label}
       </span>
       {typeof value === 'number' ? (
-        <Metric value={value} size={20} tone={tone} />
+        <Metric value={value} size={20} tone={tone} pulseOnChange />
       ) : (
         <span
           style={{
@@ -271,21 +263,29 @@ function PeerCard({ peer }: { peer: Peer }) {
   const ping = usePingPeer();
   const remove = useRemovePeer();
   const dotStatus = mapPeerStatusToDot(peer.status);
+
+  const onPing = () => {
+    ping.mutate(peer.peerId, {
+      onSuccess: (res) => {
+        if (res.error) toast.error(`Ping failed: ${res.error}`);
+        else toast.success(`${peer.displayName} is reachable`);
+      },
+      onError: (e) =>
+        toast.error(`Ping failed: ${e instanceof Error ? e.message : String(e)}`),
+    });
+  };
+
+  const onRemove = () => {
+    if (!window.confirm(`Remove peer "${peer.displayName}"?`)) return;
+    remove.mutate(peer.peerId, {
+      onSuccess: () => toast.success(`Removed ${peer.displayName}`),
+      onError: (e) =>
+        toast.error(`Remove failed: ${e instanceof Error ? e.message : String(e)}`),
+    });
+  };
+
   return (
-    <motion.article
-      whileHover={{ borderColor: 'var(--border-strong)', y: -1 }}
-      transition={spring.smooth}
-      style={{
-        padding: 16,
-        borderRadius: 'var(--radius-card)',
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-      }}
-    >
+    <GlowCard interactive live={peer.status === 'ok'} className="flex flex-col gap-2.5 p-4">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <StatusDot status={dotStatus} size={8} />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -316,6 +316,7 @@ function PeerCard({ peer }: { peer: Peer }) {
         </div>
         {peer.unreadInbound ? (
           <span
+            className="shadow-glow-sm"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -330,7 +331,7 @@ function PeerCard({ peer }: { peer: Peer }) {
               fontWeight: 700,
             }}
           >
-            <Metric value={peer.unreadInbound} size={11} tone="accent" />
+            <Metric value={peer.unreadInbound} size={11} tone="accent" pulseOnChange />
           </span>
         ) : null}
       </div>
@@ -373,137 +374,53 @@ function PeerCard({ peer }: { peer: Peer }) {
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 8 }}>
-        <Press
-          pressScale={0.94}
-          onClick={() => ping.mutate(peer.peerId)}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onPing}
           disabled={ping.isPending}
-          style={{ flex: 1 } as React.CSSProperties}
+          className="flex-1"
         >
-          <span
-            style={{
-              display: 'block',
-              padding: '8px 10px',
-              background: 'var(--bg-pressed)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--text-primary)',
-              fontSize: 12,
-              fontWeight: 600,
-              textAlign: 'center',
-            }}
-          >
-            {ping.isPending ? 'Pinging…' : 'Ping'}
-          </span>
-        </Press>
+          {ping.isPending ? 'Pinging…' : 'Ping'}
+        </Button>
         <Link
           to={`/relay?peer=${encodeURIComponent(peer.peerId)}`}
           style={{ flex: 1, textDecoration: 'none' }}
         >
-          <Press pressScale={0.94}>
-            <span
-              style={{
-                display: 'block',
-                padding: '8px 10px',
-                background: 'var(--accent)',
-                color: '#fff',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: 12,
-                fontWeight: 600,
-                textAlign: 'center',
-              }}
-            >
-              Send message
-            </span>
-          </Press>
+          <Button variant="primary" size="sm" className="w-full">
+            Send message
+          </Button>
         </Link>
-        <Press
-          pressScale={0.92}
-          onClick={() => {
-            if (window.confirm(`Remove peer "${peer.displayName}"?`)) {
-              remove.mutate(peer.peerId);
-            }
-          }}
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={onRemove}
           disabled={remove.isPending}
+          aria-label={`Remove ${peer.displayName}`}
         >
-          <span
-            style={{
-              display: 'block',
-              padding: '8px 10px',
-              background: 'transparent',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--text-muted)',
-              fontSize: 12,
-              fontWeight: 600,
-              minWidth: 32,
-              textAlign: 'center',
-            }}
-          >
-            ✕
-          </span>
-        </Press>
+          <X size={14} />
+        </Button>
       </div>
-    </motion.article>
+    </GlowCard>
   );
 }
 
-function EmptyPeers() {
+function PeerCardSkeleton() {
   return (
-    <div
-      style={{
-        padding: '48px 24px',
-        borderRadius: 'var(--radius-card)',
-        background: 'var(--bg-elevated)',
-        border: '1px dashed var(--border-default)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 12,
-      }}
-    >
-      <motion.div
-        animate={{ scale: [1, 0.92, 1], opacity: [0.6, 0.85, 0.6] }}
-        transition={{ duration: 4, repeat: Infinity }}
-        style={{
-          width: 48,
-          height: 48,
-          borderRadius: 14,
-          border: '1px solid var(--border-strong)',
-          background: 'transparent',
-        }}
-      />
-      <div style={{ color: 'var(--text-primary)', fontSize: 17, fontWeight: 600 }}>
-        No peer teams yet
+    <div className="surface-card flex flex-col gap-2.5 p-4">
+      <div className="flex items-center gap-2.5">
+        <Skeleton className="h-2 w-2 shrink-0 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-3.5 w-32" />
+          <Skeleton className="h-2.5 w-40" />
+        </div>
       </div>
-      <div
-        style={{
-          color: 'var(--text-muted)',
-          fontSize: 13,
-          textAlign: 'center',
-          maxWidth: 360,
-          lineHeight: 1.5,
-        }}
-      >
-        Add another jarvis instance as a peer and you can exchange messages + knowledge
-        between teams.
+      <Skeleton className="h-2.5 w-3/4" />
+      <div className="flex gap-2">
+        <Skeleton className="h-8 flex-1 rounded-md" />
+        <Skeleton className="h-8 flex-1 rounded-md" />
+        <Skeleton className="h-8 w-9 rounded-md" />
       </div>
-      <Link to="/peers/new" style={{ textDecoration: 'none', marginTop: 8 }}>
-        <Press pressScale={0.96}>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '10px 16px',
-              background: 'var(--accent)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 14,
-              fontWeight: 600,
-            }}
-          >
-            Add a peer →
-          </span>
-        </Press>
-      </Link>
     </div>
   );
 }
@@ -525,8 +442,21 @@ function IdentityEditModal({ open, onClose }: { open: boolean; onClose: () => vo
   }
 
   const submit = async () => {
-    await update.mutateAsync({ displayName, publicUrl });
-    onClose();
+    try {
+      await update.mutateAsync({ displayName, publicUrl });
+      toast.success('Identity saved');
+      onClose();
+    } catch (e) {
+      toast.error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const onGenerate = () => {
+    genToken.mutate(undefined, {
+      onSuccess: () => toast.success('Pair token generated'),
+      onError: (e) =>
+        toast.error(`Token failed: ${e instanceof Error ? e.message : String(e)}`),
+    });
   };
 
   return (
@@ -538,67 +468,37 @@ function IdentityEditModal({ open, onClose }: { open: boolean; onClose: () => vo
       size="lg"
       footer={
         <>
-          <Press pressScale={0.96} onClick={onClose}>
-            <span
-              style={{
-                padding: '8px 14px',
-                background: 'transparent',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-                fontWeight: 600,
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
-              Cancel
-            </span>
-          </Press>
-          <Press pressScale={0.96} onClick={submit} disabled={update.isPending}>
-            <span
-              style={{
-                padding: '8px 14px',
-                background: 'var(--accent)',
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 600,
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
-              {update.isPending ? 'Saving…' : 'Save'}
-            </span>
-          </Press>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={submit} disabled={update.isPending}>
+            {update.isPending ? 'Saving…' : 'Save'}
+          </Button>
         </>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <Field
-          label="Display name"
-          hint="Shown to peers in the relay feed."
-        >
-          <input
+        <Field label="Display name" hint="Shown to peers in the relay feed.">
+          <Input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="Frontend team"
-            style={inputStyle}
           />
         </Field>
         <Field
           label="Public URL"
           hint="The HTTPS endpoint other operators paste when adding you as a peer. Must reach this jarvis."
         >
-          <input
+          <Input
             value={publicUrl}
             onChange={(e) => setPublicUrl(e.target.value)}
             placeholder="https://frontend-team.example.com"
-            style={inputStyle}
           />
         </Field>
-        <Field
-          label="Peer ID"
-          hint="Immutable. Generated once on first startup."
-        >
+        <Field label="Peer ID" hint="Immutable. Generated once on first startup.">
           <code
+            className="field"
             style={{
-              ...inputStyle,
               fontFamily: 'var(--font-mono)',
               display: 'block',
               color: 'var(--text-muted)',
@@ -614,6 +514,7 @@ function IdentityEditModal({ open, onClose }: { open: boolean; onClose: () => vo
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            gap: 12,
             padding: 14,
             borderRadius: 'var(--radius-md)',
             background: 'var(--bg-surface)',
@@ -645,66 +546,14 @@ function IdentityEditModal({ open, onClose }: { open: boolean; onClose: () => vo
               </code>
             ) : null}
           </div>
-          <Press pressScale={0.94} onClick={() => genToken.mutate()} disabled={genToken.isPending}>
-            <span
-              style={{
-                padding: '8px 14px',
-                background: 'var(--bg-pressed)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-primary)',
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              {genToken.isPending ? 'Generating…' : 'Generate'}
-            </span>
-          </Press>
+          <Button variant="secondary" size="sm" onClick={onGenerate} disabled={genToken.isPending}>
+            {genToken.isPending ? 'Generating…' : 'Generate'}
+          </Button>
         </div>
       </div>
     </Modal>
   );
 }
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
-      </span>
-      {children}
-      {hint ? (
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.5 }}>{hint}</span>
-      ) : null}
-    </label>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  background: 'var(--bg-app)',
-  border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-md)',
-  color: 'var(--text-primary)',
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-};
 
 function mapPeerStatusToDot(status: PeerStatus): 'working' | 'idle' | 'meeting' | 'stuck' {
   switch (status) {

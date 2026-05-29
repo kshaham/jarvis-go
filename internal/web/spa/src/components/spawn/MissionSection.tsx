@@ -1,4 +1,5 @@
-import { inputStyle, SectionCard } from './formPrimitives';
+import { Textarea } from '@/components/ui';
+import { SectionCard } from './formPrimitives';
 
 const MAX = 1000;
 
@@ -29,7 +30,7 @@ export function MissionSection({
         </span>
       }
     >
-      <textarea
+      <Textarea
         value={value}
         onChange={(e) => onChange(e.target.value.slice(0, MAX))}
         rows={5}
@@ -40,7 +41,6 @@ export function MissionSection({
         }
         aria-label="Team mission"
         style={{
-          ...inputStyle,
           resize: 'vertical',
           minHeight: 96,
           lineHeight: 1.5,

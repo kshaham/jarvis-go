@@ -17,6 +17,17 @@ export default defineConfig({
     outDir: '../static/public/react',
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Keep the heavy data-viz vendors in their own stable, cacheable
+        // chunks. tldraw is intentionally absent — it's split
+        // automatically by the React.lazy import in WhiteboardScreen.
+        manualChunks: {
+          'vendor-charts': ['recharts'],
+          'vendor-flow': ['@xyflow/react', 'd3-force'],
+        },
+      },
+    },
   },
   server: {
     port: 5174,

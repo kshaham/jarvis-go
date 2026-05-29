@@ -1,8 +1,12 @@
 import { useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { FileText } from 'lucide-react';
 
-import { Metric, Press, RevealItem } from '../components/motion';
+import { Metric, Press } from '../components/motion';
 import { Modal } from '../components/motion/Modal';
+import { Button, EmptyState, GlowCard, Section, Skeleton } from '../components/ui';
 import { relativeTime } from '../lib/relativeTime';
 import { fetchJSON, fetchText } from '../api/client';
 import { useReports } from '../hooks/useOfficeData';
@@ -16,10 +20,16 @@ export function ReportsScreen() {
   const qc = useQueryClient();
   const [open, setOpen] = useState<SavedReport | null>(null);
   const [body, setBody] = useState<string>('');
+  // AutoAnimate owns enter/exit/reorder as reports are generated.
+  const [listRef] = useAutoAnimate<HTMLDivElement>();
 
   const generate = useMutation({
     mutationFn: () => fetchJSON('/api/office/reports/generate', { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['office', 'reports'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['office', 'reports'] });
+      toast.success('Report generated');
+    },
+    onError: () => toast.error('Failed to generate report'),
   });
 
   const list = reports.data?.reports ?? [];
@@ -35,6 +45,15 @@ export function ReportsScreen() {
     }
   };
 
+  const copyBody = async () => {
+    try {
+      await navigator.clipboard.writeText(body);
+      toast.success('Copied');
+    } catch {
+      toast.error('Copy failed');
+    }
+  };
+
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
@@ -46,50 +65,35 @@ export function ReportsScreen() {
             Saved wrap-up reports. Generate a fresh snapshot without ending the session.
           </p>
         </div>
-        <Press pressScale={0.96} onClick={() => generate.mutate()} disabled={generate.isPending}>
-          <span
-            style={{
-              padding: '10px 16px',
-              background: 'var(--accent)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 14,
-              fontWeight: 600,
-              opacity: generate.isPending ? 0.6 : 1,
-            }}
-          >
-            {generate.isPending ? 'Generating…' : 'Generate report'}
-          </span>
-        </Press>
+        <Button onClick={() => generate.mutate()} disabled={generate.isPending}>
+          {generate.isPending ? 'Generating…' : 'Generate report'}
+        </Button>
       </header>
 
-      <section
-        style={{
-          padding: 14,
-          borderRadius: 'var(--radius-card)',
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-        }}
-      >
-        <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-            Saved reports
-          </h2>
+      <Section
+        title="Saved reports"
+        trailing={
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            <Metric value={list.length} size={11} /> on disk
+            <Metric value={list.length} size={11} pulseOnChange /> on disk
           </span>
-        </header>
-        {list.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 32 }}>
-            No reports saved yet.
-          </div>
-        ) : (
+        }
+      >
+        {reports.isLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {list.map((r, i) => (
-              <RevealItem key={r.filename} index={Math.min(i, 12)}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <ReportSkeleton key={i} />
+            ))}
+          </div>
+        ) : list.length === 0 ? (
+          <EmptyState
+            icon={<FileText size={22} />}
+            title="No reports saved yet"
+            description="Generate a snapshot to capture the team's progress without ending the session."
+          />
+        ) : (
+          <div ref={listRef} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {list.map((r) => (
+              <GlowCard key={r.filename} interactive className="p-0">
                 <Press
                   pressScale={0.97}
                   onClick={() => openReport(r)}
@@ -98,9 +102,6 @@ export function ReportsScreen() {
                     alignItems: 'center',
                     gap: 12,
                     padding: '10px 12px',
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
                     width: '100%',
                     cursor: 'pointer',
                   }}
@@ -141,11 +142,11 @@ export function ReportsScreen() {
                     </span>
                   ) : null}
                 </Press>
-              </RevealItem>
+              </GlowCard>
             ))}
           </div>
         )}
-      </section>
+      </Section>
 
       <Modal
         open={!!open}
@@ -155,42 +156,10 @@ export function ReportsScreen() {
         size="lg"
         footer={
           <>
-            <Press
-              pressScale={0.96}
-              onClick={async () => {
-                if (open) {
-                  await navigator.clipboard.writeText(body);
-                }
-              }}
-            >
-              <span
-                style={{
-                  padding: '8px 14px',
-                  background: 'var(--bg-pressed)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)',
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-              >
-                Copy
-              </span>
-            </Press>
-            <Press pressScale={0.96} onClick={() => setOpen(null)}>
-              <span
-                style={{
-                  padding: '8px 14px',
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-              >
-                Close
-              </span>
-            </Press>
+            <Button variant="secondary" onClick={copyBody}>
+              Copy
+            </Button>
+            <Button onClick={() => setOpen(null)}>Close</Button>
           </>
         }
       >
@@ -208,5 +177,17 @@ export function ReportsScreen() {
         </pre>
       </Modal>
     </section>
+  );
+}
+
+function ReportSkeleton() {
+  return (
+    <div className="surface-card flex items-center gap-3 px-3 py-2.5">
+      <div className="flex-1 space-y-2">
+        <Skeleton className="h-3 w-1/3" />
+        <Skeleton className="h-2.5 w-2/3" />
+      </div>
+      <Skeleton className="h-2.5 w-12" />
+    </div>
   );
 }

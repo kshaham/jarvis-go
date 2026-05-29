@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 import { Modal } from './motion/Modal';
-import { Press } from './motion';
+import { Button, Chip, Field, Input, Textarea } from './ui';
 import { fetchJSON } from '../api/client';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import type { TaskPriority } from '../api/types';
@@ -11,6 +12,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
 };
+
+const PRIORITIES: TaskPriority[] = ['high', 'medium', 'low'];
 
 // QuickAddTaskModal — bound to the AppShell "+ Task" button and the
 // `t` keyboard shortcut. Drops a task into any agent's queue via
@@ -47,8 +50,10 @@ export function QuickAddTaskModal({ open, onClose }: Props) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['office', 'task-queues'] });
+      toast.success('Task added to queue');
       onClose();
     },
+    onError: () => toast.error('Could not add task'),
   });
 
   const canSubmit = !!sessionId && title.trim().length > 0;
@@ -62,45 +67,22 @@ export function QuickAddTaskModal({ open, onClose }: Props) {
       description="Drop a task into any agent's queue. They'll pick it up at the next turn."
       footer={
         <>
-          <Press pressScale={0.96} onClick={onClose}>
-            <span
-              style={{
-                padding: '8px 14px',
-                background: 'transparent',
-                color: 'var(--text-muted)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              Cancel
-            </span>
-          </Press>
-          <Press
-            pressScale={0.96}
-            onClick={() => submit.mutate()}
-            disabled={!canSubmit || submit.isPending}
-          >
-            <span
-              style={{
-                padding: '8px 16px',
-                background: 'var(--accent)',
-                color: '#fff',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 13,
-                fontWeight: 600,
-                opacity: !canSubmit || submit.isPending ? 0.5 : 1,
-              }}
-            >
-              {submit.isPending ? 'Adding…' : 'Add task'}
-            </span>
-          </Press>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => submit.mutate()} disabled={!canSubmit || submit.isPending}>
+            {submit.isPending ? 'Adding…' : 'Add task'}
+          </Button>
         </>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Field label="Assign to">
-          <select value={sessionId} onChange={(e) => setSessionId(e.target.value)} style={inputStyle}>
+          <select
+            value={sessionId}
+            onChange={(e) => setSessionId(e.target.value)}
+            className="field"
+          >
             <option value="">Select an agent…</option>
             {members.map((m) => (
               <option key={m.sessionId} value={m.sessionId}>
@@ -110,87 +92,37 @@ export function QuickAddTaskModal({ open, onClose }: Props) {
           </select>
         </Field>
         <Field label="Title">
-          <input
+          <Input
             autoFocus
             value={title}
             onChange={(e) => setTitle(e.target.value.slice(0, 200))}
             placeholder="Short summary (≤ 200 chars)"
-            style={inputStyle}
           />
         </Field>
         <Field label="Description" hint="Optional details (≤ 800 chars).">
-          <textarea
+          <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value.slice(0, 800))}
             rows={4}
             placeholder="Details, links, expected output, etc."
-            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+            style={{ resize: 'vertical' }}
           />
         </Field>
         <Field label="Priority">
           <div style={{ display: 'flex', gap: 6 }}>
-            {(['high', 'medium', 'low'] as TaskPriority[]).map((p) => {
-              const active = p === priority;
-              const color =
-                p === 'high'
-                  ? 'var(--status-error)'
-                  : p === 'low'
-                    ? 'var(--text-muted)'
-                    : 'var(--status-warn)';
-              return (
-                <Press key={p} pressScale={0.95} onClick={() => setPriority(p)}>
-                  <span
-                    style={{
-                      padding: '6px 14px',
-                      background: active ? 'var(--accent-muted)' : 'var(--bg-pressed)',
-                      border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border-default)'),
-                      borderRadius: 999,
-                      color: active ? 'var(--accent)' : color,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      textTransform: 'capitalize',
-                      display: 'inline-block',
-                    }}
-                  >
-                    {p}
-                  </span>
-                </Press>
-              );
-            })}
+            {PRIORITIES.map((p) => (
+              <Chip
+                key={p}
+                active={p === priority}
+                onClick={() => setPriority(p)}
+                className="capitalize"
+              >
+                {p}
+              </Chip>
+            ))}
           </div>
         </Field>
       </div>
     </Modal>
   );
 }
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
-        {label}
-      </span>
-      {children}
-      {hint ? <span style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.4 }}>{hint}</span> : null}
-    </label>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  padding: 10,
-  background: 'var(--bg-app)',
-  border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-md)',
-  color: 'var(--text-primary)',
-  fontSize: 13,
-  outline: 'none',
-  width: '100%',
-};

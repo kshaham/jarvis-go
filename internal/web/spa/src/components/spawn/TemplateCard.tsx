@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
-import { Press } from '../motion';
+import { GlowCard } from '@/components/ui';
 import { Avatar, AvatarStack } from './Avatar';
 import { leadOf } from './templateHelpers';
 import { TierCounts } from './TierBadge';
@@ -18,111 +18,117 @@ export function TemplateCard({
   style?: CSSProperties;
 }) {
   const lead = leadOf(tpl);
-  const ring = selected ? 'var(--accent)' : 'var(--border-subtle)';
-  const bg = selected ? 'var(--accent-muted)' : 'var(--bg-elevated)';
 
+  // GlowCard gives the hover lift + violet shadow grow; `live` keeps the
+  // selected card glowing at rest. The accent ring on selection is layered
+  // via inline border so it reads as "chosen" even without hover.
   return (
-    <Press pressScale={0.98} onClick={onSelect}>
-      <article
-        aria-pressed={selected}
-        style={{
-          padding: 12,
-          background: bg,
-          border: `1px solid ${ring}`,
-          borderRadius: 'var(--radius-card)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          cursor: 'pointer',
-          transition: 'background 120ms ease, border-color 120ms ease',
-          ...style,
-        }}
-      >
-        <header style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {lead ? (
-            <Avatar
-              name={lead.name}
-              emoji={lead.emoji}
-              color={lead.color}
-              tier={lead.tier as Tier | undefined}
-              size="md"
-              ring
-            />
-          ) : null}
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              fontSize: 14,
-              fontWeight: 700,
-              color: 'var(--text-primary)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {tpl.name}
-          </span>
-        </header>
-
-        {tpl.description ? (
-          <p
-            style={{
-              margin: 0,
-              fontSize: 12,
-              color: 'var(--text-secondary)',
-              lineHeight: 1.4,
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }}
-          >
-            {tpl.description}
-          </p>
-        ) : null}
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AvatarStack
-            members={tpl.members.map((m) => ({
-              name: m.name,
-              emoji: m.emoji,
-              color: m.color,
-              tier: m.tier as Tier | undefined,
-            }))}
-            max={5}
-            size="sm"
+    <GlowCard
+      interactive
+      live={selected}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className="focus-ring flex cursor-pointer flex-col gap-2.5 p-3"
+      style={{
+        background: selected ? 'var(--accent-muted)' : 'var(--bg-elevated)',
+        border: '1px solid ' + (selected ? 'rgb(var(--accent-rgb))' : 'var(--border-subtle)'),
+        ...style,
+      }}
+    >
+      <header style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {lead ? (
+          <Avatar
+            name={lead.name}
+            emoji={lead.emoji}
+            color={lead.color}
+            tier={lead.tier as Tier | undefined}
+            size="md"
+            ring
           />
-        </div>
-
-        <footer
+        ) : null}
+        <span
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
+            flex: 1,
+            minWidth: 0,
+            fontSize: 15,
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            lineHeight: 1.3,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
           }}
         >
-          <TierCounts members={tpl.members.map((m) => ({ tier: m.tier as Tier | undefined }))} />
-          {tpl.category ? (
-            <span
-              style={{
-                padding: '2px 8px',
-                background: 'var(--bg-pressed)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-pill)',
-                color: 'var(--text-muted)',
-                fontSize: 11,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: 0.4,
-              }}
-            >
-              {tpl.category}
-            </span>
-          ) : null}
-        </footer>
-      </article>
-    </Press>
+          {tpl.name}
+        </span>
+      </header>
+
+      {tpl.description ? (
+        <p
+          style={{
+            margin: 0,
+            fontSize: 12,
+            color: 'var(--text-secondary)',
+            lineHeight: 1.4,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {tpl.description}
+        </p>
+      ) : null}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <AvatarStack
+          members={tpl.members.map((m) => ({
+            name: m.name,
+            emoji: m.emoji,
+            color: m.color,
+            tier: m.tier as Tier | undefined,
+          }))}
+          max={5}
+          size="sm"
+        />
+      </div>
+
+      <footer
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <TierCounts members={tpl.members.map((m) => ({ tier: m.tier as Tier | undefined }))} />
+        {tpl.category ? (
+          <span
+            style={{
+              padding: '2px 8px',
+              background: 'var(--bg-pressed)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-pill)',
+              color: 'var(--text-muted)',
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: 0.4,
+            }}
+          >
+            {tpl.category}
+          </span>
+        ) : null}
+      </footer>
+    </GlowCard>
   );
 }

@@ -1,37 +1,44 @@
+import '@xyflow/react/dist/style.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useReducedMotion } from 'motion/react';
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  ReactFlowProvider,
+  useEdgesState,
+  useNodesState,
+  useReactFlow,
+  type Edge,
+  type Node,
+  type NodeTypes,
+} from '@xyflow/react';
 
 import { Metric, Press, StatusDot } from '../components/motion';
 import { Modal } from '../components/motion/Modal';
+import { AgentFlowNode } from '../components/network/AgentFlowNode';
+import { settleLayout } from '../lib/forceLayout';
 import { useOfficeMessages } from '../hooks/useOfficeData';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import type { AgentStatus, OfficeMember } from '../api/types';
 
-// NetworkScreen — agents as nodes, messages as edges. Force-directed
-// layout port of office.js's velocity-Verlet sim (simplified). Color
-// reflects status; edge thickness reflects message volume between a
-// pair; edge opacity reflects recency. Click a node to open a
-// detail panel.
-type Node = {
-  id: string;
-  member: OfficeMember;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  fx?: number; // pin (drag)
-  fy?: number;
-};
+// NetworkScreen — agents as nodes, messages as edges, rendered with
+// React Flow. Layout is a one-shot d3-force settle (see settleLayout);
+// edge thickness = message volume, opacity = recency. Click a node for
+// detail. Re-layout only happens on topology change or a manual
+// Relayout — never per SSE message (avoids a re-render storm).
+const W = 900;
+const H = 560;
 
-type Edge = {
+// Module-scope so React Flow doesn't re-instantiate nodes each render.
+const nodeTypes: NodeTypes = { agent: AgentFlowNode };
+
+type MsgEdge = {
   source: string;
   target: string;
   count: number;
   lastTs: number;
 };
-
-const W = 900;
-const H = 560;
-const TICK_LIMIT = 200;
 
 export function NetworkScreen() {
   const status = useOfficeStatus();
@@ -41,11 +48,12 @@ export function NetworkScreen() {
   const [hideIdle, setHideIdle] = useState(false);
   const [activeOnly, setActiveOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [relayoutSeed, setRelayoutSeed] = useState(0);
   const selectedMember = members.find((m) => m.sessionId === selectedId) ?? null;
 
   // Aggregate messages → edges (undirected, dedup by pair).
-  const edges = useMemo<Edge[]>(() => {
-    const map = new Map<string, Edge>();
+  const edges = useMemo<MsgEdge[]>(() => {
+    const map = new Map<string, MsgEdge>();
     for (const m of messages.data?.messages ?? []) {
       const a = m.fromSessionId;
       const b = m.toSessionId;
@@ -63,74 +71,23 @@ export function NetworkScreen() {
     return Array.from(map.values());
   }, [messages.data?.messages]);
 
-  // Filter members + edges.
   const visibleMembers = useMemo(
     () => (hideIdle ? members.filter((m) => m.status !== 'idle') : members),
     [members, hideIdle],
   );
-  const visibleSet = useMemo(() => new Set(visibleMembers.map((m) => m.sessionId)), [visibleMembers]);
+  const visibleSet = useMemo(
+    () => new Set(visibleMembers.map((m) => m.sessionId)),
+    [visibleMembers],
+  );
   const visibleEdges = useMemo(() => {
     let list = edges.filter((e) => visibleSet.has(e.source) && visibleSet.has(e.target));
     if (activeOnly) {
-      // "Active" = touched in the last hour.
       const cutoff = Date.now() - 60 * 60_000;
       list = list.filter((e) => e.lastTs >= cutoff);
     }
     return list;
   }, [edges, visibleSet, activeOnly]);
 
-  // Force-directed layout state (refs because we don't want to re-render every tick).
-  const nodesRef = useRef<Map<string, Node>>(new Map());
-  const tickRef = useRef<number>(0);
-  // bumping `tickFrame` once per RAF triggers an SVG re-render.
-  const [, setTickFrame] = useState(0);
-
-  // Sync nodes set with visibleMembers — preserve positions for nodes
-  // that survived a re-filter; assign random positions to newcomers.
-  useEffect(() => {
-    const m = nodesRef.current;
-    const ids = new Set(visibleMembers.map((mem) => mem.sessionId));
-    for (const k of m.keys()) {
-      if (!ids.has(k)) m.delete(k);
-    }
-    for (const mem of visibleMembers) {
-      const existing = m.get(mem.sessionId);
-      if (existing) {
-        // Keep position, refresh the member ref so status / cost render fresh.
-        existing.member = mem;
-      } else {
-        m.set(mem.sessionId, {
-          id: mem.sessionId,
-          member: mem,
-          x: W / 2 + (Math.random() - 0.5) * 100,
-          y: H / 2 + (Math.random() - 0.5) * 100,
-          vx: 0,
-          vy: 0,
-        });
-      }
-    }
-    tickRef.current = 0; // restart the cooldown
-  }, [visibleMembers]);
-
-  // rAF simulation loop. Cools down after TICK_LIMIT ticks; resumes
-  // when membership changes (above). Pure simulation — no React state
-  // touches happen here except setTickFrame to schedule re-render.
-  useEffect(() => {
-    let raf = 0;
-    const step = () => {
-      const t = tickRef.current;
-      if (t < TICK_LIMIT) {
-        simulate(nodesRef.current, visibleEdges);
-        tickRef.current += 1;
-        setTickFrame((v) => (v + 1) & 0xffff);
-      }
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [visibleEdges]);
-
-  const nodes = Array.from(nodesRef.current.values());
   const maxCount = visibleEdges.reduce((m, e) => Math.max(m, e.count), 1);
 
   return (
@@ -141,25 +98,18 @@ export function NetworkScreen() {
             Network
           </h1>
           <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
-            Agents as nodes, messages as edges. Edge thickness = volume; opacity = recency.
+            Agents as nodes, messages as edges. Edge thickness = volume; opacity = recency. Drag,
+            zoom, and click a node for detail.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <ToggleChip label="Hide idle" active={hideIdle} onClick={() => setHideIdle((v) => !v)} />
-          <ToggleChip label="Active edges only" active={activeOnly} onClick={() => setActiveOnly((v) => !v)} />
-          <Press
-            pressScale={0.96}
-            onClick={() => {
-              tickRef.current = 0;
-              // Jitter positions so the layout re-runs.
-              for (const n of nodesRef.current.values()) {
-                n.x = W / 2 + (Math.random() - 0.5) * 80;
-                n.y = H / 2 + (Math.random() - 0.5) * 80;
-                n.vx = 0;
-                n.vy = 0;
-              }
-            }}
-          >
+          <ToggleChip
+            label="Active edges only"
+            active={activeOnly}
+            onClick={() => setActiveOnly((v) => !v)}
+          />
+          <Press pressScale={0.96} onClick={() => setRelayoutSeed((s) => s + 1)}>
             <span
               style={{
                 padding: '6px 12px',
@@ -191,94 +141,31 @@ export function NetworkScreen() {
         <Legend status="meeting" label="Meeting" />
         <Legend status="stuck" label="Stuck" />
         <span style={{ marginLeft: 'auto' }}>
-          <Metric value={nodes.length} size={11} /> nodes ·{' '}
+          <Metric value={visibleMembers.length} size={11} /> nodes ·{' '}
           <Metric value={visibleEdges.length} size={11} /> edges
         </span>
       </div>
 
       <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          padding: 14,
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-card)',
-          overflow: 'hidden',
-        }}
+        className="surface-card"
+        style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}
       >
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" style={{ display: 'block' }}>
-          {/* Edges */}
-          <g>
-            {visibleEdges.map((e, i) => {
-              const a = nodesRef.current.get(e.source);
-              const b = nodesRef.current.get(e.target);
-              if (!a || !b) return null;
-              const ageHrs = (Date.now() - e.lastTs) / 3_600_000;
-              const opacity = Math.max(0.12, Math.min(0.75, 1 - ageHrs / 24));
-              const stroke = Math.max(1, (e.count / maxCount) * 5);
-              return (
-                <line
-                  key={i}
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  stroke="var(--accent)"
-                  strokeOpacity={opacity}
-                  strokeWidth={stroke}
-                />
-              );
-            })}
-          </g>
-          {/* Nodes */}
-          <g>
-            {nodes.map((n) => {
-              const color = colorForStatus(n.member.status);
-              return (
-                <g
-                  key={n.id}
-                  transform={`translate(${n.x},${n.y})`}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => setSelectedId(n.id)}
-                >
-                  <circle
-                    r={16}
-                    fill="var(--bg-elevated)"
-                    stroke={color}
-                    strokeWidth={2}
-                  />
-                  <text
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontSize={11}
-                    fontWeight={700}
-                    fill="var(--text-primary)"
-                  >
-                    {(n.member.avatarEmoji ||
-                      n.member.avatarInitial ||
-                      n.member.name?.[0] ||
-                      '?').toString().slice(0, 1)}
-                  </text>
-                  <text
-                    y={28}
-                    textAnchor="middle"
-                    fontSize={10}
-                    fill="var(--text-muted)"
-                  >
-                    {n.member.name}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        </svg>
+        <ReactFlowProvider>
+          <NetworkGraph
+            members={visibleMembers}
+            edges={visibleEdges}
+            maxCount={maxCount}
+            relayoutSeed={relayoutSeed}
+            onSelect={setSelectedId}
+          />
+        </ReactFlowProvider>
       </div>
 
       <Modal
         open={!!selectedMember}
         onOpenChange={(next) => (next ? null : setSelectedId(null))}
         size="md"
+        glow={selectedMember?.status === 'working'}
         title={selectedMember?.name ?? ''}
         description={selectedMember?.role}
       >
@@ -287,11 +174,20 @@ export function NetworkScreen() {
             <div style={{ display: 'flex', gap: 18 }}>
               <Stat label="Status" value={selectedMember.status} />
               <Stat label="Cost" value={`$${(selectedMember.totalCost ?? 0).toFixed(2)}`} />
-              {selectedMember.score?.grade ? <Stat label="Grade" value={selectedMember.score.grade} /> : null}
+              {selectedMember.score?.grade ? (
+                <Stat label="Grade" value={selectedMember.score.grade} />
+              ) : null}
             </div>
             {selectedMember.workingDir ? (
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                <span style={{ display: 'block', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: 10,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.4,
+                  }}
+                >
                   Working dir
                 </span>
                 <code style={{ fontFamily: 'var(--font-mono)' }}>{selectedMember.workingDir}</code>
@@ -305,14 +201,111 @@ export function NetworkScreen() {
   );
 }
 
-// PeerEdges — shows which agents this one has exchanged messages with.
+// edgeFrom — map an aggregated message edge to a React Flow edge with
+// the volume/recency styling. CSS var stroke resolves against :root.
+function edgeFrom(e: MsgEdge, maxCount: number): Edge {
+  const ageHrs = (Date.now() - e.lastTs) / 3_600_000;
+  const opacity = Math.max(0.12, Math.min(0.75, 1 - ageHrs / 24));
+  const width = Math.max(1, (e.count / maxCount) * 5);
+  return {
+    id: `${e.source}-${e.target}`,
+    source: e.source,
+    target: e.target,
+    type: 'straight',
+    style: { stroke: 'var(--accent)', strokeOpacity: opacity, strokeWidth: width },
+  };
+}
+
+function NetworkGraph({
+  members,
+  edges,
+  maxCount,
+  relayoutSeed,
+  onSelect,
+}: {
+  members: OfficeMember[];
+  edges: MsgEdge[];
+  maxCount: number;
+  relayoutSeed: number;
+  onSelect: (id: string) => void;
+}) {
+  const reduce = useReducedMotion();
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const { fitView } = useReactFlow();
+  const topoRef = useRef('');
+
+  useEffect(() => {
+    const nodeIds = members.map((m) => m.sessionId);
+    const memberById = new Map(members.map((m) => [m.sessionId, m] as const));
+    const topoKey =
+      [...nodeIds].sort().join(',') +
+      '||' +
+      edges.map((e) => `${e.source}-${e.target}`).sort().join(',') +
+      '||' +
+      relayoutSeed;
+
+    if (topoKey !== topoRef.current) {
+      // Topology changed (or manual relayout) — recompute positions.
+      topoRef.current = topoKey;
+      const pos = settleLayout(
+        nodeIds,
+        edges.map((e) => ({ source: e.source, target: e.target })),
+        W,
+        H,
+      );
+      setNodes(
+        nodeIds.map((id) => ({
+          id,
+          type: 'agent',
+          position: pos.get(id) ?? { x: W / 2, y: H / 2 },
+          data: { member: memberById.get(id) as OfficeMember },
+        })),
+      );
+      setRfEdges(edges.map((e) => edgeFrom(e, maxCount)));
+      requestAnimationFrame(() => fitView({ padding: 0.2, duration: reduce ? 0 : 400 }));
+    } else {
+      // Same topology — refresh node data + edge styling in place,
+      // keep positions (and any user drag) stable.
+      setNodes((prev) =>
+        prev.map((n) => {
+          const m = memberById.get(n.id);
+          return m ? { ...n, data: { member: m } } : n;
+        }),
+      );
+      setRfEdges(edges.map((e) => edgeFrom(e, maxCount)));
+    }
+  }, [members, edges, maxCount, relayoutSeed, reduce, setNodes, setRfEdges, fitView]);
+
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={rfEdges}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      nodeTypes={nodeTypes}
+      onNodeClick={(_, node) => onSelect(node.id)}
+      fitView
+      minZoom={0.2}
+      maxZoom={2}
+      proOptions={{ hideAttribution: true }}
+      nodesConnectable={false}
+      style={{ width: '100%', height: '100%' }}
+    >
+      <Background color="rgba(255,255,255,0.07)" gap={24} />
+      <Controls showInteractive={false} />
+    </ReactFlow>
+  );
+}
+
+// PeerEdges — which agents this one has exchanged messages with.
 function PeerEdges({
   sessionId,
   edges,
   members,
 }: {
   sessionId: string;
-  edges: Edge[];
+  edges: MsgEdge[];
   members: OfficeMember[];
 }) {
   const lookup = useMemo(() => {
@@ -330,7 +323,15 @@ function PeerEdges({
   if (peers.length === 0) return null;
   return (
     <div>
-      <h3 style={{ margin: '8px 0', fontSize: 11, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
+      <h3
+        style={{
+          margin: '8px 0',
+          fontSize: 11,
+          color: 'var(--text-muted)',
+          letterSpacing: 0.4,
+          textTransform: 'uppercase',
+        }}
+      >
         Talks to
       </h3>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -362,7 +363,9 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
       <span style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
         {label}
       </span>
-      <span style={{ fontSize: 14, color: 'var(--text-primary)', fontWeight: 600 }}>{value}</span>
+      <span style={{ fontSize: 14, color: 'var(--text-primary)', fontWeight: 600, textTransform: 'capitalize' }}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -402,79 +405,4 @@ function ToggleChip({
       </span>
     </Press>
   );
-}
-
-function colorForStatus(s: AgentStatus): string {
-  switch (s) {
-    case 'working':
-      return 'var(--status-working)';
-    case 'meeting':
-      return 'var(--status-meeting)';
-    case 'stuck':
-      return 'var(--status-stuck)';
-    default:
-      return 'var(--status-idle)';
-  }
-}
-
-// simulate — one tick of a velocity-Verlet-ish force-directed layout.
-// Centre gravity + repulsion + spring on each edge. Cheap (O(N^2))
-// but fine for the <50 nodes the office shell ever has.
-function simulate(nodesMap: Map<string, Node>, edges: Edge[]) {
-  const nodes = Array.from(nodesMap.values());
-  const k = 0.04; // spring stiffness
-  const repulse = 4500;
-  const damping = 0.7;
-  const centre = { x: W / 2, y: H / 2 };
-
-  // Centre gravity
-  for (const n of nodes) {
-    n.vx += (centre.x - n.x) * 0.003;
-    n.vy += (centre.y - n.y) * 0.003;
-  }
-  // Repulsion (every pair)
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i];
-      const b = nodes[j];
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      const d2 = Math.max(40, dx * dx + dy * dy);
-      const f = repulse / d2;
-      const dist = Math.sqrt(d2);
-      const nx = dx / dist;
-      const ny = dy / dist;
-      a.vx += nx * f * 0.02;
-      a.vy += ny * f * 0.02;
-      b.vx -= nx * f * 0.02;
-      b.vy -= ny * f * 0.02;
-    }
-  }
-  // Springs on edges
-  for (const e of edges) {
-    const a = nodesMap.get(e.source);
-    const b = nodesMap.get(e.target);
-    if (!a || !b) continue;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const dist = Math.max(0.1, Math.sqrt(dx * dx + dy * dy));
-    const target = 120;
-    const force = (dist - target) * k;
-    const nx = dx / dist;
-    const ny = dy / dist;
-    a.vx += nx * force;
-    a.vy += ny * force;
-    b.vx -= nx * force;
-    b.vy -= ny * force;
-  }
-  // Integrate
-  for (const n of nodes) {
-    n.vx *= damping;
-    n.vy *= damping;
-    n.x += n.vx;
-    n.y += n.vy;
-    // Clamp to viewport.
-    n.x = Math.max(30, Math.min(W - 30, n.x));
-    n.y = Math.max(30, Math.min(H - 40, n.y));
-  }
 }

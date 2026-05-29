@@ -100,6 +100,71 @@
   --elev-popover-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
   --elev-command-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
   --elev-command-blur: 24px;
+
+  /* ── Aurora Glow additions (web depth layer) ──────────────────────
+     Additive only. jarvis-mobile mirrors the hex/semantic tokens above;
+     the tokens below are web-surface extras (depth, glow, glass, RGB
+     channels) and may be mirrored later if mobile wants the ambiance.
+
+     RGB channel triplets are the SINGLE SOURCE OF TRUTH for Tailwind
+     alpha utilities (rgb(var(--x-rgb) / <alpha-value>)). Keep each one
+     in lockstep with its hex token above — listed beside its hex. */
+  --accent-rgb: 124 92 255; /* #7c5cff */
+  --accent-strong-rgb: 155 128 255; /* #9b80ff */
+  --status-working-rgb: 61 220 151; /* #3ddc97 */
+  --status-idle-rgb: 110 113 120; /* #6e7178 */
+  --status-meeting-rgb: 255 180 84; /* #ffb454 */
+  --status-stuck-rgb: 255 90 95; /* #ff5a5f */
+  --status-success-rgb: 61 220 151; /* #3ddc97 */
+  --status-warn-rgb: 255 180 84; /* #ffb454 */
+  --status-error-rgb: 255 90 95; /* #ff5a5f */
+  --status-info-rgb: 59 130 246; /* #3b82f6 */
+
+  /* Surface-tint channel — white-on-dark glass fills. */
+  --surface-tint-rgb: 255 255 255;
+
+  /* Aurora mesh — radial-gradient stops behind #root. Low alpha so
+     dense data stays legible over it. */
+  --aurora-1: rgba(124, 92, 255, 0.16); /* violet, top-right */
+  --aurora-2: rgba(61, 220, 151, 0.1); /* mint, bottom-left */
+  --aurora-3: rgba(59, 130, 246, 0.1); /* azure, center drift */
+  --aurora-base: #06080c; /* == --bg-app */
+
+  /* Glassmorphic surface — fill + hairline + blur radius. Blur is for
+     floating/overlay surfaces only, never large always-on panels. */
+  --glass-bg: rgba(255, 255, 255, 0.045);
+  --glass-bg-strong: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: 14px;
+  --glass-blur-strong: 24px; /* mirrors --elev-command-blur */
+
+  /* Glow tiers — the signature violet bloom on live surfaces. Rises
+     with "liveness": rest < hover < working/live. */
+  --glow-violet-sm: 0 0 0 1px rgba(124, 92, 255, 0.22), 0 2px 14px rgba(124, 92, 255, 0.14);
+  --glow-violet-md: 0 0 0 1px rgba(124, 92, 255, 0.3), 0 4px 22px rgba(124, 92, 255, 0.22);
+  --glow-violet-lg: 0 0 0 1px rgba(124, 92, 255, 0.4), 0 8px 40px rgba(124, 92, 255, 0.3);
+  --glow-success: 0 0 0 1px rgba(61, 220, 151, 0.3), 0 4px 22px rgba(61, 220, 151, 0.2);
+  --glow-error: 0 0 0 1px rgba(255, 90, 95, 0.32), 0 4px 22px rgba(255, 90, 95, 0.22);
+
+  /* Elevation tiers — complements existing --elev-* (does not replace). */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --elev-3: 0 12px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  /* Focus ring — one token, used by .focus-ring everywhere. */
+  --focus-ring-color: rgba(124, 92, 255, 0.55);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring: 0 0 0 var(--focus-ring-offset) var(--bg-app),
+    0 0 0 calc(var(--focus-ring-offset) + var(--focus-ring-width)) var(--focus-ring-color);
+
+  /* Cursor-follow spotlight — components set --mx/--my on hover. */
+  --spotlight-size: 380px;
+  --spotlight-color: rgba(124, 92, 255, 0.1);
+
+  /* Ambient animation timing (CSS-animation path; reduced-motion kills). */
+  --aurora-drift-duration: 34s;
+  --shimmer-duration: 1.4s;
 }
 
 [data-theme='light'] {
@@ -123,6 +188,39 @@
   --status-warn: #d9892c;
   --status-stuck: #d63b40;
   --status-error: #d63b40;
+
+  /* Aurora Glow — light-mode overrides for the additive web layer. */
+  --accent-rgb: 91 63 224; /* #5b3fe0 */
+  --accent-strong-rgb: 73 41 199; /* #4929c7 */
+  --status-working-rgb: 30 159 110; /* #1e9f6e */
+  --status-idle-rgb: 154 157 163; /* #9a9da3 */
+  --status-meeting-rgb: 217 137 44; /* #d9892c */
+  --status-stuck-rgb: 214 59 64; /* #d63b40 */
+  --status-success-rgb: 30 159 110; /* #1e9f6e */
+  --status-warn-rgb: 217 137 44; /* #d9892c */
+  --status-error-rgb: 214 59 64; /* #d63b40 */
+  --status-info-rgb: 59 130 246; /* #3b82f6 */
+  --surface-tint-rgb: 10 11 13; /* dark tint over light bg */
+
+  --aurora-1: rgba(91, 63, 224, 0.1);
+  --aurora-2: rgba(30, 159, 110, 0.07);
+  --aurora-3: rgba(59, 130, 246, 0.07);
+  --aurora-base: #fafafb;
+
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(0, 0, 0, 0.08);
+
+  --glow-violet-sm: 0 0 0 1px rgba(91, 63, 224, 0.2), 0 2px 14px rgba(91, 63, 224, 0.12);
+  --glow-violet-md: 0 0 0 1px rgba(91, 63, 224, 0.28), 0 4px 22px rgba(91, 63, 224, 0.18);
+  --glow-violet-lg: 0 0 0 1px rgba(91, 63, 224, 0.36), 0 8px 40px rgba(91, 63, 224, 0.24);
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --elev-3: 0 12px 40px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  --focus-ring-color: rgba(91, 63, 224, 0.5);
+  --spotlight-color: rgba(91, 63, 224, 0.08);
 }
 
 /* Respect operator preference. Inside this query Motion will fall back

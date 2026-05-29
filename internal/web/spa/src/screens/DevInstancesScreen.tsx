@@ -1,4 +1,8 @@
-import { Metric, RevealItem, StatusDot } from '../components/motion';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { Server } from 'lucide-react';
+
+import { Metric, StatusDot } from '../components/motion';
+import { GlowCard, EmptyState } from '../components/ui';
 import { relativeTime } from '../lib/relativeTime';
 import { useDevInstances } from '../hooks/useOfficeData';
 
@@ -9,6 +13,9 @@ import { useDevInstances } from '../hooks/useOfficeData';
 export function DevInstancesScreen() {
   const di = useDevInstances();
   const list = di.data?.instances ?? [];
+  // AutoAnimate owns enter/exit/reorder of the live grid as instances
+  // spin up or down over SSE (respects reduced motion).
+  const [gridRef] = useAutoAnimate<HTMLDivElement>();
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -22,45 +29,67 @@ export function DevInstancesScreen() {
       </header>
 
       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-        <Metric value={list.length} size={11} /> instances running
+        <Metric value={list.length} size={11} pulseOnChange /> instances running
       </span>
 
       {list.length === 0 ? (
-        <Empty />
+        <EmptyState
+          icon={<Server size={22} />}
+          title="No dev instances"
+          description={
+            <>
+              The team will spin them up via{' '}
+              <code style={{ fontFamily: 'var(--font-mono)' }}>cm dev start</code> when needed.
+            </>
+          }
+        />
       ) : (
         <div
+          ref={gridRef}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
             gap: 10,
           }}
         >
-          {list.map((d, i) => (
-            <RevealItem key={d.slot} index={i}>
-              <article
-                style={{
-                  padding: 14,
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-card)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                }}
+          {list.map((d) => {
+            const dotStatus = (d.healthFailures ?? 0) > 0 ? 'stuck' : d.url ? 'working' : 'idle';
+            return (
+              <GlowCard
+                key={d.slot}
+                interactive
+                live={dotStatus === 'working'}
+                className="flex flex-col gap-2 p-3.5"
               >
                 <header style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <StatusDot
-                    status={
-                      (d.healthFailures ?? 0) > 0
-                        ? 'stuck'
-                        : d.url
-                          ? 'working'
-                          : 'idle'
-                    }
-                    size={8}
-                  />
+                  <StatusDot status={dotStatus} size={8} />
                   <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
                     {d.slot}
+                  </span>
+                  {/* Status badge top-right. */}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.4,
+                      padding: '2px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      background:
+                        dotStatus === 'stuck'
+                          ? 'rgba(239,68,68,0.12)'
+                          : dotStatus === 'working'
+                            ? 'var(--accent-muted)'
+                            : 'var(--bg-pressed)',
+                      color:
+                        dotStatus === 'stuck'
+                          ? 'var(--status-error)'
+                          : dotStatus === 'working'
+                            ? 'var(--accent)'
+                            : 'var(--text-muted)',
+                    }}
+                  >
+                    {dotStatus === 'stuck' ? 'Unhealthy' : dotStatus === 'working' ? 'Live' : 'Idle'}
                   </span>
                   {typeof d.pid === 'number' ? (
                     <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
@@ -114,30 +143,11 @@ export function DevInstancesScreen() {
                     </ul>
                   </details>
                 ) : null}
-              </article>
-            </RevealItem>
-          ))}
+              </GlowCard>
+            );
+          })}
         </div>
       )}
     </section>
-  );
-}
-
-function Empty() {
-  return (
-    <div
-      style={{
-        padding: 32,
-        textAlign: 'center',
-        color: 'var(--text-muted)',
-        fontSize: 13,
-        background: 'var(--bg-elevated)',
-        border: '1px dashed var(--border-default)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
-      No dev instances. The team will spin them up via{' '}
-      <code style={{ fontFamily: 'var(--font-mono)' }}>cm dev start</code> when needed.
-    </div>
   );
 }

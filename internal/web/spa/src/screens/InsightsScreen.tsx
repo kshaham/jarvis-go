@@ -1,7 +1,12 @@
 import { useMemo } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { useReducedMotion } from 'motion/react';
+import { BarChart3, CheckCircle2, Tags } from 'lucide-react';
 import type { Format } from '@number-flow/react';
 
-import { Metric, RevealItem, StatusDot } from '../components/motion';
+import { Metric, StatusDot } from '../components/motion';
+import { EmptyState, GlowCard, Section } from '../components/ui';
+import { CostByLabelChart } from '../components/charts/CostByLabelChart';
 import {
   useLabelsRollup,
   useMetrics,
@@ -17,6 +22,9 @@ export function InsightsScreen() {
   const status = useOfficeStatus();
   const queues = useTaskQueues();
   const labels = useLabelsRollup();
+
+  const [costListRef] = useAutoAnimate<HTMLUListElement>();
+  const [blockedListRef] = useAutoAnimate<HTMLUListElement>();
 
   const m = metrics.data?.metrics ?? {};
   const members = useMemo(() => status.data?.members ?? [], [status.data?.members]);
@@ -48,13 +56,12 @@ export function InsightsScreen() {
     return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, 6);
   }, [queues.data?.queues]);
 
-  // Cost-by-label top 8.
+  // Cost-by-label top 12.
   const labelRows = useMemo(() => {
     return [...(labels.data?.rollups ?? [])]
       .sort((a, b) => (b.totalCostUSD ?? 0) - (a.totalCostUSD ?? 0))
       .slice(0, 12);
   }, [labels.data?.rollups]);
-  const maxLabelCost = labelRows[0]?.totalCostUSD ?? 0;
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -87,16 +94,23 @@ export function InsightsScreen() {
       </section>
 
       {/* Cost-per-agent leaderboard */}
-      <Card title="Cost by agent" hint="Top 8 by total spend.">
+      <Section title="Cost by agent" hint="Top 8 by total spend.">
         {costByAgent.length === 0 ? (
-          <Empty />
+          <EmptyState
+            icon={<BarChart3 size={22} />}
+            title="No spend yet"
+            description="Cost accrues per agent as the team works."
+          />
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {costByAgent.map((row, i) => {
+          <ul
+            ref={costListRef}
+            style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}
+          >
+            {costByAgent.map((row) => {
               const pct = maxCost > 0 ? (row.cost / maxCost) * 100 : 0;
               return (
-                <RevealItem key={row.sessionId} index={i}>
-                  <li style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <li key={row.sessionId}>
+                  <GlowCard interactive className="flex flex-col gap-1.5 p-2.5">
                     <div
                       style={{
                         display: 'flex',
@@ -114,125 +128,127 @@ export function InsightsScreen() {
                         value={row.cost}
                         format={{ style: 'currency', currency: 'USD', minimumFractionDigits: 2 }}
                         size={12}
+                        pulseOnChange
                       />
                     </div>
-                    <div
-                      style={{
-                        height: 4,
-                        background: 'var(--bg-pressed)',
-                        borderRadius: 2,
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${pct}%`,
-                          height: '100%',
-                          background: 'var(--accent)',
-                        }}
-                      />
-                    </div>
-                  </li>
-                </RevealItem>
+                    <ProgressBar pct={pct} />
+                  </GlowCard>
+                </li>
               );
             })}
           </ul>
         )}
-      </Card>
+      </Section>
 
       {/* Blocked-tasks leaderboard */}
-      <Card title="Blocked tasks" hint="Agents with blocked work waiting for them.">
+      <Section title="Blocked tasks" hint="Agents with blocked work waiting for them.">
         {blockedByAgent.length === 0 ? (
-          <Empty message="Nothing blocked right now." />
+          <EmptyState
+            icon={<CheckCircle2 size={22} />}
+            title="Nothing blocked"
+            description="No blocked work is waiting on the team right now."
+          />
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {blockedByAgent.map((row, i) => (
-              <RevealItem key={row.name} index={i}>
-                <li
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    padding: '8px 10px',
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                  }}
+          <ul
+            ref={blockedListRef}
+            style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}
+          >
+            {blockedByAgent.map((row) => (
+              <li key={row.name}>
+                <GlowCard
+                  interactive
+                  className="flex items-center justify-between p-2.5"
                 >
                   <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
                     {row.name}
                   </span>
-                  <Metric value={row.count} size={13} tone="warning" />
-                </li>
-              </RevealItem>
+                  <Metric value={row.count} size={13} tone="warning" pulseOnChange />
+                </GlowCard>
+              </li>
             ))}
           </ul>
         )}
-      </Card>
+      </Section>
 
-      {/* Cost by label */}
-      <Card title="Cost by label" hint="Top labels by total spend. Tasks pick up labels from the workflow.">
+      {/* Cost by label — chart + detail rows */}
+      <Section title="Cost by label" hint="Top labels by total spend. Tasks pick up labels from the workflow.">
         {labelRows.length === 0 ? (
-          <Empty message="No labelled tasks yet." />
+          <EmptyState
+            icon={<Tags size={22} />}
+            title="No labelled tasks yet"
+            description="Labels are assigned by the workflow as tasks flow through."
+          />
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {labelRows.map((row, i) => {
-              const cost = row.totalCostUSD ?? 0;
-              const pct = maxLabelCost > 0 ? (cost / maxLabelCost) * 100 : 0;
-              return (
-                <RevealItem key={row.label} index={i}>
-                  <li style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <CostByLabelChart rollups={labelRows} />
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {labelRows.map((row) => {
+                const cost = row.totalCostUSD ?? 0;
+                return (
+                  <li
+                    key={row.label}
+                    style={{
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'baseline',
+                      fontSize: 12,
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    <span
                       style={{
-                        display: 'flex',
-                        gap: 12,
-                        fontSize: 12,
-                        color: 'var(--text-secondary)',
+                        flex: 1,
+                        fontFamily: 'var(--font-mono)',
+                        color: 'var(--text-primary)',
                       }}
                     >
-                      <span
-                        style={{
-                          flex: 1,
-                          fontFamily: 'var(--font-mono)',
-                          color: 'var(--text-primary)',
-                        }}
-                      >
-                        {row.label}
+                      {row.label}
+                    </span>
+                    <Metric
+                      value={cost}
+                      format={{ style: 'currency', currency: 'USD', minimumFractionDigits: 2 }}
+                      size={12}
+                      pulseOnChange
+                    />
+                    {typeof row.taskCount === 'number' ? (
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {row.taskCount} task{row.taskCount === 1 ? '' : 's'}
                       </span>
-                      <Metric
-                        value={cost}
-                        format={{ style: 'currency', currency: 'USD', minimumFractionDigits: 2 }}
-                        size={12}
-                      />
-                      {typeof row.taskCount === 'number' ? (
-                        <span style={{ color: 'var(--text-muted)' }}>
-                          {row.taskCount} task{row.taskCount === 1 ? '' : 's'}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div
-                      style={{
-                        height: 4,
-                        background: 'var(--bg-pressed)',
-                        borderRadius: 2,
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${pct}%`,
-                          height: '100%',
-                          background: 'var(--status-meeting)',
-                        }}
-                      />
-                    </div>
+                    ) : null}
                   </li>
-                </RevealItem>
-              );
-            })}
-          </ul>
+                );
+              })}
+            </ul>
+          </div>
         )}
-      </Card>
+      </Section>
     </section>
+  );
+}
+
+// ProgressBar — rounded, gradient-accent fill. Width transitions are
+// gated off under reduced motion.
+function ProgressBar({ pct }: { pct: number }) {
+  const reduce = useReducedMotion();
+  return (
+    <div
+      style={{
+        height: 7,
+        background: 'var(--bg-pressed)',
+        borderRadius: 999,
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          width: `${pct}%`,
+          height: '100%',
+          borderRadius: 999,
+          background: 'linear-gradient(90deg, var(--accent), var(--accent-strong))',
+          transition: reduce ? undefined : 'width 0.4s ease',
+        }}
+      />
+    </div>
   );
 }
 
@@ -248,17 +264,7 @@ function Kpi({
   tone?: 'accent' | 'success' | 'primary';
 }) {
   return (
-    <div
-      style={{
-        padding: 16,
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-md)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-      }}
-    >
+    <GlowCard interactive className="flex flex-col gap-1 p-4">
       <span
         style={{
           fontSize: 11,
@@ -269,58 +275,7 @@ function Kpi({
       >
         {label}
       </span>
-      <Metric value={value} size={24} tone={tone ?? 'primary'} format={format} />
-    </div>
-  );
-}
-
-function Card({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      style={{
-        padding: 18,
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-card)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <header>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-          {title}
-        </h2>
-        {hint ? (
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>{hint}</p>
-        ) : null}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function Empty({ message = 'No data yet.' }: { message?: string }) {
-  return (
-    <div
-      style={{
-        padding: 20,
-        textAlign: 'center',
-        color: 'var(--text-muted)',
-        fontSize: 12,
-        border: '1px dashed var(--border-default)',
-        borderRadius: 'var(--radius-md)',
-      }}
-    >
-      {message}
-    </div>
+      <Metric value={value} size={24} tone={tone ?? 'primary'} format={format} pulseOnChange />
+    </GlowCard>
   );
 }

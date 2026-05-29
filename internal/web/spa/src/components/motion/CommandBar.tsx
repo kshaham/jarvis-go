@@ -1,304 +1,257 @@
-import { AnimatePresence, motion } from 'motion/react';
+import { Command, useCommandState } from 'cmdk';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { spring, timing } from '../../lib/motion';
+import { Modal } from './Modal';
+import { Metric } from './Metric';
 import { useOfficeStatus } from '../../hooks/useOfficeStatus';
 import { usePeers } from '../../hooks/usePeers';
-import { Metric } from './Metric';
 
 type Action = {
   id: string;
   label: string;
   hint?: string;
   glyph: string;
-  run: () => void;
+  // Router path (no /office-v2 prefix — the basename handles it).
+  path: string;
 };
 
 type Props = {
   open: boolean;
   onClose: () => void;
+  // Client-side actions surfaced as a "Commands" group (wired by AppShell).
+  actions?: { onNewTask: () => void; onToggleTheme: () => void };
 };
 
-// CommandBar — the office's ⌘K palette. Opens with a soft scale-in
-// from 96% → 100%, blurs the rest of the page at 24px, and lets the
-// operator jump to any agent or fire a slash-command in two
-// keystrokes. Arrow keys move the selection; Enter commits; Escape
-// closes. Same design language as the mobile CommandBar — when you
-// see it on both surfaces it should feel like the same product.
-export function CommandBar({ open, onClose }: Props) {
+// CommandBar — the office's ⌘K palette, backed by cmdk for fuzzy
+// filtering + keyboard nav, rendered inside the glass Modal so it
+// inherits the scale-in/out. Navigation goes through react-router
+// (useNavigate) instead of raw pushState. Same action set as before:
+// routed pages, live agents, and peer relay jumps.
+export function CommandBar({ open, onClose, actions }: Props) {
   const { data } = useOfficeStatus();
+  const peers = usePeers();
+  const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [highlight, setHighlight] = useState(0);
 
   useEffect(() => {
-    if (!open) {
-      setQuery('');
-      setHighlight(0);
-    }
+    if (!open) setQuery('');
   }, [open]);
 
-  const peers = usePeers();
+  const routes = useMemo<Action[]>(
+    () => [
+      { id: 'go:agents', label: 'Agents', hint: 'Live team roster', glyph: 'A', path: '/' },
+      { id: 'go:tasks', label: 'Tasks', hint: 'Kanban board', glyph: 'K', path: '/tasks' },
+      { id: 'go:standup', label: 'Standup', hint: 'Transcript + composer', glyph: 'S', path: '/standup' },
+      { id: 'go:chat', label: 'Chat', hint: 'Agent messages', glyph: 'C', path: '/chat' },
+      { id: 'go:activity', label: 'Activity', hint: 'Timeline', glyph: 'L', path: '/activity' },
+      { id: 'go:whiteboard', label: 'Whiteboard', hint: 'Shared canvas', glyph: '▤', path: '/whiteboard' },
+      { id: 'go:knowledge', label: 'Knowledge', hint: 'Promotions + stats', glyph: '◇', path: '/knowledge' },
+      { id: 'go:reports', label: 'Reports', hint: 'Saved reports', glyph: '⊟', path: '/reports' },
+      { id: 'go:insights', label: 'Insights', hint: 'KPI dashboard', glyph: 'I', path: '/insights' },
+      { id: 'go:metrics', label: 'Metrics', hint: 'Cumulative counters', glyph: 'M', path: '/metrics' },
+      { id: 'go:meetings', label: 'Meetings', hint: 'Past standups', glyph: '∷', path: '/meetings' },
+      { id: 'go:network', label: 'Network', hint: 'Agent graph', glyph: '⌬', path: '/network' },
+      { id: 'go:handoffs', label: 'Handoffs', hint: 'Pending handoffs', glyph: 'H', path: '/handoffs' },
+      { id: 'go:dev', label: 'Dev instances', hint: 'Running dev servers', glyph: 'D', path: '/dev-instances' },
+      { id: 'go:locks', label: 'File locks', hint: 'Active locks', glyph: '⊞', path: '/locks' },
+      { id: 'go:settings', label: 'Settings', hint: 'Team configuration', glyph: 'G', path: '/settings' },
+      { id: 'go:spawn', label: 'Spawn team', hint: 'Open the spawn wizard', glyph: '+', path: '/spawn' },
+      { id: 'go:teams', label: 'Teams', hint: 'Local + peer teams', glyph: 'T', path: '/teams' },
+      { id: 'go:relay', label: 'Relay', hint: 'Inter-team messages', glyph: 'R', path: '/relay' },
+      { id: 'go:addpeer', label: 'Add peer team', hint: 'Register a peer jarvis', glyph: '+', path: '/peers/new' },
+    ],
+    [],
+  );
 
-  const actions = useMemo<Action[]>(() => {
-    const slash: Action[] = [
-      // Routed pages (stay in /office-v2)
-      { id: 'go:agents', label: 'Agents', hint: 'Live team roster', glyph: 'A', run: () => spaNav('/office-v2/') },
-      { id: 'go:teams', label: 'Teams', hint: 'Local + peer teams', glyph: 'T', run: () => spaNav('/office-v2/teams') },
-      { id: 'go:relay', label: 'Relay', hint: 'Inter-team messages', glyph: 'R', run: () => spaNav('/office-v2/relay') },
-      { id: 'go:addpeer', label: 'Add peer team', hint: 'Register a new peer jarvis', glyph: '+', run: () => spaNav('/office-v2/peers/new') },
-      // Slash commands now route entirely inside the SPA — the React
-      // port covers every flow these targets used to invoke. Lifecycle
-      // commands without a 1:1 page (pause / resume) drop the
-      // operator on Settings where the controls live.
-      { id: '/spawn', label: '/spawn', hint: 'Open the spawn wizard', glyph: '+', run: () => spaNav('/office-v2/spawn') },
-      { id: '/standup', label: '/standup', hint: 'Standup transcript + composer', glyph: 'S', run: () => spaNav('/office-v2/standup') },
-      { id: '/pause', label: '/pause', hint: 'Pause the team (Settings)', glyph: '⏸', run: () => spaNav('/office-v2/settings') },
-      { id: '/resume', label: '/resume', hint: 'Resume the team (Settings)', glyph: '▶', run: () => spaNav('/office-v2/settings') },
-      { id: '/whiteboard', label: '/whiteboard', hint: 'Shared note pad', glyph: '▤', run: () => spaNav('/office-v2/whiteboard') },
-      { id: '/insights', label: '/insights', hint: 'KPI dashboard', glyph: 'I', run: () => spaNav('/office-v2/insights') },
-      { id: '/metrics', label: '/metrics', hint: 'Cumulative counters', glyph: 'M', run: () => spaNav('/office-v2/metrics') },
-      { id: '/meetings', label: '/meetings', hint: 'Past standups', glyph: '∷', run: () => spaNav('/office-v2/meetings') },
-      { id: '/network', label: '/network', hint: 'Agent network graph', glyph: '⌬', run: () => spaNav('/office-v2/network') },
-      { id: '/locks', label: '/locks', hint: 'File locks', glyph: '⊞', run: () => spaNav('/office-v2/locks') },
-      { id: '/handoffs', label: '/handoffs', hint: 'Pending task handoffs', glyph: 'H', run: () => spaNav('/office-v2/handoffs') },
-    ];
-    const agents: Action[] = (data?.members ?? []).map((m) => ({
-      id: `agent:${m.sessionId}`,
-      label: m.name,
-      hint: m.role,
-      glyph: (m.avatarEmoji || m.avatarInitial || m.name?.[0] || '?').toString().slice(0, 1),
-      run: () => spaNav('/office-v2/'),
-    }));
-    // One entry per registered peer — operator can leap directly into
-    // a conversation by typing the peer's name + Enter.
-    const peerJumps: Action[] = (peers.data?.peers ?? []).map((p) => ({
-      id: `peer:${p.peerId}`,
-      label: 'Relay → ' + p.displayName,
-      hint: p.unreadInbound
-        ? `${p.unreadInbound} unread`
-        : 'Open inter-team conversation',
-      glyph: 'R',
-      run: () => spaNav(`/office-v2/relay?peer=${encodeURIComponent(p.peerId)}`),
-    }));
-    return [...slash, ...agents, ...peerJumps];
-  }, [data?.members, peers.data?.peers]);
+  const agents = useMemo<Action[]>(
+    () =>
+      (data?.members ?? []).map((m) => ({
+        id: `agent:${m.sessionId}`,
+        label: m.name,
+        hint: m.role,
+        glyph: (m.avatarEmoji || m.avatarInitial || m.name?.[0] || '?').toString().slice(0, 1),
+        path: '/',
+      })),
+    [data?.members],
+  );
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return actions;
-    return actions.filter((a) => `${a.label} ${a.hint ?? ''}`.toLowerCase().includes(q));
-  }, [query, actions]);
+  const peerJumps = useMemo<Action[]>(
+    () =>
+      (peers.data?.peers ?? []).map((p) => ({
+        id: `peer:${p.peerId}`,
+        label: 'Relay → ' + p.displayName,
+        hint: p.unreadInbound ? `${p.unreadInbound} unread` : 'Open conversation',
+        glyph: 'R',
+        path: `/relay?peer=${encodeURIComponent(p.peerId)}`,
+      })),
+    [peers.data?.peers],
+  );
 
-  // Global ⌘K / Ctrl+K toggle + within-palette key handling.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!open) return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setHighlight((h) => Math.min(h + 1, filtered.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setHighlight((h) => Math.max(0, h - 1));
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        const next = filtered[highlight];
-        if (next) {
-          onClose();
-          requestAnimationFrame(() => next.run());
-        }
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose, filtered, highlight]);
+  const commands = useMemo<{ id: string; label: string; hint?: string; glyph: string; run: () => void }[]>(
+    () => {
+      if (!actions) return [];
+      return [
+        {
+          id: 'cmd:newtask',
+          label: 'New task',
+          hint: 'Quick-add a task (t)',
+          glyph: '+',
+          run: () => {
+            onClose();
+            requestAnimationFrame(() => actions.onNewTask());
+          },
+        },
+        {
+          id: 'cmd:theme',
+          label: 'Toggle theme',
+          hint: 'Cycle dark / light / system',
+          glyph: '◐',
+          run: () => {
+            onClose();
+            actions.onToggleTheme();
+          },
+        },
+      ];
+    },
+    [actions, onClose],
+  );
 
-  // spaNav uses pushState + popstate so React Router intercepts the
-  // change instead of doing a full page load. Falls back to a full
-  // load if the History API is unavailable for some reason.
-  function spaNav(url: string) {
-    try {
-      window.history.pushState({}, '', url);
-      window.dispatchEvent(new PopStateEvent('popstate'));
-    } catch {
-      window.location.href = url;
-    }
+  function run(path: string) {
+    onClose();
+    // Defer so the modal can begin its exit before the route swaps.
+    requestAnimationFrame(() => navigate(path));
   }
 
   return (
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          key="backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={timing.short}
-          onClick={onClose}
+    <Modal
+      open={open}
+      onOpenChange={(next) => (next ? null : onClose())}
+      size="md"
+      title="Command palette"
+      hideHeader
+    >
+      <Command label="Command palette" loop>
+        <Command.Input
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Jump to agent or /command…"
+          autoFocus
+        />
+        <div
           style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 50,
-            background: 'rgba(6,8,12,0.55)',
-            backdropFilter: 'blur(var(--elev-command-blur))',
-            WebkitBackdropFilter: 'blur(var(--elev-command-blur))',
-            display: 'grid',
-            placeItems: 'center',
-            padding: '10vh 16px 0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            padding: '0 14px 6px',
+            fontSize: 11,
+            color: 'var(--text-muted)',
           }}
         >
-          <motion.div
-            key="panel"
-            initial={{ scale: 0.96, opacity: 0, y: -8 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.96, opacity: 0, y: -8 }}
-            transition={spring.smooth}
-            onClick={(e) => e.stopPropagation()}
+          <span>↑↓ navigate · ⏎ commit · esc close</span>
+          <MatchCount />
+        </div>
+        <Command.List>
+          <Command.Empty>No matches.</Command.Empty>
+          {commands.length > 0 ? (
+            <Command.Group heading="Commands">
+              {commands.map((c) => (
+                <CommandRow key={c.id} action={c} onSelect={c.run} />
+              ))}
+            </Command.Group>
+          ) : null}
+          <Command.Group heading="Navigate">
+            {routes.map((a) => (
+              <CommandRow key={a.id} action={a} onSelect={() => run(a.path)} />
+            ))}
+          </Command.Group>
+          {agents.length > 0 ? (
+            <Command.Group heading="Agents">
+              {agents.map((a) => (
+                <CommandRow key={a.id} action={a} onSelect={() => run(a.path)} />
+              ))}
+            </Command.Group>
+          ) : null}
+          {peerJumps.length > 0 ? (
+            <Command.Group heading="Peers">
+              {peerJumps.map((a) => (
+                <CommandRow key={a.id} action={a} onSelect={() => run(a.path)} />
+              ))}
+            </Command.Group>
+          ) : null}
+        </Command.List>
+      </Command>
+    </Modal>
+  );
+}
+
+// Live count of currently-matching commands (drives the "N matches"
+// flourish via the animated Metric).
+function MatchCount() {
+  const count = useCommandState((state) => state.filtered.count);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+      <Metric value={count} size={11} tone="muted" />
+      matches
+    </span>
+  );
+}
+
+function CommandRow({
+  action,
+  onSelect,
+}: {
+  action: { label: string; hint?: string; glyph: string };
+  onSelect: () => void;
+}) {
+  return (
+    <Command.Item value={`${action.label} ${action.hint ?? ''}`} onSelect={onSelect}>
+      <span
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: 6,
+          background: 'var(--bg-pressed)',
+          border: '1px solid var(--border-default)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--text-primary)',
+          fontWeight: 700,
+          fontSize: 12,
+          flexShrink: 0,
+        }}
+      >
+        {action.glyph}
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span
+          className="cmdk-item-label"
+          style={{
+            display: 'block',
+            fontSize: 14,
+            fontWeight: 600,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {action.label}
+        </span>
+        {action.hint ? (
+          <span
             style={{
-              width: 'min(560px, 100%)',
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: 'var(--radius-xl)',
-              boxShadow: 'var(--elev-command-shadow)',
-              padding: 8,
-              maxHeight: '70vh',
-              display: 'flex',
-              flexDirection: 'column',
+              display: 'block',
+              color: 'var(--text-muted)',
+              fontSize: 11,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
           >
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setHighlight(0);
-              }}
-              placeholder="Jump to agent or /command…"
-              style={{
-                width: '100%',
-                padding: '12px 14px',
-                fontSize: 17,
-                color: 'var(--text-primary)',
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            />
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '0 14px 6px',
-                fontSize: 11,
-                color: 'var(--text-muted)',
-              }}
-            >
-              <span>↑↓ navigate · ⏎ commit · esc close</span>
-              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
-                <Metric value={filtered.length} size={11} tone="muted" />
-                matches
-              </span>
-            </div>
-            <div
-              style={{
-                overflowY: 'auto',
-                borderTop: '1px solid var(--border-subtle)',
-                paddingTop: 6,
-              }}
-            >
-              {filtered.length === 0 ? (
-                <div
-                  style={{
-                    padding: 24,
-                    textAlign: 'center',
-                    color: 'var(--text-faint)',
-                    fontSize: 12,
-                  }}
-                >
-                  No matches.
-                </div>
-              ) : null}
-              {filtered.slice(0, 12).map((action, i) => {
-                const active = i === highlight;
-                return (
-                  <motion.button
-                    key={action.id}
-                    onClick={() => {
-                      onClose();
-                      requestAnimationFrame(() => action.run());
-                    }}
-                    onMouseEnter={() => setHighlight(i)}
-                    whileTap={{ scale: 0.99 }}
-                    transition={spring.snappy}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      width: '100%',
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-md)',
-                      background: active ? 'var(--accent-muted)' : 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: 6,
-                        background: 'var(--bg-pressed)',
-                        border: '1px solid var(--border-default)',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'var(--text-primary)',
-                        fontWeight: 700,
-                        fontSize: 12,
-                      }}
-                    >
-                      {action.glyph}
-                    </span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span
-                        style={{
-                          display: 'block',
-                          color: active ? 'var(--accent)' : 'var(--text-primary)',
-                          fontSize: 14,
-                          fontWeight: 600,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {action.label}
-                      </span>
-                      {action.hint ? (
-                        <span
-                          style={{
-                            display: 'block',
-                            color: 'var(--text-muted)',
-                            fontSize: 11,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {action.hint}
-                        </span>
-                      ) : null}
-                    </span>
-                  </motion.button>
-                );
-              })}
-            </div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+            {action.hint}
+          </span>
+        ) : null}
+      </span>
+    </Command.Item>
   );
 }

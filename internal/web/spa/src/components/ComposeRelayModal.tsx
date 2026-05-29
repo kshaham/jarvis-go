@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 import { Modal } from './motion/Modal';
-import { Metric, Press } from './motion';
+import { Metric } from './motion';
+import { Button, Field, Input, Textarea } from './ui';
 import { usePeers } from '../hooks/usePeers';
 import { useSendRelay } from '../hooks/useRelayMessages';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
@@ -97,12 +99,26 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
       });
       if (res.error) {
         setError(res.error);
+        toast.error('Message queued but delivery failed — will retry');
         return;
       }
+      toast.success('Message sent to team');
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      toast.error('Failed to send message');
     }
+  };
+
+  const addCustomAttachment = () => {
+    const { title, body } = customDraft;
+    if (!title.trim() || !body.trim()) return;
+    setCustomAttachments((prev) => [
+      ...prev,
+      { kind: 'task', ref: '', title: title.trim(), body: body.trim() },
+    ]);
+    setCustomDraft({ title: '', body: '' });
   };
 
   return (
@@ -126,49 +142,17 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
           >
             <Metric value={attachments.length} size={11} tone="muted" /> attachments ·{' '}
             <Metric value={wordCount} size={11} tone="muted" /> words ·{' '}
-            <Metric
-              value={charsLeft}
-              size={11}
-              tone={charsLeft < 200 ? 'warning' : 'muted'}
-            />{' '}
-            chars left
+            <Metric value={charsLeft} size={11} tone={charsLeft < 200 ? 'warning' : 'muted'} /> chars left
           </span>
           {error ? (
             <span style={{ color: 'var(--status-error)', fontSize: 12 }}>{error}</span>
           ) : null}
-          <Press pressScale={0.96} onClick={onClose}>
-            <span
-              style={{
-                padding: '8px 14px',
-                background: 'transparent',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-                fontWeight: 600,
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
-              Cancel
-            </span>
-          </Press>
-          <Press
-            pressScale={0.96}
-            onClick={submit}
-            disabled={!canSubmit || send.isPending}
-          >
-            <span
-              style={{
-                padding: '8px 18px',
-                background: 'var(--accent)',
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 600,
-                borderRadius: 'var(--radius-md)',
-                opacity: !canSubmit || send.isPending ? 0.5 : 1,
-              }}
-            >
-              {send.isPending ? 'Sending…' : 'Send to team'}
-            </span>
-          </Press>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit || send.isPending}>
+            {send.isPending ? 'Sending…' : 'Send to team'}
+          </Button>
         </>
       }
     >
@@ -187,7 +171,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
             <select
               value={toPeerId}
               onChange={(e) => setToPeerId(e.target.value)}
-              style={inputStyle}
+              className="field"
             >
               <option value="">Select a peer team…</option>
               {peerList.map((p) => (
@@ -199,12 +183,12 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
           </Field>
 
           <Field label="Message" hint="Markdown allowed. The recipient sees this verbatim.">
-            <textarea
+            <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value.slice(0, MAX_CONTENT))}
               placeholder="What did your team learn that another team should know?"
               rows={8}
-              style={{ ...inputStyle, fontFamily: 'var(--font-sans)', resize: 'vertical' }}
+              style={{ resize: 'vertical' }}
             />
           </Field>
 
@@ -230,17 +214,15 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
                   Mission excerpt
                 </div>
-                <textarea
+                <Textarea
                   value={missionExcerpt}
                   onChange={(e) => setMissionExcerpt(e.target.value.slice(0, 2000))}
                   placeholder="Pre-filled from the current team mission. Edit freely."
                   rows={4}
                   disabled={!includeMission}
                   style={{
-                    ...inputStyle,
                     marginTop: 6,
                     fontSize: 12,
-                    background: includeMission ? 'var(--bg-app)' : 'transparent',
                     opacity: includeMission ? 1 : 0.55,
                     resize: 'vertical',
                   }}
@@ -263,47 +245,26 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
                 Custom note
               </div>
-              <input
+              <Input
                 value={customDraft.title}
                 onChange={(e) => setCustomDraft({ ...customDraft, title: e.target.value })}
                 placeholder="Title (e.g. 'Lessons from the auth migration')"
-                style={inputStyle}
               />
-              <textarea
+              <Textarea
                 value={customDraft.body}
                 onChange={(e) => setCustomDraft({ ...customDraft, body: e.target.value })}
                 placeholder="Free-form notes; markdown allowed."
                 rows={3}
-                style={{ ...inputStyle, resize: 'vertical' }}
+                style={{ resize: 'vertical' }}
               />
-              <Press
-                pressScale={0.96}
-                onClick={() => {
-                  const { title, body } = customDraft;
-                  if (!title.trim() || !body.trim()) return;
-                  setCustomAttachments((prev) => [
-                    ...prev,
-                    { kind: 'task', ref: '', title: title.trim(), body: body.trim() },
-                  ]);
-                  setCustomDraft({ title: '', body: '' });
-                }}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={addCustomAttachment}
+                className="self-start"
               >
-                <span
-                  style={{
-                    alignSelf: 'flex-start',
-                    padding: '6px 12px',
-                    background: 'var(--bg-pressed)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 'var(--radius-sm)',
-                    color: 'var(--text-primary)',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    display: 'inline-block',
-                  }}
-                >
-                  + Add attachment
-                </span>
-              </Press>
+                + Add attachment
+              </Button>
             </div>
 
             {customAttachments.length > 0 ? (
@@ -311,6 +272,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
                 {customAttachments.map((a, i) => (
                   <li
                     key={i}
+                    className="transition-colors hover:bg-[var(--bg-elevated)]"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -326,6 +288,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
                       onClick={() =>
                         setCustomAttachments((prev) => prev.filter((_, idx) => idx !== i))
                       }
+                      className="focus-ring transition-colors hover:text-status-error"
                       style={{
                         background: 'transparent',
                         border: 'none',
@@ -439,35 +402,6 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
   );
 }
 
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
-      </span>
-      {children}
-      {hint ? (
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.4 }}>{hint}</span>
-      ) : null}
-    </label>
-  );
-}
-
 function kindBadge(kind: RelayAttachment['kind']): string {
   switch (kind) {
     case 'experience':
@@ -486,18 +420,6 @@ function kindBadge(kind: RelayAttachment['kind']): string {
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 10px',
-  background: 'var(--bg-app)',
-  border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-md)',
-  color: 'var(--text-primary)',
-  fontSize: 13,
-  outline: 'none',
-  width: '100%',
-  fontFamily: 'inherit',
-};
 
 // Bind ComposeRelayModal as default export for convenience in lazy
 // imports if needed later.

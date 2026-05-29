@@ -1,6 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from 'sonner';
+// Self-hosted variable fonts — family names match tokens.css
+// (--font-sans / --font-mono). Imported here so they load with the app
+// bundle instead of an external CDN.
+import '@fontsource-variable/inter';
+import '@fontsource-variable/jetbrains-mono';
 import { App } from './App';
 import './styles/tokens.css';
 import './styles.css';
@@ -21,6 +27,23 @@ ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
+      {/* Mounted outside the router so transient toasts (agent stuck,
+          relay messages, SSE reconnect) survive route transitions and
+          are never torn down by the page-transition AnimatePresence. */}
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        richColors
+        closeButton
+        toastOptions={{
+          style: {
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-strong)',
+            color: 'var(--text-primary)',
+            borderRadius: 'var(--radius-md)',
+          },
+        }}
+      />
     </QueryClientProvider>
   </React.StrictMode>,
 );

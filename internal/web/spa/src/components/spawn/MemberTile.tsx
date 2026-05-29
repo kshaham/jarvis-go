@@ -1,9 +1,17 @@
 import type { CSSProperties } from 'react';
-import { Press } from '../motion';
-import { Avatar } from './Avatar';
-import { tierColor, type Tier } from './TierBadge';
+import { motion, useReducedMotion } from 'motion/react';
 
+import { GlowCard } from '@/components/ui';
+import { cn } from '@/lib/cn';
+import { Avatar } from './Avatar';
+import { TierBadge, type Tier } from './TierBadge';
+
+// MemberTile — a roomy roster card. Shows the agent's avatar plus the
+// FULL name and role (wrapping, never truncated) and a tier pill, so an
+// operator can read who's on the team at a glance. Built on GlowCard for
+// the shared depth/hover/live-glow; selected = accent ring + glow.
 export function MemberTile({
+  id,
   name,
   role,
   emoji,
@@ -14,6 +22,7 @@ export function MemberTile({
   onClick,
   style,
 }: {
+  id?: string;
   name: string;
   role: string;
   emoji?: string;
@@ -24,89 +33,84 @@ export function MemberTile({
   onClick?: () => void;
   style?: CSSProperties;
 }) {
-  const ring = selected ? 'var(--accent)' : 'var(--border-subtle)';
-  const bg = selected ? 'var(--accent-muted)' : 'var(--bg-elevated)';
-
+  const reduce = useReducedMotion();
   return (
-    <Press pressScale={0.96} onClick={onClick}>
-      <article
-        aria-label={`${name}, ${role}`}
-        aria-pressed={!!selected}
-        style={{
-          position: 'relative',
-          width: 96,
-          padding: '10px 8px 8px',
-          background: bg,
-          border: `1px solid ${ring}`,
-          borderRadius: 'var(--radius-md)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 6,
-          cursor: 'pointer',
-          transition: 'background 120ms ease, border-color 120ms ease',
-          ...style,
-        }}
-      >
-        {edited ? (
-          <span
-            aria-hidden
-            title="Edited"
-            style={{
-              position: 'absolute',
-              top: 6,
-              right: 6,
-              width: 8,
-              height: 8,
-              borderRadius: 999,
-              background: 'var(--status-warn)',
-              boxShadow: '0 0 0 2px var(--bg-elevated)',
-            }}
-          />
-        ) : null}
-        <Avatar name={name} emoji={emoji} color={color} tier={tier} size="md" ring />
+    <GlowCard
+      id={id}
+      role="option"
+      aria-selected={!!selected}
+      aria-label={`${name || 'Unnamed'}${role ? `, ${role}` : ''}`}
+      interactive
+      live={selected}
+      onClick={onClick}
+      className={cn('flex cursor-pointer items-start gap-3 p-3')}
+      style={{
+        minHeight: 88,
+        background: selected ? 'var(--accent-muted)' : 'var(--bg-elevated)',
+        border: '1px solid ' + (selected ? 'rgb(var(--accent-rgb))' : 'var(--border-subtle)'),
+        ...style,
+      }}
+    >
+      <Avatar name={name} emoji={emoji} color={color} tier={tier} size="lg" ring />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* Full name — wraps, never clipped. */}
         <span
           style={{
-            fontSize: 12,
+            fontSize: 15,
             fontWeight: 600,
             color: 'var(--text-primary)',
-            maxWidth: '100%',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+            lineHeight: 1.3,
+            overflowWrap: 'anywhere',
           }}
         >
-          {name}
+          {name || 'Unnamed'}
         </span>
-        <span
-          style={{
-            fontSize: 10,
-            color: 'var(--text-muted)',
-            maxWidth: '100%',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            textTransform: 'uppercase',
-            letterSpacing: 0.4,
-          }}
-        >
-          {role}
-        </span>
-        {tier ? (
+        {role ? (
           <span
-            aria-hidden
             style={{
-              position: 'absolute',
-              left: 8,
-              top: 8,
-              width: 6,
-              height: 6,
-              borderRadius: 999,
-              background: tierColor(tier),
+              fontSize: 12,
+              color: 'var(--text-secondary)',
+              lineHeight: 1.35,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
             }}
-          />
+          >
+            {role}
+          </span>
         ) : null}
-      </article>
-    </Press>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+          {tier ? <TierBadge tier={tier} variant="pill" /> : null}
+          {edited ? (
+            <motion.span
+              aria-label="Edited"
+              title="Overridden from the template"
+              initial={reduce ? false : { scale: 0, opacity: 0 }}
+              animate={reduce ? undefined : { scale: 1, opacity: 1 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-pill)',
+                background: 'color-mix(in srgb, var(--status-warn) 16%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--status-warn) 36%, transparent)',
+                color: 'var(--status-warn)',
+                fontSize: 10,
+                fontWeight: 600,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--status-warn)' }}
+              />
+              Edited
+            </motion.span>
+          ) : null}
+        </div>
+      </div>
+    </GlowCard>
   );
 }

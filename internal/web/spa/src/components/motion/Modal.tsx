@@ -33,6 +33,8 @@ type Props = {
   // CommandBar.  When `true` the caller is responsible for rendering
   // an accessible heading using <Dialog.Title> + <Dialog.Description>.
   hideHeader?: boolean;
+  // Adds a violet glow to the panel — for "live"/working contexts.
+  glow?: boolean;
 };
 
 // Modal — the canonical office-redesign dialog primitive. Built on
@@ -50,6 +52,7 @@ export function Modal({
   children,
   footer,
   hideHeader,
+  glow = false,
 }: Props) {
   const reduce = useReducedMotion();
   return (
@@ -77,15 +80,21 @@ export function Modal({
             <Dialog.Content asChild aria-describedby={description ? 'modal-desc' : undefined}>
               <motion.div
                 key="content"
-                initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: -8 }}
-                animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
-                exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: -8 }}
+                // Horizontal centering is done via Motion's own `x`
+                // (not a CSS transform, which Motion overrides when it
+                // animates scale/y).
+                initial={reduce ? { opacity: 0, x: '-50%' } : { opacity: 0, scale: 0.94, y: -8, x: '-50%' }}
+                animate={reduce ? { opacity: 1, x: '-50%' } : { opacity: 1, scale: 1, y: 0, x: '-50%' }}
+                exit={
+                  reduce
+                    ? { opacity: 0, x: '-50%', transition: timing.short }
+                    : { opacity: 0, scale: 0.96, y: -8, x: '-50%', transition: timing.short }
+                }
                 transition={spring.smooth}
                 style={{
                   position: 'fixed',
                   top: '8vh',
                   left: '50%',
-                  transform: 'translateX(-50%)',
                   zIndex: 61,
                   width: 'min(100% - 32px, ' + SIZE_MAX_WIDTH[size] + ')',
                   maxHeight: '84vh',
@@ -94,8 +103,14 @@ export function Modal({
                   background: 'var(--bg-elevated)',
                   border: '1px solid var(--border-strong)',
                   borderRadius: 'var(--radius-xl)',
-                  boxShadow: 'var(--elev-command-shadow)',
+                  boxShadow: glow
+                    ? 'var(--elev-command-shadow), var(--glow-violet-md)'
+                    : 'var(--elev-command-shadow)',
                   overflow: 'hidden',
+                  // Radix focuses the content container on open; suppress
+                  // the default browser outline (inner controls keep their
+                  // own focus rings via .focus-ring).
+                  outline: 'none',
                 }}
               >
                 {hideHeader ? (

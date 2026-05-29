@@ -1,13 +1,41 @@
-import { motion } from 'motion/react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { TeamHeader } from './TeamHeader';
 import { CommandBar, Metric, Press } from './motion';
+import { AuroraBackground, ConnectionBanner, TopProgress } from './ui';
 import { QuickAddTaskModal } from './QuickAddTaskModal';
+import { ShortcutsModal } from './ShortcutsModal';
 import { spring } from '../lib/motion';
 import { usePeers } from '../hooks/usePeers';
+import { useToastBridge } from '../hooks/useToastBridge';
+import { useTheme } from '../hooks/useTheme';
+
+// Per-route document titles (pathname is basename-relative).
+const ROUTE_TITLES: Record<string, string> = {
+  '/': 'Agents',
+  '/tasks': 'Tasks',
+  '/standup': 'Standup',
+  '/chat': 'Chat',
+  '/activity': 'Activity',
+  '/whiteboard': 'Whiteboard',
+  '/knowledge': 'Knowledge',
+  '/reports': 'Reports',
+  '/insights': 'Insights',
+  '/metrics': 'Metrics',
+  '/meetings': 'Meetings',
+  '/network': 'Network',
+  '/handoffs': 'Handoffs',
+  '/dev-instances': 'Dev instances',
+  '/locks': 'File locks',
+  '/settings': 'Settings',
+  '/spawn': 'Spawn',
+  '/teams': 'Teams',
+  '/relay': 'Relay',
+  '/peers/new': 'Add peer',
+};
 
 type NavItem = {
   to: string;
@@ -23,14 +51,20 @@ type NavItem = {
 // component — AppShell is just the layout.
 export function AppShell({ children }: { children?: ReactNode }) {
   const peers = usePeers();
+  // Live office events → transient toasts. Mounted once, here.
+  useToastBridge();
   const totalUnread = (peers.data?.peers ?? []).reduce(
     (sum, p) => sum + (p.unreadInbound ?? 0),
     0,
   );
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const reduce = useReducedMotion();
+  const { cycle } = useTheme();
   const [commandOpen, setCommandOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -41,15 +75,26 @@ export function AppShell({ children }: { children?: ReactNode }) {
         setCommandOpen((open) => !open);
         return;
       }
-      // `t` opens quick-add task; ignored when typing in a field.
-      if (!isMeta && !inField && (e.key === 't' || e.key === 'T')) {
+      if (inField || isMeta) return;
+      // `t` opens quick-add task; `?` opens the shortcuts cheat-sheet.
+      if (e.key === 't' || e.key === 'T') {
         e.preventDefault();
         setQuickAddOpen(true);
+      } else if (e.key === '?') {
+        e.preventDefault();
+        setShortcutsOpen(true);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // Per-route document title + scroll-to-top on navigation.
+  useEffect(() => {
+    const label = ROUTE_TITLES[location.pathname];
+    document.title = label ? `${label} · Jarvis Office` : 'Jarvis · Office';
+    window.scrollTo({ top: 0 });
+  }, [location.pathname]);
 
   // Three groups in the left rail. Office (the live team's tabs),
   // Operations (the bigger dashboards / panels), Multi-team (peer relay).
@@ -79,7 +124,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <TopProgress />
+      <AuroraBackground />
       <TeamHeader />
+      <ConnectionBanner />
       <div className="flex-1 flex" style={{ minHeight: 0 }}>
         {/* Left rail navigation — sticky to the viewport so it stays
             visible as content scrolls. 220px wide, collapses to a
@@ -121,13 +169,16 @@ export function AppShell({ children }: { children?: ReactNode }) {
               key={item.to}
               to={item.to}
               end={item.to === '/'}
+              className="transition-colors hover:bg-[var(--bg-elevated)]"
               style={({ isActive }) => ({
                 marginTop: item.divider ? 12 : 0,
                 borderTop: item.divider ? '1px solid var(--border-subtle)' : 'none',
                 paddingTop: item.divider ? 12 : undefined,
                 textDecoration: 'none',
                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                background: isActive ? 'var(--accent-muted)' : 'transparent',
+                // Active background is the sliding layoutId pill below
+                // (or a static fill under reduced motion).
+                background: isActive && reduce ? 'var(--accent-muted)' : undefined,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 10,
@@ -140,43 +191,70 @@ export function AppShell({ children }: { children?: ReactNode }) {
             >
               {({ isActive }) => (
                 <>
+                  {isActive && !reduce ? (
+                    <motion.span
+                      layoutId="nav-active"
+                      transition={spring.smooth}
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        borderRadius: 'var(--radius-md)',
+                        background: 'var(--accent-muted)',
+                        boxShadow: 'inset 2px 0 0 var(--accent)',
+                        zIndex: 0,
+                      }}
+                    />
+                  ) : null}
                   <span
                     style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 6,
-                      border: '1px solid var(--border-default)',
-                      background: isActive ? 'var(--accent)' : 'var(--bg-elevated)',
-                      color: isActive ? '#fff' : 'var(--text-secondary)',
+                      position: 'relative',
+                      zIndex: 1,
                       display: 'inline-flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 11,
-                      fontWeight: 700,
+                      gap: 10,
+                      flex: 1,
+                      minWidth: 0,
                     }}
                   >
-                    {item.glyph}
-                  </span>
-                  <span style={{ flex: 1 }}>{item.label}</span>
-                  {item.badge ? (
                     <span
                       style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        border: '1px solid var(--border-default)',
+                        background: isActive ? 'var(--accent)' : 'var(--bg-elevated)',
+                        color: isActive ? '#fff' : 'var(--text-secondary)',
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        minWidth: 22,
-                        height: 18,
-                        padding: '0 6px',
-                        borderRadius: 999,
-                        background: 'var(--status-error)',
-                        color: '#fff',
                         fontSize: 11,
                         fontWeight: 700,
+                        flexShrink: 0,
                       }}
                     >
-                      <Metric value={item.badge} size={11} />
+                      {item.glyph}
                     </span>
-                  ) : null}
+                    <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
+                    {item.badge ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: 22,
+                          height: 18,
+                          padding: '0 6px',
+                          borderRadius: 999,
+                          background: 'var(--status-error)',
+                          color: '#fff',
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        <Metric value={item.badge} size={11} />
+                      </span>
+                    ) : null}
+                  </span>
                 </>
               )}
             </NavLink>
@@ -265,13 +343,11 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </a>
         </nav>
 
-        {/* Main content: spring-in fade on mount. The Outlet renders
-            the active route's screen. */}
-        <motion.main
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={spring.smooth}
-          className="flex-1 px-6 py-5"
+        {/* Main content. The persistent shell (header/rail/footer/
+            CommandBar) stays mounted; only the routed screen inside
+            AnimatedOutlet transitions on navigation. */}
+        <main
+          className="flex flex-1 flex-col px-6 py-5"
           style={{
             maxWidth: 'var(--width-content, 1180px)',
             width: '100%',
@@ -279,8 +355,8 @@ export function AppShell({ children }: { children?: ReactNode }) {
             minWidth: 0,
           }}
         >
-          {children ?? <Outlet />}
-        </motion.main>
+          {children ?? <AnimatedOutlet />}
+        </main>
       </div>
       <footer
         className="px-6 py-3 text-xs"
@@ -306,8 +382,40 @@ export function AppShell({ children }: { children?: ReactNode }) {
           classic UI
         </a>
       </footer>
-      <CommandBar open={commandOpen} onClose={() => setCommandOpen(false)} />
+      <CommandBar
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        actions={{ onNewTask: () => setQuickAddOpen(true), onToggleTheme: cycle }}
+      />
       <QuickAddTaskModal open={quickAddOpen} onClose={() => setQuickAddOpen(false)} />
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
+  );
+}
+
+// AnimatedOutlet — captures the current route's element (useOutlet) and
+// keys the wrapper by pathname so AnimatePresence animates the outgoing
+// screen out before the incoming one springs in. mode="wait" keeps only
+// one screen mounted at a time (important for the heavy graph/canvas
+// routes). React-19 stable — no experimental ViewTransition. Reduced
+// motion collapses to an instant opacity swap. flex-1 + minHeight:0 so
+// full-height screens (Network, Whiteboard) still resolve height:100%.
+function AnimatedOutlet() {
+  const location = useLocation();
+  const element = useOutlet();
+  const reduce = useReducedMotion();
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={location.pathname}
+        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
+        animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
+        exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6 }}
+        transition={reduce ? { duration: 0 } : spring.smooth}
+        style={{ flex: 1, minHeight: 0, minWidth: 0 }}
+      >
+        {element}
+      </motion.div>
+    </AnimatePresence>
   );
 }

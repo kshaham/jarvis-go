@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Modal } from './motion/Modal';
 import { Metric, Press, StatusDot } from './motion';
+import { agentAvatarClass, agentAvatarGlyph } from './AgentCard';
+import { cn } from '../lib/cn';
 import { fetchJSON } from '../api/client';
 import { relativeTime } from '../lib/relativeTime';
 import type { OfficeMember } from '../api/types';
@@ -25,6 +28,7 @@ type Props = {
 // reflects the new state on close.
 export function MemberDetailModal({ member, onClose }: Props) {
   const open = !!member;
+  const reduce = useReducedMotion();
   const [tab, setTab] = useState<Tab>('overview');
   // Reset tab when the modal reopens for a fresh member.
   const [lastMemberKey, setLastMemberKey] = useState<string | null>(null);
@@ -38,17 +42,38 @@ export function MemberDetailModal({ member, onClose }: Props) {
       open={open}
       onOpenChange={(next) => (next ? null : onClose())}
       size="lg"
+      hideHeader
+      glow={member?.status === 'working'}
       title={member?.name ?? 'Agent'}
       description={member?.role}
     >
       {member ? (
-        <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '18px 22px' }}>
+          {/* Header — the avatar is the shared-element morph target: it
+              flies in from the clicked AgentCard. */}
+          <header style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <motion.div
+              layoutId={reduce ? undefined : `agent-avatar-${member.sessionId}`}
+              className={cn(
+                'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-lg font-semibold',
+                agentAvatarClass(member.avatarColor),
+              )}
+            >
+              {agentAvatarGlyph(member)}
+            </motion.div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {member.name}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{member.role}</div>
+            </div>
+          </header>
           <TabBar tab={tab} setTab={setTab} />
           {tab === 'overview' && <OverviewTab member={member} />}
           {tab === 'personality' && <PersonalityTab member={member} onSaved={onClose} />}
           {tab === 'send' && <SendTab member={member} />}
           {tab === 'lifecycle' && <LifecycleTab member={member} onAfter={onClose} />}
-        </>
+        </div>
       ) : null}
     </Modal>
   );

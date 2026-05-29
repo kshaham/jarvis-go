@@ -1,6 +1,7 @@
 import type { TeamTemplate, TeamTemplateMember } from '../../api/types';
+import { Button, Input, Textarea } from '@/components/ui';
 import { Avatar } from './Avatar';
-import { ChipGroup, Field, inputStyle, SectionCard } from './formPrimitives';
+import { ChipGroup, Field, SectionCard } from './formPrimitives';
 import type { Tier } from './TierBadge';
 import { TierBadge } from './TierBadge';
 
@@ -75,22 +76,9 @@ export function MemberEditor({
       hint="Overrides apply only to this team. The bundled template stays untouched."
       trailing={
         edited ? (
-          <button
-            type="button"
-            onClick={onReset}
-            style={{
-              padding: '4px 10px',
-              background: 'transparent',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-pill)',
-              color: 'var(--text-secondary)',
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
+          <Button variant="secondary" size="sm" onClick={onReset}>
             Reset to template
-          </button>
+          </Button>
         ) : null
       }
       style={{ background: 'var(--bg-elevated)' }}
@@ -123,36 +111,34 @@ export function MemberEditor({
         }}
       >
         <Field label="Name">
-          <input
+          <Input
             value={member.name}
             onChange={(e) => onChange({ ...member, name: e.target.value })}
-            style={inputStyle}
           />
         </Field>
         <Field label="Role">
-          <input
+          <Input
             value={member.role}
             onChange={(e) => onChange({ ...member, role: e.target.value })}
-            style={inputStyle}
           />
         </Field>
       </div>
 
       <Field label="Personality" hint="A short prompt fragment for the agent's voice.">
-        <textarea
+        <Textarea
           value={member.personality}
           onChange={(e) => onChange({ ...member, personality: e.target.value })}
           rows={2}
-          style={{ ...inputStyle, resize: 'vertical', minHeight: 56 }}
+          style={{ resize: 'vertical', minHeight: 56 }}
         />
       </Field>
 
       <Field label="System prompt" hint="Custom instructions appended to the standard kickstart.">
-        <textarea
+        <Textarea
           value={member.systemPrompt}
           onChange={(e) => onChange({ ...member, systemPrompt: e.target.value })}
           rows={4}
-          style={{ ...inputStyle, resize: 'vertical', minHeight: 96, fontFamily: 'var(--font-mono)' }}
+          style={{ resize: 'vertical', minHeight: 96, fontFamily: 'var(--font-mono)' }}
         />
       </Field>
 
@@ -175,23 +161,22 @@ export function MemberEditor({
         }}
       >
         <Field label="Provider" hint={`Team default: ${templateProvider}`}>
-          <input
+          <Input
             value={member.provider ?? ''}
             onChange={(e) => onChange({ ...member, provider: e.target.value || undefined })}
             placeholder={templateProvider}
-            style={inputStyle}
           />
         </Field>
         <Field label="Model" hint={templateModel ? `Team default: ${templateModel}` : 'Provider default'}>
-          <input
+          <Input
             value={member.model ?? ''}
             onChange={(e) => onChange({ ...member, model: e.target.value || undefined })}
             placeholder={templateModel || '(provider default)'}
-            style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+            style={{ fontFamily: 'var(--font-mono)' }}
           />
         </Field>
         <Field label="Max turns" hint="Per-prompt cap. Leave blank for the global default.">
-          <input
+          <Input
             type="number"
             value={member.maxTurns ?? ''}
             onChange={(e) =>
@@ -201,7 +186,6 @@ export function MemberEditor({
               })
             }
             placeholder="(default)"
-            style={inputStyle}
           />
         </Field>
       </div>

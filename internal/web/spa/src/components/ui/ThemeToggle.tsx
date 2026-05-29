@@ -1,0 +1,54 @@
+import { Monitor, Moon, Sun } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+
+import { Press } from '@/components/motion/Press';
+import { useTheme, type ThemePref } from '@/hooks/useTheme';
+
+const NEXT_LABEL: Record<ThemePref, string> = {
+  dark: 'Theme: dark — switch to light',
+  light: 'Theme: light — switch to system',
+  system: 'Theme: system — switch to dark',
+};
+
+const ICON = { dark: Moon, light: Sun, system: Monitor };
+
+// ThemeToggle — header button that cycles dark → light → system, with a
+// quick rotate/scale crossfade between the moon/sun/monitor glyphs.
+export function ThemeToggle() {
+  const { theme, cycle } = useTheme();
+  const reduce = useReducedMotion();
+  const Icon = ICON[theme];
+  return (
+    <Press
+      pressScale={0.9}
+      onClick={cycle}
+      aria-label={NEXT_LABEL[theme]}
+      title={NEXT_LABEL[theme]}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 30,
+        height: 30,
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border-default)',
+        background: 'var(--bg-elevated)',
+        color: 'var(--text-secondary)',
+        cursor: 'pointer',
+      }}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={theme}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, rotate: -30 }}
+          animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, rotate: 0 }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, rotate: 30 }}
+          transition={{ duration: 0.18 }}
+          style={{ display: 'inline-flex' }}
+        >
+          <Icon size={15} />
+        </motion.span>
+      </AnimatePresence>
+    </Press>
+  );
+}

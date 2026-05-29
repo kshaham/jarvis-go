@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { Inbox, MessagesSquare, Send } from 'lucide-react';
 
-import { Metric, Press, RevealItem, StatusDot } from '../components/motion';
+import { Metric, Press, StatusDot } from '../components/motion';
 import { ComposeRelayModal } from '../components/ComposeRelayModal';
+import { Button, EmptyState } from '../components/ui';
 import { spring } from '../lib/motion';
 import { useIdentity, usePeers } from '../hooks/usePeers';
 import {
@@ -29,6 +32,10 @@ export function RelayScreen() {
   const messages = useRelayMessages(selected || undefined);
   const markRead = useMarkRelayRead();
   const [composeOpen, setComposeOpen] = useState(false);
+  // AutoAnimate owns enter/exit of relay bubbles as new messages land
+  // over SSE (respects reduced motion). Replaces the per-item RevealItem
+  // so live arrivals slide in without a double animation.
+  const [threadRef] = useAutoAnimate<HTMLDivElement>();
 
   // When the operator opens a conversation, mark visible unread inbound
   // messages as read. Cap at 25 so we don't flood the API on first
@@ -67,30 +74,26 @@ export function RelayScreen() {
             have to re-learn it.
           </p>
         </div>
-        <Press
-          pressScale={0.96}
+        <Button
+          variant="primary"
           onClick={() => setComposeOpen(true)}
           disabled={peerList.length === 0}
         >
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '10px 16px',
-              background: 'var(--accent)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 14,
-              fontWeight: 600,
-              opacity: peerList.length === 0 ? 0.5 : 1,
-            }}
-          >
-            Compose ↗
-          </span>
-        </Press>
+          <Send size={14} /> Compose
+        </Button>
       </header>
 
       {peerList.length === 0 ? (
-        <EmptyNoPeers />
+        <EmptyState
+          icon={<Inbox size={22} />}
+          title="No peer teams registered"
+          description="Inter-team messages flow between registered jarvis instances. Add a peer to start."
+          action={
+            <Link to="/peers/new" style={{ textDecoration: 'none' }}>
+              <Button variant="primary">Add a peer team →</Button>
+            </Link>
+          }
+        />
       ) : (
         <div
           style={{
@@ -138,11 +141,18 @@ export function RelayScreen() {
               overflow: 'hidden',
             }}
           >
-            {selected ? (
+            {messages.isError ? (
+              <ErrorPanel
+                message={
+                  messages.error instanceof Error ? messages.error.message : String(messages.error)
+                }
+              />
+            ) : selected ? (
               conversation.length === 0 ? (
                 <EmptyNoMessages onCompose={() => setComposeOpen(true)} />
               ) : (
                 <div
+                  ref={threadRef}
                   style={{
                     flex: 1,
                     overflowY: 'auto',
@@ -152,14 +162,13 @@ export function RelayScreen() {
                     paddingRight: 6,
                   }}
                 >
-                  {conversation.map((m, i) => (
-                    <RevealItem key={m.id} index={Math.min(i, 12)}>
-                      <Bubble
-                        message={m}
-                        localPeerId={identity.data?.peerId ?? ''}
-                        localDisplayName={identity.data?.displayName ?? 'You'}
-                      />
-                    </RevealItem>
+                  {conversation.map((m) => (
+                    <Bubble
+                      key={m.id}
+                      message={m}
+                      localPeerId={identity.data?.peerId ?? ''}
+                      localDisplayName={identity.data?.displayName ?? 'You'}
+                    />
                   ))}
                 </div>
               )
@@ -189,8 +198,10 @@ function PeerRail({
   onSelect: () => void;
 }) {
   return (
-    <button
+    <Press
+      pressScale={0.98}
       onClick={onSelect}
+      className={selected ? 'shadow-glow-sm transition-shadow' : 'transition-shadow'}
       style={{
         textAlign: 'left',
         display: 'flex',
@@ -198,11 +209,12 @@ function PeerRail({
         gap: 10,
         padding: '10px 12px',
         borderRadius: 'var(--radius-md)',
-        border: '1px solid ' + (selected ? 'var(--accent)' : 'transparent'),
+        border: '1px solid ' + (selected ? 'rgb(var(--accent-rgb))' : 'transparent'),
         background: selected ? 'var(--accent-muted)' : 'transparent',
         cursor: 'pointer',
         color: 'inherit',
         font: 'inherit',
+        width: '100%',
       }}
     >
       <StatusDot status={mapStatus(peer.status)} size={8} />
@@ -212,7 +224,7 @@ function PeerRail({
             display: 'block',
             fontSize: 13,
             fontWeight: 600,
-            color: 'var(--text-primary)',
+            color: selected ? 'var(--accent)' : 'var(--text-primary)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -235,7 +247,10 @@ function PeerRail({
         </span>
       </span>
       {peer.unreadInbound ? (
-        <span
+        <motion.span
+          animate={{ scale: [1, 1.12, 1] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          className="shadow-glow-sm"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -251,9 +266,9 @@ function PeerRail({
           }}
         >
           <Metric value={peer.unreadInbound} size={11} />
-        </span>
+        </motion.span>
       ) : null}
-    </button>
+    </Press>
   );
 }
 
@@ -348,127 +363,51 @@ function Bubble({
   );
 }
 
-function EmptyNoSelection() {
+function ErrorPanel({ message }: { message: string }) {
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={spring.smooth}
       style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 12,
+        padding: 12,
+        borderRadius: 'var(--radius-md)',
+        background: 'rgba(255,90,95,0.10)',
+        border: '1px solid var(--status-error)',
+        color: 'var(--status-error)',
+        fontSize: 13,
       }}
     >
-      <motion.div
-        animate={{ scale: [1, 0.92, 1], opacity: [0.6, 0.85, 0.6] }}
-        transition={{ duration: 4, repeat: Infinity }}
-        style={{
-          width: 48,
-          height: 48,
-          borderRadius: 14,
-          border: '1px solid var(--border-strong)',
-        }}
+      Couldn't load this conversation: {message}
+    </motion.div>
+  );
+}
+
+function EmptyNoSelection() {
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <EmptyState
+        icon={<MessagesSquare size={22} />}
+        title="Select a peer to view its conversation"
+        description="Pick a team from the rail to read and reply to its relay thread."
       />
-      <div style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 600 }}>
-        Select a peer to view its conversation
-      </div>
     </div>
   );
 }
 
 function EmptyNoMessages({ onCompose }: { onCompose: () => void }) {
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 14,
-      }}
-    >
-      <div style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 600 }}>
-        No messages exchanged yet
-      </div>
-      <p
-        style={{
-          margin: 0,
-          color: 'var(--text-muted)',
-          fontSize: 13,
-          textAlign: 'center',
-          maxWidth: 360,
-          lineHeight: 1.5,
-        }}
-      >
-        Send a message — share something your team learned that this peer team could use.
-      </p>
-      <Press pressScale={0.96} onClick={onCompose}>
-        <span
-          style={{
-            padding: '10px 16px',
-            background: 'var(--accent)',
-            color: '#fff',
-            fontSize: 13,
-            fontWeight: 600,
-            borderRadius: 'var(--radius-md)',
-            display: 'inline-block',
-          }}
-        >
-          Compose first message →
-        </span>
-      </Press>
-    </div>
-  );
-}
-
-function EmptyNoPeers() {
-  return (
-    <div
-      style={{
-        padding: '48px 24px',
-        borderRadius: 'var(--radius-card)',
-        background: 'var(--bg-elevated)',
-        border: '1px dashed var(--border-default)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 12,
-      }}
-    >
-      <div style={{ color: 'var(--text-primary)', fontSize: 17, fontWeight: 600 }}>
-        No peer teams registered
-      </div>
-      <p
-        style={{
-          margin: 0,
-          color: 'var(--text-muted)',
-          fontSize: 13,
-          textAlign: 'center',
-          maxWidth: 380,
-          lineHeight: 1.5,
-        }}
-      >
-        Inter-team messages flow between registered jarvis instances. Add a peer to start.
-      </p>
-      <Link to="/peers/new" style={{ textDecoration: 'none' }}>
-        <Press pressScale={0.96}>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '10px 16px',
-              background: 'var(--accent)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 14,
-              fontWeight: 600,
-            }}
-          >
-            Add a peer team →
-          </span>
-        </Press>
-      </Link>
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <EmptyState
+        icon={<Send size={22} />}
+        title="No messages exchanged yet"
+        description="Send a message — share something your team learned that this peer team could use."
+        action={
+          <Button variant="primary" onClick={onCompose}>
+            Compose first message →
+          </Button>
+        }
+      />
     </div>
   );
 }

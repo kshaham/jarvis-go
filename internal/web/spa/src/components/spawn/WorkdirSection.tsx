@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { inputStyle, SectionCard, SegmentedControl } from './formPrimitives';
+import { Chip, Input } from '@/components/ui';
+import { SectionCard, SegmentedControl } from './formPrimitives';
 
 const RECENT_KEY = 'jarvis.spawn.recentWorkdirs';
 const RECENT_MAX = 5;
@@ -68,7 +69,7 @@ export function WorkdirSection({
     >
       {newProject ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <input
+          <Input
             value={projectName}
             onChange={(e) => {
               const v = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
@@ -76,7 +77,7 @@ export function WorkdirSection({
             }}
             placeholder="project-name"
             aria-label="New project name"
-            style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+            style={{ fontFamily: 'var(--font-mono)' }}
           />
           <span
             style={{
@@ -91,12 +92,12 @@ export function WorkdirSection({
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <input
+          <Input
             value={workingDir}
             onChange={(e) => setWorkingDir(e.target.value)}
             placeholder="/path/to/repo"
             aria-label="Existing folder path"
-            style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+            style={{ fontFamily: 'var(--font-mono)' }}
           />
           {recents.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -113,28 +114,14 @@ export function WorkdirSection({
                 Recent
               </span>
               {recents.map((path) => (
-                <button
+                <Chip
                   key={path}
-                  type="button"
+                  active={path === workingDir}
                   onClick={() => setWorkingDir(path)}
-                  style={{
-                    padding: '4px 8px',
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 'var(--radius-pill)',
-                    color: 'var(--text-secondary)',
-                    fontSize: 11,
-                    fontFamily: 'var(--font-mono)',
-                    cursor: 'pointer',
-                    maxWidth: 220,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={path}
+                  className="max-w-[220px] truncate font-mono"
                 >
                   {path}
-                </button>
+                </Chip>
               ))}
             </div>
           ) : null}

@@ -40,6 +40,7 @@ export function SSEPulse({ size = 6 }: Props) {
           borderRadius: '50%',
           background: connected ? 'var(--accent)' : 'transparent',
           border: connected ? 'none' : '1px solid var(--status-error)',
+          boxShadow: connected ? '0 0 6px var(--accent)' : 'none',
         }}
       />
     </span>

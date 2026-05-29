@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { cn } from '@/lib/cn';
 import { StatusPill } from './StatusPill';
 import { Metric } from './motion';
-import { spring } from '@/lib/motion';
+import { GlowCard, Skeleton } from './ui';
 import type { OfficeMember } from '@/api/types';
 
 interface Props {
@@ -31,47 +31,48 @@ const avatarBg: Record<string, string> = {
   red: 'bg-red-500/20 text-red-300',
 };
 
+// Avatar tint classes for a member's color — shared so the
+// MemberDetailModal header avatar matches the card avatar during the
+// shared-element morph.
+export function agentAvatarClass(color?: string): string {
+  return avatarBg[color || 'blue'] || avatarBg.blue;
+}
+
+// The glyph shown in an agent avatar (emoji → initial → first letter).
+export function agentAvatarGlyph(member: Pick<OfficeMember, 'avatarEmoji' | 'avatarInitial' | 'name'>): string {
+  return (member.avatarEmoji || member.avatarInitial || member.name?.[0] || '?').toString();
+}
+
 export function AgentCard({ member, onSelect }: Props) {
   const cost = member.totalCost || 0;
-  const color = avatarBg[member.avatarColor || 'blue'] || avatarBg.blue;
-  const avatar = member.avatarEmoji || member.avatarInitial || member.name?.[0] || '?';
+  const color = agentAvatarClass(member.avatarColor);
+  const avatar = agentAvatarGlyph(member);
   const reduce = useReducedMotion();
-  // working status gets a 2px breathing left-edge accent — the
-  // "this agent is active right now" signal.
-  const accentEdge =
-    member.status === 'working' ? 'var(--status-working)' :
-    member.status === 'stuck' ? 'var(--status-stuck)' :
-    'transparent';
-
   const isInteractive = !!onSelect;
+  // Working agents glow violet (replaces the old 2px breathing edge);
+  // the spotlight tracks the cursor. Stuck agents are signalled by the
+  // urgent red StatusPill.
   return (
-    <motion.article
+    <GlowCard
+      interactive={isInteractive}
+      live={member.status === 'working'}
+      spotlight={isInteractive}
       onClick={onSelect ? () => onSelect(member) : undefined}
-      whileHover={reduce ? {} : { y: -2, borderColor: 'var(--border-strong)' }}
-      transition={spring.smooth}
-      className={cn(
-        'group relative flex flex-col gap-3 rounded-[14px] border p-4',
-        'transition-colors',
-        member.paused && 'opacity-60',
-      )}
-      style={{
-        cursor: isInteractive ? 'pointer' : 'default',
-        borderColor: 'var(--border-subtle)',
-        background: 'var(--bg-elevated)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-        // Left-edge accent painted via a pseudo-style background.
-        backgroundImage: `linear-gradient(to right, ${accentEdge} 0, ${accentEdge} 2px, transparent 2px)`,
-      }}
+      className={cn('group flex flex-col gap-3 p-4', member.paused && 'opacity-60')}
+      style={{ cursor: isInteractive ? 'pointer' : 'default' }}
     >
       <div className="flex items-start gap-3">
-        <div
+        {/* Shared-element morph target — the avatar flies into the
+            MemberDetailModal header on open (gated by reduced motion). */}
+        <motion.div
+          layoutId={reduce ? undefined : `agent-avatar-${member.sessionId}`}
           className={cn(
             'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-base font-semibold',
             color,
           )}
         >
           {avatar}
-        </div>
+        </motion.div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
             {member.name}
@@ -84,12 +85,13 @@ export function AgentCard({ member, onSelect }: Props) {
       </div>
 
       <div className="flex items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
-        {/* Cost ticks digit-by-digit as more tokens get billed. */}
+        {/* Cost ticks digit-by-digit and flashes when more tokens get billed. */}
         <Metric
           value={cost}
           format={{ style: 'currency', currency: 'USD', minimumFractionDigits: 2 }}
           size={11}
           tone="muted"
+          pulseOnChange
         />
         <span>{timeAgo(member.lastActivityAt)}</span>
       </div>
@@ -117,22 +119,22 @@ export function AgentCard({ member, onSelect }: Props) {
           </span>
         </div>
       )}
-    </motion.article>
+    </GlowCard>
   );
 }
 
 export function AgentCardSkeleton() {
   return (
-    <div className="flex animate-pulse flex-col gap-3 rounded-xl border border-white/5 bg-white/[0.025] p-4">
+    <div className="surface-card flex flex-col gap-3 p-4">
       <div className="flex items-start gap-3">
-        <div className="h-10 w-10 shrink-0 rounded-lg bg-white/10" />
+        <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
         <div className="flex-1 space-y-2">
-          <div className="h-3 w-24 rounded bg-white/10" />
-          <div className="h-2.5 w-16 rounded bg-white/10" />
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-2.5 w-16" />
         </div>
-        <div className="h-5 w-14 rounded-full bg-white/10" />
+        <Skeleton className="h-5 w-14 rounded-full" />
       </div>
-      <div className="h-2.5 w-full rounded bg-white/10" />
+      <Skeleton className="h-2.5 w-full" />
     </div>
   );
 }

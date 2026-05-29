@@ -1,5 +1,6 @@
 import { useOfficeStatus } from '@/hooks/useOfficeStatus';
 import { Metric, SSEPulse } from '@/components/motion';
+import { ThemeToggle } from '@/components/ui';
 
 export function TeamHeader() {
   const { data } = useOfficeStatus();
@@ -73,6 +74,7 @@ export function TeamHeader() {
           )}
           {/* Live SSE indicator — the heartbeat of the office. */}
           <SSEPulse />
+          <ThemeToggle />
         </div>
       </div>
     </header>

@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react';
-import { motion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { MessageSquare } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { Metric, Press, RevealItem } from '../components/motion';
-import { spring } from '../lib/motion';
-import { relativeTime } from '../lib/relativeTime';
-import { fetchJSON } from '../api/client';
-import { useOfficeMessages } from '../hooks/useOfficeData';
-import { useOfficeStatus } from '../hooks/useOfficeStatus';
-import type { OfficeMember, OfficeMessageWire } from '../api/types';
+import { Metric } from '@/components/motion';
+import { Button, EmptyState, GlowCard, Skeleton, Textarea } from '@/components/ui';
+import { relativeTime } from '@/lib/relativeTime';
+import { fetchJSON } from '@/api/client';
+import { useOfficeMessages } from '@/hooks/useOfficeData';
+import { useOfficeStatus } from '@/hooks/useOfficeStatus';
+import type { OfficeMember, OfficeMessageWire } from '@/api/types';
 
 // MessagesScreen — agent-to-agent chat. Left rail: agent list with
 // unread / latest preview. Right pane: thread between local viewer
@@ -70,15 +72,25 @@ export function MessagesScreen() {
         },
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['office', 'messages'] }),
+    onError: () => toast.error('Message failed to send'),
   });
 
   const [text, setText] = useState('');
+  // AutoAnimate owns the thread's entrance / reorder as messages stream
+  // in over SSE (respects reduced motion).
+  const [threadRef] = useAutoAnimate<HTMLDivElement>();
+
   const submit = () => {
     const content = text.trim();
     if (!content || !fromAgent || !effectiveSelected) return;
     sendMut.mutate(
       { from: fromAgent, to: effectiveSelected, content },
-      { onSuccess: () => setText('') },
+      {
+        onSuccess: () => {
+          setText('');
+          toast.success('Message sent');
+        },
+      },
     );
   };
 
@@ -94,12 +106,16 @@ export function MessagesScreen() {
           </p>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          <Metric value={allMessages.length} size={12} /> messages
+          <Metric value={allMessages.length} size={12} pulseOnChange /> messages
         </span>
       </header>
 
       {members.length === 0 ? (
-        <EmptyNoTeam />
+        <EmptyState
+          icon={<MessageSquare size={22} />}
+          title="No team spawned"
+          description="Spawn a team in the classic UI and inter-agent messages will start flowing here."
+        />
       ) : (
         <div
           style={{
@@ -146,6 +162,7 @@ export function MessagesScreen() {
             }}
           >
             <div
+              ref={threadRef}
               style={{
                 flex: 1,
                 overflowY: 'auto',
@@ -155,19 +172,18 @@ export function MessagesScreen() {
                 paddingRight: 4,
               }}
             >
-              {conversation.length === 0 ? (
-                <EmptyThread
-                  name={memberLookup.get(effectiveSelected)?.name ?? '—'}
-                />
+              {messagesQ.isLoading ? (
+                <ThreadSkeleton />
+              ) : conversation.length === 0 ? (
+                <EmptyThread name={memberLookup.get(effectiveSelected)?.name ?? '—'} />
               ) : (
-                conversation.map((m, i) => (
-                  <RevealItem key={m.id} index={Math.min(i, 12)}>
-                    <Bubble
-                      msg={m}
-                      isOutboundToSelected={m.toSessionId === effectiveSelected}
-                      lookup={memberLookup}
-                    />
-                  </RevealItem>
+                conversation.map((m) => (
+                  <Bubble
+                    key={m.id}
+                    msg={m}
+                    isOutboundToSelected={m.toSessionId === effectiveSelected}
+                    lookup={memberLookup}
+                  />
                 ))
               )}
             </div>
@@ -201,19 +217,16 @@ function AgentRail({
   onSelect: () => void;
 }) {
   return (
-    <button
+    <GlowCard
+      interactive
+      live={selected}
       onClick={onSelect}
+      className="flex gap-2.5 p-2.5 text-left"
       style={{
-        textAlign: 'left',
-        display: 'flex',
-        gap: 10,
-        padding: 10,
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid ' + (selected ? 'var(--accent)' : 'transparent'),
         background: selected ? 'var(--accent-muted)' : 'transparent',
+        border: '1px solid ' + (selected ? 'var(--accent)' : 'transparent'),
+        borderRadius: 'var(--radius-md)',
         cursor: 'pointer',
-        color: 'inherit',
-        font: 'inherit',
       }}
     >
       <div
@@ -265,7 +278,7 @@ function AgentRail({
           {relativeTime(last.timestamp)}
         </span>
       ) : null}
-    </button>
+    </GlowCard>
   );
 }
 
@@ -283,8 +296,7 @@ function Bubble({
   const fromName = msg.fromName || fromMember?.name || msg.fromSessionId.slice(0, 6);
   const toName = msg.toName || toMember?.name || msg.toSessionId?.slice(0, 6) || 'team';
   return (
-    <motion.div
-      transition={spring.smooth}
+    <div
       style={{
         alignSelf: isOutboundToSelected ? 'flex-end' : 'flex-start',
         maxWidth: '78%',
@@ -310,7 +322,7 @@ function Bubble({
       >
         {msg.content}
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -350,14 +362,8 @@ function Composer({
         <select
           value={fromAgent}
           onChange={(e) => setFromAgent(e.target.value)}
-          style={{
-            padding: '4px 8px',
-            background: 'var(--bg-app)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-sm)',
-            color: 'var(--text-primary)',
-            fontSize: 12,
-          }}
+          className="field"
+          style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }}
         >
           <option value="">Select sender…</option>
           {members.map((m) => (
@@ -368,46 +374,20 @@ function Composer({
         </select>
         <span style={{ marginLeft: 'auto' }}>→ {recipient || 'recipient'}</span>
       </div>
-      <textarea
+      <Textarea
         value={text}
         onChange={(e) => setText(e.target.value.slice(0, 500))}
         placeholder="Inject a message into the team channel…"
         rows={2}
-        style={{
-          padding: '8px 12px',
-          background: 'var(--bg-app)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-sm)',
-          color: 'var(--text-primary)',
-          fontSize: 13,
-          outline: 'none',
-          resize: 'vertical',
-          fontFamily: 'inherit',
-        }}
+        style={{ resize: 'vertical' }}
       />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
         <span style={{ fontSize: 11, color: text.length > 480 ? 'var(--status-warn)' : 'var(--text-muted)' }}>
           <Metric value={text.length} size={11} /> / 500
         </span>
-        <Press
-          pressScale={0.96}
-          onClick={onSend}
-          disabled={pending || !text.trim() || !fromAgent}
-        >
-          <span
-            style={{
-              padding: '8px 16px',
-              background: 'var(--accent)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 12,
-              fontWeight: 600,
-              opacity: pending || !text.trim() || !fromAgent ? 0.5 : 1,
-            }}
-          >
-            {pending ? 'Sending…' : 'Send'}
-          </span>
-        </Press>
+        <Button onClick={onSend} disabled={pending || !text.trim() || !fromAgent}>
+          {pending ? 'Sending…' : 'Send'}
+        </Button>
       </div>
     </div>
   );
@@ -419,29 +399,25 @@ function latestAgentId(messages: OfficeMessageWire[]): string {
   return last.toSessionId || last.fromSessionId;
 }
 
-function EmptyNoTeam() {
+function ThreadSkeleton() {
+  const rows = [
+    { side: 'flex-start', w: '60%' },
+    { side: 'flex-end', w: '45%' },
+    { side: 'flex-start', w: '70%' },
+    { side: 'flex-end', w: '52%' },
+  ] as const;
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-        padding: 32,
-        borderRadius: 'var(--radius-card)',
-        background: 'var(--bg-elevated)',
-        border: '1px dashed var(--border-default)',
-      }}
-    >
-      <div style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 600 }}>
-        No team spawned
-      </div>
-      <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', maxWidth: 360 }}>
-        Spawn a team in the classic UI and inter-agent messages will start flowing here.
-      </div>
-    </div>
+    <>
+      {rows.map((r, i) => (
+        <div
+          key={i}
+          style={{ alignSelf: r.side, maxWidth: '78%', width: r.w, display: 'flex', flexDirection: 'column', gap: 6 }}
+        >
+          <Skeleton className="h-2.5 w-24" />
+          <Skeleton className="h-10 w-full" style={{ borderRadius: 'var(--radius-card)' }} />
+        </div>
+      ))}
+    </>
   );
 }
 

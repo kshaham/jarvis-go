@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
-import { motion } from 'motion/react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 
-import { Metric, Press, RevealItem } from '../components/motion';
-import { spring } from '../lib/motion';
-import { relativeTime } from '../lib/relativeTime';
-import { useTaskQueues } from '../hooks/useOfficeData';
-import { useOfficeStatus } from '../hooks/useOfficeStatus';
-import type { Task, TaskPriority, TaskStatus } from '../api/types';
+import { Metric } from '@/components/motion';
+import { GlowCard, Input, Chip } from '@/components/ui';
+import { relativeTime } from '@/lib/relativeTime';
+import { useTaskQueues } from '@/hooks/useOfficeData';
+import { useOfficeStatus } from '@/hooks/useOfficeStatus';
+import type { Task, TaskPriority, TaskStatus } from '@/api/types';
 
 // Kanban columns mirror the vanilla shell: pending → acknowledged →
 // in_progress → review-equivalent (failed/handoff) → completed.
@@ -23,6 +23,8 @@ const COLUMNS: { id: ColumnId; label: string; accepts: TaskStatus[] }[] = [
 ];
 
 const PRIORITY_RANK: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 };
+
+const PRIORITY_FILTERS = ['all', 'high', 'medium', 'low'] as const;
 
 // TasksScreen — Arc/Rauno kanban. Five columns, magnetic-press cards,
 // search + priority filter, drag-out-of-scope (drag/drop is Phase 4 of
@@ -120,53 +122,24 @@ export function TasksScreen() {
       </header>
 
       {/* Filter bar */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 10,
-          alignItems: 'center',
-          flexWrap: 'wrap',
-        }}
-      >
-        <input
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search tasks…"
-          style={{
-            flex: '1 1 240px',
-            padding: '8px 12px',
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--text-primary)',
-            fontSize: 13,
-            outline: 'none',
-          }}
+          style={{ flex: '1 1 240px' }}
         />
         <div style={{ display: 'flex', gap: 6 }}>
-          {(['all', 'high', 'medium', 'low'] as const).map((p) => {
-            const active = priority === p;
-            return (
-              <Press
-                key={p}
-                pressScale={0.94}
-                onClick={() => setPriority(p)}
-                style={{
-                  padding: '6px 12px',
-                  background: active ? 'var(--accent-muted)' : 'var(--bg-surface)',
-                  border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border-default)'),
-                  borderRadius: 999,
-                  color: active ? 'var(--accent)' : 'var(--text-muted)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: 'capitalize',
-                  cursor: 'pointer',
-                }}
-              >
-                {p}
-              </Press>
-            );
-          })}
+          {PRIORITY_FILTERS.map((p) => (
+            <Chip
+              key={p}
+              active={priority === p}
+              onClick={() => setPriority(p)}
+              className="capitalize"
+            >
+              {p}
+            </Chip>
+          ))}
         </div>
       </div>
 
@@ -211,6 +184,9 @@ function Column({
 }) {
   const borderTone =
     tone === 'warning' ? 'var(--status-warn)' : tone === 'success' ? 'var(--status-success)' : 'var(--border-subtle)';
+  // AutoAnimate owns enter/exit/reorder of each lane as tasks move
+  // between columns over SSE (respects reduced motion).
+  const [listRef] = useAutoAnimate<HTMLDivElement>();
   return (
     <section
       style={{
@@ -245,9 +221,10 @@ function Column({
         >
           {label}
         </span>
-        <Metric value={count} size={12} tone="muted" />
+        <Metric value={count} size={12} tone="muted" pulseOnChange />
       </header>
       <div
+        ref={listRef}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -270,13 +247,12 @@ function Column({
             empty
           </div>
         ) : (
-          items.map((item, i) => (
-            <RevealItem key={item.task.id} index={Math.min(i, 12)}>
-              <TaskCard
-                task={item.task}
-                assignee={nameBySession.get(item.sessionId) ?? item.sessionId.slice(0, 6)}
-              />
-            </RevealItem>
+          items.map((item) => (
+            <TaskCard
+              key={item.task.id}
+              task={item.task}
+              assignee={nameBySession.get(item.sessionId) ?? item.sessionId.slice(0, 6)}
+            />
           ))
         )}
       </div>
@@ -291,19 +267,14 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
       : task.priority === 'low'
         ? 'var(--text-muted)'
         : 'var(--status-warn)';
+  const isWorking = task.status === 'in_progress';
   return (
-    <motion.article
-      whileHover={{ y: -1, borderColor: 'var(--border-strong)' }}
-      transition={spring.smooth}
+    <GlowCard
+      interactive
+      live={isWorking}
+      className="flex flex-col gap-1.5 p-2.5"
       style={{
-        padding: 10,
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
         borderLeft: '2px solid ' + priorityColor,
-        borderRadius: 'var(--radius-md)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
         boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
       }}
     >
@@ -368,7 +339,7 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
           🚧 {task.blockerDescription}
         </span>
       ) : null}
-    </motion.article>
+    </GlowCard>
   );
 }
 
@@ -393,7 +364,7 @@ function StatTile({
       >
         {label}
       </span>
-      <Metric value={value} size={20} tone={tone} />
+      <Metric value={value} size={20} tone={tone} pulseOnChange />
     </div>
   );
 }

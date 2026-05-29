@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
+import { Button } from '@/components/ui';
 import { Avatar } from './Avatar';
 import { leadOf } from './templateHelpers';
 import { TierCounts } from './TierBadge';
@@ -53,12 +54,14 @@ export function TemplateChip({
           </span>
           <span
             style={{
-              fontSize: 14,
+              fontSize: 15,
               fontWeight: 700,
               color: 'var(--text-primary)',
+              lineHeight: 1.3,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
             }}
           >
             {tpl.name}
@@ -68,23 +71,9 @@ export function TemplateChip({
 
       <TierCounts members={tpl.members.map((m) => ({ tier: m.tier as Tier | undefined }))} />
 
-      <button
-        type="button"
-        onClick={onChange}
-        style={{
-          padding: '6px 10px',
-          background: 'var(--bg-pressed)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-md)',
-          color: 'var(--text-primary)',
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: 'pointer',
-          alignSelf: 'flex-start',
-        }}
-      >
+      <Button variant="secondary" size="sm" onClick={onChange} style={{ alignSelf: 'flex-start' }}>
         Change template
-      </button>
+      </Button>
     </aside>
   );
 }

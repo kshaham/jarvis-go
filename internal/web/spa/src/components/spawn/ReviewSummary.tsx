@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import type { TeamTemplate } from '../../api/types';
-import { Press } from '../motion';
+import { Button } from '@/components/ui';
 import { AvatarStack } from './Avatar';
 import type { MemberEdit } from './MemberEditor';
 import { TierCounts } from './TierBadge';
@@ -75,6 +76,7 @@ export function ReviewSummary({
   error: string | null;
   onSpawn: () => void;
 }) {
+  const reduce = useReducedMotion();
   const providerLabel =
     defaultProvider === 'claude-subscription'
       ? 'Claude · Sub'
@@ -102,7 +104,12 @@ export function ReviewSummary({
   const spawnDisabled = !validity.ok || pending;
 
   return (
-    <div
+    <motion.div
+      // Subtle rise-and-fade as the sticky review bar mounts (after a
+      // template is chosen). Disabled under reduced motion.
+      initial={reduce ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
       style={{
         position: 'sticky',
         bottom: 0,
@@ -157,27 +164,15 @@ export function ReviewSummary({
 
         <span style={{ flex: 1 }} />
 
-        <Press
-          pressScale={spawnDisabled ? 1 : 0.97}
+        <Button
+          variant="primary"
           onClick={spawnDisabled ? undefined : onSpawn}
           disabled={spawnDisabled}
           aria-disabled={spawnDisabled}
           title={validity.ok ? '' : validity.reason}
-          style={{
-            padding: '10px 20px',
-            background: validity.ok ? 'var(--accent)' : 'var(--bg-pressed)',
-            color: validity.ok ? '#fff' : 'var(--text-muted)',
-            border: validity.ok ? 'none' : '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            fontSize: 14,
-            fontWeight: 700,
-            cursor: spawnDisabled ? 'not-allowed' : 'pointer',
-            opacity: pending ? 0.7 : 1,
-            transition: 'background 120ms ease, opacity 120ms ease',
-          }}
         >
           {pending ? 'Spawning…' : 'Spawn team'}
-        </Press>
+        </Button>
       </div>
 
       {!validity.ok ? (
@@ -191,7 +186,7 @@ export function ReviewSummary({
           {validity.reason}
         </p>
       ) : null}
-    </div>
+    </motion.div>
   );
 }
 

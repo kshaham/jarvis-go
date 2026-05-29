@@ -82,6 +82,8 @@ export function StatusDot({ status, size = 8 }: Props) {
           inset: 0,
           borderRadius: '50%',
           background: color,
+          // Soft halo so an active status reads as "glowing"; idle stays flat.
+          boxShadow: status === 'idle' ? 'none' : `0 0 6px ${color}`,
         }}
       />
     </span>

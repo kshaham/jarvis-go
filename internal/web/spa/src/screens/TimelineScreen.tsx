@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { Activity } from 'lucide-react';
 
-import { Metric, Press, RevealItem } from '../components/motion';
+import { Metric } from '../components/motion';
+import { Chip, EmptyState, GlowCard, Skeleton } from '../components/ui';
 import { relativeTime } from '../lib/relativeTime';
 import { useTimeline } from '../hooks/useOfficeData';
 import type { TimelineEntry } from '../api/types';
@@ -27,6 +30,10 @@ const KIND_COLOR: Record<string, string> = {
 export function TimelineScreen() {
   const timeline = useTimeline(200);
   const [kind, setKind] = useState('');
+  // AutoAnimate owns enter/exit/reorder as new events stream in over
+  // SSE (respects reduced motion). Replaces the per-row RevealItem so
+  // live mutations animate without double-staggering.
+  const [listRef] = useAutoAnimate<HTMLDivElement>();
 
   const entries = useMemo(() => timeline.data?.entries ?? [], [timeline.data?.entries]);
   const filtered = useMemo(() => {
@@ -46,15 +53,14 @@ export function TimelineScreen() {
           </p>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          <Metric value={filtered.length} size={20} /> events
+          {/* Count pulses as new events stream in. */}
+          <Metric value={filtered.length} size={20} pulseOnChange /> events
         </span>
       </header>
 
       <div
+        className="flex flex-wrap gap-1.5"
         style={{
-          display: 'flex',
-          gap: 6,
-          flexWrap: 'wrap',
           padding: '4px 0',
           position: 'sticky',
           top: 0,
@@ -62,38 +68,29 @@ export function TimelineScreen() {
           zIndex: 1,
         }}
       >
-        {KIND_CHIPS.map((chip) => {
-          const active = kind === chip.id;
-          return (
-            <Press
-              key={chip.id || 'all'}
-              pressScale={0.94}
-              onClick={() => setKind(chip.id)}
-              style={{
-                padding: '6px 12px',
-                background: active ? 'var(--accent-muted)' : 'var(--bg-surface)',
-                border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border-default)'),
-                borderRadius: 999,
-                color: active ? 'var(--accent)' : 'var(--text-muted)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {chip.label}
-            </Press>
-          );
-        })}
+        {KIND_CHIPS.map((chip) => (
+          <Chip key={chip.id || 'all'} active={kind === chip.id} onClick={() => setKind(chip.id)}>
+            {chip.label}
+          </Chip>
+        ))}
       </div>
 
-      {filtered.length === 0 ? (
-        <Empty />
-      ) : (
+      {timeline.isLoading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <EntrySkeleton key={i} />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<Activity size={22} />}
+          title="No activity yet"
+          description="Events appear here as the team produces tasks, messages, standups, and reviews."
+        />
+      ) : (
+        <div ref={listRef} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filtered.map((entry, i) => (
-            <RevealItem key={`${entry.timestamp}-${i}`} index={Math.min(i, 12)}>
-              <Entry entry={entry} />
-            </RevealItem>
+            <Entry key={`${entry.timestamp}-${i}`} entry={entry} />
           ))}
         </div>
       )}
@@ -123,6 +120,7 @@ function Entry({ entry }: { entry: TimelineEntry }) {
             background: 'var(--border-subtle)',
           }}
         />
+        {/* The spine dot glows in its kind color for emphasis. */}
         <span
           style={{
             position: 'relative',
@@ -132,21 +130,11 @@ function Entry({ entry }: { entry: TimelineEntry }) {
             borderRadius: '50%',
             background: color,
             margin: '0 auto',
+            boxShadow: `0 0 6px ${color}`,
           }}
         />
       </div>
-      <article
-        style={{
-          flex: 1,
-          padding: 12,
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-        }}
-      >
+      <GlowCard interactive className="flex flex-1 flex-col gap-1 p-3">
         <header style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
           <span
             style={{
@@ -174,25 +162,35 @@ function Entry({ entry }: { entry: TimelineEntry }) {
             {entry.summary}
           </div>
         ) : null}
-      </article>
+      </GlowCard>
     </div>
   );
 }
 
-function Empty() {
+function EntrySkeleton() {
   return (
-    <div
-      style={{
-        padding: 32,
-        textAlign: 'center',
-        color: 'var(--text-muted)',
-        fontSize: 13,
-        background: 'var(--bg-elevated)',
-        border: '1px dashed var(--border-default)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
-      No activity yet.
+    <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ width: 16, paddingTop: 14, position: 'relative', flexShrink: 0 }}>
+        <span
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: 7,
+            width: 1,
+            background: 'var(--border-subtle)',
+          }}
+        />
+        <Skeleton className="relative mx-auto h-2 w-2 rounded-full" />
+      </div>
+      <div className="surface-card flex flex-1 flex-col gap-2 p-3">
+        <div className="flex justify-between gap-8">
+          <Skeleton className="h-2.5 w-16" />
+          <Skeleton className="h-2.5 w-12" />
+        </div>
+        <Skeleton className="h-3 w-2/3" />
+        <Skeleton className="h-2.5 w-full" />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { ArrowLeftRight } from 'lucide-react';
 
-import { Metric, RevealItem } from '../components/motion';
+import { Metric } from '../components/motion';
+import { GlowCard, EmptyState } from '../components/ui';
 import { useTaskQueues } from '../hooks/useOfficeData';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import { relativeTime } from '../lib/relativeTime';
@@ -12,6 +15,9 @@ import { relativeTime } from '../lib/relativeTime';
 export function HandoffsScreen() {
   const queues = useTaskQueues();
   const status = useOfficeStatus();
+  // AutoAnimate owns enter/exit/reorder of the live list as handoffs
+  // resolve over SSE (respects reduced motion).
+  const [listRef] = useAutoAnimate<HTMLUListElement>();
   const nameBySession = useMemo(() => {
     const m = new Map<string, string>();
     for (const member of status.data?.members ?? []) m.set(member.sessionId, member.name);
@@ -52,13 +58,18 @@ export function HandoffsScreen() {
       </header>
 
       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-        <Metric value={pending.length} size={11} /> awaiting decision
+        <Metric value={pending.length} size={11} pulseOnChange /> awaiting decision
       </span>
 
       {pending.length === 0 ? (
-        <Empty />
+        <EmptyState
+          icon={<ArrowLeftRight size={22} />}
+          title="No pending handoffs"
+          description="When an agent hands a task to a teammate, it shows up here until they accept or reject."
+        />
       ) : (
         <ul
+          ref={listRef}
           style={{
             listStyle: 'none',
             padding: 0,
@@ -68,19 +79,9 @@ export function HandoffsScreen() {
             gap: 6,
           }}
         >
-          {pending.map((row, i) => (
-            <RevealItem key={row.taskId} index={i}>
-              <li
-                style={{
-                  padding: 12,
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  display: 'flex',
-                  gap: 12,
-                  alignItems: 'center',
-                }}
-              >
+          {pending.map((row) => (
+            <li key={row.taskId} style={{ listStyle: 'none' }}>
+              <GlowCard interactive className="flex items-center gap-3 p-3">
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span
                     style={{
@@ -111,29 +112,11 @@ export function HandoffsScreen() {
                 >
                   Pending
                 </span>
-              </li>
-            </RevealItem>
+              </GlowCard>
+            </li>
           ))}
         </ul>
       )}
     </section>
-  );
-}
-
-function Empty() {
-  return (
-    <div
-      style={{
-        padding: 32,
-        textAlign: 'center',
-        color: 'var(--text-muted)',
-        fontSize: 13,
-        background: 'var(--bg-elevated)',
-        border: '1px dashed var(--border-default)',
-        borderRadius: 'var(--radius-card)',
-      }}
-    >
-      No pending handoffs.
-    </div>
   );
 }
