@@ -177,14 +177,21 @@ func (s *CodexSession) worker(ctx context.Context) {
 	}
 }
 
-// runTurn spawns one `codex exec` invocation and consumes its JSONL stream.
-func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
-	s.setWorking()
-
+// codexExecArgs builds the argv (after the binary) for one `codex exec` turn.
+// resume is the captured thread id ("" on the first turn). workingDir is the
+// agent cwd; prompt is the turn input.
+//
+// IMPORTANT: `codex exec` (verified against codex-cli 0.135.0) does NOT accept
+// an `--ask-for-approval` flag — that lives only on the interactive command.
+// Approval is instead driven by `approval_policy` in the per-agent
+// CODEX_HOME/config.toml (codexcfg writes "never"). Passing
+// `--ask-for-approval` makes exec hard-error with "unexpected argument", which
+// fails every turn. Accepted exec flags here: --json, --skip-git-repo-check,
+// -s/--sandbox <mode>, -C/--cd <dir>, -m/--model. Keep this list aligned with
+// `codex exec --help`; the regression test in codex_session_test.go asserts
+// the no-approval-flag invariant.
+func codexExecArgs(resume, workingDir, prompt string) []string {
 	args := []string{"exec"}
-	s.mu.RLock()
-	resume := s.threadID
-	s.mu.RUnlock()
 	if resume != "" {
 		// Subsequent turns resume the captured thread (preserves transcript).
 		args = append(args, "resume", resume)
@@ -193,10 +200,20 @@ func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
 		"--json",
 		"--skip-git-repo-check",
 		"--sandbox", "danger-full-access", // we run in a hardened container
-		"--ask-for-approval", "never",
-		"-C", s.WorkingDir,
+		"-C", workingDir,
 		prompt,
 	)
+	return args
+}
+
+// runTurn spawns one `codex exec` invocation and consumes its JSONL stream.
+func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
+	s.setWorking()
+
+	s.mu.RLock()
+	resume := s.threadID
+	s.mu.RUnlock()
+	args := codexExecArgs(resume, s.WorkingDir, prompt)
 
 	cmd := exec.CommandContext(ctx, s.codexBin, args...)
 	cmd.Dir = s.WorkingDir

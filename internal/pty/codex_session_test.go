@@ -90,6 +90,35 @@ func TestCodexConsumeJSONL_Error(t *testing.T) {
 	}
 }
 
+func TestCodexExecArgs_NoApprovalFlagAndShape(t *testing.T) {
+	// `codex exec` (>= the deployed 0.135.0) hard-errors on --ask-for-approval;
+	// approval comes from config.toml approval_policy. Guard against anyone
+	// re-adding the flag, and pin the rest of the invocation shape.
+	first := codexExecArgs("", "/work/dir", "do a thing")
+	for _, a := range first {
+		if a == "--ask-for-approval" {
+			t.Fatalf("codexExecArgs must NOT pass --ask-for-approval (rejected by codex exec); got %v", first)
+		}
+	}
+	if first[0] != "exec" {
+		t.Errorf("args[0]=%q want exec", first[0])
+	}
+	want := []string{"exec", "--json", "--skip-git-repo-check", "--sandbox", "danger-full-access", "-C", "/work/dir", "do a thing"}
+	if len(first) != len(want) {
+		t.Fatalf("first-turn args=%v want %v", first, want)
+	}
+	for i := range want {
+		if first[i] != want[i] {
+			t.Errorf("first-turn args[%d]=%q want %q", i, first[i], want[i])
+		}
+	}
+	// Resume turns insert `resume <threadID>` right after the subcommand.
+	resumed := codexExecArgs("thread-123", "/work/dir", "next")
+	if resumed[1] != "resume" || resumed[2] != "thread-123" {
+		t.Errorf("resume args=%v want [exec resume thread-123 ...]", resumed)
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (haystack == needle || indexOf(haystack, needle) >= 0)
 }
