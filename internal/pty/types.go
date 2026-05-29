@@ -8,6 +8,11 @@ const (
 	ModeClaude    SessionMode = "claude"
 	ModeClaudeSDK SessionMode = "claude-sdk"
 	ModeShell     SessionMode = "shell"
+	// ModeCodexExec runs the agent on OpenAI's Codex CLI via per-turn
+	// `codex exec --json` (alternative backend to Claude Code). Driven by
+	// CodexSession, which parses the JSONL event stream instead of
+	// screen-scraping a TUI.
+	ModeCodexExec SessionMode = "codex-exec"
 )
 
 type SessionStatus string
@@ -153,6 +158,15 @@ type SessionConfig struct {
 	// at cmd/fakeclaude so integration tests can run without a real
 	// Claude install. ModeClaude only.
 	ClaudeBinaryPath string
+
+	// CodexHome is the per-agent CODEX_HOME directory (holds the
+	// generated config.toml + session rollout logs). ModeCodexExec only;
+	// passed to the `codex` subprocess as the CODEX_HOME env var.
+	CodexHome string
+
+	// CodexBinaryPath overrides the `codex` binary lookup (ModeCodexExec
+	// only). Empty resolves via PATH. Tests can point this at a stub.
+	CodexBinaryPath string
 }
 
 type NiceConfig struct {
