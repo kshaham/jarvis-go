@@ -457,9 +457,9 @@ func TestResolveMemberProviderModel_StrategicOpenAIDefaultsToFlagship(t *testing
 	}
 }
 
-func TestResolveMemberProviderModel_WorkerOpenAIDefaultsToMini(t *testing.T) {
-	// Worker-tier OpenAI member with no pinned model → cheaper gpt-5.4-mini
-	// so a Codex team doesn't run every member on the flagship.
+func TestResolveMemberProviderModel_WorkerOpenAIDefaultsToGPT54(t *testing.T) {
+	// Worker-tier OpenAI member with no pinned model → gpt-5.4 (one step down
+	// from the gpt-5.5 leads).
 	for _, prov := range []string{"openai-codex", "openai-custom"} {
 		_, model := ResolveMemberProviderModel(
 			teamtemplates.TeamTemplateMember{ID: "w1", Tier: "worker"},
@@ -467,8 +467,8 @@ func TestResolveMemberProviderModel_WorkerOpenAIDefaultsToMini(t *testing.T) {
 			prov,
 			"",
 		)
-		if model != "gpt-5.4-mini" {
-			t.Errorf("provider=%q worker model=%q want gpt-5.4-mini", prov, model)
+		if model != "gpt-5.4" {
+			t.Errorf("provider=%q worker model=%q want gpt-5.4", prov, model)
 		}
 	}
 }

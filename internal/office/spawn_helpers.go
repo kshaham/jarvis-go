@@ -279,17 +279,18 @@ func ResolveMemberProviderModel(
 		case "claude-subscription", "", "claude-api":
 			model = "claude-opus-4-8"
 		case "openai-codex", "openai-custom":
-			// Strategic Codex agents default to the flagship gpt-5.5;
-			// workers fall through to gpt-5.4-mini below.
+			// Strategic Codex agents (leads) default to the flagship gpt-5.5;
+			// workers fall through to gpt-5.4 below.
 			model = "gpt-5.5"
 		}
 	}
-	// Codex workers (no template/override/strategic default) get the cheaper
-	// gpt-5.4-mini so a team doesn't run every member on the flagship.
+	// Codex workers (no template/override/strategic default) default to the
+	// full gpt-5.4 (one step down from the gpt-5.5 leads). An explicit
+	// per-member model from the template or spawn modal always wins above.
 	if model == "" {
 		switch provider {
 		case "openai-codex", "openai-custom":
-			model = "gpt-5.4-mini"
+			model = "gpt-5.4"
 		}
 	}
 	if model == "" && zaiSonnet != "" {
