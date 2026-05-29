@@ -144,6 +144,33 @@ The build output is embedded automatically via the existing
 `/office-v2` will serve the React shell instead of the placeholder. See
 `internal/web/spa/README.md` for the full dev workflow.
 
+### Independent frontend deploys (`OFFICE_SPA_DIR`)
+
+The static asset root is configurable. By default the server serves the
+repo-relative `internal/web/static/public/` in dev and the embedded build in
+prod. Set `OFFICE_SPA_DIR=/path/to/public` to serve the SPA (and the classic
+UI) from a directory **at runtime** instead — this lets the frontend be
+rebuilt and redeployed without recompiling or relinking the Go binary.
+
+The container deployment uses this to decouple the two build artifacts:
+
+- The `frontend-dist` Docker stage assembles the full `public/` tree
+  (committed classic UI + the freshly built Vite SPA) into a tiny data image.
+- `scripts/deploy.sh` copies that tree into the `office-spa` named volume
+  (pinned name `jarvis_office_spa`) under a timestamped `rel-*` dir, then
+  atomically flips a `current` symlink. The backend mounts the volume
+  read-only at `/app/office-public` with `OFFICE_SPA_DIR=/app/office-public/current`.
+- The Go `go-build` stage no longer embeds the SPA, so a **frontend-only**
+  change rebuilds only the small `frontend-dist` image and repopulates the
+  volume — the Go binary's layers stay cached, no relink, no backend restart
+  (the server re-reads the dir per request). The binary still embeds the
+  **classic** UI as an offline fallback; if the volume is ever missing,
+  `/office-v2` degrades to the "bundle not built" placeholder.
+
+`scripts/rollback.sh` flips `current` back to the previous `rel-*` release.
+This is a single-origin design: no reverse proxy, no CORS — the Go server
+still serves both `/api` and the SPA.
+
 ---
 
 ## 🔀 4. Reverse proxy

@@ -1235,9 +1235,15 @@ func (s *Server) setupRouter() chi.Router {
 	// rewrites any sub-route (e.g. /office-v2/agents/:id) onto the same
 	// index.html so client-side routing works. When the bundle hasn't
 	// been built yet, serves a placeholder page pointing at the README.
-	const reactPublicDir = "internal/web/static/public"
+	// Static asset root. OFFICE_SPA_DIR (a mounted volume in prod) overrides
+	// the repo-relative dev default so the SPA can be deployed independently
+	// of this binary; static.Handler/FileExists are disk-first with an
+	// embedded-FS fallback, so an unset or missing dir degrades to the
+	// embedded build. Shared by the /office-v2 handler and the catch-all
+	// static handler below.
+	publicDir := static.PublicDirFromEnv("internal/web/static/public")
 	officeV2 := func(w http.ResponseWriter, r *http.Request) {
-		if !static.FileExists(reactPublicDir, "react/index.html") {
+		if !static.FileExists(publicDir, "react/index.html") {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(officeV2PlaceholderHTML))
 			return
@@ -1247,13 +1253,13 @@ func (s *Server) setupRouter() chi.Router {
 		// behind the auth wall; "/react/" makes it serve index.html in
 		// place with no redirect.
 		r.URL.Path = "/react/"
-		static.Handler(reactPublicDir).ServeHTTP(w, r)
+		static.Handler(publicDir).ServeHTTP(w, r)
 	}
 	r.Get("/office-v2", officeV2)
 	r.Get("/office-v2/*", officeV2)
 
-	// Static files (frontend)
-	publicDir := "internal/web/static/public" // dev path (relative to project root)
+	// Static files (frontend) — served from the resolved publicDir above
+	// (OFFICE_SPA_DIR volume in prod, repo-relative dir in dev).
 	// Static files with auth-aware redirect for HTML pages
 	staticHandler := static.Handler(publicDir)
 	r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {

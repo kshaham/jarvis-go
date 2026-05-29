@@ -30,6 +30,19 @@ func Handler(publicDir string) http.Handler {
 	return http.FileServer(http.FS(publicSub))
 }
 
+// PublicDirFromEnv returns the OFFICE_SPA_DIR env var when set (non-empty),
+// otherwise def. This lets the SPA be served from a mounted volume in prod
+// so it can be deployed independently of the Go binary, while an unset/dev
+// environment keeps the repo-relative default. Handler() and FileExists()
+// are already disk-first with an embedded-FS fallback, so a missing or
+// empty dir degrades gracefully to the embedded build.
+func PublicDirFromEnv(def string) string {
+	if d := os.Getenv("OFFICE_SPA_DIR"); d != "" {
+		return d
+	}
+	return def
+}
+
 // FileExists reports whether the named file exists under the public
 // root. Dev mode (publicDir set + exists) consults disk; production
 // consults the embedded FS. Used by the /office-v2 handler to decide
