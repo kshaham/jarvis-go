@@ -121,6 +121,16 @@ type SpawnTeamRequest struct {
 	// owned by Claude Code's preview API and may change.
 	Channels []string `json:"channels,omitempty"`
 
+	// Per-team kill switch for Claude Code Dynamic Workflows (the
+	// capability where an agent fans out up to ~1,000 subagents, ~16
+	// concurrent). Default false = workflows ON (Claude Code's default
+	// on paid plans), so a lead can orchestrate a workflow on-demand.
+	// Set true to inject CLAUDE_CODE_DISABLE_WORKFLOWS=1 into every
+	// member's session — a guardrail, since agents run permission-
+	// bypassed and would otherwise self-launch large runs with no human
+	// gate. The per-session cost cap remains the spend backstop.
+	DisableWorkflows bool `json:"disableWorkflows,omitempty"`
+
 	// Per-team escape hatch for the codegraph MCP wiring. Default
 	// behaviour (nil) = codegraph on if the binary is on PATH,
 	// mirroring jarvis-mcp + codegraphcontext (always on). Set true

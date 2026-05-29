@@ -47,6 +47,9 @@ export function SpawnScreen() {
   const [defaultModel, setDefaultModel] = useState('');
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramInterval, setTelegramInterval] = useState(60);
+  // Dynamic Workflows are on by default; this toggle lets the operator
+  // disable them for the team (sends disableWorkflows to the backend).
+  const [workflowsEnabled, setWorkflowsEnabled] = useState(true);
   const [members, setMembers] = useState<MemberEdit[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
 
@@ -103,6 +106,7 @@ export function SpawnScreen() {
         perpetualMode: perpetual,
         telegramEnabled,
         telegramIntervalMin: telegramInterval,
+        disableWorkflows: !workflowsEnabled,
         memberOverrides: members.map((m) => ({
           id: m.id,
           name: m.name,
@@ -173,6 +177,8 @@ export function SpawnScreen() {
                 setTelegramEnabled={setTelegramEnabled}
                 telegramInterval={telegramInterval}
                 setTelegramInterval={setTelegramInterval}
+                workflowsEnabled={workflowsEnabled}
+                setWorkflowsEnabled={setWorkflowsEnabled}
               />
             </div>
             {/* Column 2 — the roster leads. */}

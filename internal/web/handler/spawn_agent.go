@@ -7,10 +7,10 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/pty"
 	"github.com/kshaham/jarvis/internal/teamtemplates"
-	"github.com/google/uuid"
 )
 
 type spawnAgentSpec struct {
@@ -30,6 +30,17 @@ type spawnAgentSpec struct {
 // modal. R24 removed the MaxCostUSD counterpart. When nil, defaults
 // apply (defaultMaxTurnsPerSession).
 func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, trySDK bool, ov *memberOverride, spec spawnAgentSpec) (string, string) {
+	// Per-team Dynamic Workflows kill switch. Workflows are ON by default
+	// (Claude Code paid-plan default); when the operator opts out we inject
+	// CLAUDE_CODE_DISABLE_WORKFLOWS=1, honored on every surface (SDK,
+	// headless, interactive). Done before the hooks short-circuit so all
+	// three spawn paths (SDK / PTY / hooks) inherit it.
+	if req.DisableWorkflows {
+		if envVars == nil {
+			envVars = map[string]string{}
+		}
+		envVars["CLAUDE_CODE_DISABLE_WORKFLOWS"] = "1"
+	}
 	// hooks-mode short-circuits the SDK path entirely: ModeClaude+hooks
 	// runs the interactive `claude` CLI in a PTY (billed on the
 	// interactive subscription pool, NOT the new SDK credit pool) and
@@ -272,16 +283,16 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 // spawnAgentSessionWithHooks is the office spawn path for
 // officeSessionMode = "hooks". Same shape as the PTY fallback in
 // spawnAgentSession, but with three differences:
-//   1. ID is preassigned (so the hook URLs in the per-agent
-//      .claude/settings.local.json -- written before this call by
-//      SetupWorktreesWithHooks -- match the agent we're about to
-//      register.
-//   2. WorkingDir is the per-agent worktree path, not the team's
-//      shared workingDir.
-//   3. HooksEnabled flag flows through SessionConfig so the office
-//      payload builder can render the "via hooks" badge and so the
-//      SDK forwarder bypasses tear-down for hooks-driven AgentState
-//      updates.
+//  1. ID is preassigned (so the hook URLs in the per-agent
+//     .claude/settings.local.json -- written before this call by
+//     SetupWorktreesWithHooks -- match the agent we're about to
+//     register.
+//  2. WorkingDir is the per-agent worktree path, not the team's
+//     shared workingDir.
+//  3. HooksEnabled flag flows through SessionConfig so the office
+//     payload builder can render the "via hooks" badge and so the
+//     SDK forwarder bypasses tear-down for hooks-driven AgentState
+//     updates.
 func spawnAgentSessionWithHooks(ctx *Context, member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, spec spawnAgentSpec) (string, string) {
 	ptyEnv := make(map[string]string, len(envVars)+1)
 	for k, v := range envVars {

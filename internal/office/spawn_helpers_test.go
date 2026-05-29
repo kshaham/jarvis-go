@@ -354,6 +354,63 @@ func TestResolveMemberProviderModel_BlankOverrideFieldsDontClobber(t *testing.T)
 	}
 }
 
+func TestResolveMemberProviderModel_StrategicClaudeDefaultsToOpus48(t *testing.T) {
+	// Strategic-tier lead on a first-party Claude provider with no pinned
+	// model → defaults to Opus 4.8 (the model that authors Dynamic Workflows).
+	for _, prov := range []string{"claude-subscription", "", "claude-api"} {
+		provider, model := ResolveMemberProviderModel(
+			teamtemplates.TeamTemplateMember{ID: "lead", Tier: "strategic"},
+			nil,
+			prov,
+			"",
+		)
+		if model != "claude-opus-4-8" {
+			t.Errorf("provider=%q strategic model=%q want claude-opus-4-8", provider, model)
+		}
+	}
+}
+
+func TestResolveMemberProviderModel_WorkerClaudeStaysDefault(t *testing.T) {
+	// Worker tier must NOT be upgraded to Opus — keeps the cheaper default.
+	_, model := ResolveMemberProviderModel(
+		teamtemplates.TeamTemplateMember{ID: "w1", Tier: "worker"},
+		nil,
+		"claude-subscription",
+		"",
+	)
+	if model != "" {
+		t.Errorf("worker model=%q want empty (no Opus upgrade)", model)
+	}
+}
+
+func TestResolveMemberProviderModel_StrategicZAINotOpus(t *testing.T) {
+	// Strategic on a non-Claude provider (zai-glm) must not get Opus 4.8;
+	// the Z.AI sonnet fallback fills the blank model instead.
+	_, model := ResolveMemberProviderModel(
+		teamtemplates.TeamTemplateMember{ID: "lead", Tier: "strategic"},
+		nil,
+		"zai-glm",
+		"glm-5",
+	)
+	if model != "glm-5" {
+		t.Errorf("strategic zai model=%q want glm-5 (no Opus upgrade for non-Claude)", model)
+	}
+}
+
+func TestResolveMemberProviderModel_ExplicitModelBeatsOpusDefault(t *testing.T) {
+	// An explicit template/override model on a strategic claude member wins
+	// over the Opus-4.8 default.
+	_, model := ResolveMemberProviderModel(
+		teamtemplates.TeamTemplateMember{ID: "lead", Tier: "strategic", Provider: "claude-api", Model: "claude-sonnet-4-6"},
+		nil,
+		"claude-api",
+		"",
+	)
+	if model != "claude-sonnet-4-6" {
+		t.Errorf("model=%q want claude-sonnet-4-6 (explicit pin beats Opus default)", model)
+	}
+}
+
 func TestResolveMemberProviderModel_ZAISonnetFillsBlankModel(t *testing.T) {
 	// Z.AI allocator assigned glm-5 to this member; nothing else
 	// pinned a model.

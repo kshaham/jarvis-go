@@ -8,13 +8,13 @@ const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: st
     value: 'claude-subscription',
     label: 'Claude · Subscription',
     hint: 'Uses the operator account login (no API key needed).',
-    placeholder: 'claude-opus-4-7',
+    placeholder: 'claude-opus-4-8',
   },
   {
     value: 'claude-api',
     label: 'Claude · API',
     hint: 'Direct Anthropic API. Requires ANTHROPIC_API_KEY.',
-    placeholder: 'claude-opus-4-7',
+    placeholder: 'claude-opus-4-8',
   },
   {
     value: 'zai-glm',
@@ -39,6 +39,8 @@ export function DefaultsSection({
   setTelegramEnabled,
   telegramInterval,
   setTelegramInterval,
+  workflowsEnabled,
+  setWorkflowsEnabled,
 }: {
   defaultProvider: string;
   setDefaultProvider: (v: string) => void;
@@ -50,6 +52,8 @@ export function DefaultsSection({
   setTelegramEnabled: (b: boolean) => void;
   telegramInterval: number;
   setTelegramInterval: (n: number) => void;
+  workflowsEnabled: boolean;
+  setWorkflowsEnabled: (b: boolean) => void;
 }) {
   const activeProvider = KNOWN_VALUES.has(defaultProvider)
     ? PROVIDERS.find((p) => p.value === defaultProvider) ?? null
@@ -97,6 +101,12 @@ export function DefaultsSection({
           value={perpetual}
           onChange={setPerpetual}
           hint="Auto-restart agents that finish their queue."
+        />
+        <Toggle
+          label="Dynamic workflows"
+          value={workflowsEnabled}
+          onChange={setWorkflowsEnabled}
+          hint="Let leads fan out subagents for large tasks. Off disables it team-wide."
         />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Toggle

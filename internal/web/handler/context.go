@@ -186,6 +186,12 @@ func (ctx *Context) getProviderEnvVars() map[string]string {
 
 	provider, _ := settings["provider"].(string)
 
+	// Make the bare `opus` alias resolve to Opus 4.8 (the model that authors
+	// Dynamic Workflows) so it never silently downgrades to an older Opus on
+	// any provider. Not an auth var — safe for subscription mode. The zai-glm
+	// case below overwrites it with the GLM mapping; Claude providers keep it.
+	env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = "claude-opus-4-8"
+
 	switch provider {
 	case "claude-subscription", "":
 		// Don't set any auth env vars for subscription mode.
@@ -244,6 +250,9 @@ var AllocateZAIModels = office.AllocateZAIModels
 func (ctx *Context) getProviderEnvVarsFor(provider, model, sonnetOverride string) map[string]string {
 	env := make(map[string]string)
 	settings := ctx.StateStore.GetSettings()
+
+	// Pin the `opus` alias to Opus 4.8 (zai-glm case overwrites below).
+	env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = "claude-opus-4-8"
 
 	switch provider {
 	case "claude-subscription", "":

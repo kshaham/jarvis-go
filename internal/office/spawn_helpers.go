@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kshaham/jarvis/internal/office/spawnpayload"
 	"github.com/kshaham/jarvis/internal/strs"
 	"github.com/kshaham/jarvis/internal/teamtemplates"
-	"github.com/google/uuid"
 )
 
 // PreassignHookSessionIDs generates a fresh UUID session ID per
@@ -267,6 +267,17 @@ func ResolveMemberProviderModel(
 		}
 		if override.Model != "" {
 			model = override.Model
+		}
+	}
+	// Lead/strategic agents on a first-party Claude provider default to
+	// Opus 4.8 — the model that authors Dynamic Workflows and benefits
+	// most from the higher effort tiers. Workers and non-Claude providers
+	// (e.g. zai-glm) keep their cheaper default; an explicit template or
+	// spawn-modal model always wins (handled above).
+	if model == "" && member.Tier == "strategic" {
+		switch provider {
+		case "claude-subscription", "", "claude-api":
+			model = "claude-opus-4-8"
 		}
 	}
 	if model == "" && zaiSonnet != "" {

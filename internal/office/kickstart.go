@@ -190,6 +190,9 @@ func BuildStableSystemPrompt(tier, teamMission string) string {
 	// full skill bodies on every turn.
 	b.WriteString("- For multi-step tasks, wrap your work in `/goal <criteria>` so Claude Code's evaluator decides when you're done. If you get stuck, ask the team: `cm ask \"<question>\" --about <taskId> --wait 5m` (lead-first, fallback teammate, blocks until answered or timeout). Read `cm skill read office-goal-loop` and `cm skill read office-ask-for-help` once.\n\n")
 
+	b.WriteString("## Dynamic Workflows (large fan-out work)\n")
+	b.WriteString("For big, parallelizable tasks -- codebase-wide audits, migrations, sweeping refactors, multi-source research -- you can run a **dynamic workflow**: describe the task and include the word \"workflow\", and Claude Code writes a JS orchestration script that fans out subagents (up to ~16 concurrent, 1,000 total per run) in a background runtime, returning only the final result to your context. Reach for it when a task is genuinely large and decomposable; it costs substantially more tokens than a normal turn, so prefer ordinary work for small tasks and respect your cost cap.\n\n")
+
 	b.WriteString("## Team Messaging\n")
 	b.WriteString("Team messages arrive as `[Team Message from <name>]: <content>`. Reply with `cm message <sessionId> \"...\"`. `cm roster` lists sessionIds.\n")
 

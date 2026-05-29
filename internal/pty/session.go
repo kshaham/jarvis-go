@@ -121,9 +121,14 @@ type Session struct {
 	// R1.3 · Per-session CLI flags mirrored from SessionConfig. PTY
 	// sessions get the same flag surface as SDK sessions where the
 	// `claude` CLI exposes it. Empty / zero values mean "skip".
-	systemPromptFile                   string
-	appendSystemPromptFile             string
-	effort                             string
+	systemPromptFile       string
+	appendSystemPromptFile string
+	effort                 string
+	// model mirrors SessionConfig.Model. The SDK path forwards it via
+	// claude.WithModel; the PTY path now forwards it via --model (without
+	// this it was silently ignored, so PTY/hooks sessions ran the CLI
+	// default regardless of the team's pinned model).
+	model                              string
 	fallbackModel                      string
 	excludeDynamicSystemPromptSections bool
 	strictMcpConfig                    bool
@@ -158,19 +163,19 @@ func NewSession(config SessionConfig) *Session {
 	}
 
 	return &Session{
-		ID:             id,
-		WorkingDir:     config.WorkingDir,
-		CreatedAt:      time.Now(),
-		Mode:           config.Mode,
-		name:           config.Name,
-		status:         StatusStopped,
-		terminalBuffer: NewBufferAccumulator(MaxTerminalBufferSize, TrimTerminalTo),
-		textOutput:     NewBufferAccumulator(MaxTextOutputSize, TrimTextTo),
-		screenManager:  config.ScreenManager,
-		useScreen:      config.UseScreen,
-		events:         make(chan SessionEvent, eventChannelSize),
-		done:           make(chan struct{}),
-		idleReset:      make(chan struct{}, 1),
+		ID:                  id,
+		WorkingDir:          config.WorkingDir,
+		CreatedAt:           time.Now(),
+		Mode:                config.Mode,
+		name:                config.Name,
+		status:              StatusStopped,
+		terminalBuffer:      NewBufferAccumulator(MaxTerminalBufferSize, TrimTerminalTo),
+		textOutput:          NewBufferAccumulator(MaxTextOutputSize, TrimTextTo),
+		screenManager:       config.ScreenManager,
+		useScreen:           config.UseScreen,
+		events:              make(chan SessionEvent, eventChannelSize),
+		done:                make(chan struct{}),
+		idleReset:           make(chan struct{}, 1),
 		providerEnv:         config.ProviderEnv,
 		niceConfig:          config.NiceConfig,
 		omitSkipPermissions: config.OmitSkipPermissions,
@@ -181,6 +186,7 @@ func NewSession(config SessionConfig) *Session {
 		systemPromptFile:                   config.SystemPromptFile,
 		appendSystemPromptFile:             config.AppendSystemPromptFile,
 		effort:                             config.Effort,
+		model:                              config.Model,
 		fallbackModel:                      config.FallbackModel,
 		excludeDynamicSystemPromptSections: config.ExcludeDynamicSystemPromptSections,
 		strictMcpConfig:                    config.StrictMcpConfig,
@@ -269,6 +275,13 @@ func (s *Session) Start(ctx context.Context) error {
 		}
 		if effort := normaliseEffortString(s.effort); effort != "" {
 			claudeArgs = append(claudeArgs, "--effort", effort)
+		}
+		// Forward the pinned model (e.g. claude-opus-4-8 for strategic-tier
+		// leads). Previously the PTY path omitted --model, so hooks/standard
+		// sessions silently ran the CLI default — only the SDK path honored
+		// SessionConfig.Model.
+		if s.model != "" {
+			claudeArgs = append(claudeArgs, "--model", s.model)
 		}
 		if s.fallbackModel != "" {
 			claudeArgs = append(claudeArgs, "--fallback-model", s.fallbackModel)
@@ -771,11 +784,11 @@ func (s *Session) processOutput(rawData string) {
 // Menus have patterns like "❯ 1. Title" with numbered options below.
 //
 // Two-layer detection:
-//   1. Per-chunk substring scan on cleanData -- fast, latency-optimal
-//      for the common case where the entire menu lands in one PTY read.
-//   2. Snapshot fallback when the per-chunk scan misses a marker but
-//      one is present -- handles ANSI splits across chunk boundaries
-//      that would have left the per-chunk view incomplete.
+//  1. Per-chunk substring scan on cleanData -- fast, latency-optimal
+//     for the common case where the entire menu lands in one PTY read.
+//  2. Snapshot fallback when the per-chunk scan misses a marker but
+//     one is present -- handles ANSI splits across chunk boundaries
+//     that would have left the per-chunk view incomplete.
 func (s *Session) detectAndAutoRespondMenu(cleanData string) {
 	// Only auto-respond in Claude mode (not shell sessions)
 	if s.Mode != ModeClaude {
