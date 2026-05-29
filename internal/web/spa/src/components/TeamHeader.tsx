@@ -12,7 +12,7 @@ export function TeamHeader() {
       className="sticky top-0 z-10 border-b backdrop-blur"
       style={{
         borderColor: 'var(--border-subtle)',
-        background: 'rgba(6,8,12,0.8)',
+        background: 'rgba(3,20,14,0.8)',
       }}
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">

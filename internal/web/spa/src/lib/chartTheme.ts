@@ -18,8 +18,8 @@ export interface ChartTheme {
 }
 
 const FALLBACK: ChartTheme = {
-  accent: '#7c5cff',
-  accentStrong: '#9b80ff',
+  accent: '#22c55e',
+  accentStrong: '#4ef0a3',
   success: '#3ddc97',
   warn: '#ffb454',
   error: '#ff5a5f',

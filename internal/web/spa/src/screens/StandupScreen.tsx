@@ -258,12 +258,12 @@ function SpotlightRow({
                 isCurrent && !reduce
                   ? {
                       boxShadow: [
-                        '0 0 14px rgba(124,92,255,0.35)',
-                        '0 0 26px rgba(124,92,255,0.65)',
-                        '0 0 14px rgba(124,92,255,0.35)',
+                        '0 0 14px rgba(34,197,94,0.35)',
+                        '0 0 26px rgba(34,197,94,0.65)',
+                        '0 0 14px rgba(34,197,94,0.35)',
                       ],
                     }
-                  : { boxShadow: isCurrent ? '0 0 18px rgba(124,92,255,0.4)' : '0 0 0 rgba(0,0,0,0)' }
+                  : { boxShadow: isCurrent ? '0 0 18px rgba(34,197,94,0.4)' : '0 0 0 rgba(0,0,0,0)' }
               }
               transition={
                 isCurrent && !reduce
