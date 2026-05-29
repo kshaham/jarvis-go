@@ -32,8 +32,8 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
+      // /api/events (the SSE stream) is covered by this /api proxy.
       '/api': 'http://localhost:3555',
-      '/sse': 'http://localhost:3555',
     },
   },
 });

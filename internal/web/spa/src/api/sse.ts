@@ -48,7 +48,10 @@ export function getSSEConnected(): boolean {
 }
 
 export function subscribeSSE(handler: SSEHandler): SSESubscription {
-  const url = '/sse';
+  // The server's SSE stream lives at /api/events (the classic UI uses the
+  // same route). No `?subscribe=` param → the broker treats it as "all
+  // events"; we filter by event name on the client below.
+  const url = '/api/events';
   const src = new EventSource(url, { withCredentials: true });
   activeSources++;
   const generic = (e: MessageEvent) => {
