@@ -203,6 +203,11 @@ func (ctx *Context) getProviderEnvVars() map[string]string {
 		if key, ok := settings["claudeApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_API_KEY"] = key
 		}
+	case "openai-subscription":
+		// Codex on a ChatGPT/Codex Pro subscription (codex login OAuth). No API
+		// key in env — the driver also strips any inherited OPENAI_API_KEY so
+		// the built-in provider authenticates via auth.json, not API billing.
+		delete(env, "ANTHROPIC_DEFAULT_OPUS_MODEL")
 	case "openai-codex", "openai-custom":
 		// Codex backend. Key precedence: operator setting > shared
 		// deployment key (server .env OPENAI_API_KEY). The per-agent
@@ -276,6 +281,11 @@ func (ctx *Context) getProviderEnvVarsFor(provider, model, sonnetOverride string
 		if key, ok := settings["claudeApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_API_KEY"] = key
 		}
+	case "openai-subscription":
+		// Codex on a ChatGPT/Codex Pro subscription (codex login OAuth). No API
+		// key in env — the driver also strips any inherited OPENAI_API_KEY so
+		// the built-in provider authenticates via auth.json, not API billing.
+		delete(env, "ANTHROPIC_DEFAULT_OPUS_MODEL")
 	case "openai-codex", "openai-custom":
 		// Codex backend. Key precedence: operator setting > shared
 		// deployment key (server .env OPENAI_API_KEY). The per-agent

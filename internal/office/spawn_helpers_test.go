@@ -473,6 +473,22 @@ func TestResolveMemberProviderModel_WorkerOpenAIDefaultsToGPT54(t *testing.T) {
 	}
 }
 
+func TestResolveMemberProviderModel_SubscriptionNoForcedModel(t *testing.T) {
+	// openai-subscription must NOT force a model (the plan exposes its own
+	// lineup) — leave it empty so codex uses the plan default, for both tiers.
+	for _, tier := range []string{"strategic", "worker"} {
+		_, model := ResolveMemberProviderModel(
+			teamtemplates.TeamTemplateMember{ID: "m", Tier: tier},
+			nil,
+			"openai-subscription",
+			"",
+		)
+		if model != "" {
+			t.Errorf("tier=%q subscription model=%q want empty (plan default)", tier, model)
+		}
+	}
+}
+
 func TestResolveMemberProviderModel_ExplicitOpenAIModelWins(t *testing.T) {
 	// An explicit pin beats both the strategic-flagship and worker-mini
 	// defaults for OpenAI providers.
@@ -491,6 +507,7 @@ func TestHarnessFor(t *testing.T) {
 	cases := map[string]string{
 		"openai-codex":        "codex",
 		"openai-custom":       "codex",
+		"openai-subscription": "codex",
 		"claude-subscription": "claude",
 		"claude-api":          "claude",
 		"zai-glm":             "claude",

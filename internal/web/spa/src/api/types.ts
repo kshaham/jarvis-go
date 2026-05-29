@@ -407,6 +407,9 @@ export const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
   'zai-glm': ['glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
   'openai-codex': ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2'],
   'openai-custom': ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2'],
+  // Subscription uses the plan's own model lineup, so no fixed dropdown —
+  // ModelSelect falls back to free text (blank = plan default).
+  'openai-subscription': [],
 };
 
 // modelOptionsForProvider returns the dropdown choices for a provider, or an

@@ -6,7 +6,8 @@ type Provider =
   | 'claude-api'
   | 'zai-glm'
   | 'openai-codex'
-  | 'openai-custom';
+  | 'openai-custom'
+  | 'openai-subscription';
 
 const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: string }[] = [
   {
@@ -29,9 +30,15 @@ const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: st
   },
   {
     value: 'openai-codex',
-    label: 'OpenAI · Codex',
-    hint: 'Runs the whole team on the Codex CLI. Uses the shared deployment OpenAI key, or `codex login` for a ChatGPT subscription.',
+    label: 'OpenAI · Codex (API key)',
+    hint: 'Runs the whole team on the Codex CLI billed per-token against the shared OpenAI API key.',
     placeholder: 'gpt-5.5',
+  },
+  {
+    value: 'openai-subscription',
+    label: 'OpenAI · Codex (subscription)',
+    hint: 'Runs on your ChatGPT/Codex Pro plan via `codex login` (no per-token cost). Uses the plan’s models — leave Model blank for the default.',
+    placeholder: '(plan default)',
   },
   {
     value: 'openai-custom',
@@ -89,7 +96,11 @@ export function DefaultsSection({
     ? activeProvider.hint
     : `Custom provider: ${defaultProvider || '(none)'}`;
   const modelPlaceholder = activeProvider?.placeholder ?? '(provider default)';
-  const isCodexHarness = defaultProvider === 'openai-codex' || defaultProvider === 'openai-custom';
+  const isSubscription = defaultProvider === 'openai-subscription';
+  const showOpenAIKeyFields =
+    defaultProvider === 'openai-codex' || defaultProvider === 'openai-custom';
+  // Any OpenAI provider runs on the Codex harness (Dynamic Workflows N/A).
+  const isCodexHarness = showOpenAIKeyFields || isSubscription;
 
   return (
     <SectionCard
@@ -117,7 +128,28 @@ export function DefaultsSection({
         />
       </Field>
 
-      {isCodexHarness ? (
+      {isSubscription ? (
+        <Field
+          label="Codex login required"
+          hint="One-time, in the container: run  CODEX_HOME=~/.jarvis/codex-auth codex login  to authorize your ChatGPT/Codex Pro account. jarvis stages those OAuth credentials into each agent — no API key, no per-token cost."
+        >
+          <div
+            style={{
+              padding: '8px 10px',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--lg-fill)',
+              border: '1px solid var(--lg-rim)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+              color: 'var(--text-secondary)',
+            }}
+          >
+            CODEX_HOME=~/.jarvis/codex-auth codex login
+          </div>
+        </Field>
+      ) : null}
+
+      {showOpenAIKeyFields ? (
         <div
           style={{
             display: 'grid',

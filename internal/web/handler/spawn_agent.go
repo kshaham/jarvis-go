@@ -5,6 +5,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -416,6 +417,39 @@ func codexMCPFromMap(in map[string]any) map[string]codexcfg.MCPServer {
 	return out
 }
 
+// codexSubscriptionAuthDir is the persisted directory (under the
+// jarvis-config volume, so it survives container restarts) where the operator
+// runs `CODEX_HOME=<dir> codex login` once to authorize the ChatGPT/Codex Pro
+// subscription. Its auth.json is staged into each subscription agent's
+// per-agent CODEX_HOME at spawn time.
+func codexSubscriptionAuthDir(home string) string {
+	return filepath.Join(home, ".jarvis", "codex-auth")
+}
+
+// stageCodexAuth copies the operator's `codex login` OAuth credentials into a
+// subscription agent's CODEX_HOME so the built-in `openai` provider
+// authenticates against the plan. Prefers the persisted
+// ~/.jarvis/codex-auth/auth.json (recommended), then the default
+// ~/.codex/auth.json. Returns an error if neither exists.
+func stageCodexAuth(home, codexHome string) error {
+	candidates := []string{
+		filepath.Join(codexSubscriptionAuthDir(home), "auth.json"),
+		filepath.Join(home, ".codex", "auth.json"),
+	}
+	for _, src := range candidates {
+		data, rerr := os.ReadFile(src)
+		if rerr != nil {
+			continue
+		}
+		dst := filepath.Join(codexHome, "auth.json")
+		if werr := os.WriteFile(dst, data, 0o600); werr != nil {
+			return fmt.Errorf("stage codex auth -> %s: %w", dst, werr)
+		}
+		return nil
+	}
+	return fmt.Errorf("no codex auth.json found (looked in %v); run `CODEX_HOME=%s codex login`", candidates, codexSubscriptionAuthDir(home))
+}
+
 // spawnCodexAgentSession is the Codex-harness spawn path (ModeCodexExec). It
 // writes a per-agent CODEX_HOME/config.toml (provider + model + sandbox + MCP),
 // builds the Codex-flavored system prompt, starts a CodexSession, and wires its
@@ -438,9 +472,15 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	stablePrefix := office.BuildStableSystemPromptCodex(member.Tier, req.Mission)
 	systemPrompt := stablePrefix + "\n\n" + kickstart
 
-	// Resolve model (caller passes the resolved per-member model; default to
-	// the flagship if somehow empty) and reasoning effort.
-	if model == "" {
+	// openai-subscription runs on a ChatGPT/Codex Pro plan via `codex login`
+	// OAuth (auth.json) — no API key, no custom provider block, and no forced
+	// model (the plan exposes its own lineup, so leave it to codex's default
+	// unless the operator pinned one explicitly).
+	subscription := provider == "openai-subscription"
+
+	// API-key teams default to the flagship when no model is pinned;
+	// subscription teams leave it empty so codex uses the plan default.
+	if model == "" && !subscription {
 		model = "gpt-5.5"
 	}
 	tuning := resolveSessionTuning(req, member.Tier, ov)
@@ -455,6 +495,10 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	hasKey := envVars["OPENAI_API_KEY"] != ""
 	var prov *codexcfg.Provider
 	switch provider {
+	case "openai-subscription":
+		// Built-in `openai` provider (prov stays nil) authenticated by the
+		// codex login OAuth credentials staged into CODEX_HOME below. No
+		// API-key provider block.
 	case "openai-custom":
 		baseURL, _ := settings["openaiBaseUrl"].(string)
 		if baseURL == "" {
@@ -504,6 +548,18 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 		return "", ""
 	}
 
+	// Subscription: stage the `codex login` OAuth credentials into this agent's
+	// CODEX_HOME so the built-in provider authenticates against the plan. Fail
+	// loudly rather than spawn a teammate that 401s every turn when the
+	// operator hasn't logged in yet.
+	if subscription {
+		if err := stageCodexAuth(home, codexHome); err != nil {
+			slog.Error("Codex subscription: no auth.json found — run `codex login` in the container first (see CODEX_HOME below)",
+				"name", member.Name, "error", err)
+			return "", ""
+		}
+	}
+
 	// Subprocess env: provider env (OPENAI_API_KEY/CODEX_API_KEY) + jarvis vars
 	// so `cm` works + CODEX_HOME (also set by the driver, belt-and-suspenders).
 	agentEnv := make(map[string]string, len(envVars)+4)
@@ -535,6 +591,7 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 			Effort:             tuning.Effort,
 			MaxTurnsPerSession: maxTurns,
 			CodexHome:          codexHome,
+			CodexSubscription:  subscription,
 		},
 	)
 	if err != nil {

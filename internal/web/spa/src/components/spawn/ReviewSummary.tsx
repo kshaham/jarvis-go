@@ -88,7 +88,9 @@ export function ReviewSummary({
             ? 'OpenAI · Codex'
             : defaultProvider === 'openai-custom'
               ? 'OpenAI · Custom'
-              : defaultProvider;
+              : defaultProvider === 'openai-subscription'
+                ? 'OpenAI · Sub'
+                : defaultProvider;
 
   const baseById = useMemo(
     () => new Map(tpl.members.map((m, i) => [m.id ?? `${tpl.id}-${i}`, m] as const)),

@@ -305,7 +305,7 @@ func ResolveMemberProviderModel(
 // Codex CLI harness. Callers branch the spawn path on this.
 func HarnessFor(provider string) string {
 	switch provider {
-	case "openai-codex", "openai-custom":
+	case "openai-codex", "openai-custom", "openai-subscription":
 		return "codex"
 	default:
 		return "claude"

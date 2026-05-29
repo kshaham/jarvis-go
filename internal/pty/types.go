@@ -167,6 +167,14 @@ type SessionConfig struct {
 	// CodexBinaryPath overrides the `codex` binary lookup (ModeCodexExec
 	// only). Empty resolves via PATH. Tests can point this at a stub.
 	CodexBinaryPath string
+
+	// CodexSubscription (ModeCodexExec only) runs the agent against a
+	// ChatGPT/Codex Pro subscription via `codex login` OAuth (auth.json in
+	// CODEX_HOME) instead of an API key. When true the driver strips
+	// OPENAI_API_KEY / CODEX_API_KEY from the subprocess env so the built-in
+	// `openai` provider uses the OAuth credentials rather than falling back to
+	// (or being forced into) API-key billing inherited from the container env.
+	CodexSubscription bool
 }
 
 type NiceConfig struct {

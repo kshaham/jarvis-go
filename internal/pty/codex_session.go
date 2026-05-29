@@ -84,11 +84,12 @@ type CodexSession struct {
 	droppedEvents atomic.Uint64
 
 	// Config
-	providerEnv map[string]string
-	codexHome   string
-	codexBin    string
-	model       string
-	kickstart   string
+	providerEnv  map[string]string
+	codexHome    string
+	codexBin     string
+	model        string
+	kickstart    string
+	subscription bool // ChatGPT/Codex OAuth (auth.json) instead of an API key
 
 	outputObservers   map[int]func(string)
 	outputObserverSeq int
@@ -123,6 +124,7 @@ func NewCodexSession(config SessionConfig) *CodexSession {
 		codexBin:           bin,
 		model:              config.Model,
 		kickstart:          config.SystemPrompt,
+		subscription:       config.CodexSubscription,
 		maxTurnsPerSession: config.MaxTurnsPerSession,
 		outputObservers:    make(map[int]func(string)),
 		activeTools:        make(map[string]bool),
@@ -446,10 +448,23 @@ func codexToolName(it *codexItem) string {
 	}
 }
 
-// buildEnv merges the host env with providerEnv + CODEX_HOME.
+// buildEnv merges the host env with providerEnv + CODEX_HOME. In subscription
+// mode it also strips OPENAI_API_KEY / CODEX_API_KEY (which the container sets
+// for the shared API-key path) so the built-in `openai` provider authenticates
+// with the `codex login` OAuth credentials in CODEX_HOME/auth.json rather than
+// an inherited API key.
 func (s *CodexSession) buildEnv() []string {
-	env := os.Environ()
+	var env []string
+	for _, kv := range os.Environ() {
+		if s.subscription && (strings.HasPrefix(kv, "OPENAI_API_KEY=") || strings.HasPrefix(kv, "CODEX_API_KEY=")) {
+			continue
+		}
+		env = append(env, kv)
+	}
 	for k, v := range s.providerEnv {
+		if s.subscription && (k == "OPENAI_API_KEY" || k == "CODEX_API_KEY") {
+			continue
+		}
 		env = append(env, k+"="+v)
 	}
 	if s.codexHome != "" {

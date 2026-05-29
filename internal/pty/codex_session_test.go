@@ -129,6 +129,49 @@ func TestCodexExecArgs_NoApprovalFlagAndShape(t *testing.T) {
 	}
 }
 
+func TestCodexBuildEnv_SubscriptionStripsAPIKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-should-be-stripped")
+	t.Setenv("CODEX_API_KEY", "sk-should-be-stripped")
+
+	// API-key mode: the inherited key is kept.
+	apiSess := NewCodexSession(SessionConfig{Model: "gpt-5.4", CodexHome: "/tmp/h"})
+	if !envHasKey(apiSess.buildEnv(), "OPENAI_API_KEY") {
+		t.Error("api-key mode should keep inherited OPENAI_API_KEY")
+	}
+
+	// Subscription mode: OPENAI_API_KEY / CODEX_API_KEY are stripped so the
+	// built-in provider uses auth.json (OAuth), and providerEnv can't reintroduce them.
+	subSess := NewCodexSession(SessionConfig{
+		Model:             "gpt-5.5",
+		CodexHome:         "/tmp/h",
+		CodexSubscription: true,
+		ProviderEnv:       map[string]string{"OPENAI_API_KEY": "sk-from-provider", "JARVIS_API_URL": "http://localhost:3555"},
+	})
+	env := subSess.buildEnv()
+	if envHasKey(env, "OPENAI_API_KEY") {
+		t.Error("subscription mode must strip OPENAI_API_KEY from the subprocess env")
+	}
+	if envHasKey(env, "CODEX_API_KEY") {
+		t.Error("subscription mode must strip CODEX_API_KEY from the subprocess env")
+	}
+	if !envHasKey(env, "JARVIS_API_URL") {
+		t.Error("subscription mode must still pass non-key providerEnv (JARVIS_API_URL)")
+	}
+	if !envHasKey(env, "CODEX_HOME") {
+		t.Error("CODEX_HOME must be set")
+	}
+}
+
+// envHasKey reports whether a KEY=... entry exists in an os/exec-style env slice.
+func envHasKey(env []string, key string) bool {
+	for _, kv := range env {
+		if len(kv) > len(key) && kv[:len(key)+1] == key+"=" {
+			return true
+		}
+	}
+	return false
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (haystack == needle || indexOf(haystack, needle) >= 0)
 }
