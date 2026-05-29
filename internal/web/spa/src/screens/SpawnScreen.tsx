@@ -148,55 +148,67 @@ export function SpawnScreen() {
       </header>
 
       {hasTemplate ? (
-        <div className="spawn-shell">
-          <TemplateChip tpl={tpl} onChange={() => setTemplateId('')} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-            <ConfigureStep
-              tpl={tpl}
-              mission={mission}
-              setMission={setMission}
-              workingDir={workingDir}
-              setWorkingDir={setWorkingDir}
-              newProject={newProject}
-              setNewProject={setNewProject}
-              projectName={projectName}
-              setProjectName={setProjectName}
-              perpetual={perpetual}
-              setPerpetual={setPerpetual}
-              defaultProvider={defaultProvider}
-              setDefaultProvider={setDefaultProvider}
-              defaultModel={defaultModel}
-              setDefaultModel={setDefaultModel}
-              telegramEnabled={telegramEnabled}
-              setTelegramEnabled={setTelegramEnabled}
-              telegramInterval={telegramInterval}
-              setTelegramInterval={setTelegramInterval}
-              members={members}
-              setMembers={setMembers}
-              selectedMemberId={selectedMemberId}
-              setSelectedMemberId={setSelectedMemberId}
-            />
-            <ReviewSummary
-              tpl={tpl}
-              members={members}
-              defaultProvider={defaultProvider}
-              defaultModel={defaultModel}
-              newProject={newProject}
-              workingDir={workingDir}
-              projectName={projectName}
-              validity={validateSpawnState({
-                templateId,
-                mission,
-                newProject,
-                workingDir,
-                projectName,
-              })}
-              pending={spawn.isPending}
-              error={spawn.error instanceof Error ? spawn.error.message : null}
-              onSpawn={() => spawn.mutate()}
-            />
+        <>
+          <div className="spawn-grid">
+            {/* Column 1 — team-level setup. */}
+            <div className="spawn-col">
+              <TemplateChip tpl={tpl} onChange={() => setTemplateId('')} />
+              <MissionSection value={mission} onChange={setMission} templateName={tpl.name} />
+              <WorkdirSection
+                newProject={newProject}
+                setNewProject={setNewProject}
+                workingDir={workingDir}
+                setWorkingDir={setWorkingDir}
+                projectName={projectName}
+                setProjectName={setProjectName}
+              />
+              <DefaultsSection
+                defaultProvider={defaultProvider}
+                setDefaultProvider={setDefaultProvider}
+                defaultModel={defaultModel}
+                setDefaultModel={setDefaultModel}
+                perpetual={perpetual}
+                setPerpetual={setPerpetual}
+                telegramEnabled={telegramEnabled}
+                setTelegramEnabled={setTelegramEnabled}
+                telegramInterval={telegramInterval}
+                setTelegramInterval={setTelegramInterval}
+              />
+            </div>
+            {/* Column 2 — the roster leads. */}
+            <div className="spawn-col">
+              <MembersSection
+                tpl={tpl}
+                members={members}
+                setMembers={setMembers}
+                selectedMemberId={selectedMemberId}
+                setSelectedMemberId={setSelectedMemberId}
+                defaultProvider={defaultProvider}
+                defaultModel={defaultModel}
+              />
+            </div>
           </div>
-        </div>
+          {/* Full-width sticky review/spawn bar spanning both columns. */}
+          <ReviewSummary
+            tpl={tpl}
+            members={members}
+            defaultProvider={defaultProvider}
+            defaultModel={defaultModel}
+            newProject={newProject}
+            workingDir={workingDir}
+            projectName={projectName}
+            validity={validateSpawnState({
+              templateId,
+              mission,
+              newProject,
+              workingDir,
+              projectName,
+            })}
+            pending={spawn.isPending}
+            error={spawn.error instanceof Error ? spawn.error.message : null}
+            onSpawn={() => spawn.mutate()}
+          />
+        </>
       ) : (
         <TemplateStep
           query={query}
@@ -364,93 +376,4 @@ function TemplateCardSkeleton() {
   );
 }
 
-function ConfigureStep(props: {
-  tpl: TeamTemplate;
-  mission: string;
-  setMission: (s: string) => void;
-  workingDir: string;
-  setWorkingDir: (s: string) => void;
-  newProject: boolean;
-  setNewProject: (b: boolean) => void;
-  projectName: string;
-  setProjectName: (s: string) => void;
-  perpetual: boolean;
-  setPerpetual: (b: boolean) => void;
-  defaultProvider: string;
-  setDefaultProvider: (s: string) => void;
-  defaultModel: string;
-  setDefaultModel: (s: string) => void;
-  telegramEnabled: boolean;
-  setTelegramEnabled: (b: boolean) => void;
-  telegramInterval: number;
-  setTelegramInterval: (n: number) => void;
-  members: MemberEdit[];
-  setMembers: (m: MemberEdit[]) => void;
-  selectedMemberId: string | null;
-  setSelectedMemberId: (id: string | null) => void;
-}) {
-  const {
-    tpl,
-    mission,
-    setMission,
-    workingDir,
-    setWorkingDir,
-    newProject,
-    setNewProject,
-    projectName,
-    setProjectName,
-    perpetual,
-    setPerpetual,
-    defaultProvider,
-    setDefaultProvider,
-    defaultModel,
-    setDefaultModel,
-    telegramEnabled,
-    setTelegramEnabled,
-    telegramInterval,
-    setTelegramInterval,
-    members,
-    setMembers,
-    selectedMemberId,
-    setSelectedMemberId,
-  } = props;
-
-  return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <MissionSection value={mission} onChange={setMission} templateName={tpl.name} />
-
-      <WorkdirSection
-        newProject={newProject}
-        setNewProject={setNewProject}
-        workingDir={workingDir}
-        setWorkingDir={setWorkingDir}
-        projectName={projectName}
-        setProjectName={setProjectName}
-      />
-
-      <DefaultsSection
-        defaultProvider={defaultProvider}
-        setDefaultProvider={setDefaultProvider}
-        defaultModel={defaultModel}
-        setDefaultModel={setDefaultModel}
-        perpetual={perpetual}
-        setPerpetual={setPerpetual}
-        telegramEnabled={telegramEnabled}
-        setTelegramEnabled={setTelegramEnabled}
-        telegramInterval={telegramInterval}
-        setTelegramInterval={setTelegramInterval}
-      />
-
-      <MembersSection
-        tpl={tpl}
-        members={members}
-        setMembers={setMembers}
-        selectedMemberId={selectedMemberId}
-        setSelectedMemberId={setSelectedMemberId}
-        defaultProvider={defaultProvider}
-        defaultModel={defaultModel}
-      />
-    </section>
-  );
-}
 
