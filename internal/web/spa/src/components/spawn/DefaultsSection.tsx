@@ -1,7 +1,12 @@
 import { Input } from '@/components/ui';
-import { ChipGroup, Field, inputStyle, SectionCard, Toggle } from './formPrimitives';
+import { ChipGroup, Field, inputStyle, ModelSelect, SectionCard, Toggle } from './formPrimitives';
 
-type Provider = 'claude-subscription' | 'claude-api' | 'zai-glm';
+type Provider =
+  | 'claude-subscription'
+  | 'claude-api'
+  | 'zai-glm'
+  | 'openai-codex'
+  | 'openai-custom';
 
 const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: string }[] = [
   {
@@ -22,6 +27,18 @@ const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: st
     hint: 'Anthropic-compatible Z.AI API. Requires ZAI_API_KEY.',
     placeholder: 'glm-5',
   },
+  {
+    value: 'openai-codex',
+    label: 'OpenAI · Codex',
+    hint: 'Runs the whole team on the Codex CLI. Uses the shared deployment OpenAI key, or `codex login` for a ChatGPT subscription.',
+    placeholder: 'gpt-5.5',
+  },
+  {
+    value: 'openai-custom',
+    label: 'OpenAI · Custom endpoint',
+    hint: 'Codex CLI against an internal OpenAI-compatible endpoint (Responses API). Set the base URL + API key below.',
+    placeholder: 'gpt-5.5',
+  },
 ];
 
 const KNOWN_VALUES = new Set<string>(PROVIDERS.map((p) => p.value));
@@ -33,6 +50,11 @@ export function DefaultsSection({
   setDefaultProvider,
   defaultModel,
   setDefaultModel,
+  openaiBaseUrl,
+  setOpenaiBaseUrl,
+  openaiApiKey,
+  setOpenaiApiKey,
+  openaiKeyConfigured,
   perpetual,
   setPerpetual,
   telegramEnabled,
@@ -46,6 +68,11 @@ export function DefaultsSection({
   setDefaultProvider: (v: string) => void;
   defaultModel: string;
   setDefaultModel: (v: string) => void;
+  openaiBaseUrl: string;
+  setOpenaiBaseUrl: (v: string) => void;
+  openaiApiKey: string;
+  setOpenaiApiKey: (v: string) => void;
+  openaiKeyConfigured: boolean;
   perpetual: boolean;
   setPerpetual: (b: boolean) => void;
   telegramEnabled: boolean;
@@ -62,6 +89,7 @@ export function DefaultsSection({
     ? activeProvider.hint
     : `Custom provider: ${defaultProvider || '(none)'}`;
   const modelPlaceholder = activeProvider?.placeholder ?? '(provider default)';
+  const isCodexHarness = defaultProvider === 'openai-codex' || defaultProvider === 'openai-custom';
 
   return (
     <SectionCard
@@ -80,14 +108,56 @@ export function DefaultsSection({
       </Field>
 
       <Field label="Model" hint="Leave blank for the provider default.">
-        <Input
+        <ModelSelect
+          provider={defaultProvider}
           value={defaultModel}
-          onChange={(e) => setDefaultModel(e.target.value)}
+          onChange={setDefaultModel}
           placeholder={modelPlaceholder}
-          aria-label="Default model"
-          style={{ fontFamily: 'var(--font-mono)' }}
+          ariaLabel="Default model"
         />
       </Field>
+
+      {isCodexHarness ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: 12,
+          }}
+        >
+          {defaultProvider === 'openai-custom' ? (
+            <Field
+              label="OpenAI base URL"
+              hint="Internal endpoint, e.g. https://your-proxy/v1 (must speak the Responses API)."
+            >
+              <Input
+                value={openaiBaseUrl}
+                onChange={(e) => setOpenaiBaseUrl(e.target.value)}
+                placeholder="https://api.openai.com/v1"
+                aria-label="OpenAI base URL"
+                style={{ fontFamily: 'var(--font-mono)' }}
+              />
+            </Field>
+          ) : null}
+          <Field
+            label="OpenAI API key"
+            hint={
+              openaiKeyConfigured
+                ? 'A shared key is already configured for deployment — leave blank to use it.'
+                : 'Sent as a Bearer token to the endpoint. Stored in settings.'
+            }
+          >
+            <Input
+              type="password"
+              value={openaiApiKey}
+              onChange={(e) => setOpenaiApiKey(e.target.value)}
+              placeholder={openaiKeyConfigured ? 'configured ✓ (override optional)' : 'sk-...'}
+              aria-label="OpenAI API key"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+          </Field>
+        </div>
+      ) : null}
 
       <div
         style={{
@@ -106,7 +176,11 @@ export function DefaultsSection({
           label="Dynamic workflows"
           value={workflowsEnabled}
           onChange={setWorkflowsEnabled}
-          hint="Let leads fan out subagents for large tasks. Off disables it team-wide."
+          hint={
+            isCodexHarness
+              ? 'Claude Code only — ignored on the Codex harness.'
+              : 'Let leads fan out subagents for large tasks. Off disables it team-wide.'
+          }
         />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Toggle

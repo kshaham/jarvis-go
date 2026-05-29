@@ -1,7 +1,7 @@
 import type { TeamTemplate, TeamTemplateMember } from '../../api/types';
 import { Button, Input, Textarea } from '@/components/ui';
 import { Avatar } from './Avatar';
-import { ChipGroup, Field, SectionCard } from './formPrimitives';
+import { ChipGroup, Field, ModelSelect, SectionCard } from './formPrimitives';
 import type { Tier } from './TierBadge';
 import { TierBadge } from './TierBadge';
 
@@ -167,11 +167,12 @@ export function MemberEditor({
           />
         </Field>
         <Field label="Model" hint={templateModel ? `Team default: ${templateModel}` : 'Provider default'}>
-          <Input
+          <ModelSelect
+            provider={member.provider || templateProvider}
             value={member.model ?? ''}
-            onChange={(e) => onChange({ ...member, model: e.target.value || undefined })}
+            onChange={(v) => onChange({ ...member, model: v || undefined })}
             placeholder={templateModel || '(provider default)'}
-            style={{ fontFamily: 'var(--font-mono)' }}
+            ariaLabel="Member model"
           />
         </Field>
         <Field label="Max turns" hint="Per-prompt cap. Leave blank for the global default.">

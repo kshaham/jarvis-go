@@ -392,3 +392,33 @@ export interface Whiteboard {
   updatedAt?: string;
   updatedBy?: string;
 }
+
+// ---------------------------------------------------------------------
+// Provider / model catalog (spawn page dropdowns)
+// ---------------------------------------------------------------------
+
+// PROVIDER_MODEL_OPTIONS maps each AI provider to the models the spawn
+// page offers in its dropdown. Mirrors the harness/pricing support on the
+// Go side (internal/state/pricing.go, internal/office/spawn_helpers.go).
+// openai-codex / openai-custom run on the Codex CLI; the rest on Claude Code.
+export const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
+  'claude-subscription': ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  'claude-api': ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  'zai-glm': ['glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
+  'openai-codex': ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2'],
+  'openai-custom': ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2'],
+};
+
+// modelOptionsForProvider returns the dropdown choices for a provider, or an
+// empty array for unknown/custom providers (callers fall back to free text).
+export function modelOptionsForProvider(provider: string): string[] {
+  return PROVIDER_MODEL_OPTIONS[provider] ?? [];
+}
+
+// Settings/accounts response subset the spawn page consumes for the OpenAI
+// "configured" prefill (the key value itself is returned masked, never raw).
+export interface SettingsAccounts {
+  provider?: string;
+  openaiBaseUrl?: string;
+  openaiKeyConfigured?: boolean;
+}

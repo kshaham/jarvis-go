@@ -16,7 +16,7 @@ import { TemplateChip } from '../components/spawn/TemplateChip';
 import { recordRecentWorkdir, WorkdirSection } from '../components/spawn/WorkdirSection';
 import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
-import type { TeamTemplate, TeamTemplateMember } from '../api/types';
+import type { SettingsAccounts, TeamTemplate, TeamTemplateMember } from '../api/types';
 
 // SpawnScreen — the wizard formerly known as the spawn-team modal.
 // Two panes: template picker on the left, configure form + sticky
@@ -45,6 +45,13 @@ export function SpawnScreen() {
   const [perpetual, setPerpetual] = useState(true);
   const [defaultProvider, setDefaultProvider] = useState('claude-subscription');
   const [defaultModel, setDefaultModel] = useState('');
+  // OpenAI / Codex custom-endpoint operator settings. Persisted to /api/settings
+  // on spawn (the backend reads them from the settings store, not the spawn
+  // payload). openaiKeyConfigured prefills the "configured ✓" indicator when a
+  // key (operator setting or shared deployment OPENAI_API_KEY) already exists.
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [openaiKeyConfigured, setOpenaiKeyConfigured] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramInterval, setTelegramInterval] = useState(60);
   // Dynamic Workflows are on by default; this toggle lets the operator
@@ -75,6 +82,24 @@ export function SpawnScreen() {
     setHydratedFor(tpl.id);
   }, [tpl, hydratedFor]);
 
+  // Prefill the OpenAI/Codex config indicator from settings once on mount.
+  // The key value is never returned raw (only openaiKeyConfigured + base URL).
+  useEffect(() => {
+    let cancelled = false;
+    fetchJSON<SettingsAccounts>('/api/settings/accounts')
+      .then((accounts) => {
+        if (cancelled || !accounts) return;
+        setOpenaiKeyConfigured(!!accounts.openaiKeyConfigured);
+        if (accounts.openaiBaseUrl) setOpenaiBaseUrl(accounts.openaiBaseUrl);
+      })
+      .catch(() => {
+        /* non-fatal: spawn still works, the indicator just stays unset */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filteredTemplates = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (templates.data?.templates ?? []).filter((t) => {
@@ -96,7 +121,24 @@ export function SpawnScreen() {
   }, [templates.data?.templates]);
 
   const spawn = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      // For the Codex custom-endpoint provider, persist the operator's base
+      // URL + API key to settings first so the backend's spawn path can read
+      // them (it reads the settings store, not this payload). Skip the API key
+      // when it's blank or the masked placeholder so we never clobber a stored
+      // key with its display mask.
+      const isCodexHarness =
+        defaultProvider === 'openai-codex' || defaultProvider === 'openai-custom';
+      if (isCodexHarness) {
+        const settingsUpdate: Record<string, unknown> = {};
+        if (openaiBaseUrl.trim()) settingsUpdate.openaiBaseUrl = openaiBaseUrl.trim();
+        if (openaiApiKey.trim() && !openaiApiKey.includes('****')) {
+          settingsUpdate.openaiApiKey = openaiApiKey.trim();
+        }
+        if (Object.keys(settingsUpdate).length > 0) {
+          await fetchJSON('/api/settings', { method: 'PUT', body: settingsUpdate });
+        }
+      }
       const body: Record<string, unknown> = {
         templateId,
         mission,
@@ -171,6 +213,11 @@ export function SpawnScreen() {
                 setDefaultProvider={setDefaultProvider}
                 defaultModel={defaultModel}
                 setDefaultModel={setDefaultModel}
+                openaiBaseUrl={openaiBaseUrl}
+                setOpenaiBaseUrl={setOpenaiBaseUrl}
+                openaiApiKey={openaiApiKey}
+                setOpenaiApiKey={setOpenaiApiKey}
+                openaiKeyConfigured={openaiKeyConfigured}
                 perpetual={perpetual}
                 setPerpetual={setPerpetual}
                 telegramEnabled={telegramEnabled}

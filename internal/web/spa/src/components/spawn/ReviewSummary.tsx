@@ -84,7 +84,11 @@ export function ReviewSummary({
         ? 'Claude · API'
         : defaultProvider === 'zai-glm'
           ? 'Z.AI · GLM'
-          : defaultProvider;
+          : defaultProvider === 'openai-codex'
+            ? 'OpenAI · Codex'
+            : defaultProvider === 'openai-custom'
+              ? 'OpenAI · Custom'
+              : defaultProvider;
 
   const baseById = useMemo(
     () => new Map(tpl.members.map((m, i) => [m.id ?? `${tpl.id}-${i}`, m] as const)),
