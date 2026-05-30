@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -78,6 +79,29 @@ func (s *AppState) UpdateSettings(updates map[string]interface{}) {
 		s.Settings[k] = v
 	}
 	s.save()
+}
+
+// IncrementSettingCounter atomically increments the integer counter stored
+// under key in Settings and returns the new value. Used for monotonic counters
+// (e.g. plan checkpoint versions) where a read-modify-write across separate
+// GetSettings/UpdateSettings calls would race and lose increments (two callers
+// both read N, both persist N+1, both write the same versioned file).
+func (s *AppState) IncrementSettingCounter(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := 0
+	switch v := s.Settings[key].(type) {
+	case float64:
+		cur = int(v)
+	case int:
+		cur = v
+	case string:
+		cur, _ = strconv.Atoi(v)
+	}
+	cur++
+	s.Settings[key] = float64(cur)
+	s.save()
+	return cur
 }
 
 // GetConfig returns a copy of config.

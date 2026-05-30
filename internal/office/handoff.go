@@ -519,19 +519,35 @@ func (m *Manager) finishReject(h *HandoffRequest, task *Task, sender, receiver *
 func (m *Manager) resolveHandoffPair(taskID, requireFromSession string) (*HandoffRequest, *Task, *AgentState, *AgentState, error) {
 	roster := m.GetRoster()
 	for _, a := range roster {
-		for _, t := range a.GetTasks() {
+		// Scan this agent's tasks UNDER its lock so reading t.Handoff /
+		// t.Handoff.Status doesn't race a concurrent handoff mutation (which all
+		// happen under a.mu). Capture the LIVE task + handoff pointers to return
+		// -- callers (finishReject/AcceptHandoff) re-acquire a.mu to mutate.
+		a.mu.Lock()
+		var foundTask *Task
+		var foundHandoff *HandoffRequest
+		for _, t := range a.taskQueue.Tasks {
 			if t.ID == taskID && t.Handoff != nil && t.Handoff.Status == HandoffPending {
-				if requireFromSession != "" && t.Handoff.FromSessionID != requireFromSession {
-					return nil, nil, nil, nil, fmt.Errorf("not your handoff")
-				}
-				sender := m.GetAgent(t.Handoff.FromSessionID)
-				receiver := m.GetAgent(t.Handoff.ToSessionID)
-				if sender == nil || receiver == nil {
-					return nil, nil, nil, nil, fmt.Errorf("handoff references missing agent")
-				}
-				return t.Handoff, t, sender, receiver, nil
+				foundTask = t
+				foundHandoff = t.Handoff
+				break
 			}
 		}
+		a.mu.Unlock()
+		if foundTask == nil {
+			continue
+		}
+		// FromSessionID/ToSessionID are immutable after the handoff is created,
+		// so reading them after releasing a.mu is safe.
+		if requireFromSession != "" && foundHandoff.FromSessionID != requireFromSession {
+			return nil, nil, nil, nil, fmt.Errorf("not your handoff")
+		}
+		sender := m.GetAgent(foundHandoff.FromSessionID)
+		receiver := m.GetAgent(foundHandoff.ToSessionID)
+		if sender == nil || receiver == nil {
+			return nil, nil, nil, nil, fmt.Errorf("handoff references missing agent")
+		}
+		return foundHandoff, foundTask, sender, receiver, nil
 	}
 	return nil, nil, nil, nil, fmt.Errorf("no pending handoff for task")
 }
@@ -542,7 +558,9 @@ func (m *Manager) resolveHandoffPair(taskID, requireFromSession string) (*Handof
 func (m *Manager) ListPendingHandoffs() []*HandoffRequest {
 	var out []*HandoffRequest
 	for _, a := range m.GetRoster() {
-		for _, t := range a.GetTasks() {
+		// GetTasksCopy returns DEEP copies (incl. a copied Handoff), so reading
+		// t.Handoff here doesn't race a concurrent mutation of the live task.
+		for _, t := range a.GetTasksCopy() {
 			if t.Handoff != nil && t.Handoff.Status == HandoffPending {
 				// Return a copy so callers can't mutate through the pointer.
 				copy := *t.Handoff
