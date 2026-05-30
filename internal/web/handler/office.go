@@ -178,6 +178,9 @@ type agentTaskSelfAddRequest struct {
 	// normalised + validated; invalid entries return 400 so the
 	// operator / agent learns about the typo immediately.
 	Labels []string `json:"labels,omitempty"`
+	// AcceptanceCriteria holds the DoD conditions supplied at creation.
+	// Each entry is validated; invalid entries return 400.
+	AcceptanceCriteria []string `json:"acceptanceCriteria,omitempty"`
 }
 
 type agentTaskTriageRequest struct {
@@ -2330,15 +2333,23 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Validate acceptance criteria before creating the task for the same reason.
+	for _, c := range req.AcceptanceCriteria {
+		if err := office.ValidateAcceptanceCriterion(c); err != nil {
+			request.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	task := &office.Task{
-		ID:          uuid.New().String(),
-		Title:       req.Title,
-		Description: req.Description,
-		Priority:    req.Priority,
-		Status:      office.TaskPending,
-		AssignedAt:  time.Now(),
-		Source:      "self",
-		Labels:      normLabels,
+		ID:                 uuid.New().String(),
+		Title:              req.Title,
+		Description:        req.Description,
+		Priority:           req.Priority,
+		Status:             office.TaskPending,
+		AssignedAt:         time.Now(),
+		Source:             "self",
+		Labels:             normLabels,
+		AcceptanceCriteria: req.AcceptanceCriteria,
 	}
 	agent.AddTask(task)
 

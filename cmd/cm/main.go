@@ -478,11 +478,18 @@ func handleTask(args []string) {
 		// R36 · Accept repeated --label flags. parseArgsAndFlags
 		// overwrites on repeat, so scan manually for --label pairs
 		// while letting it handle the rest (positional + priority).
+		// Also accept repeated --criterion flags (mirror of --label).
 		var labels []string
+		var criteria []string
 		filtered := make([]string, 0, len(subargs))
 		for i := 0; i < len(subargs); i++ {
 			if subargs[i] == "--label" && i+1 < len(subargs) {
 				labels = append(labels, subargs[i+1])
+				i++
+				continue
+			}
+			if subargs[i] == "--criterion" && i+1 < len(subargs) {
+				criteria = append(criteria, subargs[i+1])
 				i++
 				continue
 			}
@@ -491,7 +498,7 @@ func handleTask(args []string) {
 		positional, _ := parseArgsAndFlags(filtered)
 		fields := strings.Fields(positional)
 		if len(fields) < 2 {
-			fatal("cm task self-add <title> <description> [priority] [--label <name>]...")
+			fatal("cm task self-add <title> <description> [priority] [--label <name>]... [--criterion \"<c>\"]...")
 		}
 		priority := "medium"
 		if len(fields) > 2 {
@@ -502,6 +509,9 @@ func handleTask(args []string) {
 		}
 		if len(labels) > 0 {
 			body["labels"] = labels
+		}
+		if len(criteria) > 0 {
+			body["acceptanceCriteria"] = criteria
 		}
 		post("/api/office/agent/task/self-add", body)
 		fmt.Printf("Self-generated task added: %s\n", fields[0])
@@ -1379,8 +1389,8 @@ Commands:
   task progress <taskId> <note>       Report task progress
   task blocked <taskId> <reason>      Report blocker
   task list                           List your task queue
-  task self-add <title> <desc> [--label <name>]...
-                                      Add self-generated task with optional labels
+  task self-add <title> <desc> [--label <name>]... [--criterion "<c>"]...
+                                      Add self-generated task with optional labels and acceptance criteria
   task label add|remove <taskId> <label>
                                       Edit labels on an existing task
   task triage <taskId> <to> <reason>  Triage to another agent

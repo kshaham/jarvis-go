@@ -341,6 +341,17 @@ func (m *Manager) PromptNextTask(sessionID, taskTitle, taskID string) {
 		return
 	}
 	prompt := fmt.Sprintf(nextTaskPromptFormat, taskTitle, taskID, taskID)
+	// Append acceptance criteria checklist when the task has one.
+	if agent := m.GetAgent(sessionID); agent != nil {
+		for _, t := range agent.GetTasks() {
+			if t != nil && t.ID == taskID {
+				if section := renderTaskCriteriaSection(t); section != "" {
+					prompt = prompt + "\n\n" + section
+				}
+				break
+			}
+		}
+	}
 	if hint := m.nextTaskHint(sessionID, taskID, taskTitle); hint != "" {
 		prompt = prompt + "\n\n" + hint
 	}

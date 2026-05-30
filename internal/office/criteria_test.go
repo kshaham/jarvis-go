@@ -1,6 +1,9 @@
 package office
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateAcceptanceCriterion(t *testing.T) {
 	if err := ValidateAcceptanceCriterion("all tests pass"); err != nil {
@@ -41,6 +44,18 @@ func TestSetTaskCriteriaAndReject(t *testing.T) {
 	n := a.IncrementCriteriaReject("t1")
 	if n != 1 || findTaskForTest(a, "t1").Status != TaskInProgress {
 		t.Fatalf("reject must not change status; n=%d status=%s", n, findTaskForTest(a, "t1").Status)
+	}
+}
+
+func TestRenderTaskCriteriaSection(t *testing.T) {
+	if renderTaskCriteriaSection(&Task{ID: "t1"}) != "" {
+		t.Fatalf("no criteria -> empty")
+	}
+	out := renderTaskCriteriaSection(&Task{ID: "t1", AcceptanceCriteria: []string{"tests pass", "lint clean"}})
+	if !strings.Contains(out, "Acceptance Criteria") ||
+		!strings.Contains(out, "- tests pass") ||
+		!strings.Contains(out, "/goal") {
+		t.Fatalf("expected criteria checklist + /goal suggestion:\n%s", out)
 	}
 }
 

@@ -181,9 +181,10 @@ var allToolDefs = []ToolDefinition{
 		InputSchema: InputSchema{
 			Type: "object",
 			Properties: map[string]Property{
-				"title":       {Type: "string", Description: "Task title"},
-				"description": {Type: "string", Description: "Task description"},
-				"priority":    {Type: "string", Description: "Task priority", Enum: []string{"low", "medium", "high"}},
+				"title":              {Type: "string", Description: "Task title"},
+				"description":        {Type: "string", Description: "Task description"},
+				"priority":           {Type: "string", Description: "Task priority", Enum: []string{"low", "medium", "high"}},
+				"acceptanceCriteria": {Type: "array", Description: "Optional list of acceptance criteria (DoD conditions)"},
 			},
 			Required: []string{"title", "description"},
 		},
@@ -1168,12 +1169,29 @@ func handleOfficeTaskSelfAdd(args map[string]interface{}) ToolResult {
 		return toolError("description is required")
 	}
 	priority := getStringArg(args, "priority", "medium")
-	result, err := apiPost("/api/office/agent/task/self-add", map[string]interface{}{
+	body := map[string]interface{}{
 		"sessionId":   sid,
 		"title":       title,
 		"description": desc,
 		"priority":    priority,
-	})
+	}
+	// acceptanceCriteria is an optional []string; accept []interface{} from JSON decoding.
+	if raw, exists := args["acceptanceCriteria"]; exists {
+		if rawSlice, ok := raw.([]interface{}); ok {
+			items := make([]string, 0, len(rawSlice))
+			for i, v := range rawSlice {
+				s, ok := v.(string)
+				if !ok {
+					return toolError(fmt.Sprintf("acceptanceCriteria[%d] must be a string", i))
+				}
+				items = append(items, s)
+			}
+			if len(items) > 0 {
+				body["acceptanceCriteria"] = items
+			}
+		}
+	}
+	result, err := apiPost("/api/office/agent/task/self-add", body)
 	if err != nil {
 		return toolError(err.Error())
 	}

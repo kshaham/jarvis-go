@@ -71,6 +71,28 @@ func (a *AgentState) SetTaskCriteria(taskID, op string, values []string) error {
 	return nil
 }
 
+// renderTaskCriteriaSection returns a markdown checklist for the task's
+// AcceptanceCriteria plus a suggested /goal line. Returns empty string when
+// the task has no criteria so callers can unconditionally append it.
+func renderTaskCriteriaSection(task *Task) string {
+	if task == nil || len(task.AcceptanceCriteria) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("### Acceptance Criteria\n")
+	for _, c := range task.AcceptanceCriteria {
+		b.WriteString("- ")
+		b.WriteString(c)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nSuggested: `/goal All acceptance criteria met: ")
+	b.WriteString(strings.Join(task.AcceptanceCriteria, "; "))
+	b.WriteString("; then cm task complete ")
+	b.WriteString(task.ID)
+	b.WriteString("`")
+	return b.String()
+}
+
 // IncrementCriteriaReject bumps the reject counter without touching status.
 // Returns the new count (0 if task not found).
 func (a *AgentState) IncrementCriteriaReject(taskID string) int {
