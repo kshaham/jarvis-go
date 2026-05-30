@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1703,6 +1704,15 @@ func (ctx *Context) OfficePostWrapUpCancel(w http.ResponseWriter, r *http.Reques
 // Standup handlers
 // ---------------------------------------------------------------------------
 
+// currentSpeakerID returns the session ID of the participant currently speaking,
+// or empty string if there is none (nil state, inactive, or out-of-range index).
+func currentSpeakerID(su *office.StandupState) string {
+	if su == nil || !su.Active || su.CurrentIndex < 0 || su.CurrentIndex >= len(su.Participants) {
+		return ""
+	}
+	return su.Participants[su.CurrentIndex]
+}
+
 // OfficeGetStandup returns the current standup state.
 func (ctx *Context) OfficeGetStandup(w http.ResponseWriter, r *http.Request) {
 	su := ctx.OfficeManager.GetStandup()
@@ -1712,11 +1722,14 @@ func (ctx *Context) OfficeGetStandup(w http.ResponseWriter, r *http.Request) {
 	}
 	ok(w, map[string]interface{}{
 		"standup": map[string]interface{}{
-			"active":       su.Active,
-			"participants": su.Participants,
-			"responses":    su.Responses,
-			"startedAt":    su.StartedAt.Format(time.RFC3339),
-			"currentIndex": su.CurrentIndex,
+			"id":               su.ID,
+			"active":           su.Active,
+			"participants":     su.Participants,
+			"responses":        su.Responses,
+			"startedAt":        su.StartedAt.Format(time.RFC3339),
+			"currentIndex":     su.CurrentIndex,
+			"transcript":       su.Transcript,
+			"currentSpeakerId": currentSpeakerID(su),
 		},
 	})
 }
@@ -1773,36 +1786,63 @@ func (ctx *Context) OfficePostStandupUserMessage(w http.ResponseWriter, r *http.
 	ok(w, nil)
 }
 
-// OfficeGetStandupHistory returns standup history.
-func (ctx *Context) OfficeGetStandupHistory(w http.ResponseWriter, r *http.Request) {
-	homeDir, _ := os.UserHomeDir()
-	standupsDir := filepath.Join(homeDir, ".jarvis", "office-memory", "standups")
-	entries, err := os.ReadDir(standupsDir)
+// standupHistoryEntry is the wire shape sent to the frontend for each historical standup.
+type standupHistoryEntry struct {
+	ID           string   `json:"id"`
+	StartedAt    string   `json:"startedAt"`
+	EndedAt      string   `json:"endedAt,omitempty"`
+	Participants []string `json:"participants,omitempty"`
+	MessageCount int      `json:"messageCount"`
+}
+
+// standupHistoryEntryWithSort carries a sort key alongside the output entry.
+type standupHistoryEntryWithSort struct {
+	entry       standupHistoryEntry
+	completedAt int64
+}
+
+// buildStandupHistory loads all persisted standups from dir, shapes them into
+// standupHistoryEntry values, and returns them sorted newest-first by CompletedAt.
+func buildStandupHistory(dir string) []standupHistoryEntry {
+	files, err := os.ReadDir(dir)
 	if err != nil {
-		ok(w, map[string]interface{}{"standups": []interface{}{}})
-		return
+		return []standupHistoryEntry{}
 	}
-	var standups []map[string]interface{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+	var rows []standupHistoryEntryWithSort
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
 			continue
 		}
-		info, infoErr := e.Info()
-		var modTime string
-		if infoErr == nil {
-			modTime = info.ModTime().Format(time.RFC3339)
+		id := strings.TrimSuffix(f.Name(), ".json")
+		ps, loadErr := office.LoadPersistedStandup(id)
+		if loadErr != nil {
+			continue
 		}
-		standupID := strings.TrimSuffix(e.Name(), ".json")
-		standups = append(standups, map[string]interface{}{
-			"id":       standupID,
-			"file":     e.Name(),
-			"modified": modTime,
-		})
+		entry := standupHistoryEntry{
+			ID:           ps.ID,
+			StartedAt:    time.UnixMilli(ps.StartedAt).Format(time.RFC3339),
+			Participants: ps.Participants,
+			MessageCount: len(ps.Transcript),
+		}
+		if ps.CompletedAt > 0 {
+			entry.EndedAt = time.UnixMilli(ps.CompletedAt).Format(time.RFC3339)
+		}
+		rows = append(rows, standupHistoryEntryWithSort{entry: entry, completedAt: ps.CompletedAt})
 	}
-	if standups == nil {
-		standups = make([]map[string]interface{}, 0)
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].completedAt > rows[j].completedAt
+	})
+	out := make([]standupHistoryEntry, len(rows))
+	for i, r := range rows {
+		out[i] = r.entry
 	}
-	ok(w, map[string]interface{}{"standups": standups})
+	return out
+}
+
+// OfficeGetStandupHistory returns standup history sorted newest-first.
+func (ctx *Context) OfficeGetStandupHistory(w http.ResponseWriter, r *http.Request) {
+	history := buildStandupHistory(office.StandupDir())
+	ok(w, map[string]interface{}{"history": history})
 }
 
 // OfficeGetStandupByID returns a specific historical standup.
