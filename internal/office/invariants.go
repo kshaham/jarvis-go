@@ -99,6 +99,28 @@ func (m *Manager) persistProjectInvariants(items []string) {
 	}
 }
 
+// renderInvariantsBlock formats a slice of invariant strings into a prompt
+// section. Returns empty string when items is nil or empty, so callers can
+// gate on the return value without an extra length check.
+func renderInvariantsBlock(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Project Invariants (Non-Negotiable Rules)\n")
+	total := 0
+	for _, it := range items {
+		line := "- " + it + "\n"
+		if total+len(line) > 1500 { // cap rendered block to protect context
+			break
+		}
+		b.WriteString(line)
+		total += len(line)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 func (m *Manager) loadPersistedInvariants() {
 	data, err := os.ReadFile(projectInvariantsPath())
 	if err != nil {

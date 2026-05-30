@@ -806,7 +806,7 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 					}
 				}()
 				agentMemory := office.LoadAgentMemory(a.ConfigID, req.WorkingDir)
-				prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual)
+				prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual, ctx.OfficeManager.GetProjectInvariants())
 				if prompt == "" {
 					return
 				}

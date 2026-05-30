@@ -44,7 +44,7 @@ func TestKickstartPromptUnderSizeLimit(t *testing.T) {
 	mission := "Ship the Q2 reliability initiative -- improve uptime to 99.9%."
 
 	for _, member := range team {
-		got := BuildKickstartPrompt(member, "/app/workspace/example", team, mission, "", true)
+		got := BuildKickstartPrompt(member, "/app/workspace/example", team, mission, "", true, nil)
 		if len(got) > kickstartMaxChars {
 			t.Errorf("kickstart for %s (%s) is %d chars, exceeds limit of %d",
 				member.Name, member.Role, len(got), kickstartMaxChars)
@@ -64,8 +64,8 @@ func TestKickstartWorkerTrimsLeaderBlocks(t *testing.T) {
 	team := makeOffice7Team()
 	strategic := team[0] // Max, Engineering Manager
 	worker := team[2]    // Nova, UI/UX Designer
-	stratKickstart := BuildKickstartPrompt(strategic, "/tmp/x", team, "", "", true)
-	workerKickstart := BuildKickstartPrompt(worker, "/tmp/x", team, "", "", true)
+	stratKickstart := BuildKickstartPrompt(strategic, "/tmp/x", team, "", "", true, nil)
+	workerKickstart := BuildKickstartPrompt(worker, "/tmp/x", team, "", "", true, nil)
 
 	if !strings.Contains(stratKickstart, "Leader Task Assignment") {
 		t.Error("strategic kickstart should contain Leader Task Assignment block")
@@ -90,7 +90,7 @@ func TestKickstartWorkerTrimsLeaderBlocks(t *testing.T) {
 // team spawn pay ~10%% of this prefix.
 func TestStableSystemPromptCoversBoilerplate(t *testing.T) {
 	for _, tier := range []string{"strategic", "worker"} {
-		got := BuildStableSystemPrompt(tier, "Ship the Q2 initiative.")
+		got := BuildStableSystemPrompt(tier, "Ship the Q2 initiative.", nil)
 		for _, mustHave := range []string{
 			"Team Mission",
 			"Lazy-load Reference",
@@ -112,8 +112,8 @@ func TestStableSystemPromptCoversBoilerplate(t *testing.T) {
 		}
 	}
 	// dev-lead only appears for strategic.
-	strat := BuildStableSystemPrompt("strategic", "")
-	worker := BuildStableSystemPrompt("worker", "")
+	strat := BuildStableSystemPrompt("strategic", "", nil)
+	worker := BuildStableSystemPrompt("worker", "", nil)
 	if !strings.Contains(strat, "dev-lead") {
 		t.Error("strategic stable prefix should mention dev-lead topic")
 	}
@@ -125,7 +125,7 @@ func TestStableSystemPromptCoversBoilerplate(t *testing.T) {
 func TestKickstartCapsPreviousWorkMemory(t *testing.T) {
 	team := makeOffice7Team()
 	huge := strings.Repeat("x", memoryInjectMaxChars*3)
-	got := BuildKickstartPrompt(team[0], "/app/workspace/example", team, "", huge, false)
+	got := BuildKickstartPrompt(team[0], "/app/workspace/example", team, "", huge, false, nil)
 	if !strings.Contains(got, "(truncated") {
 		t.Errorf("expected truncation marker when injecting %d-char memory; got prompt of %d chars",
 			len(huge), len(got))

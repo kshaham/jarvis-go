@@ -68,6 +68,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		kickstart := office.BuildKickstartPrompt(
 			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
 			req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
+			ctx.OfficeManager.GetProjectInvariants(),
 		)
 		// Pre-generate session ID so we can inject it into MCP env and subprocess env.
 		sessionID := uuid.New().String()
@@ -112,7 +113,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		// must be byte-for-byte identical per tier so cache lookups
 		// hit; BuildStableSystemPrompt is deterministic for a given
 		// (tier, mission) pair.
-		stablePrefix := office.BuildStableSystemPrompt(member.Tier, req.Mission)
+		stablePrefix := office.BuildStableSystemPrompt(member.Tier, req.Mission, ctx.OfficeManager.GetProjectInvariants())
 		// R2.4 · Write the prefix to the worktree once per spawn and
 		// pass it via --append-system-prompt-file. File-backed prompts
 		// cache more reliably than inline strings (same byte content +
@@ -465,11 +466,13 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	// Workflows) + the provider-agnostic per-agent kickstart, folded into one
 	// string (Codex has no separate append-system-prompt channel).
 	agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
+	invariants := ctx.OfficeManager.GetProjectInvariants()
 	kickstart := office.BuildKickstartPrompt(
 		&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
 		req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
+		invariants,
 	)
-	stablePrefix := office.BuildStableSystemPromptCodex(member.Tier, req.Mission)
+	stablePrefix := office.BuildStableSystemPromptCodex(member.Tier, req.Mission, invariants)
 	systemPrompt := stablePrefix + "\n\n" + kickstart
 
 	// openai-subscription runs on a ChatGPT/Codex Pro plan via `codex login`

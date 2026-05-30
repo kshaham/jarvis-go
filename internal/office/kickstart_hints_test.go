@@ -100,7 +100,7 @@ func TestBuildKickstartPrompt_IncludesLibrarySectionWhenAvailable(t *testing.T) 
 		t.Fatal(err)
 	}
 	cfg := &TeamMemberConfig{ID: "new-lead", Name: "NewLead", Role: "strategic-lead", Tier: "strategic"}
-	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "ship the thing", "", true)
+	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "ship the thing", "", true, nil)
 	if !strings.Contains(prompt, "## What Worked Before") {
 		t.Errorf("kickstart missing 'What Worked Before' section\n--- prompt ---\n%s", prompt)
 	}
@@ -115,7 +115,7 @@ func TestBuildKickstartPrompt_SectionAbsentWhenLibraryEmpty(t *testing.T) {
 	// empty placeholder that wastes prompt budget).
 	withTempLibraryForOffice(t)
 	cfg := &TeamMemberConfig{ID: "vex", Name: "Vex", Role: "backend-engineer"}
-	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "", "", false)
+	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "", "", false, nil)
 	if strings.Contains(prompt, "## What Worked Before") {
 		t.Errorf("section should be absent on empty library; prompt:\n%s", prompt)
 	}
@@ -267,7 +267,7 @@ func TestBuildKickstartPrompt_IncludesAntiPatternSection(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &TeamMemberConfig{ID: "lead", Name: "Lead", Role: "strategic-lead", Tier: "strategic"}
-	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "ship the thing", "", true)
+	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "ship the thing", "", true, nil)
 	if !strings.Contains(prompt, "## What to Avoid") {
 		t.Errorf("kickstart missing 'What to Avoid' section\n--- prompt ---\n%s", prompt)
 	}
@@ -279,7 +279,7 @@ func TestBuildKickstartPrompt_IncludesAntiPatternSection(t *testing.T) {
 func TestBuildKickstartPrompt_AntiPatternAbsentWhenNoHits(t *testing.T) {
 	withTempLibraryForOffice(t)
 	cfg := &TeamMemberConfig{ID: "vex", Name: "Vex", Role: "backend-engineer"}
-	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "", "", false)
+	prompt := BuildKickstartPrompt(cfg, "/repo", nil, "", "", false, nil)
 	if strings.Contains(prompt, "## What to Avoid") {
 		t.Errorf("section should be absent on empty library; prompt:\n%s", prompt)
 	}

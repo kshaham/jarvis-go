@@ -24,7 +24,7 @@ const memoryInjectMaxChars = 1500
 // R31 · Per-role trim: worker tier skips the leader-task-assignment
 // and leader-dev-instance blocks entirely; those stay reachable via
 // `cm onboard dev-lead` for the few leaders who need them.
-func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string, perpetualMode bool) string {
+func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string, perpetualMode bool, invariants []string) string {
 	var b strings.Builder
 
 	// Header
@@ -38,6 +38,11 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 		b.WriteString("## Team Mission\n")
 		b.WriteString(teamMission)
 		b.WriteString("\n\nAlign your work with this mission. Look for ways to go above and beyond.\n\n")
+	}
+
+	// Project invariants -- non-negotiable rules that apply to every agent.
+	if block := renderInvariantsBlock(invariants); block != "" {
+		b.WriteString(block)
 	}
 
 	// Project context (CLAUDE.md / README.md / ARCHITECTURE.md). Cached
@@ -162,8 +167,8 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 //
 // Tier-aware: strategic agents get the dev-lead topic listed in the
 // router; workers don't.
-func BuildStableSystemPrompt(tier, teamMission string) string {
-	return buildStableSystemPrompt(tier, teamMission, "claude")
+func BuildStableSystemPrompt(tier, teamMission string, invariants []string) string {
+	return buildStableSystemPrompt(tier, teamMission, invariants, "claude")
 }
 
 // BuildStableSystemPromptCodex is the Codex-harness variant of the stable
@@ -173,14 +178,14 @@ func BuildStableSystemPrompt(tier, teamMission string) string {
 // (`cm` task lifecycle, memory, knowledge search, messaging). Unlike the
 // Claude path, this prefix is folded directly into the Codex system prompt
 // (no Anthropic ephemeral-cache reuse to optimize for).
-func BuildStableSystemPromptCodex(tier, teamMission string) string {
-	return buildStableSystemPrompt(tier, teamMission, "codex")
+func BuildStableSystemPromptCodex(tier, teamMission string, invariants []string) string {
+	return buildStableSystemPrompt(tier, teamMission, invariants, "codex")
 }
 
 // buildStableSystemPrompt is the harness-parameterized implementation behind
 // BuildStableSystemPrompt (harness="claude") and BuildStableSystemPromptCodex
 // (harness="codex").
-func buildStableSystemPrompt(tier, teamMission, harness string) string {
+func buildStableSystemPrompt(tier, teamMission string, invariants []string, harness string) string {
 	isCodex := harness == "codex"
 	var b strings.Builder
 	b.WriteString("# Jarvis Team Operating Context\n\n")
@@ -195,6 +200,12 @@ func buildStableSystemPrompt(tier, teamMission, harness string) string {
 		b.WriteString("## Team Mission\n")
 		b.WriteString(teamMission)
 		b.WriteString("\n\n")
+	}
+
+	// Project invariants -- non-negotiable rules surfaced in the cached
+	// stable prefix so every agent on the team sees them on every turn.
+	if block := renderInvariantsBlock(invariants); block != "" {
+		b.WriteString(block)
 	}
 
 	b.WriteString("## Lazy-load Reference\n")

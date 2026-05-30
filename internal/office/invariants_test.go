@@ -3,6 +3,7 @@ package office
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,5 +47,29 @@ func TestProjectInvariantsPersistRoundTrip(t *testing.T) {
 	m2.loadPersistedInvariants()
 	if got := m2.GetProjectInvariants(); len(got) != 1 || got[0] != "persist me" {
 		t.Fatalf("round-trip failed: %#v", got)
+	}
+}
+
+func TestRenderInvariantsBlock(t *testing.T) {
+	if renderInvariantsBlock(nil) != "" {
+		t.Fatalf("empty invariants must render empty block")
+	}
+	out := renderInvariantsBlock([]string{"No force-push to main", "All code has tests"})
+	if !strings.Contains(out, "Project Invariants") ||
+		!strings.Contains(out, "- No force-push to main") ||
+		!strings.Contains(out, "- All code has tests") {
+		t.Fatalf("unexpected block:\n%s", out)
+	}
+}
+
+func TestKickstartIncludesInvariants(t *testing.T) {
+	cfg := &TeamMemberConfig{Name: "Alice", Role: "Engineer"}
+	p := BuildKickstartPrompt(cfg, "/tmp", nil, "Ship it", "", false, []string{"No force-push to main"})
+	if !strings.Contains(p, "Project Invariants") || !strings.Contains(p, "No force-push to main") {
+		t.Fatalf("kickstart missing invariants block")
+	}
+	p2 := BuildKickstartPrompt(cfg, "/tmp", nil, "Ship it", "", false, nil)
+	if strings.Contains(p2, "Project Invariants") {
+		t.Fatalf("empty invariants should not emit a block")
 	}
 }
