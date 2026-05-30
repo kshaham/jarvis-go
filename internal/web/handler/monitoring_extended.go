@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -14,6 +16,29 @@ import (
 	"github.com/kshaham/jarvis/internal/web/auth"
 	"github.com/kshaham/jarvis/internal/web/request"
 )
+
+// claudeAuthCacheTTL is how long the parsed Claude auth status is cached.
+// Credentials change only on operator login/logout (rare), so 30s staleness
+// avoids reading + parsing ~/.claude/.credentials.json on every poll.
+const claudeAuthCacheTTL = 30 * time.Second
+
+type claudeAuthCache struct {
+	mu        sync.Mutex
+	result    claudeauth.Status
+	fetchedAt time.Time
+	valid     bool
+}
+
+var claudeAuthOnce claudeAuthCache
+
+// resetClaudeAuthCache clears the cached auth status so the next call
+// re-reads the credentials file. Used by tests that write fixture files.
+func resetClaudeAuthCache() {
+	claudeAuthOnce.mu.Lock()
+	claudeAuthOnce.valid = false
+	claudeAuthOnce.fetchedAt = time.Time{}
+	claudeAuthOnce.mu.Unlock()
+}
 
 // GetAuthStatus returns the current authentication status.
 // GET /api/auth/status
@@ -246,11 +271,31 @@ func (ctx *Context) AuthChangePassword(w http.ResponseWriter, r *http.Request) {
 // GetClaudeAuthStatus returns the Claude API authentication status.
 // Reads ~/.claude/.credentials.json to check if Claude CLI is authenticated.
 // Also handles credential symlink persistence for Docker volume survival.
+// Result is cached for claudeAuthCacheTTL (30s) — credentials change only
+// on operator login/logout, so reading + parsing on every poll is wasteful.
 // GET /api/claude/auth-status
 func (ctx *Context) GetClaudeAuthStatus(w http.ResponseWriter, r *http.Request) {
+	claudeAuthOnce.mu.Lock()
+	if claudeAuthOnce.valid && time.Since(claudeAuthOnce.fetchedAt) < claudeAuthCacheTTL {
+		cached := claudeAuthOnce.result
+		claudeAuthOnce.mu.Unlock()
+		request.WriteJSON(w, http.StatusOK, cached)
+		return
+	}
+	claudeAuthOnce.mu.Unlock()
+
+	// Compute outside the lock to avoid holding it during file I/O.
 	// All credential-file location, parsing, expiry, and
 	// symlink-restoration logic lives in internal/claudeauth.
-	request.WriteJSON(w, http.StatusOK, claudeauth.CheckStatus())
+	status := claudeauth.CheckStatus()
+
+	claudeAuthOnce.mu.Lock()
+	claudeAuthOnce.result = status
+	claudeAuthOnce.fetchedAt = time.Now()
+	claudeAuthOnce.valid = true
+	claudeAuthOnce.mu.Unlock()
+
+	request.WriteJSON(w, http.StatusOK, status)
 }
 
 // fileExists + copyFile were moved to internal/claudeauth (the

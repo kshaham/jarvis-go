@@ -126,6 +126,12 @@ type FileLock struct {
 type AgentState struct {
 	mu sync.Mutex
 
+	// manager is the owning Manager. Set by RegisterAgent so that
+	// applyTaskStatusLocked can notify the manager's atomic blockedTaskCount
+	// without the agent holding a cyclic reference at construction time.
+	// nil in unit tests that construct AgentState directly.
+	manager *Manager
+
 	SessionID    string
 	ConfigID     string
 	Config       *TeamMemberConfig
@@ -467,7 +473,17 @@ func (a *AgentState) UpdateTaskStatus(taskID string, status TaskStatus) bool {
 // lock acquisition) can reuse the bookkeeping without re-acquiring
 // a.mu through the public UpdateTaskStatus.
 func (a *AgentState) applyTaskStatusLocked(t *Task, status TaskStatus) {
+	prev := t.Status
 	t.Status = status
+	// Maintain the manager's team-wide blocked-task counter. The manager
+	// field is nil in unit tests that construct AgentState directly.
+	if a.manager != nil {
+		if status == TaskBlocked && prev != TaskBlocked {
+			a.manager.NotifyTaskBlocked()
+		} else if prev == TaskBlocked && status != TaskBlocked {
+			a.manager.NotifyTaskUnblocked()
+		}
+	}
 	now := time.Now()
 	if status == TaskInProgress && t.StartedAt.IsZero() {
 		t.StartedAt = now
@@ -802,13 +818,33 @@ func (a *AgentState) SnapshotConfig() TeamMemberConfig {
 	return *a.Config
 }
 
+// CountBlockedTasks returns the number of tasks currently in TaskBlocked state.
+// Used by UnregisterAgent to drain the manager's team-wide blocked counter.
+func (a *AgentState) CountBlockedTasks() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	count := 0
+	for _, t := range a.taskQueue.Tasks {
+		if t != nil && t.Status == TaskBlocked {
+			count++
+		}
+	}
+	return count
+}
+
 // RemoveTask removes a task by ID and returns it, or nil if not found.
+// If the removed task was in TaskBlocked, the manager's team-wide blocked
+// count is decremented so the count stays accurate on handoff/requeue.
 func (a *AgentState) RemoveTask(taskID string) *Task {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for i, t := range a.taskQueue.Tasks {
 		if t.ID == taskID {
+			wasBlocked := t.Status == TaskBlocked
 			a.taskQueue.Tasks = append(a.taskQueue.Tasks[:i], a.taskQueue.Tasks[i+1:]...)
+			if wasBlocked && a.manager != nil {
+				a.manager.NotifyTaskUnblocked()
+			}
 			return t
 		}
 	}

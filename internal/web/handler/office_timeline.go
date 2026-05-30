@@ -14,6 +14,12 @@ import (
 	"github.com/kshaham/jarvis/internal/web/request"
 )
 
+// listPersistedStandupsMax caps how many standup files listPersistedStandups
+// parses per call. Mirrors the maxStandupHistoryEntries bound in office.go's
+// buildStandupHistory. Older files (by mtime) are omitted; the timeline
+// already sorts and paginates, so the cap only bounds disk work.
+const listPersistedStandupsMax = 50
+
 // TimelineEntry is the unified shape returned by /api/office/timeline.
 // Sources (audit, task, standup, message, learning) all map to this type
 // so the UI can render a single chronological list without knowing each
@@ -154,7 +160,12 @@ func (ctx *Context) collectTimelineEntries() []TimelineEntry {
 		if a == nil || a.Config == nil {
 			continue
 		}
-		for _, t := range a.GetTasks() {
+		// GetTasksCopy deep-copies under a.mu so t.* fields (Title,
+		// Status, Priority, AssignedAt, StartedAt, CompletedAt, ID) are
+		// safe to read outside the lock. GetTasks (shallow) returns live
+		// pointers that applyTaskStatusLocked mutates concurrently — a
+		// data race caught by -race.
+		for _, t := range a.GetTasksCopy() {
 			if !t.AssignedAt.IsZero() {
 				out = append(out, TimelineEntry{
 					Timestamp: t.AssignedAt,
@@ -247,6 +258,11 @@ func fmtStandupSummary(s office.PersistedStandup) string {
 // and parses each file. Mirrors what OfficeGetStandupHistory does but
 // returns typed values rather than the raw directory listing the handler
 // returns to the client.
+//
+// To bound per-request disk work, entries are sorted by mtime descending and
+// only the most recent listPersistedStandupsMax are parsed. The timeline
+// already sorts by CompletedAt and paginates, so the cap only limits how many
+// files are read per call, not which standups appear in results over time.
 func listPersistedStandups() []office.PersistedStandup {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -257,12 +273,35 @@ func listPersistedStandups() []office.PersistedStandup {
 	if err != nil {
 		return nil
 	}
-	out := make([]office.PersistedStandup, 0, len(entries))
+
+	// Collect JSON entries with their mtime so we can pick the N newest.
+	type entryWithMtime struct {
+		e     os.DirEntry
+		mtime int64
+	}
+	var jsonEntries []entryWithMtime
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		jsonEntries = append(jsonEntries, entryWithMtime{e: e, mtime: info.ModTime().UnixNano()})
+	}
+	// Sort newest-mtime first so we parse the most-recent standups.
+	sort.Slice(jsonEntries, func(i, j int) bool {
+		return jsonEntries[i].mtime > jsonEntries[j].mtime
+	})
+	// Cap parse work to the most recent N entries.
+	if len(jsonEntries) > listPersistedStandupsMax {
+		jsonEntries = jsonEntries[:listPersistedStandupsMax]
+	}
+
+	out := make([]office.PersistedStandup, 0, len(jsonEntries))
+	for _, je := range jsonEntries {
+		data, err := os.ReadFile(filepath.Join(dir, je.e.Name()))
 		if err != nil {
 			continue
 		}

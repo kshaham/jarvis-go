@@ -3,8 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -170,5 +174,110 @@ func TestOfficeTimeline_PaginationAndSortDesc(t *testing.T) {
 	}
 	if hm, _ := resp3["hasMore"].(bool); hm {
 		t.Error("expected hasMore=false past end")
+	}
+}
+
+// TestOfficeTimeline_WithTask verifies that a task assigned to an agent
+// appears in the timeline as a "task" kind entry. This also exercises the
+// GetTasksCopy path (the race fix) — run with -race to catch regressions.
+func TestOfficeTimeline_WithTask(t *testing.T) {
+	ctx := newTimelineContext(t)
+	mgr := ctx.OfficeManager
+	mgr.RegisterAgent("s-vex", "vex", &office.TeamMemberConfig{ID: "vex", Name: "Vex"})
+
+	agent := mgr.GetAgent("s-vex")
+	agent.AddTask(&office.Task{
+		ID:         "t1",
+		Title:      "Build the thing",
+		Status:     office.TaskPending,
+		AssignedAt: time.Now(),
+	})
+
+	req := httptest.NewRequest("GET", "/api/office/timeline?type=task", nil)
+	rec := httptest.NewRecorder()
+	ctx.OfficeTimeline(rec, req)
+
+	resp := decodeTimeline(t, rec)
+	entries, _ := resp["entries"].([]interface{})
+	if len(entries) == 0 {
+		t.Fatal("expected at least one task entry in timeline")
+	}
+	e := entries[0].(map[string]interface{})
+	if e["kind"] != "task" {
+		t.Errorf("entry kind=%v want task", e["kind"])
+	}
+	if e["agentId"] != "s-vex" {
+		t.Errorf("agentId=%v want s-vex", e["agentId"])
+	}
+}
+
+// TestOfficeTimeline_WithTask_RaceFree verifies that concurrent task status
+// mutations don't race with timeline collection. The test is a no-op without
+// -race; with -race it catches data races on task field reads.
+func TestOfficeTimeline_WithTask_RaceFree(t *testing.T) {
+	ctx := newTimelineContext(t)
+	mgr := ctx.OfficeManager
+	mgr.RegisterAgent("s-vex", "vex", &office.TeamMemberConfig{ID: "vex", Name: "Vex"})
+	agent := mgr.GetAgent("s-vex")
+	agent.AddTask(&office.Task{
+		ID:         "t-race",
+		Title:      "concurrent task",
+		Status:     office.TaskPending,
+		AssignedAt: time.Now(),
+	})
+
+	var wg sync.WaitGroup
+	// Writer goroutine: cycle through task statuses.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			agent.UpdateTaskStatus("t-race", office.TaskInProgress)
+			agent.UpdateTaskStatus("t-race", office.TaskBlocked)
+			agent.UpdateTaskStatus("t-race", office.TaskPending)
+		}
+	}()
+	// Reader goroutine: collect timeline entries while writer is mutating.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			req := httptest.NewRequest("GET", "/api/office/timeline?type=task", nil)
+			rec := httptest.NewRecorder()
+			ctx.OfficeTimeline(rec, req)
+		}
+	}()
+	wg.Wait()
+}
+
+// TestListPersistedStandups_Cap verifies that listPersistedStandups only
+// parses at most listPersistedStandupsMax files even when more exist on disk.
+func TestListPersistedStandups_Cap(t *testing.T) {
+	// Override HOME so standup files land in a temp dir.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	standupDir := filepath.Join(tmpHome, ".jarvis", "office-memory", "standups")
+	if err := os.MkdirAll(standupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed cap+10 standup JSON files.
+	total := listPersistedStandupsMax + 10
+	for i := 0; i < total; i++ {
+		content := fmt.Sprintf(`{"id":"s%d","completedAt":%d,"participantCount":1,"respondedCount":1,"timedOutCount":0,"participants":["agent"]}`,
+			i, time.Now().UnixMilli()+int64(i))
+		path := filepath.Join(standupDir, fmt.Sprintf("standup-%04d.json", i))
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := listPersistedStandups()
+	if len(got) > listPersistedStandupsMax {
+		t.Errorf("listPersistedStandups returned %d entries, want at most %d", len(got), listPersistedStandupsMax)
+	}
+	if len(got) == 0 {
+		t.Error("listPersistedStandups returned 0 entries; expected some")
 	}
 }

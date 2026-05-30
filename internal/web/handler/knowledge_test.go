@@ -35,6 +35,12 @@ func newKnowledgeContext(t *testing.T) *Context {
 	restore := library.SetDirForTest(root)
 	t.Cleanup(restore)
 
+	// Reset the stats cache so each test gets a fresh computation against
+	// its own library root. Without this, a cached result from a previous
+	// test (pointing at a now-deleted tempdir) would be served.
+	resetKnowledgeStatsCache()
+	t.Cleanup(resetKnowledgeStatsCache)
+
 	ctx := newTimelineContext(t)
 	return ctx
 }
@@ -301,6 +307,59 @@ func TestWorkflowSlugFromLedgerPath(t *testing.T) {
 		if got := workflowSlugFromLedgerPath(tc.in); got != tc.want {
 			t.Errorf("workflowSlugFromLedgerPath(%q)=%q want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestGetKnowledgeStats_CacheReturnsStaleValue verifies that the stats cache
+// is served for subsequent calls within the TTL, even if underlying files
+// change. After the first call, deleting a file should NOT change the
+// count until the TTL expires.
+func TestGetKnowledgeStats_CacheReturnsStaleValue(t *testing.T) {
+	ctx := newKnowledgeContext(t)
+
+	// Seed 1 experience.
+	_ = library.WriteExperience(library.ExperienceRecord{
+		AgentConfigID:    "vex",
+		TaskID:           "task-cache",
+		TaskTitle:        "cached",
+		CompletionStatus: "completed",
+		OutcomeScore:     0.9,
+		CompletedAt:      time.Now(),
+	})
+
+	// First call — populates cache with experiences=1.
+	req1 := httptest.NewRequest("GET", "/api/knowledge/stats", nil)
+	rec1 := httptest.NewRecorder()
+	ctx.GetKnowledgeStats(rec1, req1)
+	var resp1 map[string]interface{}
+	_ = json.Unmarshal(rec1.Body.Bytes(), &resp1)
+	if resp1["experiences"].(float64) != 1 {
+		t.Fatalf("first call: experiences=%v want 1", resp1["experiences"])
+	}
+
+	// Delete the file from disk — but DON'T reset the cache.
+	root := library.Dir()
+	_ = os.Remove(filepath.Join(root, "experiences", "vex", "task-cache.md"))
+
+	// Second call within TTL — should return the cached value (1), not 0.
+	req2 := httptest.NewRequest("GET", "/api/knowledge/stats", nil)
+	rec2 := httptest.NewRecorder()
+	ctx.GetKnowledgeStats(rec2, req2)
+	var resp2 map[string]interface{}
+	_ = json.Unmarshal(rec2.Body.Bytes(), &resp2)
+	if resp2["experiences"].(float64) != 1 {
+		t.Errorf("second call (cached): experiences=%v want 1 (stale cache)", resp2["experiences"])
+	}
+
+	// After resetting the cache, the next call should reflect disk state.
+	resetKnowledgeStatsCache()
+	req3 := httptest.NewRequest("GET", "/api/knowledge/stats", nil)
+	rec3 := httptest.NewRecorder()
+	ctx.GetKnowledgeStats(rec3, req3)
+	var resp3 map[string]interface{}
+	_ = json.Unmarshal(rec3.Body.Bytes(), &resp3)
+	if resp3["experiences"].(float64) != 0 {
+		t.Errorf("third call (after cache reset): experiences=%v want 0", resp3["experiences"])
 	}
 }
 

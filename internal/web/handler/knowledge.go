@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kshaham/jarvis/internal/library"
@@ -33,6 +34,30 @@ import (
 	"github.com/kshaham/jarvis/internal/secpath"
 	"github.com/kshaham/jarvis/internal/web/request"
 )
+
+// knowledgeStatsTTL is how long a GetKnowledgeStats result is cached.
+// Counts change only when knowledge files are added/removed — rare enough
+// that a 30s staleness window is acceptable and bounds the 4× filepath.Walk
+// to at most one walk per 30s window.
+const knowledgeStatsTTL = 30 * time.Second
+
+type knowledgeStatsCache struct {
+	mu        sync.Mutex
+	result    map[string]interface{}
+	fetchedAt time.Time
+}
+
+var knowledgeStatsOnce knowledgeStatsCache
+
+// resetKnowledgeStatsCache clears the cached stats so the next call
+// recomputes from disk. Exported for test helpers that swap the library
+// root between subtests.
+func resetKnowledgeStatsCache() {
+	knowledgeStatsOnce.mu.Lock()
+	knowledgeStatsOnce.result = nil
+	knowledgeStatsOnce.fetchedAt = time.Time{}
+	knowledgeStatsOnce.mu.Unlock()
+}
 
 // knowledgeMaxFileBytes caps the size of any single library file
 // the operator can pull through /api/knowledge/library. Larger
@@ -44,17 +69,29 @@ const knowledgeMaxFileBytes = 1 << 20 // 1 MB
 const knowledgeMaxBodyBytes = 4 << 10 // 4 KB
 
 // GetKnowledgeStats returns counts + health for the dashboard tab.
-// Cheap (directory listings only); safe to call frequently.
+// Results are cached for knowledgeStatsTTL (30s) to avoid 4 recursive
+// filepath.Walks on every poll. Counts change only when knowledge files
+// are promoted/revoked — rare enough that 30s staleness is acceptable.
 //
 // GET /api/knowledge/stats
 func (ctx *Context) GetKnowledgeStats(w http.ResponseWriter, r *http.Request) {
+	knowledgeStatsOnce.mu.Lock()
+	if knowledgeStatsOnce.result != nil && time.Since(knowledgeStatsOnce.fetchedAt) < knowledgeStatsTTL {
+		cached := knowledgeStatsOnce.result
+		knowledgeStatsOnce.mu.Unlock()
+		request.WriteJSON(w, http.StatusOK, cached)
+		return
+	}
+	knowledgeStatsOnce.mu.Unlock()
+
+	// Compute outside the lock to avoid holding it during I/O.
 	root := library.Dir()
 	out := map[string]interface{}{
-		"libraryDir":        root,
-		"experiences":       countMarkdownFiles(filepath.Join(root, "experiences")),
-		"workflows":         countMarkdownFiles(filepath.Join(root, "workflows")),
-		"standups":          countMarkdownFiles(filepath.Join(root, "standups")),
-		"experiments":       countMarkdownFiles(filepath.Join(root, "experiments")),
+		"libraryDir":         root,
+		"experiences":        countMarkdownFiles(filepath.Join(root, "experiences")),
+		"workflows":          countMarkdownFiles(filepath.Join(root, "workflows")),
+		"standups":           countMarkdownFiles(filepath.Join(root, "standups")),
+		"experiments":        countMarkdownFiles(filepath.Join(root, "experiments")),
 		"pageindexAvailable": office.PageIndexAvailable(),
 	}
 
@@ -80,6 +117,11 @@ func (ctx *Context) GetKnowledgeStats(w http.ResponseWriter, r *http.Request) {
 			out["ledgerRevoked"] = revoked
 		}
 	}
+
+	knowledgeStatsOnce.mu.Lock()
+	knowledgeStatsOnce.result = out
+	knowledgeStatsOnce.fetchedAt = time.Now()
+	knowledgeStatsOnce.mu.Unlock()
 
 	request.WriteJSON(w, http.StatusOK, out)
 }
@@ -276,4 +318,3 @@ func countMarkdownFiles(dir string) int {
 	})
 	return count
 }
-

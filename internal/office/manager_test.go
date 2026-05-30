@@ -6,6 +6,74 @@ import (
 	"time"
 )
 
+// TestBlockedTaskCount verifies the atomic counter is updated correctly on
+// every status transition into/out of TaskBlocked, including task removal
+// while blocked.
+func TestBlockedTaskCount(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newTestManager()
+	m.RegisterAgent("s-vex", "vex", &TeamMemberConfig{ID: "vex", Name: "Vex"})
+	m.RegisterAgent("s-bolt", "bolt", &TeamMemberConfig{ID: "bolt", Name: "Bolt"})
+
+	vex := m.GetAgent("s-vex")
+	bolt := m.GetAgent("s-bolt")
+
+	if got := m.BlockedTaskCount(); got != 0 {
+		t.Fatalf("initial blocked count = %d, want 0", got)
+	}
+
+	// Add tasks and transition vex's t1 into blocked.
+	vex.AddTask(&Task{ID: "t1", Title: "vex-task", Status: TaskPending})
+	vex.UpdateTaskStatus("t1", TaskBlocked)
+	if got := m.BlockedTaskCount(); got != 1 {
+		t.Errorf("after vex t1 blocked: count=%d want 1", got)
+	}
+
+	// Add another task on bolt and block it too.
+	bolt.AddTask(&Task{ID: "t2", Title: "bolt-task", Status: TaskPending})
+	bolt.UpdateTaskStatus("t2", TaskBlocked)
+	if got := m.BlockedTaskCount(); got != 2 {
+		t.Errorf("after bolt t2 blocked: count=%d want 2", got)
+	}
+
+	// Unblock vex's task by transitioning to in_progress.
+	vex.UpdateTaskStatus("t1", TaskInProgress)
+	if got := m.BlockedTaskCount(); got != 1 {
+		t.Errorf("after unblocking vex t1: count=%d want 1", got)
+	}
+
+	// Remove bolt's blocked task directly (remove-while-blocked path).
+	bolt.RemoveTask("t2")
+	if got := m.BlockedTaskCount(); got != 0 {
+		t.Errorf("after removing blocked t2: count=%d want 0", got)
+	}
+
+	// Block -> complete (not just blocked -> in_progress).
+	vex.UpdateTaskStatus("t1", TaskBlocked)
+	if got := m.BlockedTaskCount(); got != 1 {
+		t.Errorf("re-blocking t1: count=%d want 1", got)
+	}
+	vex.UpdateTaskStatus("t1", TaskCompleted)
+	if got := m.BlockedTaskCount(); got != 0 {
+		t.Errorf("completing blocked t1: count=%d want 0", got)
+	}
+
+	// UnregisterAgent drains remaining blocked count for that agent.
+	// Register a fresh agent (vex was unregistered above via UnregisterAgent
+	// semantics; re-register with a new session so the agent map is clean).
+	m.RegisterAgent("s-vex2", "vex2", &TeamMemberConfig{ID: "vex2", Name: "Vex2"})
+	vex2 := m.GetAgent("s-vex2")
+	vex2.AddTask(&Task{ID: "t4", Title: "drain-test", Status: TaskPending})
+	vex2.UpdateTaskStatus("t4", TaskBlocked)
+	if got := m.BlockedTaskCount(); got != 1 {
+		t.Errorf("before unregister: count=%d want 1", got)
+	}
+	m.UnregisterAgent("s-vex2")
+	if got := m.BlockedTaskCount(); got != 0 {
+		t.Errorf("after unregistering agent with blocked task: count=%d want 0", got)
+	}
+}
+
 // mockSessionStore implements SessionStore for testing.
 type mockSessionStore struct{}
 

@@ -31,26 +31,23 @@ func (ctx *Context) OfficeAgentStatusLine(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	roster := ctx.OfficeManager.GetRoster()
+	// O(1) lookup — GetAgent reads the agents map under RLock.
+	// Previously this walked the full roster to find the requesting agent.
+	a := ctx.OfficeManager.GetAgent(sessionID)
 	var name, status, role, tier, currentTaskTitle string
-	for _, a := range roster {
-		if a.SessionID != sessionID {
-			continue
-		}
-		if a.Config != nil {
-			name = a.Config.Name
-			role = a.Config.Role
-			tier = a.Config.Tier
-		}
+	if a != nil {
+		cfg := a.SnapshotConfig()
+		name = cfg.Name
+		role = cfg.Role
+		tier = cfg.Tier
 		if a.GetSDKWorking() {
 			status = "working"
 		} else {
 			status = "idle"
 		}
-		if active := a.ActiveTask(); active != nil {
+		if active := a.ActiveTaskCopy(); active != nil {
 			currentTaskTitle = active.Title
 		}
-		break
 	}
 	if name == "" {
 		// Agent not registered yet. Statusline still renders something
@@ -60,14 +57,10 @@ func (ctx *Context) OfficeAgentStatusLine(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	blockerCount := 0
-	for _, a := range roster {
-		for _, t := range a.GetTasks() {
-			if string(t.Status) == "blocked" {
-				blockerCount++
-			}
-		}
-	}
+	// O(1) read — maintained atomically by applyTaskStatusLocked /
+	// RemoveTask whenever a task transitions into or out of TaskBlocked.
+	// Previously this walked all agents * tasks on every shell prompt.
+	blockerCount := int(ctx.OfficeManager.BlockedTaskCount())
 	paused := ctx.OfficeManager.IsPaused()
 
 	parts := []string{

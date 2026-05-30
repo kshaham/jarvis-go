@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -35,6 +36,13 @@ type Manager struct {
 
 	agents      map[string]*AgentState // sessionId -> state
 	configIndex map[string]string      // configId -> sessionId
+
+	// blockedTaskCount is the team-wide count of tasks in TaskBlocked state.
+	// Maintained atomically so the statusline handler can read it in O(1)
+	// without walking all agents*tasks. Updated by NotifyTaskBlocked and
+	// NotifyTaskUnblocked, which are called from applyTaskStatusLocked and
+	// RemoveTask respectively.
+	blockedTaskCount atomic.Int64
 
 	fileLocks            map[string]*FileLock
 	meetings             map[string]*Meeting
@@ -251,6 +259,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 func (m *Manager) RegisterAgent(sessionID, configID string, config *TeamMemberConfig) {
 	agent := NewAgentState(sessionID, configID, config)
 	agent.LastPromptSentAt = time.Now() // Mark spawn time so stuck detection can track it
+	agent.manager = m                   // backlink so applyTaskStatusLocked can notify blockedTaskCount
 
 	m.mu.Lock()
 	m.agents[sessionID] = agent
@@ -481,6 +490,20 @@ func (m *Manager) UnregisterAgent(sessionID string) {
 	}
 	m.mu.Unlock()
 
+	// Drain the blocked-task count for any tasks still in TaskBlocked on the
+	// departing agent. Done AFTER releasing m.mu so we can safely acquire
+	// agent.mu inside CountBlockedTasks without lock-ordering concerns.
+	// The agent is already removed from the map so no new task assignments
+	// flow through the manager, but concurrent in-flight agent method calls
+	// may still hold agent.mu — CountBlockedTasks is the safe API.
+	if ok && agent != nil {
+		if n := agent.CountBlockedTasks(); n > 0 {
+			for i := 0; i < n; i++ {
+				m.NotifyTaskUnblocked()
+			}
+		}
+	}
+
 	if ok {
 		name := sessionID
 		if agent.Config != nil {
@@ -689,6 +712,45 @@ func (m *Manager) PruneTriage(taskID string) {
 	delete(m.triageAttempts, taskID)
 	delete(m.lastTriageAt, taskID)
 	m.mu.Unlock()
+}
+
+// BlockedTaskCount returns the current team-wide count of TaskBlocked tasks.
+// The value is maintained by NotifyTaskBlocked/NotifyTaskUnblocked so this
+// is O(1) — no roster or task-queue walk. Used by the statusline handler.
+func (m *Manager) BlockedTaskCount() int64 {
+	return m.blockedTaskCount.Load()
+}
+
+// NotifyTaskBlocked increments the team-wide blocked-task counter. Called
+// from applyTaskStatusLocked (via AgentState) whenever a task transitions
+// INTO TaskBlocked. The Manager pointer is passed in because AgentState
+// does not hold a reference to the Manager; callers that don't have a
+// manager reference (tests, standalone agents) pass nil and the call is a
+// safe no-op.
+func (m *Manager) NotifyTaskBlocked() {
+	if m == nil {
+		return
+	}
+	m.blockedTaskCount.Add(1)
+}
+
+// NotifyTaskUnblocked decrements the team-wide blocked-task counter. Called
+// from applyTaskStatusLocked (via AgentState) whenever a task transitions
+// OUT OF TaskBlocked, and from RemoveTask when a blocked task is removed.
+// Clamps to zero to guard against any missed pairing.
+func (m *Manager) NotifyTaskUnblocked() {
+	if m == nil {
+		return
+	}
+	for {
+		cur := m.blockedTaskCount.Load()
+		if cur <= 0 {
+			return
+		}
+		if m.blockedTaskCount.CompareAndSwap(cur, cur-1) {
+			return
+		}
+	}
 }
 
 // SweepTriageMaps drops triage-map entries whose taskIDs are no longer in the

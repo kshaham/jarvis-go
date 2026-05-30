@@ -109,9 +109,20 @@ func durationMillis(s string) int64 {
 	return d.Milliseconds()
 }
 
+// experimentHistoryCap is the maximum number of experiment records returned
+// by LoadExperimentHistory per call. The UI shows recent experiments, so
+// returning the last N from the JSONL tail is sufficient. Older records
+// are omitted rather than loaded and discarded.
+const experimentHistoryCap = 200
 
-// LoadExperimentHistory reads all experiment records from the JSONL log.
-// Returns an empty slice if the file is missing or unreadable.
+// LoadExperimentHistory reads the most recent experimentHistoryCap experiment
+// records from the JSONL log. Returns an empty slice if the file is missing or
+// unreadable.
+//
+// To avoid reading the entire file on every call, the scanner consumes all
+// lines but only retains the last experimentHistoryCap in a ring buffer —
+// this is O(N) in lines but O(cap) in allocations and avoids a seek/stat
+// loop for a file that is append-only and typically small.
 func LoadExperimentHistory() []ExperimentRecord {
 	f, err := os.Open(experimentsPath())
 	if err != nil {
@@ -119,7 +130,12 @@ func LoadExperimentHistory() []ExperimentRecord {
 	}
 	defer f.Close()
 
-	var records []ExperimentRecord
+	// Ring buffer: keep only the last experimentHistoryCap records to bound
+	// memory and avoid returning thousands of stale entries to the UI.
+	ring := make([]ExperimentRecord, experimentHistoryCap)
+	head := 0
+	count := 0
+
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -131,9 +147,26 @@ func LoadExperimentHistory() []ExperimentRecord {
 			slog.Warn("Failed to parse experiment record", "err", err)
 			continue
 		}
-		records = append(records, rec)
+		ring[head%experimentHistoryCap] = rec
+		head++
+		count++
 	}
-	return records
+
+	if count == 0 {
+		return []ExperimentRecord{}
+	}
+
+	// Reconstruct in chronological order (oldest-surviving → newest).
+	n := count
+	if n > experimentHistoryCap {
+		n = experimentHistoryCap
+	}
+	out := make([]ExperimentRecord, n)
+	start := head - n
+	for i := 0; i < n; i++ {
+		out[i] = ring[(start+i)%experimentHistoryCap]
+	}
+	return out
 }
 
 // BuildExperimentRecord constructs an ExperimentRecord from current manager state.

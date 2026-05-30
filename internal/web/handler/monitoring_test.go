@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kshaham/jarvis/internal/pty"
@@ -161,5 +163,66 @@ func TestQuerySessions_HonorsLimit(t *testing.T) {
 	json.NewDecoder(rec.Body).Decode(&resp)
 	if resp["limit"] != float64(5) {
 		t.Errorf("expected limit=5, got %v", resp["limit"])
+	}
+}
+
+// TestGetClaudeAuthStatus_CacheServesStaleResult verifies that the 30s TTL
+// cache on GetClaudeAuthStatus is served for subsequent calls even after
+// the credentials file changes on disk.
+func TestGetClaudeAuthStatus_CacheServesStaleResult(t *testing.T) {
+	// Point HOME at a temp dir so the credentials file is isolated.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Reset the global cache so this test starts clean, and restore on exit.
+	resetClaudeAuthCache()
+	t.Cleanup(resetClaudeAuthCache)
+
+	ctx := newTestContext()
+
+	// Write a credentials file with an API key so the first call returns
+	// authenticated=true.
+	claudeDir := filepath.Join(tmpHome, ".claude")
+	_ = os.MkdirAll(claudeDir, 0o755)
+	credPath := filepath.Join(claudeDir, ".credentials.json")
+	_ = os.WriteFile(credPath, []byte(`{"apiKey":"sk-test-key"}`), 0o600)
+
+	req1 := httptest.NewRequest("GET", "/api/claude/auth-status", nil)
+	rec1 := httptest.NewRecorder()
+	ctx.GetClaudeAuthStatus(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first call: status=%d", rec1.Code)
+	}
+	var resp1 map[string]interface{}
+	_ = json.Unmarshal(rec1.Body.Bytes(), &resp1)
+	if resp1["authenticated"] != true {
+		t.Fatalf("first call: authenticated=%v want true", resp1["authenticated"])
+	}
+
+	// Remove the credentials file and the symlink target that claudeauth
+	// may have created as a side effect of checkStatus — but DON'T reset
+	// the in-memory cache.
+	_ = os.Remove(credPath)
+	_ = os.Remove(filepath.Join(tmpHome, ".claude-auth", ".credentials.json"))
+
+	// Second call within TTL should still return the cached (authenticated=true) result.
+	req2 := httptest.NewRequest("GET", "/api/claude/auth-status", nil)
+	rec2 := httptest.NewRecorder()
+	ctx.GetClaudeAuthStatus(rec2, req2)
+	var resp2 map[string]interface{}
+	_ = json.Unmarshal(rec2.Body.Bytes(), &resp2)
+	if resp2["authenticated"] != true {
+		t.Errorf("second call (cached): authenticated=%v want true (stale cache)", resp2["authenticated"])
+	}
+
+	// After resetting the cache, the next call reflects disk state (no credentials).
+	resetClaudeAuthCache()
+	req3 := httptest.NewRequest("GET", "/api/claude/auth-status", nil)
+	rec3 := httptest.NewRecorder()
+	ctx.GetClaudeAuthStatus(rec3, req3)
+	var resp3 map[string]interface{}
+	_ = json.Unmarshal(rec3.Body.Bytes(), &resp3)
+	if resp3["authenticated"] != false {
+		t.Errorf("third call (cache reset): authenticated=%v want false", resp3["authenticated"])
 	}
 }
