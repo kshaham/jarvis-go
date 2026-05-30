@@ -274,6 +274,13 @@ func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
 				slog.Debug("Codex subprocess stderr", "session", s.ID, "line", line)
 			}
 		}
+		// Drain any remaining stderr if the scanner stopped early (e.g. a line
+		// exceeded the 1MB token cap -> ErrTooLong). Without this the child can
+		// block once the OS stderr pipe buffer fills, wedging cmd.Wait() — the
+		// stdout path does the same drain on its scan error.
+		if sc.Err() != nil {
+			_, _ = io.Copy(io.Discard, stderr)
+		}
 	})
 
 	sawCompleted := s.consumeJSONL(stdout)

@@ -248,9 +248,11 @@ func loadMemorySections(configID, workingDir string) (map[string]string, string,
 	}
 	flush()
 
-	// Legacy migration: if there were no section headers, the prelude IS
-	// the notes section.
-	if len(sections) == 0 && len(prelude) > 0 {
+	// Always preserve prelude content (lines before the first '## section:'),
+	// not only in the legacy no-sections case. A file with BOTH a prelude and
+	// section headers previously dropped the prelude on the next rewrite (data
+	// loss). Merge it into 'notes'.
+	if len(prelude) > 0 {
 		// Trim leading + trailing blank lines.
 		for len(prelude) > 0 && strings.TrimSpace(prelude[0]) == "" {
 			prelude = prelude[1:]
@@ -259,7 +261,12 @@ func loadMemorySections(configID, workingDir string) (map[string]string, string,
 			prelude = prelude[:len(prelude)-1]
 		}
 		if len(prelude) > 0 {
-			sections["notes"] = strings.Join(prelude, "\n")
+			preludeText := strings.Join(prelude, "\n")
+			if existing, ok := sections["notes"]; ok && existing != "" {
+				sections["notes"] = preludeText + "\n\n" + existing
+			} else {
+				sections["notes"] = preludeText
+			}
 		}
 	}
 

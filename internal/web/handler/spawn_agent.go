@@ -120,7 +120,10 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		// inline AppendSystemPrompt stays set as a fallback for the
 		// PTY path when no worktree was created.
 		appendPromptFile := ""
-		if pf, perr := office.WriteAppendSystemPromptFile(req.WorkingDir, stablePrefix); perr != nil {
+		// Variant = tier: teammates can share req.WorkingDir but BuildStableSystemPrompt
+		// differs by tier, so a single per-cwd file would let the last writer win
+		// and give some members the wrong tier's prompt. Per-tier filename fixes it.
+		if pf, perr := office.WriteAppendSystemPromptFile(req.WorkingDir, member.Tier, stablePrefix); perr != nil {
 			slog.Warn("R2.4: WriteAppendSystemPromptFile failed; falling back to inline", "err", perr)
 		} else {
 			appendPromptFile = pf
@@ -587,6 +590,10 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 		if err := stageCodexAuth(home, codexHome); err != nil {
 			slog.Error("Codex built-in openai provider needs auth.json — run `codex login` in the container first",
 				"name", member.Name, "provider", provider, "error", err)
+			// config.toml (written above) embeds the agent token; remove the
+			// whole CODEX_HOME so a failed spawn doesn't orphan a 0600
+			// plaintext-credential dir (one accumulates per failed spawn).
+			os.RemoveAll(codexHome)
 			return "", ""
 		}
 	}
@@ -630,6 +637,7 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	)
 	if err != nil {
 		slog.Error("Failed to create Codex session", "name", member.Name, "error", err)
+		os.RemoveAll(codexHome) // drop the agent-token-bearing config dir on failure
 		return "", ""
 	}
 	go forwardCodexSessionEvents(codexSession, ctx)

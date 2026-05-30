@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // KnowledgeSource categorizes where a hit came from. Exposed so callers
@@ -407,5 +408,11 @@ func trimExcerpt(line string) string {
 	if len(line) <= maxExcerptChars {
 		return line
 	}
-	return line[:maxExcerptChars-3] + "..."
+	// Back up to a rune boundary so a multi-byte rune (emoji / non-ASCII in
+	// agent memory) isn't split into invalid UTF-8 in the marshaled excerpt.
+	limit := maxExcerptChars - 3
+	for limit > 0 && !utf8.RuneStart(line[limit]) {
+		limit--
+	}
+	return line[:limit] + "..."
 }

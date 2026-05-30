@@ -456,6 +456,9 @@ func (m *Manager) UnregisterAgent(sessionID string) {
 		delete(m.agents, sessionID)
 		delete(m.configIndex, agent.ConfigID)
 	}
+	// Reclaim the per-session recovery timestamp so it doesn't leak one stale
+	// entry per dead/restarted session for the lifetime of the team.
+	delete(m.lastRecoveryAt, sessionID)
 	// Release any file locks owned by the departing agent.
 	for path, lock := range m.fileLocks {
 		if lock.Owner == sessionID {
@@ -612,6 +615,9 @@ func (m *Manager) SetTeamSpawned(v bool) {
 		m.triageAttempts = make(map[string]int)
 		m.lastTriageAt = make(map[string]time.Time)
 		m.lastRecoveryAt = make(map[string]time.Time)
+		// lastAskAt accumulates one entry per distinct (session, question) pair
+		// and is otherwise never pruned; reset it on teardown like the siblings.
+		m.lastAskAt = make(map[string]time.Time)
 	}
 	m.mu.Unlock()
 

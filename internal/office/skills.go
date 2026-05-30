@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // suggestedSkillsByRole maps a lowercase substring of a role name (e.g.
@@ -379,7 +380,11 @@ func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	const max = 110
 	if len(s) > max {
-		s = s[:max-3] + "..."
+		limit := max - 3
+		for limit > 0 && !utf8.RuneStart(s[limit]) {
+			limit--
+		}
+		s = s[:limit] + "..."
 	}
 	return s
 }
