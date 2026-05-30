@@ -9,6 +9,7 @@ import { cn } from '../lib/cn';
 import { fetchJSON } from '../api/client';
 import { relativeTime } from '../lib/relativeTime';
 import type { OfficeMember } from '../api/types';
+import { VOICES } from '../lib/voices';
 
 type Tab = 'overview' | 'personality' | 'send' | 'lifecycle';
 
@@ -166,6 +167,7 @@ function PersonalityTab({ member, onSaved }: { member: OfficeMember; onSaved: ()
   const qc = useQueryClient();
   const [character, setCharacter] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [voice, setVoice] = useState(member.voice ?? '');
   const save = useMutation({
     mutationFn: () =>
       fetchJSON(`/api/office/member/${encodeURIComponent(member.sessionId)}/personality`, {
@@ -177,8 +179,38 @@ function PersonalityTab({ member, onSaved }: { member: OfficeMember; onSaved: ()
       onSaved();
     },
   });
+  const saveVoice = useMutation({
+    mutationFn: (v: string) =>
+      fetchJSON(`/api/office/member/${encodeURIComponent(member.sessionId)}/voice`, {
+        method: 'PUT',
+        body: { voice: v },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['office', 'status'] }),
+    onError: () => {
+      setVoice(member.voice ?? '');
+    },
+  });
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <Field label="Voice" hint="Voice used for this agent in standup audio summaries.">
+        <select
+          value={voice}
+          onChange={(e) => {
+            setVoice(e.target.value);
+            saveVoice.mutate(e.target.value);
+          }}
+          style={selectStyle}
+        >
+          <option value="" disabled>
+            Choose a voice…
+          </option>
+          {VOICES.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </Field>
       <Field label="Character" hint="Free-form personality notes the agent sees in its system prompt.">
         <textarea
           value={character}
@@ -421,5 +453,17 @@ const textareaStyle: React.CSSProperties = {
   fontSize: 13,
   outline: 'none',
   resize: 'vertical',
+  fontFamily: 'inherit',
+};
+
+const selectStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '8px 10px',
+  background: 'var(--bg-app)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--text-primary)',
+  fontSize: 13,
+  outline: 'none',
   fontFamily: 'inherit',
 };
