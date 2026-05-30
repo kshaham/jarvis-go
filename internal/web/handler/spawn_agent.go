@@ -547,15 +547,19 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	cfg := codexcfg.Config{
 		Model:           model,
 		ReasoningEffort: codexcfg.MapReasoningEffort(tuning.Effort),
-		// workspace-write confines model-run commands' writes to the agent's
-		// workspace (real OS-level enforcement that works in `codex exec` —
-		// unlike hooks, which don't fire in exec) so an agent can't tamper with
-		// secrets, the agent token, other repos, or system files outside its
-		// worktree. network_access stays on so builds / dep installs / git
-		// fetch keep working.
-		SandboxMode:           "workspace-write",
-		WorkspaceWriteNetwork: true,
-		ApprovalPolicy:        "never",
+		// danger-full-access: the ONLY sandbox mode that works on this
+		// deployment. Codex's workspace-write/read-only sandboxes use
+		// bubblewrap (bwrap), which fails on this host's kernel
+		// ("Creating new namespace failed ... kernel does not support user
+		// namespaces") and breaks every shell command. So OS-level codex
+		// sandboxing isn't available here — the CONTAINER is the boundary and
+		// the guardrails (no push, no destructive, no secrets) stay advisory in
+		// the kickstart. (Codex hooks, the other enforcement path, don't fire
+		// in `codex exec` either — verified.) codexcfg still supports
+		// workspace-write + network_access for a kernel that allows user
+		// namespaces; flip SandboxMode there if the host kernel allows them.
+		SandboxMode:    "danger-full-access",
+		ApprovalPolicy: "never",
 		Provider:        prov,
 		MCPServers:      codexMCPFromMap(leanCodexMCPServers(ctx.buildOfficeMCPServers(req, sessionID, agentToken))),
 		WebSearch:       webSearch,
