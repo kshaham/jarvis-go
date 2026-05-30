@@ -1152,7 +1152,7 @@ func handleProject(args []string) {
 //	cm project invariants              -- list all invariants
 //	cm project invariants list         -- list all invariants
 //	cm project invariants add "<rule>" -- append a rule
-//	cm project invariants remove <n>   -- remove rule at 1-based index
+//	cm project invariants remove <n>   -- remove rule at 0-based index
 //	cm project invariants set "<r1>" "<r2>" ...  -- replace full list
 func handleProjectInvariants(args []string) {
 	subCmd := "list"
@@ -1175,10 +1175,11 @@ func handleProjectInvariants(args []string) {
 		if len(args) < 1 {
 			fatal("Usage: cm project invariants remove <index>")
 		}
-		if _, err := strconv.Atoi(args[0]); err != nil {
-			fatal("index must be an integer")
+		idx, err := strconv.Atoi(args[0])
+		if err != nil || idx < 0 {
+			fatal("index must be a non-negative integer (0-based)")
 		}
-		delResult := delBody(fmt.Sprintf("/api/office/project/invariants/%s", args[0]))
+		delResult := delBody(fmt.Sprintf("/api/office/project/invariants/%d", idx))
 		printInvariantsList(delResult)
 	case "set":
 		if len(args) < 1 {

@@ -265,6 +265,26 @@ func TaskHasNeedsReviewLabel(t *Task) bool {
 	return false
 }
 
+// GatedLabel is the label that enables the synchronous criteria gate on task
+// completion. When a task carries this label AND has AcceptanceCriteria, the
+// evaluator runs before CompleteTask; failure rejects or escalates the
+// completion request without marking the task done.
+const GatedLabel = "gated"
+
+// TaskHasGatedLabel returns true when the task carries the `gated` label
+// (case-insensitive). Mirrors TaskHasNeedsReviewLabel.
+func TaskHasGatedLabel(t *Task) bool {
+	if t == nil {
+		return false
+	}
+	for _, l := range t.Labels {
+		if NormalizeTaskLabel(l) == GatedLabel {
+			return true
+		}
+	}
+	return false
+}
+
 func truncateUltrareviewLog(s string) string {
 	const max = 4096
 	if len(s) <= max {

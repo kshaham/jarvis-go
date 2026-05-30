@@ -20,7 +20,7 @@ type DynamicTool struct {
 	WorkingDir  string `json:"workingDir"`
 }
 
-// All static tool definitions (29 tools)
+// All static tool definitions (31 tools)
 var allToolDefs = []ToolDefinition{
 	// --- Session Tools (6) ---
 	{
@@ -354,6 +354,24 @@ var allToolDefs = []ToolDefinition{
 		},
 	},
 
+	// --- Office Project Invariants Tools (2) ---
+	{
+		Name:        "office_project_invariants_get",
+		Description: "List the team's project invariants (non-negotiable rules).",
+		InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
+	},
+	{
+		Name:        "office_project_invariants_set",
+		Description: "Replace the team's project invariants (non-negotiable rules) with the given list.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"invariants": {Type: "array", Description: "List of invariant rule strings to set"},
+			},
+			Required: []string{"invariants"},
+		},
+	},
+
 	// --- Skill Tools (5) ---
 	{
 		Name:        "list_skills",
@@ -589,17 +607,17 @@ var allTools = map[string]ToolHandler{
 	"office_task_progress":     handleOfficeTaskProgress,
 	"office_task_blocked":      handleOfficeTaskBlocked,
 	"office_task_set_criteria": handleOfficeTaskSetCriteria,
-	"office_standup_respond": handleOfficeStandupRespond,
-	"office_reflect":         handleOfficeReflect,
-	"office_team_roster":     handleOfficeTeamRoster,
-	"office_send_message":    handleOfficeSendMessage,
-	"office_memory_read":     handleOfficeMemoryRead,
-	"office_memory_write":    handleOfficeMemoryWrite,
-	"office_memory_append":   handleOfficeMemoryAppend,
-	"office_skill_list":      handleListSkills,
-	"office_skill_search":    handleSearchSkills,
-	"office_skill_read":      handleGetSkill,
-	"office_skill_create":    handleCreateSkill,
+	"office_standup_respond":   handleOfficeStandupRespond,
+	"office_reflect":           handleOfficeReflect,
+	"office_team_roster":       handleOfficeTeamRoster,
+	"office_send_message":      handleOfficeSendMessage,
+	"office_memory_read":       handleOfficeMemoryRead,
+	"office_memory_write":      handleOfficeMemoryWrite,
+	"office_memory_append":     handleOfficeMemoryAppend,
+	"office_skill_list":        handleListSkills,
+	"office_skill_search":      handleSearchSkills,
+	"office_skill_read":        handleGetSkill,
+	"office_skill_create":      handleCreateSkill,
 
 	// Project invariants
 	"office_project_invariants_get": handleOfficeProjectInvariantsGet,

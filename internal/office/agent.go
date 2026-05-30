@@ -23,13 +23,13 @@ type TeamMemberConfig struct {
 type TaskStatus string
 
 const (
-	TaskPending         TaskStatus = "pending"
-	TaskAcknowledged    TaskStatus = "acknowledged"
-	TaskInProgress      TaskStatus = "in_progress"
-	TaskCompleted       TaskStatus = "completed"
-	TaskFailed          TaskStatus = "failed"
-	TaskBlocked         TaskStatus = "blocked"
-	TaskHandoffPending  TaskStatus = "handoff_pending" // R29 · waiting on receiver accept/reject
+	TaskPending        TaskStatus = "pending"
+	TaskAcknowledged   TaskStatus = "acknowledged"
+	TaskInProgress     TaskStatus = "in_progress"
+	TaskCompleted      TaskStatus = "completed"
+	TaskFailed         TaskStatus = "failed"
+	TaskBlocked        TaskStatus = "blocked"
+	TaskHandoffPending TaskStatus = "handoff_pending" // R29 · waiting on receiver accept/reject
 )
 
 // TaskProgressEntry is a single timestamped progress update on a task.
@@ -494,6 +494,20 @@ func (a *AgentState) SetTaskProgress(taskID string, progress string) bool {
 			if len(t.ProgressLog) > taskProgressLogCap {
 				t.ProgressLog = t.ProgressLog[len(t.ProgressLog)-taskProgressLogCap:]
 			}
+			return true
+		}
+	}
+	return false
+}
+
+// SetTaskBlockerDescription sets Task.BlockerDescription under the agent lock.
+// Returns true if the task was found.
+func (a *AgentState) SetTaskBlockerDescription(taskID string, desc string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.taskQueue.Tasks {
+		if t.ID == taskID {
+			t.BlockerDescription = desc
 			return true
 		}
 	}

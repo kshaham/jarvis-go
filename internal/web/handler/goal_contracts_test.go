@@ -8,14 +8,105 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/testutil/stubbin"
 	"github.com/kshaham/jarvis/internal/web/middleware"
 	"github.com/kshaham/jarvis/internal/web/sse"
 )
 
+// captureSessionStore extends stubSessions to capture WriteInkPrompt calls.
+type captureSessionStore struct {
+	stubSessions
+	prompts []string
+}
+
+func (c *captureSessionStore) WriteInkPrompt(sessionID, prompt string) bool {
+	c.prompts = append(c.prompts, prompt)
+	return true
+}
+
+// newCriteriaGateCtx builds a Context with a captureSessionStore so tests can
+// observe WriteInkPrompt calls delivered back to the agent.
+func newCriteriaGateCtx(t *testing.T, sess office.SessionStore) *Context {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(func() { time.Sleep(100 * time.Millisecond) })
+	mgr := office.NewManager(sess, func(string, interface{}) {}, nil)
+	return &Context{
+		SessionManager: pty.NewSessionManager(10),
+		SSEBroker:      sse.NewBroker(100, 10),
+		CSRFStore:      middleware.NewCSRFStore(context.Background()),
+		OfficeManager:  mgr,
+	}
+}
+
+// makePassVerdict returns bare-JSON for a criteria verdict with allPass=true.
+func makePassVerdict(criteria []string) string {
+	type cr struct {
+		Criterion string `json:"criterion"`
+		Pass      bool   `json:"pass"`
+		Reason    string `json:"reason"`
+	}
+	type verdict struct {
+		Results []cr `json:"results"`
+		AllPass bool `json:"allPass"`
+	}
+	v := verdict{AllPass: true}
+	for _, c := range criteria {
+		v.Results = append(v.Results, cr{Criterion: c, Pass: true, Reason: "ok"})
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+// makeFailVerdict returns bare-JSON for a criteria verdict with allPass=false.
+func makeFailVerdict(criteria []string) string {
+	type cr struct {
+		Criterion string `json:"criterion"`
+		Pass      bool   `json:"pass"`
+		Reason    string `json:"reason"`
+	}
+	type verdict struct {
+		Results []cr `json:"results"`
+		AllPass bool `json:"allPass"`
+	}
+	v := verdict{AllPass: false}
+	for _, c := range criteria {
+		v.Results = append(v.Results, cr{Criterion: c, Pass: false, Reason: "not done"})
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+// postTaskComplete fires OfficeAgentTaskComplete and returns the recorder.
+func postTaskComplete(t *testing.T, ctx *Context, sessionID, taskID, result string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]interface{}{
+		"sessionId": sessionID,
+		"taskId":    taskID,
+		"result":    result,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/office/agent/task/complete", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx.OfficeAgentTaskComplete(rec, req)
+	return rec
+}
+
+// seedGateAgent registers an agent with a worktree path and returns it.
+func seedGateAgent(t *testing.T, ctx *Context, sessionID string) *office.AgentState {
+	t.Helper()
+	ctx.OfficeManager.RegisterAgent(sessionID, "cfg-"+sessionID, &office.TeamMemberConfig{
+		ID: "cfg-" + sessionID, Name: sessionID, Role: "worker",
+	})
+	a := ctx.OfficeManager.GetAgent(sessionID)
+	a.SetWorktreePath(t.TempDir())
+	return a
+}
 
 // newInvariantsCtx builds an isolated Context for invariants handler tests.
 func newInvariantsCtx(t *testing.T) *Context {
@@ -285,5 +376,228 @@ func TestTaskCriteriaHandler(t *testing.T) {
 		})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad op: want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Criteria gate tests (Task 8)
+// ---------------------------------------------------------------------------
+
+// TestCompletionGate_NoCriteriaUnchanged: a task without criteria completes
+// exactly as today (status completed, HTTP 200).
+func TestCompletionGate_NoCriteriaUnchanged(t *testing.T) {
+	sess := &captureSessionStore{}
+	ctx := newCriteriaGateCtx(t, sess)
+	recorder := newEventRecorder(ctx.SSEBroker)
+	_ = recorder
+
+	a := seedGateAgent(t, ctx, "s-plain")
+	a.AddTask(&office.Task{
+		ID:     "t-plain",
+		Title:  "plain task",
+		Status: office.TaskInProgress,
+		// no AcceptanceCriteria, no labels
+	})
+
+	rec := postTaskComplete(t, ctx, "s-plain", "t-plain", "done")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("no-criteria: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify task is completed.
+	tasks := a.GetTasks()
+	if len(tasks) == 0 {
+		t.Fatal("no tasks found after completion")
+	}
+	if tasks[0].Status != office.TaskCompleted {
+		t.Errorf("no-criteria: want status completed, got %s", tasks[0].Status)
+	}
+}
+
+// TestCompletionGate_GatedFailKeepsInProgress: gated task with allPass=false
+// and rejectCount 0 → HTTP 202, task stays in_progress, CriteriaRejectCount==1,
+// office:taskCompletionRejected broadcast seen, no re-task.
+func TestCompletionGate_GatedFailKeepsInProgress(t *testing.T) {
+	stub := stubbin.EchoStub(t, makeFailVerdict([]string{"feature works"}))
+	prev := office.SetCriteriaBinaryForTest(stub)
+	t.Cleanup(func() { office.SetCriteriaBinaryForTest(prev) })
+
+	sess := &captureSessionStore{}
+	ctx := newCriteriaGateCtx(t, sess)
+	recorder := newEventRecorder(ctx.SSEBroker)
+
+	a := seedGateAgent(t, ctx, "s-gfail")
+	a.AddTask(&office.Task{
+		ID:                  "t-gfail",
+		Title:               "gated task",
+		Status:              office.TaskInProgress,
+		AcceptanceCriteria:  []string{"feature works"},
+		Labels:              []string{"gated"},
+		CriteriaRejectCount: 0,
+	})
+
+	rec := postTaskComplete(t, ctx, "s-gfail", "t-gfail", "finished the feature")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("gated-fail: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["completed"] != false {
+		t.Errorf("gated-fail: want completed=false, got %v", resp["completed"])
+	}
+
+	// Task must still be in_progress.
+	tasks := a.GetTasks()
+	if len(tasks) == 0 {
+		t.Fatal("no tasks after gated-fail")
+	}
+	if tasks[0].Status != office.TaskInProgress {
+		t.Errorf("gated-fail: want status in_progress, got %s", tasks[0].Status)
+	}
+
+	// CriteriaRejectCount should be 1.
+	if tasks[0].CriteriaRejectCount != 1 {
+		t.Errorf("gated-fail: want CriteriaRejectCount=1, got %d", tasks[0].CriteriaRejectCount)
+	}
+
+	// Broadcast must have fired.
+	if !recorder.waitFor("office:taskCompletionRejected", 2*time.Second) {
+		t.Fatal("office:taskCompletionRejected not broadcast")
+	}
+
+	// Reject prompt must have been delivered.
+	if len(sess.prompts) == 0 {
+		t.Error("gated-fail: want WriteInkPrompt called with reject prompt, got none")
+	}
+}
+
+// TestCompletionGate_AdvisoryFailStillCompletes: advisory criteria (no gated
+// label), allPass=false → task still completes (HTTP 200), and eventually
+// office:taskCriteriaReviewed fires.
+func TestCompletionGate_AdvisoryFailStillCompletes(t *testing.T) {
+	stub := stubbin.EchoStub(t, makeFailVerdict([]string{"tests pass"}))
+	prev := office.SetCriteriaBinaryForTest(stub)
+	t.Cleanup(func() { office.SetCriteriaBinaryForTest(prev) })
+
+	sess := &captureSessionStore{}
+	ctx := newCriteriaGateCtx(t, sess)
+	recorder := newEventRecorder(ctx.SSEBroker)
+
+	a := seedGateAgent(t, ctx, "s-advisory")
+	a.AddTask(&office.Task{
+		ID:                 "t-advisory",
+		Title:              "advisory task",
+		Status:             office.TaskInProgress,
+		AcceptanceCriteria: []string{"tests pass"},
+		// no "gated" label
+	})
+
+	rec := postTaskComplete(t, ctx, "s-advisory", "t-advisory", "work done")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("advisory-fail: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Task must be completed.
+	tasks := a.GetTasks()
+	if len(tasks) == 0 {
+		t.Fatal("no tasks after advisory completion")
+	}
+	if tasks[0].Status != office.TaskCompleted {
+		t.Errorf("advisory-fail: want completed, got %s", tasks[0].Status)
+	}
+
+	// Async broadcast should fire eventually.
+	if !recorder.waitFor("office:taskCriteriaReviewed", 3*time.Second) {
+		t.Fatal("office:taskCriteriaReviewed not broadcast for advisory path")
+	}
+}
+
+// TestCompletionGate_FailOpenCompletes: gated criteria + evaluator exits
+// non-zero (EvaluatorError set) → fail-open → task completes (HTTP 200).
+func TestCompletionGate_FailOpenCompletes(t *testing.T) {
+	stub := stubbin.FailStub(t, 1, "internal error")
+	prev := office.SetCriteriaBinaryForTest(stub)
+	t.Cleanup(func() { office.SetCriteriaBinaryForTest(prev) })
+
+	sess := &captureSessionStore{}
+	ctx := newCriteriaGateCtx(t, sess)
+
+	a := seedGateAgent(t, ctx, "s-failopen")
+	a.AddTask(&office.Task{
+		ID:                 "t-failopen",
+		Title:              "fail-open task",
+		Status:             office.TaskInProgress,
+		AcceptanceCriteria: []string{"something"},
+		Labels:             []string{"gated"},
+	})
+
+	rec := postTaskComplete(t, ctx, "s-failopen", "t-failopen", "done")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("fail-open: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	tasks := a.GetTasks()
+	if len(tasks) == 0 {
+		t.Fatal("no tasks after fail-open completion")
+	}
+	if tasks[0].Status != office.TaskCompleted {
+		t.Errorf("fail-open: want completed, got %s", tasks[0].Status)
+	}
+}
+
+// TestCompletionGate_CapEscalates: gated + allPass=false + CriteriaRejectCount==2
+// → status becomes blocked, office:taskCompletionEscalated broadcast, no re-task.
+func TestCompletionGate_CapEscalates(t *testing.T) {
+	stub := stubbin.EchoStub(t, makeFailVerdict([]string{"feature works", "tests pass"}))
+	prev := office.SetCriteriaBinaryForTest(stub)
+	t.Cleanup(func() { office.SetCriteriaBinaryForTest(prev) })
+
+	sess := &captureSessionStore{}
+	ctx := newCriteriaGateCtx(t, sess)
+	recorder := newEventRecorder(ctx.SSEBroker)
+
+	a := seedGateAgent(t, ctx, "s-escalate")
+	a.AddTask(&office.Task{
+		ID:                  "t-escalate",
+		Title:               "should escalate",
+		Status:              office.TaskInProgress,
+		AcceptanceCriteria:  []string{"feature works", "tests pass"},
+		Labels:              []string{"gated"},
+		CriteriaRejectCount: 2, // already at cap
+	})
+
+	rec := postTaskComplete(t, ctx, "s-escalate", "t-escalate", "tried again")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("escalate: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["escalated"] != true {
+		t.Errorf("escalate: want escalated=true, got %v", resp["escalated"])
+	}
+
+	// Task must be blocked.
+	tasks := a.GetTasks()
+	if len(tasks) == 0 {
+		t.Fatal("no tasks after escalation")
+	}
+	if tasks[0].Status != office.TaskBlocked {
+		t.Errorf("escalate: want status blocked, got %s", tasks[0].Status)
+	}
+
+	// Escalated broadcast must fire.
+	if !recorder.waitFor("office:taskCompletionEscalated", 2*time.Second) {
+		t.Fatal("office:taskCompletionEscalated not broadcast")
+	}
+
+	// No reject prompt on escalation path.
+	if len(sess.prompts) != 0 {
+		t.Errorf("escalate: want no WriteInkPrompt, got %d prompt(s)", len(sess.prompts))
 	}
 }

@@ -170,10 +170,10 @@ type agentTaskProgressRequest struct {
 }
 
 type agentTaskSelfAddRequest struct {
-	SessionID   string   `json:"sessionId"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Priority    string   `json:"priority"`
+	SessionID   string `json:"sessionId"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Priority    string `json:"priority"`
 	// R36 · Optional labels applied on task creation. Each entry
 	// normalised + validated; invalid entries return 400 so the
 	// operator / agent learns about the typo immediately.
@@ -508,11 +508,12 @@ func (ctx *Context) OfficeHealth(w http.ResponseWriter, r *http.Request) {
 // mode from settings. Default is "sdk" for back-compat with installs
 // from before hooks-mode shipped. Valid values:
 //   - "sdk"    : ModeClaudeSDK via claude-agent-sdk-go (programmatic
-//                billing pool starting 2026-06-15).
+//     billing pool starting 2026-06-15).
 //   - "hooks"  : ModeClaude + HTTP hooks; runs interactive `claude`
-//                in a PTY, billed on the interactive subscription pool.
+//     in a PTY, billed on the interactive subscription pool.
 //   - "legacy" : ModeClaude without hooks (raw PTY, no structured
-//                events; escape hatch).
+//     events; escape hatch).
+//
 // Unknown values fall back to "sdk".
 func (ctx *Context) resolveOfficeSessionMode() string {
 	settings := ctx.StateStore.GetSettings()
@@ -2100,6 +2101,99 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	var warning string
 	if agent != nil {
+		cwd := agent.GetWorktreePath()
+		sid := req.SessionID
+
+		// Criteria gate: non-mutating task lookup to read AcceptanceCriteria,
+		// labels, and CriteriaRejectCount before touching task state.
+		var (
+			taskCriteria    []string
+			taskIsGated     bool
+			taskRejectCount int
+		)
+		for _, t := range agent.GetTasks() {
+			if t != nil && t.ID == req.TaskID {
+				taskCriteria = t.AcceptanceCriteria
+				taskIsGated = office.TaskHasGatedLabel(t)
+				taskRejectCount = t.CriteriaRejectCount
+				break
+			}
+		}
+
+		// Gated path: run evaluator synchronously before CompleteTask.
+		if len(taskCriteria) > 0 && taskIsGated {
+			v, _ := office.EvaluateAcceptanceCriteria(r.Context(), cwd, req.Result, taskCriteria)
+			if v.EvaluatorError != "" {
+				// Fail-open: broadcast the infra error and continue to completion.
+				ctx.SSEBroker.Broadcast("office:taskCriteriaReviewed", map[string]interface{}{
+					"sessionId":      sid,
+					"taskId":         req.TaskID,
+					"results":        v.Results,
+					"allPass":        v.AllPass,
+					"evaluatorError": v.EvaluatorError,
+				})
+				// Fall through to CompleteTask below.
+			} else if !v.AllPass {
+				// Real failure: reject or escalate.
+				if taskRejectCount >= 2 {
+					// Escalate: block the task, set blocker description, set progress, broadcast, respond.
+					agent.UpdateTaskStatus(req.TaskID, office.TaskBlocked)
+					var failingSummary strings.Builder
+					for _, cr := range v.Results {
+						if !cr.Pass {
+							failingSummary.WriteString("- ")
+							failingSummary.WriteString(cr.Criterion)
+							failingSummary.WriteString(": ")
+							failingSummary.WriteString(cr.Reason)
+							failingSummary.WriteString("\n")
+						}
+					}
+					blockerDesc := "Acceptance criteria not met after 2 rejections:\n" + failingSummary.String()
+					agent.SetTaskBlockerDescription(req.TaskID, blockerDesc)
+					agent.SetTaskProgress(req.TaskID, "escalated: criteria not met after 2 rejections\n"+failingSummary.String())
+					ctx.SSEBroker.Broadcast("office:taskCompletionEscalated", map[string]interface{}{
+						"sessionId": sid,
+						"taskId":    req.TaskID,
+						"failing":   v.Results,
+					})
+					request.WriteJSON(w, http.StatusAccepted, map[string]interface{}{
+						"completed": false,
+						"escalated": true,
+						"failing":   v.Results,
+					})
+					return
+				}
+				// Reject: increment counter, deliver follow-up prompt, respond.
+				n := agent.IncrementCriteriaReject(req.TaskID)
+				var promptBuf strings.Builder
+				promptBuf.WriteString("Your last task completion was rejected because the following acceptance criteria were not met:\n")
+				for _, cr := range v.Results {
+					if !cr.Pass {
+						promptBuf.WriteString("- ")
+						promptBuf.WriteString(cr.Criterion)
+						promptBuf.WriteString(": ")
+						promptBuf.WriteString(cr.Reason)
+						promptBuf.WriteString("\n")
+					}
+				}
+				promptBuf.WriteString("\nPlease address the above and call `cm task complete` again when the criteria are satisfied.")
+				ctx.OfficeManager.Sessions().WriteInkPrompt(sid, promptBuf.String())
+				ctx.SSEBroker.Broadcast("office:taskCompletionRejected", map[string]interface{}{
+					"sessionId":   sid,
+					"taskId":      req.TaskID,
+					"failing":     v.Results,
+					"rejectCount": n,
+				})
+				request.WriteJSON(w, http.StatusAccepted, map[string]interface{}{
+					"completed":   false,
+					"failing":     v.Results,
+					"rejectCount": n,
+				})
+				return
+			}
+			// AllPass (or fail-open above) — fall through to CompleteTask.
+		}
+
 		// Single-lock lookup + mutation. Returns AlreadyComplete=true
 		// for repeat calls so we short-circuit broadcasts (observed
 		// 6× re-fire in prod before the idempotency guard).
@@ -2195,6 +2289,28 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			}()
 		} else {
 			safego.Go("office.checkForIdleAgents", ctx.OfficeManager.CheckForIdleAgents)
+		}
+
+		// Advisory criteria review: when the task has AcceptanceCriteria but
+		// is NOT gated, run the evaluator in the background so operators see
+		// a non-blocking review event (office:taskCriteriaReviewed) without
+		// delaying the HTTP response or gating completion.
+		if len(taskCriteria) > 0 && !taskIsGated {
+			criteriaSnap := taskCriteria
+			resultSnap := req.Result
+			cwdSnap := cwd
+			tidSnap := req.TaskID
+			broker := ctx.SSEBroker
+			safego.Go("office.advisoryCriteria", func() {
+				v, _ := office.EvaluateAcceptanceCriteria(context.Background(), cwdSnap, resultSnap, criteriaSnap)
+				broker.Broadcast("office:taskCriteriaReviewed", map[string]interface{}{
+					"sessionId":      sid,
+					"taskId":         tidSnap,
+					"results":        v.Results,
+					"allPass":        v.AllPass,
+					"evaluatorError": v.EvaluatorError,
+				})
+			})
 		}
 
 		// Knowledge-library write. Renders the just-completed task
