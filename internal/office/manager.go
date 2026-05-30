@@ -70,6 +70,10 @@ type Manager struct {
 	pausedAt    time.Time
 	pauseReason string
 	teamMission string
+	// projectInvariants holds the ordered list of project-wide invariants that
+	// are injected into every agent prompt. Persisted to
+	// ~/.jarvis/office-memory/project-invariants.json.
+	projectInvariants []string
 	// Dev instances keyed by slot name (default slot is "app"; fullstack
 	// teams can have e.g. "frontend" + "api"). One dev server per slot.
 	// Persisted individually at ~/.jarvis/office-memory/team-dev-<slot>.json.
@@ -231,6 +235,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		events:             make(chan OfficeEvent, 64),
 	}
 	mgr.loadPersistedMission()
+	mgr.loadPersistedInvariants()
 	mgr.LoadPersistedMetrics()
 	mgr.loadPersistedMessages()
 	return mgr
