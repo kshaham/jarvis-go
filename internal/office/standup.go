@@ -853,3 +853,53 @@ func buildTelegramStandupSummary(standupID string, participants []string, transc
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
+
+// StandupDir is the exported directory of persisted standups.
+func StandupDir() string { return standupDir() }
+
+// StandupAudioPath returns the cache path for a standup's generated MP3.
+func StandupAudioPath(id string) string {
+	return filepath.Join(standupDir(), id+".mp3")
+}
+
+// LoadPersistedStandup reads one persisted standup by ID.
+func LoadPersistedStandup(id string) (*PersistedStandup, error) {
+	data, err := os.ReadFile(filepath.Join(standupDir(), id+".json"))
+	if err != nil {
+		return nil, err
+	}
+	var ps PersistedStandup
+	if err := json.Unmarshal(data, &ps); err != nil {
+		return nil, err
+	}
+	return &ps, nil
+}
+
+// LatestCompletedStandupID returns the ID of the standup with the greatest
+// CompletedAt, or an error if none exist.
+func LatestCompletedStandupID() (string, error) {
+	entries, err := os.ReadDir(standupDir())
+	if err != nil {
+		return "", err
+	}
+	bestID := ""
+	var bestAt int64 = -1
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		ps, err := LoadPersistedStandup(id)
+		if err != nil {
+			continue
+		}
+		if ps.CompletedAt > bestAt {
+			bestAt = ps.CompletedAt
+			bestID = id
+		}
+	}
+	if bestID == "" {
+		return "", os.ErrNotExist
+	}
+	return bestID, nil
+}
