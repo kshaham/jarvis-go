@@ -68,6 +68,7 @@ npm run build</pre>
 
 // Server is the main HTTP server for Jarvis.
 type Server struct {
+	rootCtx             context.Context
 	port                int
 	isHTTPS             bool
 	dataDir             string
@@ -299,6 +300,7 @@ func NewServer(ctx context.Context, port int, isHTTPS bool, sessionManager *pty.
 	}
 
 	srv := &Server{
+		rootCtx:            ctx,
 		port:               port,
 		isHTTPS:            isHTTPS,
 		dataDir:            dataDir,
@@ -645,7 +647,7 @@ func (s *Server) setupRouter() chi.Router {
 		baseURL, _ := settings["openaiBaseUrl"].(string)
 		return tts.NewClient(key, baseURL), nil
 	}
-	h.AudioJobs = handler.NewAudioJobManager(s.sseBroker.Broadcast, newSynth, voiceFor)
+	h.AudioJobs = handler.NewAudioJobManager(s.rootCtx, s.sseBroker.Broadcast, newSynth, voiceFor)
 
 	s.handlerCtx = h
 

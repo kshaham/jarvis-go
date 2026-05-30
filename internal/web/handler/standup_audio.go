@@ -27,6 +27,7 @@ const defaultAudioWordBudget = 280
 // AudioJobManager coalesces concurrent requests for the same standup audio
 // and runs synthesis in a background goroutine.
 type AudioJobManager struct {
+	baseCtx    context.Context
 	mu         sync.Mutex
 	running    map[string]bool
 	broadcast  func(string, interface{})
@@ -35,14 +36,20 @@ type AudioJobManager struct {
 	wordBudget int
 }
 
-// NewAudioJobManager constructs a manager. broadcast must be safe for
+// NewAudioJobManager constructs a manager. ctx is the server root context;
+// pass nil to default to context.Background(). broadcast must be safe for
 // concurrent calls (the SSE broker is).
 func NewAudioJobManager(
+	ctx context.Context,
 	broadcast func(string, interface{}),
 	newSynth func() (Synthesizer, error),
 	voiceFor func(string, int) string,
 ) *AudioJobManager {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &AudioJobManager{
+		baseCtx:    ctx,
 		running:    make(map[string]bool),
 		broadcast:  broadcast,
 		newSynth:   newSynth,
@@ -81,6 +88,9 @@ func (m *AudioJobManager) Start(standupID string) (string, error) {
 
 // run executes the full synthesis pipeline for standupID.
 func (m *AudioJobManager) run(id string) {
+	ctx, cancel := context.WithCancel(m.baseCtx)
+	defer cancel()
+
 	defer func() {
 		if r := recover(); r != nil {
 			tmpPath := office.StandupAudioPath(id) + ".tmp"
@@ -151,8 +161,8 @@ func (m *AudioJobManager) run(id string) {
 		return
 	}
 
-	// NOTE: uses Background context; in-flight jobs are not cancelled on shutdown (bounded by the client's 90s per-call timeout). Future: thread the server root context.
-	script, err := synth.CondenseScript(context.Background(), transcriptStr, m.wordBudget)
+	// Job context derives from the server root context, so an in-flight job is cancelled on shutdown (each OpenAI call is also bounded by the client's 90s timeout).
+	script, err := synth.CondenseScript(ctx, transcriptStr, m.wordBudget)
 	if err != nil {
 		m.broadcast("office:standupAudioError", map[string]interface{}{
 			"id":      id,
@@ -205,7 +215,7 @@ func (m *AudioJobManager) run(id string) {
 			"stage":  "voicing",
 			"detail": s.label,
 		})
-		mp3, err := synth.CreateSpeech(context.Background(), tts.SpeechRequest{
+		mp3, err := synth.CreateSpeech(ctx, tts.SpeechRequest{
 			Voice: s.voice,
 			Input: s.text,
 		})

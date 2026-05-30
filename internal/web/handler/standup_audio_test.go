@@ -67,6 +67,7 @@ func TestAudioJobEmitsProgressAndWritesFile(t *testing.T) {
 	}
 
 	mgr := NewAudioJobManager(
+		context.Background(),
 		broadcast,
 		func() (Synthesizer, error) { return fakeSynth{}, nil },
 		func(_ string, _ int) string { return "marin" },
