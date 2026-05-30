@@ -511,6 +511,16 @@ func (m *Manager) GetRoster() []*AgentState {
 	return result
 }
 
+// sessionIDOf returns an agent's current SessionID read under m.mu. SessionID
+// is mutated by ReassignSessionID under m.mu (R25 in-place restart), so reading
+// it directly off a roster *AgentState (after GetRoster released m.mu) is a data
+// race. Callers must NOT already hold m.mu.
+func (m *Manager) sessionIDOf(a *AgentState) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return a.SessionID
+}
+
 // GetAgentAndTouch returns the agent for sessionID and records that
 // we just received an API call from them. Used by /api/office/agent/*
 // handlers so the stuck-detector has a "heard from agent recently"
@@ -2129,7 +2139,7 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"sessionId":      a.SessionID,
+		"sessionId":      m.sessionIDOf(a),
 		"configId":       a.ConfigID,
 		"name":           a.Config.Name,
 		"role":           a.Config.Role,
@@ -2211,7 +2221,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	taskQueues := make([]interface{}, 0, len(roster))
 	for _, a := range roster {
 		taskQueues = append(taskQueues, map[string]interface{}{
-			"sessionId": a.SessionID,
+			"sessionId": m.sessionIDOf(a),
 			// Deep copies: this is marshaled by the handler outside any lock
 			// while the live tasks are mutated under a.mu.
 			"tasks": a.GetTasksCopy(),

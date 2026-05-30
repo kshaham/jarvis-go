@@ -1435,20 +1435,12 @@ func (ctx *Context) CheckpointSessionPlan(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get and increment version counter from StateStore
+	// Atomically increment the version counter so two concurrent checkpoints of
+	// the same session get DISTINCT versions (and thus distinct files) instead
+	// of both reading N, both persisting N+1, and overwriting each other's
+	// @fix_plan.vN+1.md.
 	versionKey := fmt.Sprintf("plan-version-%s", id)
-	settings := ctx.StateStore.GetSettings()
-	var version int
-	if raw, exists := settings[versionKey]; exists {
-		switch v := raw.(type) {
-		case float64:
-			version = int(v)
-		case string:
-			version, _ = strconv.Atoi(v)
-		}
-	}
-	version++
-	ctx.StateStore.UpdateSettings(map[string]interface{}{versionKey: float64(version)})
+	version := ctx.StateStore.IncrementSettingCounter(versionKey)
 
 	versionPath := filepath.Join(session.WorkingDir, fmt.Sprintf("@fix_plan.v%d.md", version))
 	if err := atomicWriteFile(versionPath, data, 0644); err != nil {
