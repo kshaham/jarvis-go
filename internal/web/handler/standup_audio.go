@@ -17,6 +17,11 @@ import (
 	"github.com/kshaham/jarvis/internal/web/request"
 )
 
+// maxAudioBytes caps the concatenated MP3 size before writing to disk.
+// A 50 MiB standup audio file is already unrealistically large; anything
+// bigger is most likely a bug or a malicious payload.
+const maxAudioBytes = 50 << 20
+
 // maxConcurrentAudioJobs bounds how many synthesis jobs run at once. Each job
 // fans out paid OpenAI chat + speech calls, so without a cap an authenticated
 // caller looping over every historical standup could spawn unbounded goroutines
@@ -95,6 +100,10 @@ func sweepStaleAudioTmp() {
 // Start queues or coalesces an audio generation job for the given standup ID.
 // "latest" is resolved to the most-recent completed standup ID. Returns the
 // resolved ID on success.
+//
+// The OpenAI key is validated synchronously before the semaphore is acquired,
+// so a missing key returns tts.ErrNoAPIKey immediately without consuming a
+// concurrency slot or launching a goroutine.
 func (m *AudioJobManager) Start(standupID string) (string, error) {
 	id := standupID
 	if id == "latest" {
@@ -106,6 +115,14 @@ func (m *AudioJobManager) Start(standupID string) (string, error) {
 	}
 	if !safeName(id) {
 		return "", errors.New("invalid standup id")
+	}
+
+	// Validate the synthesizer (and therefore the API key) before touching the
+	// semaphore or marking the job running. This makes the ErrNoAPIKey path in
+	// OfficePostStandupAudio reachable and keeps the slot count accurate.
+	synth, err := m.newSynth()
+	if err != nil {
+		return "", err
 	}
 
 	m.mu.Lock()
@@ -125,12 +142,14 @@ func (m *AudioJobManager) Start(standupID string) (string, error) {
 	m.wg.Add(1)
 	m.mu.Unlock()
 
-	go m.run(id)
+	go m.run(id, synth)
 	return id, nil
 }
 
-// run executes the full synthesis pipeline for standupID.
-func (m *AudioJobManager) run(id string) {
+// run executes the full synthesis pipeline for standupID using the already-
+// validated synth. The synth is passed in from Start so that the API-key check
+// happens synchronously before the semaphore is acquired (Fix 4).
+func (m *AudioJobManager) run(id string, synth Synthesizer) {
 	ctx, cancel := context.WithCancel(m.baseCtx)
 	defer cancel()
 
@@ -190,22 +209,6 @@ func (m *AudioJobManager) run(id string) {
 	}
 	transcriptStr := strings.Join(lines, "\n")
 
-	synth, err := m.newSynth()
-	if err != nil {
-		if errors.Is(err, tts.ErrNoAPIKey) {
-			m.broadcast("office:standupAudioError", map[string]interface{}{
-				"id":      id,
-				"message": "Configure your OpenAI key in Settings",
-			})
-		} else {
-			m.broadcast("office:standupAudioError", map[string]interface{}{
-				"id":      id,
-				"message": "failed to create synthesizer: " + err.Error(),
-			})
-		}
-		return
-	}
-
 	// Job context derives from the server root context, so an in-flight job is cancelled on shutdown (each OpenAI call is also bounded by the client's 90s timeout).
 	script, err := synth.CondenseScript(ctx, transcriptStr, m.wordBudget)
 	if err != nil {
@@ -226,13 +229,16 @@ func (m *AudioJobManager) run(id string) {
 	}
 	var segs []segment
 
-	// Build a stable 0-based index per distinct speaker in first-appearance order
-	// so that DefaultVoiceForIndex gives each speaker a consistent voice even when
-	// the same speaker appears in multiple segments.
-	speakerIndex := map[string]int{}
-	for _, seg := range script.Segments {
-		if _, seen := speakerIndex[seg.SessionID]; !seen {
-			speakerIndex[seg.SessionID] = len(speakerIndex)
+	// Pre-build lookup maps from the original transcript order (inputs) so that:
+	//   - speaker name lookup is O(1) per segment instead of O(N) (Fix 6d)
+	//   - the stable voice index is derived from original-transcript order, not
+	//     the LLM's segment order, giving each speaker a consistent voice.
+	sessionName := make(map[string]string, len(inputs))
+	sessionIdx := make(map[string]int, len(inputs))
+	for _, inp := range inputs {
+		if _, seen := sessionIdx[inp.SessionID]; !seen {
+			sessionIdx[inp.SessionID] = len(sessionIdx)
+			sessionName[inp.SessionID] = inp.SpeakerName
 		}
 	}
 
@@ -243,14 +249,17 @@ func (m *AudioJobManager) run(id string) {
 		if seg.Text == "" {
 			continue
 		}
-		voice := m.voiceFor(seg.SessionID, speakerIndex[seg.SessionID])
-		// Find the human-readable speaker name from inputs if available.
+		idx, known := sessionIdx[seg.SessionID]
+		if !known {
+			// Segment references a session not in the original inputs; assign a
+			// new index at the tail so it still gets a deterministic voice.
+			idx = len(sessionIdx)
+			sessionIdx[seg.SessionID] = idx
+		}
+		voice := m.voiceFor(seg.SessionID, idx)
 		label := seg.SessionID
-		for _, inp := range inputs {
-			if inp.SessionID == seg.SessionID {
-				label = inp.SpeakerName
-				break
-			}
+		if name, ok := sessionName[seg.SessionID]; ok {
+			label = name
 		}
 		segs = append(segs, segment{voice: voice, text: seg.Text, label: label})
 	}
@@ -289,6 +298,15 @@ func (m *AudioJobManager) run(id string) {
 	}
 
 	data := tts.ConcatMP3(mp3Parts)
+
+	// Fix 6c: guard against unreasonably large audio output before touching disk.
+	if len(data) > maxAudioBytes {
+		m.broadcast("office:standupAudioError", map[string]interface{}{
+			"id":      id,
+			"message": fmt.Sprintf("audio output too large (%d bytes); refusing to write", len(data)),
+		})
+		return
+	}
 
 	audioPath := office.StandupAudioPath(id)
 	tmpPath := audioPath + ".tmp"

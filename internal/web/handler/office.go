@@ -1825,19 +1825,52 @@ type standupHistoryEntryWithSort struct {
 	completedAt int64
 }
 
-// buildStandupHistory loads all persisted standups from dir, shapes them into
+// maxStandupHistoryEntries caps how many standup files buildStandupHistory
+// parses per request. Entries beyond this cap (oldest by mtime) are silently
+// omitted; in practice a UI showing 50 standups covers weeks of history.
+const maxStandupHistoryEntries = 50
+
+// buildStandupHistory loads persisted standups from dir, shapes them into
 // standupHistoryEntry values, and returns them sorted newest-first by CompletedAt.
+//
+// To bound the per-request work, directory entries are sorted by mtime
+// descending and only the most recent maxStandupHistoryEntries are parsed
+// (Fix 5b). The final sort on CompletedAt is kept so the output order is
+// correct even when mtime and CompletedAt diverge slightly.
 func buildStandupHistory(dir string) []standupHistoryEntry {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return []standupHistoryEntry{}
 	}
-	var rows []standupHistoryEntryWithSort
+
+	// Collect .json entries with their mtimes so we can pick the N newest.
+	type fileWithMtime struct {
+		entry os.DirEntry
+		mtime int64
+	}
+	var jsonFiles []fileWithMtime
 	for _, f := range files {
 		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
 			continue
 		}
-		id := strings.TrimSuffix(f.Name(), ".json")
+		info, infoErr := f.Info()
+		if infoErr != nil {
+			continue
+		}
+		jsonFiles = append(jsonFiles, fileWithMtime{entry: f, mtime: info.ModTime().UnixNano()})
+	}
+	// Sort newest-mtime first so we parse the most-recent standups.
+	sort.Slice(jsonFiles, func(i, j int) bool {
+		return jsonFiles[i].mtime > jsonFiles[j].mtime
+	})
+	// Cap the parse work.
+	if len(jsonFiles) > maxStandupHistoryEntries {
+		jsonFiles = jsonFiles[:maxStandupHistoryEntries]
+	}
+
+	var rows []standupHistoryEntryWithSort
+	for _, jf := range jsonFiles {
+		id := strings.TrimSuffix(jf.entry.Name(), ".json")
 		ps, loadErr := office.LoadPersistedStandup(id)
 		if loadErr != nil {
 			continue
@@ -1853,6 +1886,8 @@ func buildStandupHistory(dir string) []standupHistoryEntry {
 		}
 		rows = append(rows, standupHistoryEntryWithSort{entry: entry, completedAt: ps.CompletedAt})
 	}
+	// Final sort by CompletedAt to guarantee correct order even if mtime
+	// and CompletedAt diverge slightly (e.g. clock skew, restored backups).
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].completedAt > rows[j].completedAt
 	})

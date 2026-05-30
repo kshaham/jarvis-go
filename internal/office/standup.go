@@ -2,11 +2,14 @@ package office
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +17,11 @@ import (
 
 	"github.com/kshaham/jarvis/internal/safego"
 )
+
+// maxStandupFileBytes caps how much data LoadPersistedStandup will read from a
+// single standup JSON file. A 10 MiB standup file is already unrealistically
+// large; anything bigger is most likely corruption or a write-gone-wrong.
+const maxStandupFileBytes = 10 << 20
 
 // StandupMessage represents one entry in the standup transcript.
 type StandupMessage struct {
@@ -483,6 +491,7 @@ func (m *Manager) persistStandup(standupID string, participants []string, transc
 		return
 	}
 	if err := os.Rename(tmpPath, filePath); err != nil {
+		os.Remove(tmpPath) //nolint:errcheck
 		slog.Error("Failed to rename standup file", "err", err)
 		return
 	}
@@ -889,10 +898,22 @@ func StandupAudioPath(id string) string {
 }
 
 // LoadPersistedStandup reads one persisted standup by ID.
+// The read is bounded to maxStandupFileBytes to prevent unbounded memory
+// growth if a file is accidentally very large or corrupted (Fix 6b).
 func LoadPersistedStandup(id string) (*PersistedStandup, error) {
-	data, err := os.ReadFile(filepath.Join(standupDir(), id+".json"))
+	path := filepath.Join(standupDir(), id+".json")
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	defer f.Close()
+	lr := io.LimitReader(f, maxStandupFileBytes+1)
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxStandupFileBytes {
+		return nil, errors.New("standup file exceeds size limit")
 	}
 	var ps PersistedStandup
 	if err := json.Unmarshal(data, &ps); err != nil {
@@ -901,31 +922,49 @@ func LoadPersistedStandup(id string) (*PersistedStandup, error) {
 	return &ps, nil
 }
 
-// LatestCompletedStandupID returns the ID of the standup with the greatest
-// CompletedAt, or an error if none exist.
+// LatestCompletedStandupID returns the ID of the most-recently completed
+// standup, or os.ErrNotExist if none exist.
+//
+// Implementation: sort directory entries by mtime descending (standups are
+// written once at completion so mtime approximates CompletedAt), then parse
+// only the newest file. If that file is corrupt, fall through to the next-
+// newest. This parses 1 file in the common case instead of N (Fix 5a).
 func LatestCompletedStandupID() (string, error) {
 	entries, err := os.ReadDir(standupDir())
 	if err != nil {
 		return "", err
 	}
-	bestID := ""
-	var bestAt int64 = -1
+
+	// Collect .json entries with their mtimes.
+	type jsonEntry struct {
+		id    string
+		mtime int64
+	}
+	var candidates []jsonEntry
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".json")
-		ps, err := LoadPersistedStandup(id)
+		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		if ps.CompletedAt > bestAt {
-			bestAt = ps.CompletedAt
-			bestID = id
+		candidates = append(candidates, jsonEntry{
+			id:    strings.TrimSuffix(e.Name(), ".json"),
+			mtime: info.ModTime().UnixNano(),
+		})
+	}
+
+	// Sort newest-mtime first.
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].mtime > candidates[j].mtime
+	})
+
+	// Parse candidates until one loads successfully.
+	for _, c := range candidates {
+		if _, err := LoadPersistedStandup(c.id); err == nil {
+			return c.id, nil
 		}
 	}
-	if bestID == "" {
-		return "", os.ErrNotExist
-	}
-	return bestID, nil
+	return "", os.ErrNotExist
 }

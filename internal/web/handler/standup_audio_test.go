@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -102,5 +103,79 @@ func TestAudioJobEmitsProgressAndWritesFile(t *testing.T) {
 	fi, statErr := os.Stat(office.StandupAudioPath("s1"))
 	if statErr != nil || fi.Size() == 0 {
 		t.Fatalf("audio file missing or empty: %v", statErr)
+	}
+}
+
+// TestStartReturnsErrNoAPIKey asserts that when newSynth returns tts.ErrNoAPIKey,
+// Start() propagates the error synchronously without consuming a semaphore slot,
+// marking a job running, or broadcasting any events (Fix 4).
+func TestStartReturnsErrNoAPIKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// Seed a persisted standup so the id-resolution path succeeds.
+	ps := office.PersistedStandup{
+		ID:           "s-nokey",
+		Participants: []string{"a"},
+		Transcript: []office.StandupMessage{
+			{SessionID: "a", SpeakerName: "Alice", Type: "status_report", Content: "Did work."},
+		},
+		CompletedAt: 1000,
+	}
+	dir := office.StandupDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(ps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "s-nokey.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	events := map[string]int{}
+	broadcast := func(name string, _ interface{}) {
+		mu.Lock()
+		events[name]++
+		mu.Unlock()
+	}
+
+	mgr := NewAudioJobManager(
+		context.Background(),
+		broadcast,
+		func() (Synthesizer, error) { return nil, tts.ErrNoAPIKey },
+		func(_ string, _ int) string { return "marin" },
+	)
+
+	_, startErr := mgr.Start("s-nokey")
+	if startErr == nil {
+		t.Fatal("expected an error from Start, got nil")
+	}
+	if !errors.Is(startErr, tts.ErrNoAPIKey) {
+		t.Fatalf("expected tts.ErrNoAPIKey, got %v", startErr)
+	}
+
+	// Give any goroutine (there should be none) a moment to broadcast events.
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 0 {
+		t.Fatalf("Start() must not broadcast any events when key is missing; got %v", events)
+	}
+
+	// Semaphore must not have been consumed: we should be able to acquire all
+	// maxConcurrentAudioJobs slots without blocking.
+	for i := 0; i < maxConcurrentAudioJobs; i++ {
+		select {
+		case mgr.sem <- struct{}{}:
+		default:
+			t.Fatalf("sem slot %d was already consumed; Start() leaked a slot", i)
+		}
+	}
+	// Drain what we just pushed so the test is clean.
+	for i := 0; i < maxConcurrentAudioJobs; i++ {
+		<-mgr.sem
 	}
 }
