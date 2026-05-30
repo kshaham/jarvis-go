@@ -241,6 +241,19 @@ var allToolDefs = []ToolDefinition{
 		},
 	},
 	{
+		Name:        "office_task_set_criteria",
+		Description: "Edit acceptance criteria on a task. op must be set|add|remove. For remove, criteria must contain a single 0-based index string (e.g. \"0\"); passing multiple indices in one remove call is not supported.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"taskId":   {Type: "string", Description: "Task ID"},
+				"op":       {Type: "string", Description: "Operation: set, add, or remove", Enum: []string{"set", "add", "remove"}},
+				"criteria": {Type: "array", Description: "Criterion strings (or a single index string for remove)"},
+			},
+			Required: []string{"taskId", "op", "criteria"},
+		},
+	},
+	{
 		Name:        "office_standup_respond",
 		Description: "Submit your standup status update",
 		InputSchema: InputSchema{
@@ -568,13 +581,14 @@ var allTools = map[string]ToolHandler{
 	"run_prompt":         handleRunPrompt,
 
 	// Office Agent Tools
-	"office_task_list":       handleOfficeTaskList,
-	"office_task_self_add":   handleOfficeTaskSelfAdd,
-	"office_task_ack":        handleOfficeTaskAck,
-	"office_task_start":      handleOfficeTaskStart,
-	"office_task_complete":   handleOfficeTaskComplete,
-	"office_task_progress":   handleOfficeTaskProgress,
-	"office_task_blocked":    handleOfficeTaskBlocked,
+	"office_task_list":         handleOfficeTaskList,
+	"office_task_self_add":     handleOfficeTaskSelfAdd,
+	"office_task_ack":          handleOfficeTaskAck,
+	"office_task_start":        handleOfficeTaskStart,
+	"office_task_complete":     handleOfficeTaskComplete,
+	"office_task_progress":     handleOfficeTaskProgress,
+	"office_task_blocked":      handleOfficeTaskBlocked,
+	"office_task_set_criteria": handleOfficeTaskSetCriteria,
 	"office_standup_respond": handleOfficeStandupRespond,
 	"office_reflect":         handleOfficeReflect,
 	"office_team_roster":     handleOfficeTeamRoster,
@@ -1280,6 +1294,50 @@ func handleOfficeTaskBlocked(args map[string]interface{}) ToolResult {
 	result, err := apiPost("/api/office/agent/task-progress", map[string]interface{}{
 		"sessionId": sid, "taskId": taskID, "progress": reason,
 		"isBlocked": true, "blockerDescription": reason,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+// handleOfficeTaskSetCriteria edits acceptance criteria on a task.
+// args: taskId, op ("set"|"add"|"remove"), criteria ([]string).
+// For op="remove", criteria must contain a single 0-based index string.
+func handleOfficeTaskSetCriteria(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	taskID, ok := requireStringArg(args, "taskId")
+	if !ok {
+		return toolError("taskId is required")
+	}
+	op, ok := requireStringArg(args, "op")
+	if !ok {
+		return toolError("op is required")
+	}
+	raw, exists := args["criteria"]
+	if !exists {
+		return toolError("criteria is required")
+	}
+	rawSlice, ok := raw.([]interface{})
+	if !ok {
+		return toolError("criteria must be an array of strings")
+	}
+	items := make([]string, 0, len(rawSlice))
+	for i, v := range rawSlice {
+		s, ok := v.(string)
+		if !ok {
+			return toolError(fmt.Sprintf("criteria[%d] must be a string", i))
+		}
+		items = append(items, s)
+	}
+	result, err := apiPost("/api/office/agent/task/criteria", map[string]interface{}{
+		"sessionId": sid,
+		"taskId":    taskID,
+		"op":        op,
+		"criteria":  items,
 	})
 	if err != nil {
 		return toolError(err.Error())

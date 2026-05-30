@@ -884,6 +884,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/task/screenshot", h.OfficeAgentTaskScreenshot)
 				// R36 · agent adds/removes labels on a task.
 				r.Post("/task/labels", h.OfficeAgentTaskLabels)
+				// Edit acceptance criteria on a task (set|add|remove).
+				r.Post("/task/criteria", h.OfficeAgentTaskCriteria)
 				r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)
 				r.Post("/dev-instance", h.OfficeAgentPostDevInstance)
 				r.Delete("/dev-instance", h.OfficeAgentDeleteDevInstance)
@@ -1292,6 +1294,7 @@ func (s *Server) setupRouter() chi.Router {
 					// can mutate tasks too. Body still carries sessionId so
 					// one handler serves both callers.
 					r.Post("/task/labels", h.OfficeAgentTaskLabels)
+					r.Post("/task/criteria", h.OfficeAgentTaskCriteria)
 					r.Post("/task/self-add", h.OfficeAgentTaskSelfAdd)
 					r.Post("/task/triage", h.OfficeAgentTaskTriage)
 					r.Post("/task/start", h.OfficeAgentTaskStart)

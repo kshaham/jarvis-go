@@ -283,6 +283,16 @@ type codeGraphImpactRequest struct {
 	Files []string `json:"files"`
 }
 
+// agentTaskCriteriaRequest is the body for POST /office/agent/task/criteria.
+// Op is "set" | "add" | "remove". For op="remove", Criteria holds a single
+// 0-based index string; pass only one index per call (removal shifts positions).
+type agentTaskCriteriaRequest struct {
+	SessionID string   `json:"sessionId"`
+	TaskID    string   `json:"taskId"`
+	Op        string   `json:"op"`
+	Criteria  []string `json:"criteria"`
+}
+
 // ---------------------------------------------------------------------------
 // Helper: read JSON body with size limit
 // ---------------------------------------------------------------------------
@@ -2542,6 +2552,46 @@ func (ctx *Context) OfficeAgentTaskTriage(w http.ResponseWriter, r *http.Request
 		ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
 	}
 	ok(w, nil)
+}
+
+// OfficeAgentTaskCriteria mutates a task's acceptance criteria.
+// POST /api/office/agent/task/criteria
+// Body: {sessionId, taskId, op ("set"|"add"|"remove"), criteria []string}
+// For op="remove", criteria holds a single 0-based index string.
+// Returns {criteria: []string} with the updated list on success.
+// Errors: 404 when the agent or task is unknown; 400 for validation failures.
+func (ctx *Context) OfficeAgentTaskCriteria(w http.ResponseWriter, r *http.Request) {
+	var req agentTaskCriteriaRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
+	if agent == nil {
+		request.WriteError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err := agent.SetTaskCriteria(req.TaskID, req.Op, req.Criteria); err != nil {
+		msg := err.Error()
+		if msg == "task not found" {
+			request.WriteError(w, http.StatusNotFound, msg)
+			return
+		}
+		request.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+		"sessionId": req.SessionID,
+		"taskId":    req.TaskID,
+	})
+	// Return the updated criteria list so the caller can confirm the change.
+	var current []string
+	for _, t := range agent.GetTasks() {
+		if t.ID == req.TaskID {
+			current = append([]string(nil), t.AcceptanceCriteria...)
+			break
+		}
+	}
+	ok(w, map[string]interface{}{"criteria": current})
 }
 
 // OfficeAgentBrainstormResponse handles an agent's brainstorm response.

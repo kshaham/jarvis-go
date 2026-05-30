@@ -372,7 +372,7 @@ func handleDiscover(args []string) {
 
 func handleTask(args []string) {
 	if len(args) < 1 {
-		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage|handoff|handoff-accept|handoff-reject|handoff-cancel|label> ...")
+		fatal("Usage: cm task <start|complete|ack|progress|blocked|list|self-add|triage|handoff|handoff-accept|handoff-reject|handoff-cancel|label|criteria> ...")
 	}
 	subcmd := args[0]
 	subargs := args[1:]
@@ -538,6 +538,29 @@ func handleTask(args []string) {
 		}
 		post("/api/office/agent/task/labels", body)
 		fmt.Printf("Label %q %sed on task %s.\n", label, action, taskID)
+
+	// cm task criteria <taskId> set "<c>"... | add "<c>"... | remove <index>
+	// Edits acceptance criteria on a task. op="remove" takes a SINGLE 0-based index.
+	case "criteria":
+		if len(subargs) < 3 {
+			fatal("Usage: cm task criteria <taskId> <set|add|remove> <criterion|index>...")
+		}
+		taskID := subargs[0]
+		op := subargs[1]
+		values := subargs[2:]
+		switch op {
+		case "set", "add", "remove":
+			// valid
+		default:
+			fatal("Usage: cm task criteria <taskId> <set|add|remove> <criterion|index>...")
+		}
+		post("/api/office/agent/task/criteria", map[string]interface{}{
+			"sessionId": sessionID,
+			"taskId":    taskID,
+			"op":        op,
+			"criteria":  values,
+		})
+		fmt.Printf("Acceptance criteria %sd on task %s.\n", op, taskID)
 
 	case "triage":
 		requireArgs(subargs, 3, "cm task triage <taskId> <toSessionId> <reason>")

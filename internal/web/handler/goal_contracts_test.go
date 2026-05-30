@@ -16,6 +16,7 @@ import (
 	"github.com/kshaham/jarvis/internal/web/sse"
 )
 
+
 // newInvariantsCtx builds an isolated Context for invariants handler tests.
 func newInvariantsCtx(t *testing.T) *Context {
 	t.Helper()
@@ -180,5 +181,109 @@ func TestOfficeDeleteProjectInvariant_ParseError(t *testing.T) {
 	ctx.OfficeDeleteProjectInvariant(rec, delReq)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for non-numeric index, got %d", rec.Code)
+	}
+}
+
+// criteriaFromResp extracts the "criteria" slice from a decoded response map.
+func criteriaFromResp(t *testing.T, m map[string]interface{}) []string {
+	t.Helper()
+	raw, ok := m["criteria"]
+	if !ok {
+		t.Fatalf("response missing 'criteria' key: %v", m)
+	}
+	arr, ok := raw.([]interface{})
+	if !ok {
+		t.Fatalf("'criteria' is not an array: %T %v", raw, raw)
+	}
+	out := make([]string, len(arr))
+	for i, v := range arr {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("criteria[%d] is not a string: %T", i, v)
+		}
+		out[i] = s
+	}
+	return out
+}
+
+// TestTaskCriteriaHandler exercises the OfficeAgentTaskCriteria handler.
+func TestTaskCriteriaHandler(t *testing.T) {
+	ctx := newInvariantsCtx(t)
+
+	// Seed an agent + task.
+	ctx.OfficeManager.RegisterAgent("s-vex", "vex", &office.TeamMemberConfig{ID: "vex", Tier: "worker"})
+	agent := ctx.OfficeManager.GetAgent("s-vex")
+	agent.AddTask(&office.Task{ID: "task-1", Status: office.TaskPending})
+
+	// --- op:set replaces the list with two criteria ---
+	rec := postJSON(t, ctx.OfficeAgentTaskCriteria, "/api/office/agent/task/criteria",
+		map[string]interface{}{
+			"sessionId": "s-vex",
+			"taskId":    "task-1",
+			"op":        "set",
+			"criteria":  []string{"a", "b"},
+		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	crit := criteriaFromResp(t, decodeMap(t, rec))
+	if len(crit) != 2 || crit[0] != "a" || crit[1] != "b" {
+		t.Fatalf("after set: want [a b], got %v", crit)
+	}
+
+	// --- op:add appends one criterion → 3 total ---
+	rec = postJSON(t, ctx.OfficeAgentTaskCriteria, "/api/office/agent/task/criteria",
+		map[string]interface{}{
+			"sessionId": "s-vex",
+			"taskId":    "task-1",
+			"op":        "add",
+			"criteria":  []string{"c"},
+		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	crit = criteriaFromResp(t, decodeMap(t, rec))
+	if len(crit) != 3 {
+		t.Fatalf("after add: want 3 criteria, got %d: %v", len(crit), crit)
+	}
+
+	// --- op:remove index 0 → 2 remaining ---
+	rec = postJSON(t, ctx.OfficeAgentTaskCriteria, "/api/office/agent/task/criteria",
+		map[string]interface{}{
+			"sessionId": "s-vex",
+			"taskId":    "task-1",
+			"op":        "remove",
+			"criteria":  []string{"0"},
+		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("remove: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	crit = criteriaFromResp(t, decodeMap(t, rec))
+	if len(crit) != 2 {
+		t.Fatalf("after remove: want 2, got %d: %v", len(crit), crit)
+	}
+
+	// --- unknown taskId → 404 ---
+	rec = postJSON(t, ctx.OfficeAgentTaskCriteria, "/api/office/agent/task/criteria",
+		map[string]interface{}{
+			"sessionId": "s-vex",
+			"taskId":    "no-such-task",
+			"op":        "set",
+			"criteria":  []string{"x"},
+		})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown task: want 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// --- bad op → 400 ---
+	rec = postJSON(t, ctx.OfficeAgentTaskCriteria, "/api/office/agent/task/criteria",
+		map[string]interface{}{
+			"sessionId": "s-vex",
+			"taskId":    "task-1",
+			"op":        "replace",
+			"criteria":  []string{"x"},
+		})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad op: want 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
