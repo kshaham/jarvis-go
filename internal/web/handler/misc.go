@@ -704,21 +704,27 @@ func (ctx *Context) UpdateScheduledTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Merge updates into existing task, preserving the ID
+	// Copy-on-write: build a NEW merged map rather than mutating the stored one
+	// in place. ListScheduledTasks/GetScheduledTask hand the stored map to the
+	// JSON encoder AFTER releasing the lock, so an in-place mutation here would
+	// be a fatal "concurrent map iteration and map write" runtime crash. Once
+	// stored, a map is never mutated again, so readers always see a stable
+	// snapshot.
 	existingMap, _ := existing.(map[string]interface{})
-	if existingMap == nil {
-		existingMap = make(map[string]interface{})
+	merged := make(map[string]interface{}, len(existingMap)+len(body))
+	for k, v := range existingMap {
+		merged[k] = v
 	}
 	for k, v := range body {
-		existingMap[k] = v
+		merged[k] = v
 	}
-	existingMap["id"] = id
-	ctx.ScheduledTasks[id] = existingMap
+	merged["id"] = id
+	ctx.ScheduledTasks[id] = merged
 	ctx.ScheduledTasksMu.Unlock()
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
-		"task":    existingMap,
+		"task":    merged,
 	})
 }
 

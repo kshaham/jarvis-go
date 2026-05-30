@@ -1765,8 +1765,13 @@ func (ctx *Context) OfficePostStandup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	standup := ctx.OfficeManager.StartStandup(ids)
-	ok(w, map[string]interface{}{"standup": standup})
+	// StartStandup launches the round-robin goroutine that concurrently mutates
+	// the live *StandupState (its Responses map + Transcript). Respond with the
+	// lock-protected deep copy from GetStandup(), NOT StartStandup's live
+	// pointer -- marshaling the live map would be a fatal concurrent map
+	// read/write that crashes the daemon.
+	ctx.OfficeManager.StartStandup(ids)
+	ok(w, map[string]interface{}{"standup": ctx.OfficeManager.GetStandup()})
 }
 
 // OfficePostStandupUserMessage sends a user message during standup.

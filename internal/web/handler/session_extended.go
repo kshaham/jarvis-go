@@ -89,7 +89,10 @@ func (ctx *Context) BulkDeleteSessions(w http.ResponseWriter, r *http.Request) {
 	deleted := make([]string, 0, len(req.SessionIDs))
 	failed := make([]map[string]string, 0)
 	for _, id := range req.SessionIDs {
-		if err := ctx.SessionManager.StopSession(r.Context(), id); err != nil {
+		// Backend-agnostic stop: StopSession is PTY-only, so SDK/Codex sessions
+		// (which ARE listed to the client) would otherwise fail bulk-delete and
+		// leak their subprocesses + CODEX_HOME credential.
+		if err := ctx.stopAnySession(r.Context(), id); err != nil {
 			failed = append(failed, map[string]string{"id": id, "error": err.Error()})
 			continue
 		}
