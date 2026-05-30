@@ -229,6 +229,10 @@ func Write(codexHome string, c Config) (string, error) {
 		return "", fmt.Errorf("codexcfg: write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
+		// The tmp file holds rendered secrets (agent token, provider keys via the
+		// env inline table). On a failed rename it would otherwise be orphaned at
+		// 0600 with no later cleanup -- remove it so no plaintext-secret file lingers.
+		_ = os.Remove(tmp)
 		return "", fmt.Errorf("codexcfg: rename %s: %w", final, err)
 	}
 	return final, nil

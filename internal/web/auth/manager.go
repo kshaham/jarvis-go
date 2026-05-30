@@ -614,10 +614,14 @@ func SetTrustedProxyCIDRs(cidrs []string) {
 }
 
 // remoteAddrIP returns just the IP portion of r.RemoteAddr (strips :port).
+// Uses net.SplitHostPort so an IPv6 RemoteAddr like "[::1]:5555" yields the
+// unbracketed "::1" that net.ParseIP accepts -- a LastIndex(":") split would
+// return "[::1]" (brackets retained), which net.ParseIP rejects, silently
+// disabling the trusted-proxy check and per-client rate limiting on IPv6.
 func remoteAddrIP(r *http.Request) string {
 	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		return addr[:idx]
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
 	}
 	return addr
 }

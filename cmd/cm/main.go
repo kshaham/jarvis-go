@@ -313,16 +313,54 @@ func handleDiscover(args []string) {
 	if len(args) < 1 {
 		fatal("Usage: cm discover <summary> --findings <item1> <item2> ... [--self-assigned <task>] [--committed]")
 	}
-	summary, opts := parseArgsAndFlags(args)
-	findings := strings.Split(opts["findings"], ",")
+	// --findings is multi-value: it consumes every following non-flag token (and
+	// also splits comma-separated tokens, so `--findings a b c` and `--findings
+	// a,b,c` both work). The previous code routed it through parseArgsAndFlags,
+	// which captured only ONE token (dropping the rest into the summary) and
+	// then split on comma -- so the documented space-separated form silently
+	// lost all findings but the first. An absent flag yields an EMPTY slice, not
+	// the phantom [""] that strings.Split("", ",") produces.
+	var summaryParts, findings []string
+	committed := false
+	selfAssigned := ""
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--committed":
+			committed = true
+		case args[i] == "--findings":
+			for i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				for _, f := range strings.Split(args[i+1], ",") {
+					if f = strings.TrimSpace(f); f != "" {
+						findings = append(findings, f)
+					}
+				}
+				i++
+			}
+		case args[i] == "--self-assigned":
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				selfAssigned = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(args[i], "--"):
+			// Unknown flag: skip it (and its value if one follows).
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				i++
+			}
+		default:
+			summaryParts = append(summaryParts, args[i])
+		}
+	}
+	if findings == nil {
+		findings = []string{}
+	}
 	body := map[string]interface{}{
 		"sessionId":   sessionID,
-		"summary":     summary,
+		"summary":     strings.Join(summaryParts, " "),
 		"discoveries": findings,
-		"ledToCommit": opts["committed"] == "true",
+		"ledToCommit": committed,
 	}
-	if v := opts["self-assigned"]; v != "" {
-		body["selfAssignedTask"] = v
+	if selfAssigned != "" {
+		body["selfAssignedTask"] = selfAssigned
 	}
 	post("/api/office/agent/curiosity/discovery", body)
 	fmt.Println("Discovery reported.")
@@ -1177,6 +1215,12 @@ func parseArgsAndFlags(args []string) (string, map[string]string) {
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
 				flags[key] = args[i+1]
 				i++
+			} else {
+				// No usable value (last token, or immediately followed by
+				// another --flag). Record the flag as present-but-empty rather
+				// than dropping it entirely, so its presence is observable
+				// instead of vanishing silently.
+				flags[key] = ""
 			}
 		} else {
 			positional = append(positional, args[i])

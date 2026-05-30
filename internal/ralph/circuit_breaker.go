@@ -16,6 +16,9 @@ const maxAutoResets = 5
 // autoResetDelay is the base delay before auto-resetting a tripped breaker.
 const autoResetDelay = 5 * time.Minute
 
+// maxCompletionTimes bounds the sliding window of completion timestamps.
+const maxCompletionTimes = 32
+
 // CompletionIndicatorPattern is a regex string that matches natural-language
 // phrases indicating all work is complete. Exported for use in tests.
 var completionIndicatorPatterns = []string{
@@ -51,8 +54,14 @@ type CircuitBreaker struct {
 
 	window time.Duration
 
-	completionIndicators int
-	lastCompletionAt     time.Time
+	// completionTimes holds the timestamps of recent completion-indicator
+	// detections (ascending). The window invariant requires >=2 of these to
+	// fall within `window` of evaluation time -- a single cumulative counter
+	// (the previous approach) would let a stale completion from an hour ago
+	// combine with a fresh one to trip the breaker, the exact premature-exit
+	// it exists to prevent.
+	completionTimes  []time.Time
+	lastCompletionAt time.Time
 
 	exitSignalSeen   bool
 	lastExitSignalAt time.Time
@@ -79,8 +88,40 @@ func NewCircuitBreakerWithWindow(window time.Duration) *CircuitBreaker {
 func (cb *CircuitBreaker) RecordCompletion() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	cb.completionIndicators++
-	cb.lastCompletionAt = time.Now()
+	now := time.Now()
+	cb.lastCompletionAt = now
+	cb.completionTimes = append(cb.completionTimes, now)
+	cb.pruneCompletionsLocked(now)
+}
+
+// pruneCompletionsLocked drops completion timestamps older than the window and
+// caps slice length. completionTimes is appended in time order, so the stale
+// entries are always a prefix. Caller must hold cb.mu.
+func (cb *CircuitBreaker) pruneCompletionsLocked(now time.Time) {
+	cutoff := now.Add(-cb.window)
+	i := 0
+	for i < len(cb.completionTimes) && cb.completionTimes[i].Before(cutoff) {
+		i++
+	}
+	if i > 0 {
+		cb.completionTimes = cb.completionTimes[i:]
+	}
+	if len(cb.completionTimes) > maxCompletionTimes {
+		cb.completionTimes = cb.completionTimes[len(cb.completionTimes)-maxCompletionTimes:]
+	}
+}
+
+// recentCompletionsLocked returns the count of completion indicators within the
+// window as of now. Caller must hold cb.mu.
+func (cb *CircuitBreaker) recentCompletionsLocked(now time.Time) int {
+	cutoff := now.Add(-cb.window)
+	n := 0
+	for _, ts := range cb.completionTimes {
+		if !ts.Before(cutoff) {
+			n++
+		}
+	}
+	return n
 }
 
 // RecordExitSignal records an EXIT_SIGNAL:true from a RALPH_STATUS block.
@@ -102,18 +143,22 @@ func (cb *CircuitBreaker) ShouldBreak() bool {
 		return true
 	}
 
-	if cb.completionIndicators < 2 || !cb.exitSignalSeen {
+	if !cb.exitSignalSeen {
 		return false
 	}
 
 	now := time.Now()
-	completionRecent := now.Sub(cb.lastCompletionAt) <= cb.window
-	exitRecent := now.Sub(cb.lastExitSignalAt) <= cb.window
-	if completionRecent && exitRecent {
-		cb.tripped = true
-		return true
+	cb.pruneCompletionsLocked(now)
+	// Require at least two completion indicators WITHIN the window (not a
+	// cumulative lifetime count) plus a recent exit signal.
+	if len(cb.completionTimes) < 2 {
+		return false
 	}
-	return false
+	if now.Sub(cb.lastExitSignalAt) > cb.window {
+		return false
+	}
+	cb.tripped = true
+	return true
 }
 
 // Reset clears the breaker state. Returns false if auto-reset limit is
@@ -126,7 +171,7 @@ func (cb *CircuitBreaker) Reset() bool {
 	}
 	cb.autoResetCount++
 	cb.tripped = false
-	cb.completionIndicators = 0
+	cb.completionTimes = nil
 	cb.exitSignalSeen = false
 	cb.lastCompletionAt = time.Time{}
 	cb.lastExitSignalAt = time.Time{}
@@ -138,7 +183,7 @@ func (cb *CircuitBreaker) Status() CircuitBreakerStatus {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	return CircuitBreakerStatus{
-		CompletionIndicators: cb.completionIndicators,
+		CompletionIndicators: cb.recentCompletionsLocked(time.Now()),
 		ExitSignalSeen:       cb.exitSignalSeen,
 		Tripped:              cb.tripped,
 		LastCompletionAt:     cb.lastCompletionAt,

@@ -151,18 +151,26 @@ func (s *Store) save() {
 		slog.Error("notifications: marshal failed", "error", err)
 		return
 	}
-	if _, err := os.Stat(s.path); err == nil {
-		if rerr := os.Rename(s.path, s.path+".backup"); rerr != nil {
-			slog.Warn("notifications: backup rotation failed", "error", rerr)
-		}
-	}
+	// Stage the new data in tmp FIRST. Only after it is safely written do we
+	// rotate the live primary to .backup -- rotating before the write (the old
+	// order) destroyed the live file if WriteFile failed, leaving only a stale
+	// backup (or, on the first save, nothing).
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		slog.Error("notifications: write failed", "error", err)
 		return
 	}
+	if _, err := os.Stat(s.path); err == nil {
+		if rerr := os.Rename(s.path, s.path+".backup"); rerr != nil {
+			slog.Warn("notifications: backup rotation failed", "error", rerr)
+		}
+	}
 	if err := os.Rename(tmp, s.path); err != nil {
 		slog.Error("notifications: rename failed", "error", err)
 		os.Remove(tmp)
+		// Restore the rotated backup so the primary isn't left missing.
+		if _, berr := os.Stat(s.path + ".backup"); berr == nil {
+			_ = os.Rename(s.path+".backup", s.path)
+		}
 	}
 }

@@ -77,6 +77,17 @@ func (c *Client) Done() <-chan struct{} {
 	return c.done
 }
 
+// Close unblocks this client's writePump (and therefore the Subscribe handler
+// waiting on Done()) by closing its event channel. Used at server shutdown so
+// http.Server.Shutdown doesn't wait on never-returning SSE handlers. Idempotent
+// and safe against a concurrent Send (both go through closeOnce).
+func (c *Client) Close() {
+	c.closeOnce.Do(func() {
+		c.closed.Store(true)
+		close(c.ch)
+	})
+}
+
 // MatchesSubscription checks if this client wants the given event.
 func (c *Client) MatchesSubscription(event string) bool {
 	if c.subscriptions == nil {

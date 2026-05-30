@@ -355,7 +355,12 @@ func (e *telegramAPIError) Error() string {
 
 // sendTelegram sends a message to the Telegram Bot API directly.
 func (mq *MessageQueue) sendTelegram(chatID, text string, keyboard *InlineKeyboardMarkup) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", mq.currentToken())
+	// Capture the token ONCE so the redaction below scrubs the exact token the
+	// URL was built from. Using mq.token (the construction-time field) here while
+	// the URL is built from currentToken() (the live/rotated token) would leave
+	// the live token un-redacted in any *url.Error on the failure path.
+	tok := mq.currentToken()
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", tok)
 
 	payload := map[string]interface{}{
 		"chat_id":    chatID,
@@ -374,9 +379,9 @@ func (mq *MessageQueue) sendTelegram(chatID, text string, keyboard *InlineKeyboa
 	resp, err := mq.client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		// R28 · *url.Error from http.Client embeds the URL (with token)
-		// in its Error() output; redact before wrapping so retries/logs
-		// downstream never see the credential.
-		return fmt.Errorf("http post: %w", redactTokenErr(err, mq.token))
+		// in its Error() output; redact the SAME token the URL was built
+		// from so retries/logs downstream never see the credential.
+		return fmt.Errorf("http post: %w", redactTokenErr(err, tok))
 	}
 	defer resp.Body.Close()
 
