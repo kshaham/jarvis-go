@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
+	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"strings"
@@ -13,10 +13,16 @@ import (
 	"github.com/kshaham/jarvis/internal/safego"
 )
 
-// CSRFStore manages CSRF tokens with 1-hour TTL and single-use validation.
+// CSRFStore manages CSRF tokens with 1-hour TTL and multi-use validation.
+//
+// Hot-path optimisation: tokens are keyed by sha256(rawToken) so Validate
+// is an O(1) map lookup instead of an O(N) linear scan. The map is guarded
+// by a sync.RWMutex because reads (Validate) are far more frequent than
+// writes (Generate, cleanup). The raw token is never stored — only its hash
+// — so a snapshot of the in-memory map reveals nothing usable.
 type CSRFStore struct {
-	mu     sync.Mutex
-	tokens map[string]time.Time // token -> expiry
+	mu     sync.RWMutex
+	tokens map[string]time.Time // sha256hex(token) -> expiry
 }
 
 // NewCSRFStore creates a new CSRF token store.
@@ -27,38 +33,57 @@ func NewCSRFStore(ctx context.Context) *CSRFStore {
 	return s
 }
 
-// Generate creates a new CSRF token.
+// csrfTokenHash returns the lower-case hex SHA-256 of a raw CSRF token.
+// Centralised so Generate and Validate share the exact same encoding.
+func csrfTokenHash(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// Generate creates a new CSRF token and stores its hash in the map.
+// Returns the raw token which the client must echo back on mutating requests.
 func (s *CSRFStore) Generate() string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	token := hex.EncodeToString(b)
+	h := csrfTokenHash(token)
 
 	s.mu.Lock()
-	s.tokens[token] = time.Now().Add(1 * time.Hour)
+	s.tokens[h] = time.Now().Add(1 * time.Hour)
 	s.mu.Unlock()
 
 	return token
 }
 
-// Validate checks and consumes a CSRF token (single-use).
-// Uses constant-time comparison to prevent timing side-channel attacks.
+// Validate checks and validates a CSRF token (multi-use until TTL expires).
+// O(1) map lookup on the hash; constant-time hash comparison is inherent
+// because the map key is a fixed-length hex string of the SHA-256 digest.
 func (s *CSRFStore) Validate(token string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tokenBytes := []byte(token)
-	for stored, expiry := range s.tokens {
-		if subtle.ConstantTimeCompare(tokenBytes, []byte(stored)) == 1 {
-			if time.Now().After(expiry) {
-				delete(s.tokens, stored)
-				return false
-			}
-			// Token is valid -- keep it alive (multi-use until TTL expires).
-			// The frontend reuses the same token for multiple rapid requests.
-			return true
-		}
+	if token == "" {
+		return false
 	}
-	return false
+	h := csrfTokenHash(token)
+
+	s.mu.RLock()
+	expiry, ok := s.tokens[h]
+	s.mu.RUnlock()
+
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		// Expired — delete under write-lock (best-effort lazy eviction;
+		// the cleanup goroutine will remove it on the next tick if we miss).
+		s.mu.Lock()
+		if exp, still := s.tokens[h]; still && time.Now().After(exp) {
+			delete(s.tokens, h)
+		}
+		s.mu.Unlock()
+		return false
+	}
+	// Token is valid — keep it alive (multi-use until TTL expires).
+	// The frontend reuses the same token for multiple rapid requests.
+	return true
 }
 
 func (s *CSRFStore) cleanupLoop(ctx context.Context) {
@@ -71,9 +96,9 @@ func (s *CSRFStore) cleanupLoop(ctx context.Context) {
 		case <-ticker.C:
 			s.mu.Lock()
 			now := time.Now()
-			for token, expiry := range s.tokens {
+			for h, expiry := range s.tokens {
 				if now.After(expiry) {
-					delete(s.tokens, token)
+					delete(s.tokens, h)
 				}
 			}
 			s.mu.Unlock()

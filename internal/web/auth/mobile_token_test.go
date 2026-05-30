@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -185,6 +186,41 @@ func TestMobileTokenManager_DeviceNameFallback(t *testing.T) {
 	if list[0].DeviceName == "" {
 		t.Error("blank deviceName should fall back to a placeholder, not stay empty")
 	}
+}
+
+// TestMobileTokenManager_ConcurrentValidateRace exercises Validate from many
+// goroutines simultaneously to confirm -race stays silent.
+func TestMobileTokenManager_ConcurrentValidateRace(t *testing.T) {
+	m := NewMobileTokenManager(t.TempDir())
+	issued, err := m.Issue("Race Phone", 0)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	const goroutines = 60
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			deviceID, ok := m.Validate(issued.Token)
+			if !ok {
+				t.Errorf("Validate returned false for valid token")
+			}
+			if deviceID != issued.DeviceID {
+				t.Errorf("Validate returned deviceID %q, want %q", deviceID, issued.DeviceID)
+			}
+		}()
+	}
+	// Concurrent revoke-check (unknown token) to stress the read path.
+	wg.Add(10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = m.Validate("unknown-token")
+		}()
+	}
+	wg.Wait()
 }
 
 func contains(haystack, needle string) bool {

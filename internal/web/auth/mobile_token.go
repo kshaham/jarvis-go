@@ -3,7 +3,6 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -57,11 +56,16 @@ type IssuedMobileToken struct {
 // the raw token (so a snapshot of the on-disk file is not usable as a
 // credential), plus operator-visible metadata for the Settings UI.
 //
+// Hot-path optimisation: a reverse index (hashIndex) maps sha256hex(token)
+// to the device ID so Validate is an O(1) lookup instead of an O(N) scan.
+// The index is kept in sync with entries by all mutating operations.
+//
 // Operations are safe for concurrent use.
 type MobileTokenManager struct {
-	path    string
-	mu      sync.RWMutex
-	entries map[string]*MobileTokenEntry // deviceID -> entry
+	path      string
+	mu        sync.RWMutex
+	entries   map[string]*MobileTokenEntry // deviceID -> entry
+	hashIndex map[string]string            // sha256hex(rawToken) -> deviceID
 	// lastUsedPersist (unix ms) debounces persisting LastUsedAt bumps so a
 	// synchronous disk write doesn't run under the write lock on every
 	// authenticated request (the auth hot path). See Validate.
@@ -73,8 +77,9 @@ type MobileTokenManager struct {
 // a missing or malformed file means "no devices registered yet".
 func NewMobileTokenManager(configDir string) *MobileTokenManager {
 	m := &MobileTokenManager{
-		path:    filepath.Join(configDir, "mobile-tokens.json"),
-		entries: make(map[string]*MobileTokenEntry),
+		path:      filepath.Join(configDir, "mobile-tokens.json"),
+		entries:   make(map[string]*MobileTokenEntry),
+		hashIndex: make(map[string]string),
 	}
 	m.load()
 	return m
@@ -102,6 +107,7 @@ func (m *MobileTokenManager) load() {
 			continue
 		}
 		m.entries[e.DeviceID] = e
+		m.hashIndex[e.TokenHash] = e.DeviceID
 	}
 	slog.Info("Loaded mobile tokens", "count", len(m.entries))
 }
@@ -165,6 +171,7 @@ func (m *MobileTokenManager) Issue(deviceName string, ttl time.Duration) (Issued
 
 	m.mu.Lock()
 	m.entries[deviceID] = entry
+	m.hashIndex[entry.TokenHash] = deviceID
 	err := m.persist()
 	m.mu.Unlock()
 	if err != nil {
@@ -184,6 +191,10 @@ func (m *MobileTokenManager) Issue(deviceName string, ttl time.Duration) (Issued
 // Validate checks the presented raw token against the store. On a hit
 // it bumps LastUsedAt (best-effort) and returns the entry's deviceID.
 // Returns ("", false) for missing, expired, or unknown tokens.
+//
+// Hot-path optimisation: we hash the presented token and do an O(1) map
+// lookup in hashIndex under an RLock. Only an expired entry (delete) or a
+// debounced LastUsedAt persist requires promotion to a write lock.
 func (m *MobileTokenManager) Validate(presented string) (string, bool) {
 	if presented == "" {
 		return "", false
@@ -191,34 +202,48 @@ func (m *MobileTokenManager) Validate(presented string) (string, bool) {
 	presentedHash := hashMobileToken(presented)
 	now := time.Now().UnixMilli()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for deviceID, entry := range m.entries {
-		// Constant-time comparison guards against hash-prefix timing
-		// attacks even though the input is already hashed.
-		if subtle.ConstantTimeCompare([]byte(entry.TokenHash), []byte(presentedHash)) != 1 {
-			continue
-		}
-		if entry.ExpiresAt > 0 && entry.ExpiresAt < now {
-			// Lazily drop expired entries so the store doesn't bloat.
-			delete(m.entries, deviceID)
-			_ = m.persist()
-			return "", false
-		}
-		entry.LastUsedAt = now
-		// Debounce the persist: LastUsedAt is best-effort metadata. Writing it
-		// to disk on EVERY authenticated request would serialize all mobile-token
-		// validation behind a synchronous disk write under the write lock. The
-		// in-memory value is always current; the on-disk "last seen" lags by at
-		// most a minute.
-		if now-m.lastUsedPersist >= 60_000 {
-			m.lastUsedPersist = now
-			_ = m.persist() // best-effort
-		}
-		return deviceID, true
+	// --- O(1) lookup under RLock ---
+	m.mu.RLock()
+	deviceID, found := m.hashIndex[presentedHash]
+	if !found {
+		m.mu.RUnlock()
+		return "", false
 	}
-	return "", false
+	entry := m.entries[deviceID]
+	if entry == nil {
+		// hashIndex is out of sync — should not happen, but be defensive.
+		m.mu.RUnlock()
+		return "", false
+	}
+	expired := entry.ExpiresAt > 0 && entry.ExpiresAt < now
+	shouldPersist := !expired && now-m.lastUsedPersist >= 60_000
+	m.mu.RUnlock()
+
+	if expired {
+		// Lazily drop expired entries under write lock.
+		m.mu.Lock()
+		// Re-check after acquiring write lock (double-checked locking).
+		if e, ok := m.entries[deviceID]; ok && e.ExpiresAt > 0 && e.ExpiresAt < now {
+			delete(m.entries, deviceID)
+			delete(m.hashIndex, presentedHash)
+			_ = m.persist()
+		}
+		m.mu.Unlock()
+		return "", false
+	}
+
+	// Bump LastUsedAt under write lock; debounced persist.
+	m.mu.Lock()
+	if e, ok := m.entries[deviceID]; ok {
+		e.LastUsedAt = now
+	}
+	if shouldPersist {
+		m.lastUsedPersist = now
+		_ = m.persist() // best-effort
+	}
+	m.mu.Unlock()
+
+	return deviceID, true
 }
 
 // Revoke removes the token for the given deviceID. Returns true if a
@@ -226,9 +251,11 @@ func (m *MobileTokenManager) Validate(presented string) (string, bool) {
 func (m *MobileTokenManager) Revoke(deviceID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.entries[deviceID]; !ok {
+	entry, ok := m.entries[deviceID]
+	if !ok {
 		return false
 	}
+	delete(m.hashIndex, entry.TokenHash)
 	delete(m.entries, deviceID)
 	if err := m.persist(); err != nil {
 		slog.Error("Failed to persist mobile token revocation", "error", err, "deviceId", deviceID)
@@ -247,16 +274,16 @@ func (m *MobileTokenManager) RevokeByToken(presented string) bool {
 	presentedHash := hashMobileToken(presented)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for deviceID, entry := range m.entries {
-		if subtle.ConstantTimeCompare([]byte(entry.TokenHash), []byte(presentedHash)) == 1 {
-			delete(m.entries, deviceID)
-			if err := m.persist(); err != nil {
-				slog.Error("Failed to persist mobile token revocation", "error", err)
-			}
-			return true
-		}
+	deviceID, ok := m.hashIndex[presentedHash]
+	if !ok {
+		return false
 	}
-	return false
+	delete(m.hashIndex, presentedHash)
+	delete(m.entries, deviceID)
+	if err := m.persist(); err != nil {
+		slog.Error("Failed to persist mobile token revocation", "error", err)
+	}
+	return true
 }
 
 // List returns the operator-visible view of every registered device.

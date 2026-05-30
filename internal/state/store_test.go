@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -76,6 +77,63 @@ func TestFlush_RotatesBackup(t *testing.T) {
 	// writes v2 to primary.
 	if !contains(string(data), "v1") {
 		t.Errorf("backup should contain v1, got: %s", string(data))
+	}
+}
+
+// TestGetSettingsSnapshotAndUpdate verifies that GetSettings reflects updates
+// and that concurrent reads under -race see no data races.
+func TestGetSettingsSnapshotAndUpdate(t *testing.T) {
+	dir := t.TempDir()
+	primary := filepath.Join(dir, "state.json")
+	s := NewStore(primary)
+
+	// Initial get should return an empty map.
+	got := s.GetSettings()
+	if len(got) != 0 {
+		t.Fatalf("expected empty settings, got %v", got)
+	}
+
+	// Update and verify the new value is reflected.
+	s.UpdateSettings(map[string]interface{}{"color": "blue"})
+	got = s.GetSettings()
+	if v, _ := got["color"].(string); v != "blue" {
+		t.Errorf("expected color=blue after update, got %v", got)
+	}
+
+	// Second update: old key overwritten, new key added.
+	s.UpdateSettings(map[string]interface{}{"color": "red", "size": float64(42)})
+	got = s.GetSettings()
+	if v, _ := got["color"].(string); v != "red" {
+		t.Errorf("expected color=red, got %v", got["color"])
+	}
+	if v, _ := got["size"].(float64); v != 42 {
+		t.Errorf("expected size=42, got %v", got["size"])
+	}
+
+	// Concurrent reads while updates happen — -race detector must stay silent.
+	var wg sync.WaitGroup
+	const readers = 40
+	const writers = 5
+	wg.Add(readers + writers)
+	for i := 0; i < readers; i++ {
+		go func() {
+			defer wg.Done()
+			m := s.GetSettings()
+			_ = m["color"]
+		}()
+	}
+	for i := 0; i < writers; i++ {
+		go func(n int) {
+			defer wg.Done()
+			s.UpdateSettings(map[string]interface{}{"concurrent": float64(n)})
+		}(i)
+	}
+	wg.Wait()
+
+	// Snapshot must reflect one of the concurrent writes.
+	final := s.GetSettings()
+	if _, ok := final["concurrent"]; !ok {
+		t.Error("concurrent write was not reflected in final snapshot")
 	}
 }
 

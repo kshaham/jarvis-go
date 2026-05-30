@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,6 +43,13 @@ type AppState struct {
 	DailyStats []DailyTokenStats        `json:"dailyStats"`
 	Version    string                   `json:"version"`
 
+	// settingsSnapshot is an atomically maintained read-only copy of Settings.
+	// GetSettings() loads from this pointer with zero lock and zero copy.
+	// Writers (UpdateSettings, IncrementSettingCounter, load, loadFromFile)
+	// must call updateSettingsSnapshot() after mutating s.Settings while
+	// holding the write-lock.
+	settingsSnapshot atomic.Pointer[map[string]interface{}]
+
 	filePath      string
 	debounceTimer *time.Timer
 	debounceDirty bool
@@ -60,11 +68,32 @@ func NewStore(filePath string) *AppState {
 	return s
 }
 
-// GetSettings returns a copy of settings.
+// updateSettingsSnapshot publishes a new read-only snapshot of s.Settings.
+// Must be called while holding s.mu (write lock) after any mutation to s.Settings.
+// The snapshot is a shallow copy — values are treated as immutable by callers.
+func (s *AppState) updateSettingsSnapshot() {
+	snap := make(map[string]interface{}, len(s.Settings))
+	for k, v := range s.Settings {
+		snap[k] = v
+	}
+	s.settingsSnapshot.Store(&snap)
+}
+
+// GetSettings returns a read-only snapshot of the current settings. The
+// returned map must NOT be mutated by callers — it is shared. Use
+// UpdateSettings (or IncrementSettingCounter) to make changes.
+//
+// Hot-path optimisation: this is lock-free (atomic pointer load) with zero
+// allocation on the read path. Writers are rare; readers are 25+ hot callers.
 func (s *AppState) GetSettings() map[string]interface{} {
+	if p := s.settingsSnapshot.Load(); p != nil {
+		return *p
+	}
+	// Snapshot not yet populated (startup race window). Fall back to a
+	// copy under lock to preserve correctness.
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	result := make(map[string]interface{})
+	result := make(map[string]interface{}, len(s.Settings))
 	for k, v := range s.Settings {
 		result[k] = v
 	}
@@ -78,6 +107,7 @@ func (s *AppState) UpdateSettings(updates map[string]interface{}) {
 	for k, v := range updates {
 		s.Settings[k] = v
 	}
+	s.updateSettingsSnapshot()
 	s.save()
 }
 
@@ -100,6 +130,7 @@ func (s *AppState) IncrementSettingCounter(key string) int {
 	}
 	cur++
 	s.Settings[key] = float64(cur)
+	s.updateSettingsSnapshot()
 	s.save()
 	return cur
 }
@@ -252,6 +283,7 @@ func (s *AppState) loadFromFile(path string) bool {
 	if s.Sessions == nil {
 		s.Sessions = make(map[string]*SessionState)
 	}
+	s.updateSettingsSnapshot()
 	return true
 }
 
@@ -295,31 +327,85 @@ func (s *AppState) Flush() {
 // Rotation: before writing the new file, we rename the current state.json to
 // state.json.backup. Combined with the loader's backup-fallback path, this
 // guarantees at least one readable copy exists even if a flush is interrupted.
+//
+// Hot-path optimisation: marshaling and disk I/O are done AFTER releasing the
+// write-lock. We capture a consistent snapshot of all mutable fields under the
+// lock, then write the snapshot without holding the lock so other goroutines
+// (e.g. 25+ GetSettings callers) are not serialised behind disk latency.
 func (s *AppState) flushLocked() {
-	data, err := json.MarshalIndent(s, "", "  ")
+	// --- snapshot under lock ---
+	// Shallow-copy the slice header so we own the reference.
+	dailyStatsCopy := make([]DailyTokenStats, len(s.DailyStats))
+	copy(dailyStatsCopy, s.DailyStats)
+
+	// Build a plain snapshot struct so json.MarshalIndent sees a stable value.
+	type snapshot struct {
+		Settings   map[string]interface{}   `json:"settings"`
+		Config     map[string]interface{}   `json:"config"`
+		Sessions   map[string]*SessionState `json:"sessions"`
+		DailyStats []DailyTokenStats        `json:"dailyStats"`
+		Version    string                   `json:"version"`
+	}
+
+	// settingsSnapshot is always consistent (updated after every mutation), so
+	// we can use it directly — it is immutable once published.
+	var settingsCopy map[string]interface{}
+	if p := s.settingsSnapshot.Load(); p != nil {
+		settingsCopy = *p
+	} else {
+		settingsCopy = make(map[string]interface{}, len(s.Settings))
+		for k, v := range s.Settings {
+			settingsCopy[k] = v
+		}
+	}
+
+	configCopy := make(map[string]interface{}, len(s.Config))
+	for k, v := range s.Config {
+		configCopy[k] = v
+	}
+
+	sessionsCopy := make(map[string]*SessionState, len(s.Sessions))
+	for k, v := range s.Sessions {
+		sessionsCopy[k] = v
+	}
+
+	snap := snapshot{
+		Settings:   settingsCopy,
+		Config:     configCopy,
+		Sessions:   sessionsCopy,
+		DailyStats: dailyStatsCopy,
+		Version:    s.Version,
+	}
+	filePath := s.filePath
+
+	// --- release lock before I/O ---
+	s.mu.Unlock()
+	defer s.mu.Lock() // re-acquire so callers see a consistent lock state
+
+	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		slog.Error("Failed to marshal state", "error", err)
 		return
 	}
-	dir := filepath.Dir(s.filePath)
+	dir := filepath.Dir(filePath)
 	os.MkdirAll(dir, 0700)
 
 	// Rotate the existing file into the backup slot before overwriting. If the
 	// main file doesn't exist yet (first flush ever), skip the rotation.
-	if _, err := os.Stat(s.filePath); err == nil {
-		backupPath := s.filePath + ".backup"
-		if err := os.Rename(s.filePath, backupPath); err != nil {
+	if _, err := os.Stat(filePath); err == nil {
+		backupPath := filePath + ".backup"
+		if err := os.Rename(filePath, backupPath); err != nil {
 			slog.Warn("Failed to rotate state backup (continuing)", "error", err)
 		}
 	}
 
 	// Atomic write via temp file (0600: contains API keys)
-	tmp := s.filePath + ".tmp"
+	tmp := filePath + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		slog.Error("Failed to write state", "error", err)
 		return
 	}
-	if err := os.Rename(tmp, s.filePath); err != nil {
+	if err := os.Rename(tmp, filePath); err != nil {
 		slog.Error("Failed to rename state file", "error", err)
 		os.Remove(tmp) // clean up temp file
 	}

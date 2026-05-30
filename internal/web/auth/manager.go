@@ -50,10 +50,22 @@ type authConfig struct {
 }
 
 // SessionEntry tracks an active session.
+// lastActivity is stored as unix nanoseconds in an atomic so ValidateSession
+// can update it under an RLock rather than a full write-lock on every request.
 type SessionEntry struct {
 	Token        string
 	CreatedAt    time.Time
-	LastActivity time.Time
+	lastActivity atomic.Int64 // unix nanoseconds; use LastActivity()/SetLastActivity()
+}
+
+// LastActivity returns the last-activity time for this session.
+func (e *SessionEntry) LastActivity() time.Time {
+	return time.Unix(0, e.lastActivity.Load())
+}
+
+// SetLastActivity stores a new last-activity timestamp.
+func (e *SessionEntry) SetLastActivity(t time.Time) {
+	e.lastActivity.Store(t.UnixNano())
 }
 
 // RateLimitEntry tracks failed login attempts per IP.
@@ -132,7 +144,7 @@ func (m *Manager) cleanupExpiredSessions() {
 	defer m.mu.Unlock()
 	now := time.Now()
 	for token, session := range m.sessions {
-		if now.Sub(session.LastActivity) > sessionTimeoutDur {
+		if now.Sub(session.LastActivity()) > sessionTimeoutDur {
 			delete(m.sessions, token)
 		}
 	}
@@ -352,12 +364,13 @@ func (m *Manager) CreateSession() string {
 	token := hex.EncodeToString(tokenBytes)
 	now := time.Now()
 
-	m.mu.Lock()
-	m.sessions[token] = &SessionEntry{
-		Token:        token,
-		CreatedAt:    now,
-		LastActivity: now,
+	entry := &SessionEntry{
+		Token:     token,
+		CreatedAt: now,
 	}
+	entry.SetLastActivity(now)
+	m.mu.Lock()
+	m.sessions[token] = entry
 	m.mu.Unlock()
 
 	slog.Info("Created new session")
@@ -365,21 +378,34 @@ func (m *Manager) CreateSession() string {
 }
 
 // ValidateSession checks whether the token corresponds to a valid, non-expired session.
+//
+// Hot-path optimisation: the common case (valid session) takes only an RLock
+// for the map lookup and validation. LastActivity is updated via atomic.Int64
+// so no write-lock is needed for the timestamp bump. Only an expired session
+// that needs deletion promotes to a write-lock.
 func (m *Manager) ValidateSession(token string) bool {
-	m.mu.Lock()
+	m.mu.RLock()
 	session, ok := m.sessions[token]
 	if !ok {
-		m.mu.Unlock()
+		m.mu.RUnlock()
 		return false
 	}
-	if time.Since(session.LastActivity) > sessionTimeoutDur {
-		delete(m.sessions, token)
+	if time.Since(session.LastActivity()) > sessionTimeoutDur {
+		// Session is expired — drop the read-lock and take a write-lock to
+		// delete. Re-check after acquiring the write-lock (double-checked
+		// locking) in case another goroutine already removed it.
+		m.mu.RUnlock()
+		m.mu.Lock()
+		if s, still := m.sessions[token]; still && time.Since(s.LastActivity()) > sessionTimeoutDur {
+			delete(m.sessions, token)
+		}
 		m.mu.Unlock()
 		slog.Info("Session expired due to inactivity")
 		return false
 	}
-	session.LastActivity = time.Now()
-	m.mu.Unlock()
+	// Update activity timestamp atomically — no write-lock needed.
+	session.SetLastActivity(time.Now())
+	m.mu.RUnlock()
 	return true
 }
 
