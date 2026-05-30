@@ -476,13 +476,17 @@ func buildReportBody(m *Manager, generatedAt time.Time, trigger, reason string) 
 }
 
 func writeAgentSection(b *strings.Builder, a *AgentState, workdir string) {
+	// Read Config + usage through the locked accessors: RecordTurnUsage mutates
+	// the token/cost fields under a.mu on every token event (this report can run
+	// concurrently during a live run), and SetVoice mutates Config under a.mu --
+	// reading them directly here would be a data race / torn read.
+	cfg := a.SnapshotConfig()
+	usage := a.Usage()
 	name := a.ConfigID
-	role := ""
-	tier := ""
-	if a.Config != nil {
-		name = a.Config.Name
-		role = a.Config.Role
-		tier = a.Config.Tier
+	role := cfg.Role
+	tier := cfg.Tier
+	if cfg.Name != "" {
+		name = cfg.Name
 	}
 
 	// Completed + in-flight task summary.
@@ -508,11 +512,11 @@ func writeAgentSection(b *strings.Builder, a *AgentState, workdir string) {
 	}
 	fmt.Fprintf(b, " — %d task%s completed\n\n", len(completed), pluralS(len(completed)))
 
-	if a.TotalCostUSD > 0 || a.TotalInputTokens > 0 || a.TotalOutputTokens > 0 {
+	if usage.TotalCostUSD > 0 || usage.TotalInputTokens > 0 || usage.TotalOutputTokens > 0 {
 		fmt.Fprintf(b, "**Usage:** $%.4f · %s input / %s output tokens\n\n",
-			a.TotalCostUSD,
-			formatTokenCount(a.TotalInputTokens),
-			formatTokenCount(a.TotalOutputTokens))
+			usage.TotalCostUSD,
+			formatTokenCount(usage.TotalInputTokens),
+			formatTokenCount(usage.TotalOutputTokens))
 	}
 
 	if len(completed) > 0 {

@@ -864,6 +864,16 @@ func (m *Manager) checkForStuckAgents() {
 		}
 		if !lastRecovery.IsZero() && backoff > 0 && time.Since(lastRecovery) < backoff {
 			m.mu.Unlock()
+			// Roll back the attempt speculatively consumed above: a
+			// backoff-suppressed tick must be a true no-op, otherwise the
+			// escalation counter is exhausted on backoff-skipped ticks and the
+			// Tier-2/Tier-3 recovery prompts (and the stuck/auto-kill alert)
+			// never fire for a genuinely stuck agent.
+			agent.mu.Lock()
+			if agent.RecoveryAttempts > 0 {
+				agent.RecoveryAttempts--
+			}
+			agent.mu.Unlock()
 			continue
 		}
 		m.lastRecoveryAt[agent.SessionID] = time.Now()

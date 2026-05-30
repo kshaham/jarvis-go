@@ -3016,8 +3016,11 @@ func (ctx *Context) OfficeGetMemberPersonality(w http.ResponseWriter, r *http.Re
 		})
 		return
 	}
-	personality := agent.Config.Personality
-	systemPrompt := agent.Config.SystemPrompt
+	// Read the config under the agent lock (SetVoice mutates a sibling field of
+	// the same *TeamMemberConfig under a.mu, so an unguarded read here is a race).
+	cfg := agent.SnapshotConfig()
+	personality := cfg.Personality
+	systemPrompt := cfg.SystemPrompt
 	if override := agent.GetPersonalityOverride(); override != nil {
 		if override.Personality != "" {
 			personality = override.Personality
