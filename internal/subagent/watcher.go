@@ -119,6 +119,7 @@ func (w *Watcher) RemoveAgent(agentID string) bool {
 	}
 	delete(w.agents, agentID)
 	delete(w.pendingTools, agentID)
+	delete(w.pendingToolTimes, agentID)
 	delete(w.accessOrder, agentID)
 	return true
 }
@@ -281,7 +282,13 @@ func (w *Watcher) scanForAgents() {
 			continue
 		}
 
-		if _, exists := w.agents[agentID]; exists {
+		if existing, exists := w.agents[agentID]; exists {
+			// Backfill FilePath for agents registered via OnHookStart without a
+			// path — otherwise RemoveAgent can't delete their w.filePos entry
+			// (it keys on agent.FilePath), orphaning it.
+			if existing.FilePath == "" {
+				existing.FilePath = filePath
+			}
 			// Already tracked; tail new content
 			w.tailFileLocked(filePath, agentID)
 			continue
@@ -384,6 +391,7 @@ func (w *Watcher) evictOldestLocked() {
 		}
 		delete(w.agents, oldestID)
 		delete(w.pendingTools, oldestID)
+		delete(w.pendingToolTimes, oldestID)
 		delete(w.accessOrder, oldestID)
 		slog.Debug("evicted LRU agent", "agentId", oldestID)
 	}
@@ -429,17 +437,28 @@ func (w *Watcher) tailFileLocked(filePath, agentID string) {
 		f.Seek(pos, 0)
 	}
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max line
-
+	// Read with bufio.Reader.ReadString rather than bufio.Scanner: (a) it
+	// advances filePos only by COMPLETE lines (those ending in '\n'), leaving a
+	// partial trailing line — a JSONL row still being written — to be re-read
+	// next tick, instead of the old `len(line)+1` over-count that pushed filePos
+	// past unwritten data and corrupted the next parse; and (b) it has no fixed
+	// line cap, so an over-1MB line no longer stalls the tail forever (the old
+	// 1MB scanner buffer hit ErrTooLong and never advanced).
+	reader := bufio.NewReader(f)
 	var bytesRead int64
 	agent := w.agents[agentID]
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		bytesRead += int64(len(line)) + 1 // +1 for newline
+	for {
+		line, rerr := reader.ReadString('\n')
+		if rerr != nil {
+			// EOF mid-line (partial row) or a read error: stop WITHOUT consuming
+			// the partial line so it's re-read once fully written.
+			break
+		}
+		bytesRead += int64(len(line)) // line includes the trailing '\n' — exact
 
-		if strings.TrimSpace(line) == "" {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			continue
 		}
 
@@ -455,21 +474,18 @@ func (w *Watcher) tailFileLocked(filePath, agentID string) {
 		// Update LRU access time
 		w.accessOrder[agentID] = time.Now()
 
-		// Parse the JSONL line
-		entry, err := ParseJSONLLine(line)
-		if err != nil {
-			slog.Debug("failed to parse JSONL line", "agentId", agentID, "error", err)
+		entry, perr := ParseJSONLLine(trimmed)
+		if perr != nil {
+			slog.Debug("failed to parse JSONL line", "agentId", agentID, "error", perr)
 			continue
 		}
 		if entry == nil {
 			continue
 		}
-
-		// Process the parsed entry
 		w.processEntry(agentID, entry)
 	}
 
-	// Update file position
+	// Update file position by the bytes of COMPLETE lines consumed this tick.
 	w.filePos[filePath] = pos + bytesRead
 
 	// Update agent info and emit update event

@@ -754,25 +754,20 @@ func forwardAgentEvents(sessionID string, events <-chan pty.SessionEvent, droppe
 	}
 
 	// The events channel closed -> the session's worker goroutine exited, so the
-	// session is dead. If we never saw an EventExit (e.g. the driver self-stopped
-	// on a turn cap, which closes the channel WITHOUT emitting EventExit), run the
-	// same death cleanup the EventExit case would have.
-	if !sawExit {
-		slog.Info("agent session events closed without EventExit; running death cleanup", "sessionId", sessionID)
-		broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID})
-		broker.Broadcast("session:updated", map[string]interface{}{"id": sessionID, "status": "stopped", "isWorking": false})
-		if ctx.OfficeManager.GetAgent(sessionID) != nil {
-			ctx.OfficeManager.HandleAgentDeath(sessionID)
-		}
-		ctx.cleanupSessionResources(sessionID)
-	}
-	// Drop the now-dead session from the manager maps so it stops counting
-	// against maxSessions and IsSessionAlive returns false. The natural-exit and
-	// self-stop paths leave the map entry behind (the session stops itself, not
-	// via the manager). Idempotent; whichever map it isn't in is a harmless no-op.
+	// session is dead. We do NOT run HandleAgentDeath here on a bare close: a
+	// close WITHOUT an EventExit means the session was stopped DELIBERATELY by a
+	// caller (operator restart, kill, team shutdown) which owns its own cleanup.
+	// Running death cleanup here was a regression — it spuriously reassigned a
+	// restarting agent's tasks and could race ReassignSessionID. Real deaths
+	// (subprocess crash/normal exit, and the turn-cap path) all emit EventExit,
+	// which is handled in the loop above.
+	//
+	// Always drop the now-dead session from the manager maps so it stops counting
+	// against maxSessions and IsSessionAlive returns false (the session stops
+	// itself, not via the manager). Idempotent; whichever map it isn't in no-ops.
 	if ctx.SessionManager != nil {
 		_ = ctx.SessionManager.StopSDKSession(sessionID)
 		_ = ctx.SessionManager.StopCodexSession(sessionID)
 	}
-	slog.Info("agent session event forwarding ended", "sessionId", sessionID)
+	slog.Info("agent session event forwarding ended", "sessionId", sessionID, "sawExit", sawExit)
 }

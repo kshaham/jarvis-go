@@ -292,16 +292,35 @@ func sanitize(s string) string {
 // per-subdir setup happens in Dir but a stray configID needs its own
 // experiences/<configID>/ folder).
 func writeAtomic(path string, content []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir parent: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, content, 0o644); err != nil {
-		return fmt.Errorf("write tmp: %w", err)
+	// Unique tmp name so two concurrent writes — even to the same final path —
+	// can't collide on a shared "<path>.tmp" (one renaming a tmp the other is
+	// mid-writing). os.CreateTemp guarantees a unique name; the last successful
+	// rename wins, which is the intended atomic-write semantics.
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create tmp: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename: %w", err)
+	tmpName := tmp.Name()
+	if _, werr := tmp.Write(content); werr != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("write tmp: %w", werr)
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close tmp: %w", cerr)
+	}
+	if cerr := os.Chmod(tmpName, 0o644); cerr != nil { // match prior 0644 perms
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("chmod tmp: %w", cerr)
+	}
+	if rerr := os.Rename(tmpName, path); rerr != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("rename: %w", rerr)
 	}
 	return nil
 }

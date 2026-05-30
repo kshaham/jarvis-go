@@ -25,6 +25,7 @@ type Runner struct {
 	mu        sync.Mutex
 	entryByID map[string]cron.EntryID
 	history   map[string][]RunRecord
+	stopped   bool // set under mu in Stop(); gates runJobByID's wg.Add
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -63,6 +64,12 @@ func (r *Runner) Start(ctx context.Context) {
 
 // Stop halts the cron scheduler and waits up to 10s for in-flight jobs.
 func (r *Runner) Stop() {
+	// Set stopped under mu BEFORE wg.Wait so a concurrent RunNow/Reschedule
+	// (which would call runJobByID -> wg.Add) either sees stopped and no-ops, or
+	// completed its Add before this — never racing Wait.
+	r.mu.Lock()
+	r.stopped = true
+	r.mu.Unlock()
 	if r.cancel != nil {
 		r.cancel()
 	}
@@ -160,7 +167,15 @@ func (r *Runner) runJobByID(id string) {
 	if j == nil || !j.Enabled {
 		return
 	}
+	// Claim the wg slot under mu so the Add can't race Stop's wg.Wait(); a
+	// RunNow after Stop becomes a no-op.
+	r.mu.Lock()
+	if r.stopped {
+		r.mu.Unlock()
+		return
+	}
 	r.wg.Add(1)
+	r.mu.Unlock()
 	go func() {
 		defer r.wg.Done()
 		defer func() {
@@ -174,7 +189,13 @@ func (r *Runner) runJobByID(id string) {
 		}()
 
 		started := time.Now()
-		execCtx, cancel := context.WithTimeout(r.ctx, 15*time.Minute)
+		// Fall back to Background if Start() hasn't run yet (RunNow before Start):
+		// context.WithTimeout(nil, ...) panics.
+		base := r.ctx
+		if base == nil {
+			base = context.Background()
+		}
+		execCtx, cancel := context.WithTimeout(base, 15*time.Minute)
 		defer cancel()
 
 		output, err := r.runExecutor(execCtx, j)

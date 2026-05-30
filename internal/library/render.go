@@ -498,9 +498,15 @@ func yamlScalarString(s string) string {
 		strings.HasPrefix(s, "-") ||
 		strings.HasPrefix(s, " ") ||
 		strings.HasSuffix(s, " ") {
-		// Use double quotes; escape backslash + double-quote.
+		// Use double quotes; escape backslash + double-quote, then turn
+		// literal control chars into YAML escape sequences so the scalar
+		// stays on one line (a raw \n inside double quotes would fold the
+		// line / break the parser). Backslash MUST be escaped first.
 		escaped := strings.ReplaceAll(s, `\`, `\\`)
 		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+		escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+		escaped = strings.ReplaceAll(escaped, "\t", `\t`)
 		return `"` + escaped + `"`
 	}
 	return s

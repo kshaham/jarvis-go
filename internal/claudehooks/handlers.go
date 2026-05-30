@@ -168,6 +168,11 @@ func (d *Dispatcher) onStop(sessionID string, ev *StopEvent) *HookResponse {
 // cleanly but the supervisor hasn't noticed yet.
 func (d *Dispatcher) onSessionEnd(sessionID string, ev *SessionEndEvent) *HookResponse {
 	slog.Info("claudehooks SessionEnd", "session", sessionID, "reason", ev.Reason)
+	// Prune the per-session first-event marker so the map stays bounded to live
+	// sessions (it was never cleaned up, growing for the life of the process).
+	d.mu.Lock()
+	delete(d.firstSeen, sessionID)
+	d.mu.Unlock()
 	d.registry.HandleAgentDeath(sessionID)
 	return nil
 }
@@ -461,10 +466,15 @@ func summariseBatchTools(calls []ToolCallSummary) []string {
 
 // truncate caps a string at n runes for safe logging/broadcasting
 // without sending the operator a megabyte of prompt text on every
-// turn.
+// turn. Cuts on a RUNE boundary so a non-ASCII prompt isn't sliced
+// mid-codepoint into invalid/garbled UTF-8.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }

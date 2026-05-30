@@ -216,51 +216,59 @@ func (b *Broker) Subscribe(w http.ResponseWriter, r *http.Request) {
 	subscriptions := parseSubscriptions(r.URL.Query().Get("subscribe"))
 	sessionID := r.URL.Query().Get("session")
 
+	// Snapshot the init-data function under a SHORT lock (fixes the data race
+	// with SetInitDataFunc) and do the cap checks, but DON'T call getInitData or
+	// add the client yet — getInitData is heavy (marshals settings, iterates all
+	// PTY/SDK sessions + respawn controllers, each taking their own locks), so
+	// running it under b.mu would block every Broadcast and create a
+	// b.mu -> sessionManager.mu -> ... lock-ordering hazard.
 	b.mu.Lock()
 	if len(b.clients) >= b.maxClients {
 		b.mu.Unlock()
 		http.Error(w, "too many SSE clients", http.StatusServiceUnavailable)
 		return
 	}
-
 	if sessionID != "" && b.sessionClients[sessionID] >= b.maxPerSession {
 		b.mu.Unlock()
 		http.Error(w, "too many SSE clients for this session", http.StatusServiceUnavailable)
 		return
 	}
+	initFn := b.getInitData
+	b.mu.Unlock()
 
 	client := NewClient(w, flusher, r.Context(), subscriptions)
 
-	// Queue the init frame (and any Last-Event-ID replay) into the client's
-	// channel BEFORE adding it to b.clients / the subscription index — all under
-	// b.mu, so no concurrent Broadcast (which also takes b.mu) can interleave a
-	// live event ahead of init. writePump drains the channel strictly FIFO, so
-	// this guarantees the frontend sees init first and replayed ids in order.
-	// (Previously the client was indexed first and init sent after unlocking, so
-	// a Broadcast in that window delivered live events before init / out of order
-	// on reconnect.) Reading b.getInitData here under the lock also fixes the
-	// data race with SetInitDataFunc.
+	// Build the init frame OUTSIDE b.mu.
 	var initPayload interface{}
-	if b.getInitData != nil {
-		initPayload = b.getInitData()
+	if initFn != nil {
+		initPayload = initFn()
 	} else {
 		initPayload = map[string]interface{}{"type": "init", "sessions": []interface{}{}, "version": "0.2.0-go"}
 	}
 	initData, _ := json.Marshal(initPayload)
-	client.Send(EventMessage{Event: "init", Data: initData})
 
+	// Re-acquire b.mu to queue init + replay AND make the client broadcast-visible
+	// atomically: client.Send is non-blocking (FIFO buffer), so queuing init +
+	// replay before adding the client to b.clients/the index — all under the same
+	// lock — guarantees the frontend sees init first, replayed ids in order, and
+	// no live Broadcast interleaved ahead of init. Re-check caps since another
+	// client may have connected during the unlock.
+	b.mu.Lock()
+	if len(b.clients) >= b.maxClients || (sessionID != "" && b.sessionClients[sessionID] >= b.maxPerSession) {
+		b.mu.Unlock()
+		http.Error(w, "too many SSE clients", http.StatusServiceUnavailable)
+		return
+	}
+	client.Send(EventMessage{Event: "init", Data: initData})
 	var replayCount int
 	if lastSeenID := parseLastEventID(r); lastSeenID > 0 {
-		replay := b.collectReplayEvents(lastSeenID) // b.mu already held
-		for _, msg := range replay {
+		for _, msg := range b.collectReplayEvents(lastSeenID) { // b.mu held
 			if client.MatchesSubscription(msg.Event) {
 				client.Send(msg)
 				replayCount++
 			}
 		}
 	}
-
-	// Now make the client broadcast-visible; live events queue after init+replay.
 	b.clients[client] = struct{}{}
 	b.indexClient(client)
 	if sessionID != "" {

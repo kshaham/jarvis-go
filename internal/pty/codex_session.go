@@ -304,6 +304,10 @@ func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
 		s.mu.Unlock()
 		s.emitEvent(EventTurnCapReached{Turns: turns, Cap: cap, Cost: cost})
 		slog.Warn("Codex session hit turn cap; stopping", "session", s.ID, "turns", turns, "cap", cap)
+		// Emit EventExit so the death flows through the forwarder's normal
+		// EventExit path (HandleAgentDeath + cleanup). go s.Stop() below sets
+		// isStopped, so the worker's defer won't emit a second EventExit.
+		s.emitEvent(EventExit{ExitCode: 0})
 		go s.Stop()
 	}
 }

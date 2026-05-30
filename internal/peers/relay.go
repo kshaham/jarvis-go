@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -185,9 +186,11 @@ func (s *Store) AppendOutbound(msg RelayMessage) error {
 // AppendInbound stores an inbound message and returns it so the
 // caller can re-broadcast as an SSE event.
 func (s *Store) AppendInbound(msg RelayMessage) error {
-	if msg.ID == "" {
-		msg.ID = uuid.New().String()
-	}
+	// Inbound messages come from a remote peer over the public /api/relay/inbox
+	// endpoint. NEVER trust the peer-supplied ID — it becomes the on-disk
+	// filename (persistLocked), so a value like "../peers/peers" would let a
+	// peer write/overwrite arbitrary files. Always assign our own UUID.
+	msg.ID = uuid.New().String()
 	msg.Direction = "inbound"
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now().UTC()
@@ -295,7 +298,14 @@ func (s *Store) persistLocked(dir string, msg RelayMessage) error {
 	if err != nil {
 		return fmt.Errorf("marshal relay message: %w", err)
 	}
-	path := filepath.Join(dir, msg.ID+".json")
+	// Defense in depth: the filename is derived from msg.ID, so confine it to a
+	// single path component (filepath.Base strips any directory parts) and reject
+	// traversal/empty ids so a record can never escape its bucket directory.
+	name := filepath.Base(msg.ID)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(msg.ID, `/\`) {
+		return fmt.Errorf("invalid relay message id %q", msg.ID)
+	}
+	path := filepath.Join(dir, name+".json")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("write relay tmp: %w", err)

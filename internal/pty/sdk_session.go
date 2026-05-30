@@ -516,6 +516,13 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 					})
 					slog.Warn("SDK session hit turn cap; stopping",
 						"session", s.ID, "turns", event.Result.NumTurns, "cap", turnCap, "cost", currentCost)
+					// Emit EventExit so the death flows through the forwarder's
+					// normal EventExit path (HandleAgentDeath + cleanup). The
+					// subsequent go s.Stop() sets isStopped, so the worker's defer
+					// won't emit a second EventExit. Without this the events
+					// channel would close with no EventExit and the office agent
+					// would leak (zombie counting against maxSessions).
+					s.emitEvent(EventExit{ExitCode: 0})
 					go s.Stop()
 				}
 
