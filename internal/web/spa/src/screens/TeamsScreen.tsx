@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { toast } from 'sonner';
 import { UsersRound, X } from 'lucide-react';
@@ -433,12 +433,13 @@ function IdentityEditModal({ open, onClose }: { open: boolean; onClose: () => vo
   const [publicUrl, setPublicUrl] = useState('');
 
   // Reset the form when the identity loads or the modal reopens. Use
-  // adjust-state-during-render so React 19's lint stays happy.
-  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
-  if (open && identity.data && hydratedFor !== identity.data.peerId) {
+  // adjust-state-during-render — track the previously hydrated peerId
+  // in a ref (never rendered) to avoid an extra re-render cycle.
+  const hydratedForRef = useRef<string | null>(null);
+  if (open && identity.data && hydratedForRef.current !== identity.data.peerId) {
+    hydratedForRef.current = identity.data.peerId;
     setDisplayName(identity.data.displayName ?? '');
     setPublicUrl(identity.data.publicUrl ?? '');
-    setHydratedFor(identity.data.peerId);
   }
 
   const submit = async () => {

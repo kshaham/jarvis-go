@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -27,13 +27,14 @@ export function SettingsScreen() {
   });
 
   const [mission, setMission] = useState('');
-  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
-  // Adjust-state-during-render: hydrate the form from the loaded
-  // settings once. Repeated invalidations don't blow away the
-  // operator's edits because hydratedFor pins the previous load.
-  if (settings.data && hydratedFor !== (settings.data.mission ?? '')) {
+  // Track what mission string we last hydrated from so repeated query
+  // invalidations don't blow away the operator's in-progress edits.
+  // Use a ref — the value is never rendered, so useState would only add
+  // an extra re-render cycle.
+  const hydratedForRef = useRef<string | null>(null);
+  if (settings.data && hydratedForRef.current !== (settings.data.mission ?? '')) {
+    hydratedForRef.current = settings.data.mission ?? '';
     setMission(settings.data.mission ?? '');
-    setHydratedFor(settings.data.mission ?? '');
   }
 
   const putSettings = useMutation({
@@ -287,9 +288,12 @@ function AdvancedSections({
   const [meetingStandupTimeout, setMeetingStandupTimeout] = useState(120);
   const [lockExpiry, setLockExpiry] = useState(15);
 
-  // One-shot hydration on first non-empty server response.
-  const [hydrated, setHydrated] = useState(false);
-  if (settings && !hydrated) {
+  // One-shot hydration on first non-empty server response. Use a ref —
+  // the flag is never rendered, so useState would only add an extra
+  // re-render cycle on top of the one React already does for each setter.
+  const hydratedRef = useRef(false);
+  if (settings && !hydratedRef.current) {
+    hydratedRef.current = true;
     setAutoStandupEnabled(!!settings.autoStandup?.enabled);
     setAutoStandupHours(
       settings.autoStandup?.intervalHours ??
@@ -302,7 +306,6 @@ function AdvancedSections({
     setMeetingInactivity(settings.meetings?.inactivityTimeoutSeconds ?? 60);
     setMeetingStandupTimeout(settings.meetings?.standupResponseTimeoutSeconds ?? 120);
     setLockExpiry(settings.fileLocks?.lockExpiryMinutes ?? 15);
-    setHydrated(true);
   }
 
   return (

@@ -30,7 +30,7 @@ export function WhiteboardScreen() {
     },
   });
 
-  function handleChange(json: string) {
+  function saveCanvasChange(json: string) {
     if (json === lastSaved.current) return;
     lastSaved.current = json;
     save.mutate(json);
@@ -70,7 +70,7 @@ export function WhiteboardScreen() {
           <CanvasSkeleton />
         ) : (
           <Suspense fallback={<CanvasSkeleton />}>
-            <ExcalidrawCanvas initialDocument={remote || undefined} onChange={handleChange} />
+            <ExcalidrawCanvas initialDocument={remote || undefined} onChange={saveCanvasChange} />
           </Suspense>
         )}
       </div>

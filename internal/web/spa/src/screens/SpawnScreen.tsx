@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -62,11 +62,13 @@ export function SpawnScreen() {
 
   // When the operator picks a template, hydrate the per-member
   // overrides + the team-wide defaults from the template.
-  // Runs in an effect so React schedules the state updates rather
-  // than re-rendering mid-render.
-  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
-  useEffect(() => {
-    if (!tpl || hydratedFor === tpl.id) return;
+  // Adjust-state-during-render: React batches all the setters called
+  // synchronously during render, so this is a single commit — no
+  // cascading re-renders and no effect needed. hydratedForRef is never
+  // rendered so we use useRef to avoid an extra re-render on the flag.
+  const hydratedForRef = useRef<string | null>(null);
+  if (tpl && hydratedForRef.current !== tpl.id) {
+    hydratedForRef.current = tpl.id;
     const hydrated = tpl.members.map((m: TeamTemplateMember, i) =>
       memberFromTemplate(m, `${tpl.id}-${i}`),
     );
@@ -79,8 +81,7 @@ export function SpawnScreen() {
       setTelegramEnabled(!!tpl.telegram.enabled);
       setTelegramInterval(tpl.telegram.intervalMinutes ?? 60);
     }
-    setHydratedFor(tpl.id);
-  }, [tpl, hydratedFor]);
+  }
 
   // Prefill the OpenAI/Codex config indicator from settings once on mount.
   // The key value is never returned raw (only openaiKeyConfigured + base URL).

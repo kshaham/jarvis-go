@@ -1,7 +1,7 @@
-import { forwardRef } from 'react';
 import type {
   InputHTMLAttributes,
   ReactNode,
+  Ref,
   TextareaHTMLAttributes,
 } from 'react';
 
@@ -10,17 +10,23 @@ import { cn } from '@/lib/cn';
 // Input / Textarea — token-styled form controls with the .field focus
 // affordances. API-compatible with components/spawn/formPrimitives so
 // those screens can migrate by import swap later.
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  function Input({ className, ...rest }, ref) {
-    return <input ref={ref} className={cn('field', className)} {...rest} />;
-  },
-);
+// React 19: ref is a regular prop on function components — forwardRef is
+// no longer needed.
+export function Input({
+  className,
+  ref,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> }) {
+  return <input ref={ref} className={cn('field', className)} {...rest} />;
+}
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  function Textarea({ className, ...rest }, ref) {
-    return <textarea ref={ref} className={cn('field', className)} {...rest} />;
-  },
-);
+export function Textarea({
+  className,
+  ref,
+  ...rest
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { ref?: Ref<HTMLTextAreaElement> }) {
+  return <textarea ref={ref} className={cn('field', className)} {...rest} />;
+}
 
 // Field — label + control + hint wrapper with consistent vertical rhythm.
 export function Field({

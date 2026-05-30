@@ -40,17 +40,18 @@ export function RelayScreen() {
   // When the operator opens a conversation, mark visible unread inbound
   // messages as read. Cap at 25 so we don't flood the API on first
   // mount of a busy thread.
+  // markRead.mutate is a stable reference from useMutation so including
+  // it in deps is correct and doesn't cause extra subscriptions.
+  const markReadMutate = markRead.mutate;
   useEffect(() => {
     if (!selected || !messages.data) return;
     const unread = messages.data.messages
       .filter((m) => m.direction === 'inbound' && !m.readAt)
       .slice(0, 25);
     for (const m of unread) {
-      markRead.mutate(m.id);
+      markReadMutate(m.id);
     }
-    // markRead.mutate is stable; we intentionally do not include it in deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, messages.data]);
+  }, [selected, messages.data, markReadMutate]);
 
   const selectPeer = (peerId: string) => {
     setParams((cur) => {
@@ -330,9 +331,9 @@ function Bubble({
         )}
         {message.attachments && message.attachments.length > 0 ? (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {message.attachments.map((a, i) => (
+            {message.attachments.map((a) => (
               <details
-                key={i}
+                key={`${a.kind}:${a.title}`}
                 style={{
                   background: isOutbound ? 'rgba(255,255,255,0.12)' : 'var(--bg-surface)',
                   borderRadius: 'var(--radius-sm)',

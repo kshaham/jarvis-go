@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Modal } from './motion/Modal';
@@ -43,10 +43,12 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   // When the modal opens, hydrate the recipient + the mission excerpt
-  // default from the current team mission. Adjust-state-during-render
-  // pattern to keep the React 19 set-state-in-effect lint happy.
-  const [lastOpenState, setLastOpenState] = useState(open);
-  if (open !== lastOpenState) {
+  // default from the current team mission. Track the previous open value
+  // in a ref (never rendered) so the state setters below fire during the
+  // parent-triggered render without adding a second re-render cycle.
+  const prevOpenRef = useRef(open);
+  if (open !== prevOpenRef.current) {
+    prevOpenRef.current = open;
     if (open) {
       setError(null);
       if (initialPeerId) setToPeerId(initialPeerId);
@@ -61,7 +63,6 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
       setCustomAttachments([]);
       setCustomDraft({ title: '', body: '' });
     }
-    setLastOpenState(open);
   }
 
   // Build the live attachment list: mission excerpt toggle + the
@@ -271,7 +272,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {customAttachments.map((a, i) => (
                   <li
-                    key={i}
+                    key={`${a.kind}:${a.title}`}
                     className="transition-colors hover:bg-[var(--bg-elevated)]"
                     style={{
                       display: 'flex',
@@ -361,7 +362,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
                 </div>
                 {attachments.map((a, i) => (
                   <details
-                    key={i}
+                    key={`${a.kind}:${a.title}`}
                     open={i === 0}
                     style={{
                       marginBottom: 8,

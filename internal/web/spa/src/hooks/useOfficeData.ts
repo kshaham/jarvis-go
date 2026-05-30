@@ -4,7 +4,7 @@
 // vanilla office.js _scheduleRender debounce pattern at a cleaner
 // abstraction level — the cache is the debounce.
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { fetchJSON } from '@/api/client';
@@ -41,16 +41,23 @@ const REPORTS_KEY = ['office', 'reports'] as const;
 // nothing; the cleanup is internal to the effect.
 function useInvalidateOn(eventNames: string[], queryKey: readonly unknown[]) {
   const qc = useQueryClient();
+  // Serialize to stable strings so the effect re-subscribes only when
+  // the actual names/keys change, not on every render due to new refs.
+  const eventKey = eventNames.join('|');
+  const queryKeyStr = queryKey.join('|');
+  // Keep latest arrays in refs so the effect closure always reads fresh
+  // values without listing the unstable array references in deps.
+  const eventNamesRef = useRef(eventNames);
+  const queryKeyRef = useRef(queryKey);
+  eventNamesRef.current = eventNames;
+  queryKeyRef.current = queryKey;
   useEffect(() => {
-    const set = new Set(eventNames);
+    const set = new Set(eventNamesRef.current);
     const sub = subscribeSSE(({ name }) => {
-      if (set.has(name)) qc.invalidateQueries({ queryKey });
+      if (set.has(name)) qc.invalidateQueries({ queryKey: queryKeyRef.current });
     });
     return () => sub.close();
-    // queryKey is a stable tuple at the call site; depend on its
-    // string form to avoid re-subscribing on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qc, eventNames.join('|'), queryKey.join('|')]);
+  }, [qc, eventKey, queryKeyStr]);
 }
 
 // ---------------------------------------------------------------------

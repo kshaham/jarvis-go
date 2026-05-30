@@ -408,9 +408,9 @@ function ThreadSkeleton() {
   ] as const;
   return (
     <>
-      {rows.map((r, i) => (
+      {rows.map((r) => (
         <div
-          key={i}
+          key={`${r.side}-${r.w}`}
           style={{ alignSelf: r.side, maxWidth: '78%', width: r.w, display: 'flex', flexDirection: 'column', gap: 6 }}
         >
           <Skeleton className="h-2.5 w-24" />

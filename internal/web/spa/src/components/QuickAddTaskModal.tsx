@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -29,17 +29,18 @@ export function QuickAddTaskModal({ open, onClose }: Props) {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
 
-  // Reset the form when the modal opens. Adjust-state-during-render
-  // pattern (mirror of the relay compose modal).
-  const [lastOpen, setLastOpen] = useState(open);
-  if (open !== lastOpen) {
+  // Reset the form when the modal opens. Track the previous open value
+  // in a ref (never rendered) so the setters below fire during the
+  // parent-triggered render without causing a second re-render cycle.
+  const prevOpenRef = useRef(open);
+  if (open !== prevOpenRef.current) {
+    prevOpenRef.current = open;
     if (open) {
       setTitle('');
       setDescription('');
       setPriority('medium');
       if (!sessionId && members.length > 0) setSessionId(members[0].sessionId);
     }
-    setLastOpen(open);
   }
 
   const submit = useMutation({

@@ -1,5 +1,5 @@
 import { Command, useCommandState } from 'cmdk';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Modal } from './Modal';
@@ -34,9 +34,15 @@ export function CommandBar({ open, onClose, actions }: Props) {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
 
-  useEffect(() => {
+  // Clear the search query when the palette transitions open → closed so
+  // it reopens fresh. Track previous open in a ref (never rendered) to
+  // avoid an extra re-render cycle — the parent's state change already
+  // causes this component to re-render.
+  const prevOpenRef = useRef(open);
+  if (open !== prevOpenRef.current) {
+    prevOpenRef.current = open;
     if (!open) setQuery('');
-  }, [open]);
+  }
 
   const routes = useMemo<Action[]>(
     () => [

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -31,12 +31,14 @@ export function MemberDetailModal({ member, onClose }: Props) {
   const open = !!member;
   const reduce = useReducedMotion();
   const [tab, setTab] = useState<Tab>('overview');
-  // Reset tab when the modal reopens for a fresh member.
-  const [lastMemberKey, setLastMemberKey] = useState<string | null>(null);
+  // Reset tab when the modal reopens for a fresh member. Track previous
+  // member key in a ref (never rendered) — the parent's state change
+  // already triggers this render so no extra re-render cycle is needed.
+  const prevMemberKeyRef = useRef<string | null>(null);
   const memberKey = member?.sessionId ?? null;
-  if (memberKey !== lastMemberKey) {
-    setTab('overview');
-    setLastMemberKey(memberKey);
+  if (memberKey !== prevMemberKeyRef.current) {
+    prevMemberKeyRef.current = memberKey;
+    if (tab !== 'overview') setTab('overview');
   }
   return (
     <Modal

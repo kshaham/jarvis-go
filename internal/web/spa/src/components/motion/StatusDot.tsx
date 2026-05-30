@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useRef } from 'react';
 
 import { spring } from '../../lib/motion';
 
@@ -27,10 +27,14 @@ export function StatusDot({ status, size = 8 }: Props) {
   const reduce = useReducedMotion();
   // rippleKey changes every time the status prop changes, which
   // remounts the ripple element and replays the animation once.
-  const [rippleKey, setRippleKey] = useState(0);
-  useEffect(() => {
-    setRippleKey((k) => k + 1);
-  }, [status]);
+  // We derive the key by counting status transitions during render
+  // instead of storing it in an effect-driven state.
+  const prevStatus = useRef(status);
+  const rippleKey = useRef(0);
+  if (prevStatus.current !== status) {
+    rippleKey.current += 1;
+    prevStatus.current = status;
+  }
 
   const color = COLOR_VARS[status];
 
@@ -61,7 +65,7 @@ export function StatusDot({ status, size = 8 }: Props) {
       {/* Ripple: scales 1 → 2.4 with opacity 0.6 → 0 on every status flip. */}
       {!reduce && (
         <motion.span
-          key={rippleKey}
+          key={rippleKey.current}
           initial={{ scale: 1, opacity: 0.6 }}
           animate={{ scale: 2.4, opacity: 0 }}
           transition={{ ...spring.smooth, duration: 0.36 }}

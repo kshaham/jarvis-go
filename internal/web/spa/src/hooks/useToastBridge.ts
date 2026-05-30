@@ -37,7 +37,12 @@ export function useToastBridge() {
   // Agent → stuck transitions. Seed the map on first sight (no toast),
   // then alert when a known agent crosses into 'stuck'. Stable toast id
   // dedupes repeat events for the same agent.
-  const lastStatus = useRef<Map<string, AgentStatus>>(new Map());
+  // Lazy-init pattern: useRef has no factory form, so we check null on
+  // first access to avoid allocating a new Map on every render.
+  const lastStatusRef = useRef<Map<string, AgentStatus> | null>(null);
+  if (lastStatusRef.current === null) lastStatusRef.current = new Map();
+  // Non-null cast: the initializer above guarantees this is always set.
+  const lastStatus = lastStatusRef as { current: Map<string, AgentStatus> };
   useEffect(() => {
     const members = data?.members ?? [];
     const map = lastStatus.current;
@@ -51,7 +56,7 @@ export function useToastBridge() {
     for (const id of [...map.keys()]) {
       if (!members.some((m) => m.sessionId === id)) map.delete(id);
     }
-  }, [data]);
+  }, [data, lastStatus]);
 
   // New inbound relay messages — offer a jump to the conversation.
   useEffect(() => {

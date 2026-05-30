@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Chip, Input } from '@/components/ui';
 import { SectionCard, SegmentedControl } from './formPrimitives';
 
@@ -46,10 +46,10 @@ export function WorkdirSection({
   projectName: string;
   setProjectName: (v: string) => void;
 }) {
-  const [recents, setRecents] = useState<string[]>([]);
-  useEffect(() => {
-    setRecents(loadRecents());
-  }, []);
+  // Lazy initializer: loadRecents() reads localStorage, so passing it
+  // as a factory avoids running it on every re-render AND avoids the
+  // mount-time effect flash that no-initialize-state flags.
+  const [recents] = useState<string[]>(loadRecents);
 
   return (
     <SectionCard

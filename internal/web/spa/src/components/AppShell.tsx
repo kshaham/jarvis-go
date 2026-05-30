@@ -90,11 +90,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
   }, []);
 
   // Per-route document title + scroll-to-top on navigation.
+  // Dep on `location` (not `.pathname`) — React Router guarantees a new
+  // object reference on every route change, so the effect re-runs reliably.
   useEffect(() => {
     const label = ROUTE_TITLES[location.pathname];
     document.title = label ? `${label} · Jarvis Office` : 'Jarvis · Office';
     window.scrollTo({ top: 0 });
-  }, [location.pathname]);
+  }, [location]);
 
   // Three groups in the left rail. Office (the live team's tabs),
   // Operations (the bigger dashboards / panels), Multi-team (peer relay).

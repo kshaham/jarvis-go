@@ -178,7 +178,7 @@ export function MeetingsScreen() {
               {renderTranscript(transcript).map((node, i) =>
                 node.kind === 'header' ? (
                   <div
-                    key={`hdr-${i}`}
+                    key={`hdr:${node.label}`}
                     style={{
                       padding: '8px 0 4px',
                       borderBottom: '1px solid var(--border-subtle)',
@@ -192,7 +192,7 @@ export function MeetingsScreen() {
                     {node.label}
                   </div>
                 ) : (
-                  <RevealItem key={`turn-${i}`} index={Math.min(i, 12)}>
+                  <RevealItem key={`turn:${node.entry.sessionId}:${node.entry.timestamp}`} index={Math.min(i, 12)}>
                     <GlowCard interactive className="p-3">
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>

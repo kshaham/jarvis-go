@@ -49,9 +49,11 @@ function read(): ChartTheme {
 }
 
 export function useChartTheme(): ChartTheme {
+  // Lazy initializer: useState(read) reads the tokens synchronously on
+  // first render, so no mount effect is needed for initialization — only
+  // the MutationObserver needs to subscribe for subsequent theme changes.
   const [theme, setTheme] = useState<ChartTheme>(read);
   useEffect(() => {
-    setTheme(read());
     const obs = new MutationObserver(() => setTheme(read()));
     obs.observe(document.documentElement, {
       attributes: true,

@@ -12,11 +12,13 @@ export function TopProgress() {
   const location = useLocation();
   const [routePulse, setRoutePulse] = useState(false);
 
+  // location is a new object reference on every route change (React Router
+  // guarantees this), so it's safe to use as a dep without reading .pathname.
   useEffect(() => {
     setRoutePulse(true);
     const t = setTimeout(() => setRoutePulse(false), 600);
     return () => clearTimeout(t);
-  }, [location.pathname]);
+  }, [location]);
 
   const active = fetching > 0 || routePulse;
 

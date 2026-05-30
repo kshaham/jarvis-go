@@ -26,16 +26,14 @@ export function MembersSection({
   defaultModel: string;
 }) {
   // Auto-select the first member when there is nothing selected yet
-  // and the roster has loaded. We intentionally don't depend on
-  // selectedMemberId — re-firing this effect every time the operator
-  // clicks a different tile would be wasted work, and only the
-  // "selectedMemberId is null" branch ever actually fires.
+  // and the roster has loaded. Including selectedMemberId in deps means
+  // the effect re-evaluates when the selection changes, but the early
+  // return keeps it a no-op unless selection is actually null.
   useEffect(() => {
     if (members.length === 0) return;
     if (selectedMemberId) return;
     setSelectedMemberId(members[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [members]);
+  }, [members, selectedMemberId, setSelectedMemberId]);
 
   const baseById = useMemo(() => {
     const map = new Map<string, (typeof tpl.members)[number]>();
