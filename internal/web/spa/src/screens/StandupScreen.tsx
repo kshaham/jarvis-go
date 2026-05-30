@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { toast } from 'sonner';
 
@@ -12,7 +12,7 @@ import { fetchJSON } from '@/api/client';
 import { subscribeSSE } from '@/api/sse';
 import { useOfficeStatus } from '@/hooks/useOfficeStatus';
 import { useStandup, useStandupHistory } from '@/hooks/useOfficeData';
-import type { Standup } from '@/api/types';
+import type { OfficeSettings, Standup } from '@/api/types';
 
 // StandupScreen mirrors the mobile standup design with the speaker
 // spotlight. Top hero: start/stop button + participant ring. Below:
@@ -80,6 +80,14 @@ export function StandupScreen() {
   const targetId = data?.id ?? latestHistoryId;
   const hasTranscript = (data?.transcript?.length ?? 0) > 0;
   const completed = !active && !!targetId && (hasTranscript || !!latestHistoryId);
+
+  const settingsQ = useQuery<OfficeSettings>({
+    queryKey: ['office', 'settings'],
+    queryFn: ({ signal }) => fetchJSON<OfficeSettings>('/api/office/settings', { signal }),
+    staleTime: 60_000,
+  });
+  // Treat "explicitly false" as missing; while loading (undefined) do NOT block the button.
+  const keyMissing = settingsQ.data?.openaiKeyConfigured === false;
 
   useEffect(() => {
     const sub = subscribeSSE((evt) => {
@@ -164,8 +172,8 @@ export function StandupScreen() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Button
             variant="secondary"
-            disabled={!completed || !!audioStage || generateMut.isPending}
-            title={completed ? undefined : 'Available after standup ends'}
+            disabled={!completed || keyMissing || !!audioStage || generateMut.isPending}
+            title={keyMissing ? 'Configure your OpenAI key in Settings' : (completed ? undefined : 'Available after standup ends')}
             onClick={() => generateMut.mutate()}
           >
             {audioStage ?? (audioUrl ? 'Regenerate audio summary' : 'Generate audio summary')}
