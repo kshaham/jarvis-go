@@ -198,8 +198,8 @@ func fakeLookup(table map[string]SDKSessionData) SDKSessionLookup {
 
 func TestHarvestSessionData_PicksFirstWorkingDir(t *testing.T) {
 	roster := []*AgentState{
-		{SessionID: "sess-aaa-0001", ConfigID: "alpha"},
-		{SessionID: "sess-bbb-0002", ConfigID: "beta"},
+		NewAgentState("sess-aaa-0001", "alpha", nil),
+		NewAgentState("sess-bbb-0002", "beta", nil),
 	}
 	lookup := fakeLookup(map[string]SDKSessionData{
 		"sess-aaa-0001": {WorkingDir: "/work/team-dir"},
@@ -216,8 +216,8 @@ func TestHarvestSessionData_SkipsMissingSessions(t *testing.T) {
 	// uses this path for mid-spawn snapshots and snapshots taken
 	// while one agent is restarting.
 	roster := []*AgentState{
-		{SessionID: "alive-0001", ConfigID: "alpha"},
-		{SessionID: "ghost-0002", ConfigID: "beta"}, // not in lookup
+		NewAgentState("alive-0001", "alpha", nil),
+		NewAgentState("ghost-0002", "beta", nil), // not in lookup
 	}
 	lookup := fakeLookup(map[string]SDKSessionData{
 		"alive-0001": {WorkingDir: "/x", ClaudeSessionID: "claude-1"},
@@ -236,7 +236,7 @@ func TestHarvestSessionData_BlankClaudeSessionIDSkipped(t *testing.T) {
 	// resume token (first-turn-in-flight). Those should NOT land
 	// in the map — the fork-mode restore handler treats absence
 	// as "spawn fresh".
-	roster := []*AgentState{{SessionID: "sess-001", ConfigID: "alpha"}}
+	roster := []*AgentState{NewAgentState("sess-001", "alpha", nil)}
 	lookup := fakeLookup(map[string]SDKSessionData{
 		"sess-001": {WorkingDir: "/x", ClaudeSessionID: ""},
 	})
@@ -249,7 +249,7 @@ func TestHarvestSessionData_BlankClaudeSessionIDSkipped(t *testing.T) {
 func TestHarvestSessionData_BlankConfigIDSkipped(t *testing.T) {
 	// A member without a ConfigID can't be re-spawned from the
 	// snapshot (no template anchor), so skip them.
-	roster := []*AgentState{{SessionID: "sess-001", ConfigID: ""}}
+	roster := []*AgentState{NewAgentState("sess-001", "", nil)}
 	lookup := fakeLookup(map[string]SDKSessionData{
 		"sess-001": {WorkingDir: "/x", ClaudeSessionID: "claude-1"},
 	})
@@ -261,7 +261,7 @@ func TestHarvestSessionData_BlankConfigIDSkipped(t *testing.T) {
 
 func TestHarvestSessionData_NilLookupReturnsEmpty(t *testing.T) {
 	// Tests sometimes pass nil to verify defensive code paths.
-	wd, ids := HarvestSessionData([]*AgentState{{SessionID: "x"}}, nil)
+	wd, ids := HarvestSessionData([]*AgentState{NewAgentState("x", "", nil)}, nil)
 	if wd != "" {
 		t.Errorf("workingDir=%q want empty", wd)
 	}
@@ -275,7 +275,7 @@ func TestHarvestSessionData_NilAgentInRosterSkipped(t *testing.T) {
 	// the production roster slice is shared) don't panic.
 	roster := []*AgentState{
 		nil,
-		{SessionID: "sess-001", ConfigID: "alpha"},
+		NewAgentState("sess-001", "alpha", nil),
 		nil,
 	}
 	lookup := fakeLookup(map[string]SDKSessionData{

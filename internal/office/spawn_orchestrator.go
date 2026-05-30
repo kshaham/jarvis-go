@@ -286,12 +286,12 @@ func (m *Manager) FanOutWrapUpPrompt(prompt string, deliver SessionPromptFunc) (
 	for _, agent := range roster {
 		delivered := false
 		if deliver != nil {
-			delivered = deliver(agent.SessionID, prompt)
+			delivered = deliver(agent.SessionID(), prompt)
 		}
 		if delivered {
-			notifiedSessionIDs = append(notifiedSessionIDs, agent.SessionID)
+			notifiedSessionIDs = append(notifiedSessionIDs, agent.SessionID())
 		} else {
-			name := agent.SessionID
+			name := agent.SessionID()
 			if agent.Config != nil {
 				name = agent.Config.Name
 			}
@@ -551,9 +551,9 @@ func (m *Manager) TeardownTeam(stopAgent StopAgentSessionFunc) {
 	// unregister the agent on the Manager side either way.
 	for _, agent := range m.GetRoster() {
 		if stopAgent != nil {
-			stopAgent(agent.SessionID)
+			stopAgent(agent.SessionID())
 		}
-		m.UnregisterAgent(agent.SessionID)
+		m.UnregisterAgent(agent.SessionID())
 	}
 
 	m.SetTeamSpawned(false)

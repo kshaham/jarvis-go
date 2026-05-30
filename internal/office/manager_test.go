@@ -118,7 +118,7 @@ func TestManager_RegisterAgent(t *testing.T) {
 	}
 
 	agent2 := m.GetAgentByConfig("vex")
-	if agent2 == nil || agent2.SessionID != "sess-1" {
+	if agent2 == nil || agent2.SessionID() != "sess-1" {
 		t.Error("expected to find agent by config")
 	}
 }

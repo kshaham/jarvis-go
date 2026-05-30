@@ -9,8 +9,8 @@ func TestNewAgentState(t *testing.T) {
 	cfg := &TeamMemberConfig{ID: "vex", Name: "Vex", Role: "Frontend Engineer"}
 	a := NewAgentState("sess-1", "vex", cfg)
 
-	if a.SessionID != "sess-1" {
-		t.Errorf("expected sess-1, got %s", a.SessionID)
+	if a.SessionID() != "sess-1" {
+		t.Errorf("expected sess-1, got %s", a.SessionID())
 	}
 	if a.ConfigID != "vex" {
 		t.Errorf("expected vex, got %s", a.ConfigID)

@@ -144,7 +144,7 @@ func (ctx *Context) OfficeSearch(w http.ResponseWriter, r *http.Request) {
 					ID:        t.ID,
 					Title:     t.Title,
 					Snippet:   snippet,
-					SessionID: agent.SessionID,
+					SessionID: agent.SessionID(),
 					AgentName: agentName,
 					Score:     score,
 				})

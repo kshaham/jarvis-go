@@ -65,10 +65,10 @@ func TestReassignSessionID_MovesAgentAndLocks(t *testing.T) {
 	if a == nil {
 		t.Fatal("new session id should resolve to the same AgentState")
 	}
-	if a.SessionID != "sess-new" {
-		t.Errorf("agent.SessionID not updated: got %q", a.SessionID)
+	if a.SessionID() != "sess-new" {
+		t.Errorf("agent.SessionID not updated: got %q", a.SessionID())
 	}
-	if byCfg := m.GetAgentByConfig("cfg-a"); byCfg == nil || byCfg.SessionID != "sess-new" {
+	if byCfg := m.GetAgentByConfig("cfg-a"); byCfg == nil || byCfg.SessionID() != "sess-new" {
 		t.Error("configIndex should point to the new session id")
 	}
 	locks := m.GetLocks()

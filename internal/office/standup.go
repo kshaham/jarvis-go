@@ -566,7 +566,7 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 			slog.Warn("Leader task assignment: sessions unavailable", "agent", agent.Config.Name)
 			continue
 		}
-		sent := sessions.WriteInkPrompt(agent.SessionID, leaderPrompt)
+		sent := sessions.WriteInkPrompt(agent.SessionID(), leaderPrompt)
 		if sent {
 			slog.Info("Leader task assignment prompt sent", "leader", agent.Config.Name)
 		}
@@ -656,7 +656,7 @@ func (m *Manager) processLeaderTaskResponse(slot *waitSlot, leader *AgentState, 
 			"Monitor your team's progress. If any agent is blocked, triage their task to another agent using `cm task triage`.",
 		}, "\n")
 		if sessions != nil {
-			sessions.WriteInkPrompt(leader.SessionID, leaderSummary)
+			sessions.WriteInkPrompt(leader.SessionID(), leaderSummary)
 		}
 		slog.Info("Post-standup summary sent to leader", "leader", leader.Config.Name)
 	}
@@ -780,10 +780,10 @@ func (m *Manager) broadcastSelfDirectFallback(allAgents []*AgentState, leader *A
 
 	notified := 0
 	for _, agent := range allAgents {
-		if agent == nil || leader != nil && agent.SessionID == leader.SessionID {
+		if agent == nil || leader != nil && agent.SessionID() == leader.SessionID() {
 			continue
 		}
-		if sessions.WriteInkPrompt(agent.SessionID, prompt) {
+		if sessions.WriteInkPrompt(agent.SessionID(), prompt) {
 			notified++
 		}
 	}
@@ -823,13 +823,13 @@ func (m *Manager) injectTaskQueue(agent *AgentState, tasks []*Task, sessions Ses
 		slog.Warn("injectTaskQueue: sessions unavailable", "agent", agent.Config.Name)
 		return
 	}
-	sent := sessions.WriteInkPrompt(agent.SessionID, b.String())
+	sent := sessions.WriteInkPrompt(agent.SessionID(), b.String())
 	if sent {
 		slog.Info("Task queue injected", "agent", agent.Config.Name, "tasks", len(tasks))
 	}
 
 	m.broadcast("office:taskQueueGenerated", map[string]interface{}{
-		"sessionId": agent.SessionID,
+		"sessionId": agent.SessionID(),
 		"agentName": agent.Config.Name,
 		"taskCount": len(tasks),
 	})

@@ -31,7 +31,7 @@ func seedHandoffTeam(t *testing.T) (*Context, *office.AgentState, *office.AgentS
 func TestHandoffInitiate_Happy(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
 	rec := postJSON(t, ctx.OfficeAgentHandoffInitiate, "/api/office/task/handoff", map[string]interface{}{
-		"sessionId":  vex.SessionID,
+		"sessionId":  vex.SessionID(),
 		"taskId":     task.ID,
 		"toConfigId": bolt.ConfigID,
 		"context":    "API contract Qs",
@@ -49,7 +49,7 @@ func TestHandoffInitiate_Happy(t *testing.T) {
 func TestHandoffAccept_WrongReceiver(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
 	// Seed the handoff via the manager directly so we can test accept in isolation.
-	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	// A third party ("stranger") tries to accept.
@@ -64,11 +64,11 @@ func TestHandoffAccept_WrongReceiver(t *testing.T) {
 
 func TestHandoffAccept_ReceiverOK(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
-	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	rec := postJSON(t, ctx.OfficeAgentHandoffAccept, "/api/office/task/handoff/accept", map[string]interface{}{
-		"sessionId": bolt.SessionID,
+		"sessionId": bolt.SessionID(),
 		"taskId":    task.ID,
 	})
 	if rec.Code != http.StatusOK {
@@ -78,11 +78,11 @@ func TestHandoffAccept_ReceiverOK(t *testing.T) {
 
 func TestHandoffReject_ReasonOptional(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
-	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	rec := postJSON(t, ctx.OfficeAgentHandoffReject, "/api/office/task/handoff/reject", map[string]interface{}{
-		"sessionId": bolt.SessionID,
+		"sessionId": bolt.SessionID(),
 		"taskId":    task.ID,
 	})
 	if rec.Code != http.StatusOK {
@@ -94,7 +94,7 @@ func TestHandoffInitiate_OversizeContext(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
 	big := strings.Repeat("x", office.HandoffContextLimit+1)
 	rec := postJSON(t, ctx.OfficeAgentHandoffInitiate, "/api/office/task/handoff", map[string]interface{}{
-		"sessionId":  vex.SessionID,
+		"sessionId":  vex.SessionID(),
 		"taskId":     task.ID,
 		"toConfigId": bolt.ConfigID,
 		"context":    big,
@@ -107,7 +107,7 @@ func TestHandoffInitiate_OversizeContext(t *testing.T) {
 func TestHandoffInitiate_SelfHandoff(t *testing.T) {
 	ctx, vex, _, task := seedHandoffTeam(t)
 	rec := postJSON(t, ctx.OfficeAgentHandoffInitiate, "/api/office/task/handoff", map[string]interface{}{
-		"sessionId":  vex.SessionID,
+		"sessionId":  vex.SessionID(),
 		"taskId":     task.ID,
 		"toConfigId": vex.ConfigID,
 		"context":    "ctx",
@@ -119,7 +119,7 @@ func TestHandoffInitiate_SelfHandoff(t *testing.T) {
 
 func TestOfficeListHandoffs_PendingAndHistory(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
-	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	req := httptest.NewRequest("GET", "/api/office/handoffs", nil)
@@ -138,11 +138,11 @@ func TestOfficeListHandoffs_PendingAndHistory(t *testing.T) {
 
 func TestHandoffCancel_HappyPath(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
-	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	rec := postJSON(t, ctx.OfficeAgentHandoffCancel, "/api/office/task/handoff/cancel", map[string]interface{}{
-		"sessionId": vex.SessionID,
+		"sessionId": vex.SessionID(),
 		"taskId":    task.ID,
 	})
 	if rec.Code != http.StatusOK {
@@ -155,12 +155,12 @@ func TestHandoffCancel_HappyPath(t *testing.T) {
 
 func TestHandoffCancel_WrongSender(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
-	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	// bolt (the receiver) tries to cancel -- should fail with 403.
 	rec := postJSON(t, ctx.OfficeAgentHandoffCancel, "/api/office/task/handoff/cancel", map[string]interface{}{
-		"sessionId": bolt.SessionID,
+		"sessionId": bolt.SessionID(),
 		"taskId":    task.ID,
 	})
 	if rec.Code != http.StatusForbidden {
@@ -170,7 +170,7 @@ func TestHandoffCancel_WrongSender(t *testing.T) {
 
 func TestHandoffForceReject_Operator(t *testing.T) {
 	ctx, vex, bolt, task := seedHandoffTeam(t)
-	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := ctx.OfficeManager.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	rec := postJSON(t, ctx.OfficeHandoffForceReject, "/api/office/handoffs/force-reject", map[string]interface{}{

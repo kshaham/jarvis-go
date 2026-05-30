@@ -72,7 +72,7 @@ func (m *Manager) InjectOptimizationSuggestions(opts []PromptOptimization) {
 		if agent == nil {
 			continue
 		}
-		sent := sessions.WriteInkPrompt(agent.SessionID, opt.Suggestion)
+		sent := sessions.WriteInkPrompt(agent.SessionID(), opt.Suggestion)
 		if sent {
 			agentName := opt.TargetConfigID
 			if agent.Config != nil {

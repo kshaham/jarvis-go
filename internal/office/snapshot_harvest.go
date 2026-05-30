@@ -174,7 +174,7 @@ func HarvestSessionData(roster []*AgentState, lookup SDKSessionLookup) (workingD
 		if a == nil {
 			continue
 		}
-		data, ok := lookup(a.SessionID)
+		data, ok := lookup(a.SessionID())
 		if !ok {
 			continue
 		}

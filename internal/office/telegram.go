@@ -381,7 +381,7 @@ func (m *Manager) GetLeadAgentInfo(pinnedSessionID string) (string, string) {
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].ConfigID < candidates[j].ConfigID
 	})
-	return candidates[0].SessionID, agentDisplayName(candidates[0])
+	return candidates[0].SessionID(), agentDisplayName(candidates[0])
 }
 
 // GetLeadStatusText renders the HTML-escaped Telegram message body

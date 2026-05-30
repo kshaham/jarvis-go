@@ -73,7 +73,7 @@ func (ctx *Context) OfficeLookupPR(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		entry := map[string]interface{}{
-			"sessionId": a.SessionID,
+			"sessionId": a.SessionID(),
 			"name":      "",
 			"role":      "",
 		}

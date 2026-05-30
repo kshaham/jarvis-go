@@ -80,7 +80,7 @@ func BuildTaskGraph(m *Manager) *TaskGraphResponse {
 				Title:       t.Title,
 				Status:      string(t.Status),
 				Priority:    t.Priority,
-				SessionID:   a.SessionID,
+				SessionID:   a.SessionID(),
 				AgentName:   agentName,
 				ConfigID:    a.ConfigID,
 				BlockedBy:   blockedCopy,

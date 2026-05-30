@@ -306,7 +306,7 @@ func (m *Manager) HandleAgentDeath(sessionID string) {
 			copied.Source = "reassigned"
 			m.mu.RLock()
 			for _, other := range m.agents {
-				if other.SessionID != sessionID && other.Config != nil && other.Config.Tier == "strategic" {
+				if other.SessionID() != sessionID && other.Config != nil && other.Config.Tier == "strategic" {
 					other.AddTask(&copied)
 					slog.Info("Reassigned task from dead agent", "task", copied.Title, "to", other.Config.Name)
 					break
@@ -325,7 +325,7 @@ func (m *Manager) HandleAgentDeath(sessionID string) {
 		m.mu.RLock()
 		otherLeadAlive := false
 		for _, other := range m.agents {
-			if other.SessionID != sessionID && other.Config != nil && other.Config.Tier == "strategic" {
+			if other.SessionID() != sessionID && other.Config != nil && other.Config.Tier == "strategic" {
 				otherLeadAlive = true
 				break
 			}
@@ -455,7 +455,7 @@ func (m *Manager) ReassignSessionID(oldSessionID, newSessionID string) bool {
 	if _, collides := m.agents[newSessionID]; collides {
 		return false
 	}
-	agent.SessionID = newSessionID
+	agent.setSessionID(newSessionID) // atomic; readers never tear
 	m.agents[newSessionID] = agent
 	delete(m.agents, oldSessionID)
 	if agent.Config != nil {
@@ -550,17 +550,14 @@ func (m *Manager) GetRoster() []*AgentState {
 	return result
 }
 
-// sessionIDOf returns an agent's current SessionID read under m.mu. SessionID
-// is mutated by ReassignSessionID under m.mu (R25 in-place restart), so reading
-// it directly off a roster *AgentState (after GetRoster released m.mu) is a data
-// race. Callers must NOT already hold m.mu.
+// sessionIDOf returns an agent's current session ID. Now a thin nil-safe wrapper
+// over the atomic AgentState.SessionID() accessor (kept because existing call
+// sites reference it); no lock needed -- the read is atomic.
 func (m *Manager) sessionIDOf(a *AgentState) string {
 	if a == nil {
 		return ""
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return a.SessionID
+	return a.SessionID()
 }
 
 // truncRunes returns s clipped to at most maxBytes bytes, backing up to a rune

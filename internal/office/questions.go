@@ -236,20 +236,20 @@ func (m *Manager) askOnce(q *Question, recipient *AgentState, maxWait time.Durat
 	recipient.QuestionSlotQID = q.ID
 	recipient.mu.Unlock()
 
-	recipientName := recipient.SessionID
+	recipientName := recipient.SessionID()
 	if recipient.Config != nil {
 		recipientName = recipient.Config.Name
 	}
 
 	m.mu.Lock()
-	q.ToSessionID = recipient.SessionID
+	q.ToSessionID = recipient.SessionID()
 	q.ToName = recipientName
-	q.Tried = append(q.Tried, recipient.SessionID)
+	q.Tried = append(q.Tried, recipient.SessionID())
 	sessions := m.sessions
 	m.mu.Unlock()
 
 	if sessions != nil {
-		sessions.WriteInkPrompt(recipient.SessionID, formatQuestionPrompt(q))
+		sessions.WriteInkPrompt(recipient.SessionID(), formatQuestionPrompt(q))
 		recipient.mu.Lock()
 		recipient.LastPromptSentAt = time.Now()
 		recipient.mu.Unlock()
@@ -259,7 +259,7 @@ func (m *Manager) askOnce(q *Question, recipient *AgentState, maxWait time.Durat
 		"questionId": q.ID,
 		"from":       q.FromSessionID,
 		"fromName":   q.FromName,
-		"to":         recipient.SessionID,
+		"to":         recipient.SessionID(),
 		"toName":     recipientName,
 		"about":      q.AboutTaskID,
 	})
@@ -456,19 +456,19 @@ func (m *Manager) findAvailableAgentExcluding(askerSessionID string, alreadyTrie
 		if a == nil || a.Config == nil {
 			return false
 		}
-		if _, skip := tried[a.SessionID]; skip {
+		if _, skip := tried[a.SessionID()]; skip {
 			return false
 		}
 		if a.ActiveTask() != nil || a.PendingTaskCount() > 1 {
 			return false
 		}
-		if sessions != nil && sessions.IsSessionWorking(a.SessionID) {
+		if sessions != nil && sessions.IsSessionWorking(a.SessionID()) {
 			return false
 		}
 		// Don't pull someone out of an active meeting just to answer a
 		// question — they'll respond after the meeting ends, by which
 		// time the asker's wait is likely up.
-		if m.isInActiveMeetingLocked(a.SessionID) {
+		if m.isInActiveMeetingLocked(a.SessionID()) {
 			return false
 		}
 		return true
