@@ -2,8 +2,10 @@ import React from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Server } from 'lucide-react';
 
-import { Metric, StatusDot } from '../components/motion';
-import { GlowCard, EmptyState } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { StatusDot } from '../components/motion/StatusDot';
+import { GlowCard } from '../components/ui/GlowCard';
+import { EmptyState } from '../components/ui/EmptyState';
 import { relativeTime } from '../lib/relativeTime';
 import { useDevInstances } from '../hooks/useOfficeData';
 

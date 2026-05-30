@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { Modal } from './motion/Modal';
-import { Button, Chip, Field, Input, Textarea } from './ui';
+import { Button } from './ui/Button';
+import { Chip } from './ui/Chip';
+import { Field, Input, Textarea } from './ui/Field';
 import { fetchJSON } from '../api/client';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import type { TaskPriority } from '../api/types';

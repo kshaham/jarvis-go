@@ -3,7 +3,9 @@ import { motion, useReducedMotion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Modal } from './motion/Modal';
-import { Metric, Press, StatusDot } from './motion';
+import { Metric } from './motion/Metric';
+import { Press } from './motion/Press';
+import { StatusDot } from './motion/StatusDot';
 import { agentAvatarClass, agentAvatarGlyph } from './AgentCard';
 import { cn } from '../lib/cn';
 import { fetchJSON } from '../api/client';

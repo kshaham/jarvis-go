@@ -2,8 +2,9 @@ import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Modal } from './motion/Modal';
-import { Metric } from './motion';
-import { Button, Field, Input, Textarea } from './ui';
+import { Metric } from './motion/Metric';
+import { Button } from './ui/Button';
+import { Field, Input, Textarea } from './ui/Field';
 import { usePeers } from '../hooks/usePeers';
 import { useSendRelay } from '../hooks/useRelayMessages';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';

@@ -3,8 +3,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Library } from 'lucide-react';
 
-import { Metric } from '../components/motion';
-import { Button, EmptyState, GlowCard, Section, Skeleton } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
+import { GlowCard } from '../components/ui/GlowCard';
+import { Section } from '../components/ui/Section';
+import { Skeleton } from '../components/ui/Skeleton';
 import { relativeTime } from '../lib/relativeTime';
 import {
   useKnowledgePromotions,

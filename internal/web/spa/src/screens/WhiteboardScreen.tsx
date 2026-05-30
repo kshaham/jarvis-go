@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchJSON } from '../api/client';
 import { useWhiteboard } from '../hooks/useOfficeData';
 import { relativeTime } from '../lib/relativeTime';
-import { Skeleton } from '../components/ui';
+import { Skeleton } from '../components/ui/Skeleton';
 
 // Excalidraw is large — load it only when this route is visited.
 const ExcalidrawCanvas = lazy(() => import('../components/whiteboard/ExcalidrawCanvas'));

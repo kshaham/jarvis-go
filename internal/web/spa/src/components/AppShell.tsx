@@ -5,8 +5,12 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { TeamHeader } from './TeamHeader';
-import { CommandBar, Metric } from './motion';
-import { AuroraBackground, Button, ConnectionBanner, TopProgress } from './ui';
+import { CommandBar } from './motion/CommandBar';
+import { Metric } from './motion/Metric';
+import { AuroraBackground } from './ui/AuroraBackground';
+import { Button } from './ui/Button';
+import { ConnectionBanner } from './ui/ConnectionBanner';
+import { TopProgress } from './ui/TopProgress';
 import { QuickAddTaskModal } from './QuickAddTaskModal';
 import { ShortcutsModal } from './ShortcutsModal';
 import { spring } from '../lib/motion';

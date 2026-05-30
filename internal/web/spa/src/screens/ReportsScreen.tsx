@@ -4,9 +4,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { FileText } from 'lucide-react';
 
-import { Metric, Press } from '../components/motion';
+import { Metric } from '../components/motion/Metric';
+import { Press } from '../components/motion/Press';
 import { Modal } from '../components/motion/Modal';
-import { Button, EmptyState, GlowCard, Section, Skeleton } from '../components/ui';
+import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
+import { GlowCard } from '../components/ui/GlowCard';
+import { Section } from '../components/ui/Section';
+import { Skeleton } from '../components/ui/Skeleton';
 import { relativeTime } from '../lib/relativeTime';
 import { fetchJSON, fetchText } from '../api/client';
 import { useReports } from '../hooks/useOfficeData';

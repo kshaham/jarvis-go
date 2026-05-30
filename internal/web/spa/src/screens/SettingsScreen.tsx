@@ -3,8 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
-import { Metric, StatusDot } from '../components/motion';
-import { Button, NumField, SegmentedControl, Section, Textarea, Toggle } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { StatusDot } from '../components/motion/StatusDot';
+import { Button } from '../components/ui/Button';
+import { NumField, Textarea } from '../components/ui/Field';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { Section } from '../components/ui/Section';
+import { Toggle } from '../components/ui/Toggle';
 import { SnapshotsModal } from '../components/SnapshotsModal';
 import { fetchJSON } from '../api/client';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';

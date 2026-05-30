@@ -4,9 +4,12 @@ import { motion } from 'motion/react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Inbox, MessagesSquare, Send } from 'lucide-react';
 
-import { Metric, Press, StatusDot } from '../components/motion';
+import { Metric } from '../components/motion/Metric';
+import { Press } from '../components/motion/Press';
+import { StatusDot } from '../components/motion/StatusDot';
 import { ComposeRelayModal } from '../components/ComposeRelayModal';
-import { Button, EmptyState } from '../components/ui';
+import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
 import { spring } from '../lib/motion';
 import { useIdentity, usePeers } from '../hooks/usePeers';
 import {

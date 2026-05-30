@@ -4,8 +4,11 @@ import { useReducedMotion } from 'motion/react';
 import { BarChart3, CheckCircle2, Tags } from 'lucide-react';
 import type { Format } from '@number-flow/react';
 
-import { Metric, StatusDot } from '../components/motion';
-import { EmptyState, GlowCard, Section } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { StatusDot } from '../components/motion/StatusDot';
+import { EmptyState } from '../components/ui/EmptyState';
+import { GlowCard } from '../components/ui/GlowCard';
+import { Section } from '../components/ui/Section';
 import { CostByLabelChart } from '../components/charts/CostByLabelChart';
 import {
   useLabelsRollup,

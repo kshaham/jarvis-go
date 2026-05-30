@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
-import { RevealItem } from '../motion';
+import { RevealItem } from '../motion/RevealItem';
 import { SectionCard } from './formPrimitives';
 import { MemberEditor, isMemberEdited, memberFromTemplate } from './MemberEditor';
 import type { MemberEdit } from './MemberEditor';

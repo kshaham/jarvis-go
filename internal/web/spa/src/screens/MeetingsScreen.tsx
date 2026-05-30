@@ -2,8 +2,12 @@ import React, { useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { CalendarClock, SearchX } from 'lucide-react';
 
-import { Metric, RevealItem } from '../components/motion';
-import { EmptyState, GlowCard, Input, Skeleton } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { RevealItem } from '../components/motion/RevealItem';
+import { EmptyState } from '../components/ui/EmptyState';
+import { GlowCard } from '../components/ui/GlowCard';
+import { Input } from '../components/ui/Field';
+import { Skeleton } from '../components/ui/Skeleton';
 import { relativeTime } from '../lib/relativeTime';
 import { useStandupDetail, useStandupHistory } from '../hooks/useOfficeData';
 

@@ -3,8 +3,10 @@ import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Lock } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { Metric } from '../components/motion';
-import { Button, GlowCard, EmptyState } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { Button } from '../components/ui/Button';
+import { GlowCard } from '../components/ui/GlowCard';
+import { EmptyState } from '../components/ui/EmptyState';
 import { fetchJSON } from '../api/client';
 import { useFileLocks } from '../hooks/useOfficeData';
 import { relativeTime } from '../lib/relativeTime';

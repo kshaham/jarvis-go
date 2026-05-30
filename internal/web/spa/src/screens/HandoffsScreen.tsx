@@ -2,8 +2,9 @@ import { useMemo } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { ArrowLeftRight } from 'lucide-react';
 
-import { Metric } from '../components/motion';
-import { GlowCard, EmptyState } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { GlowCard } from '../components/ui/GlowCard';
+import { EmptyState } from '../components/ui/EmptyState';
 import { useTaskQueues } from '../hooks/useOfficeData';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import { relativeTime } from '../lib/relativeTime';

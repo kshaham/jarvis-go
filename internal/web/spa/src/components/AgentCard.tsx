@@ -2,8 +2,9 @@ import { motion, useReducedMotion } from 'motion/react';
 
 import { cn } from '@/lib/cn';
 import { StatusPill } from './StatusPill';
-import { Metric } from './motion';
-import { GlowCard, Skeleton } from './ui';
+import { Metric } from './motion/Metric';
+import { GlowCard } from './ui/GlowCard';
+import { Skeleton } from './ui/Skeleton';
 import type { OfficeMember } from '@/api/types';
 
 interface Props {

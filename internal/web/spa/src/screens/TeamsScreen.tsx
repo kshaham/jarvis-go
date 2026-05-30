@@ -5,9 +5,14 @@ import { toast } from 'sonner';
 import { UsersRound, X } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
-import { Metric, StatusDot } from '../components/motion';
+import { Metric } from '../components/motion/Metric';
 import { Modal } from '../components/motion/Modal';
-import { Button, EmptyState, Field, GlowCard, Input, Skeleton } from '../components/ui';
+import { StatusDot } from '../components/motion/StatusDot';
+import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
+import { Field, Input } from '../components/ui/Field';
+import { GlowCard } from '../components/ui/GlowCard';
+import { Skeleton } from '../components/ui/Skeleton';
 import { spring } from '../lib/motion';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import {

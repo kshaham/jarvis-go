@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Modal } from './motion/Modal';
-import { Metric, Press, RevealItem } from './motion';
+import { Metric } from './motion/Metric';
+import { Press } from './motion/Press';
+import { RevealItem } from './motion/RevealItem';
 import { fetchJSON } from '../api/client';
 import { useSnapshots } from '../hooks/useOfficeData';
 import { relativeTime } from '../lib/relativeTime';

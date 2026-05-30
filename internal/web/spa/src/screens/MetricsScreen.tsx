@@ -1,5 +1,6 @@
-import { Metric, RevealItem } from '../components/motion';
-import { GlowCard } from '../components/ui';
+import { Metric } from '../components/motion/Metric';
+import { RevealItem } from '../components/motion/RevealItem';
+import { GlowCard } from '../components/ui/GlowCard';
 import { CostTokensChart } from '../components/charts/CostTokensChart';
 import { MetricSparkline } from '../components/charts/MetricSparkline';
 import { useMetrics } from '../hooks/useOfficeData';

@@ -14,8 +14,10 @@ import {
   type NodeTypes,
 } from '@xyflow/react';
 
-import { Metric, Press, StatusDot } from '../components/motion';
+import { Metric } from '../components/motion/Metric';
 import { Modal } from '../components/motion/Modal';
+import { Press } from '../components/motion/Press';
+import { StatusDot } from '../components/motion/StatusDot';
 import { AgentFlowNode } from '../components/network/AgentFlowNode';
 import { settleLayout } from '../lib/forceLayout';
 import { useOfficeMessages } from '../hooks/useOfficeData';

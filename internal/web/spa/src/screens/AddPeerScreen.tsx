@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 
-import { RevealItem } from '../components/motion';
-import { Button, Field, Input, Section } from '../components/ui';
+import { RevealItem } from '../components/motion/RevealItem';
+import { Button } from '../components/ui/Button';
+import { Field, Input } from '../components/ui/Field';
+import { Section } from '../components/ui/Section';
 import { spring } from '../lib/motion';
 import { useAddPeer, useGenerateToken, useIdentity } from '../hooks/usePeers';
 import { toast } from 'sonner';
