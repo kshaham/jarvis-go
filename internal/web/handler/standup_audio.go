@@ -6,14 +6,25 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/kshaham/jarvis/internal/logscrub"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/tts"
 	"github.com/kshaham/jarvis/internal/web/request"
 )
+
+// maxConcurrentAudioJobs bounds how many synthesis jobs run at once. Each job
+// fans out paid OpenAI chat + speech calls, so without a cap an authenticated
+// caller looping over every historical standup could spawn unbounded goroutines
+// and billing streams.
+const maxConcurrentAudioJobs = 3
+
+// ErrTooManyAudioJobs is returned by Start when the concurrency cap is reached.
+var ErrTooManyAudioJobs = errors.New("too many audio jobs in progress")
 
 // Synthesizer is the subset of *tts.Client used by AudioJobManager.
 // Exported so server.go (package web) can name it in the newSynth closure.
@@ -30,6 +41,8 @@ type AudioJobManager struct {
 	baseCtx    context.Context
 	mu         sync.Mutex
 	running    map[string]bool
+	sem        chan struct{}  // counting semaphore bounding concurrent jobs
+	wg         sync.WaitGroup // tracks in-flight run() goroutines for shutdown drain
 	broadcast  func(string, interface{})
 	newSynth   func() (Synthesizer, error)
 	voiceFor   func(sessionID string, index int) string
@@ -48,13 +61,34 @@ func NewAudioJobManager(
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	sweepStaleAudioTmp() // clear *.mp3.tmp orphaned by a prior hard exit mid-write
 	return &AudioJobManager{
 		baseCtx:    ctx,
 		running:    make(map[string]bool),
+		sem:        make(chan struct{}, maxConcurrentAudioJobs),
 		broadcast:  broadcast,
 		newSynth:   newSynth,
 		voiceFor:   voiceFor,
 		wordBudget: defaultAudioWordBudget,
+	}
+}
+
+// Wait blocks until all in-flight audio jobs finish. Called at server shutdown
+// (after the listeners drain and the root context is cancelled, so jobs exit
+// promptly) to avoid leaking a job goroutine mid-write and orphaning a .tmp.
+func (m *AudioJobManager) Wait() {
+	m.wg.Wait()
+}
+
+// sweepStaleAudioTmp removes any *.mp3.tmp left behind when a prior process was
+// killed (e.g. SIGKILL) between WriteFile and Rename. Best-effort; ignores errors.
+func sweepStaleAudioTmp() {
+	matches, err := filepath.Glob(filepath.Join(office.StandupDir(), "*.mp3.tmp"))
+	if err != nil {
+		return
+	}
+	for _, p := range matches {
+		os.Remove(p) //nolint:errcheck
 	}
 }
 
@@ -77,9 +111,18 @@ func (m *AudioJobManager) Start(standupID string) (string, error) {
 	m.mu.Lock()
 	if m.running[id] {
 		m.mu.Unlock()
-		return id, nil
+		return id, nil // already generating this one; coalesce
+	}
+	// Acquire a concurrency slot (non-blocking) before marking running, so the
+	// total number of simultaneous synthesis jobs is bounded.
+	select {
+	case m.sem <- struct{}{}:
+	default:
+		m.mu.Unlock()
+		return "", ErrTooManyAudioJobs
 	}
 	m.running[id] = true
+	m.wg.Add(1)
 	m.mu.Unlock()
 
 	go m.run(id)
@@ -103,6 +146,8 @@ func (m *AudioJobManager) run(id string) {
 		m.mu.Lock()
 		delete(m.running, id)
 		m.mu.Unlock()
+		<-m.sem // release the concurrency slot
+		m.wg.Done()
 	}()
 
 	m.broadcast("office:standupAudioProgress", map[string]interface{}{
@@ -164,9 +209,11 @@ func (m *AudioJobManager) run(id string) {
 	// Job context derives from the server root context, so an in-flight job is cancelled on shutdown (each OpenAI call is also bounded by the client's 90s timeout).
 	script, err := synth.CondenseScript(ctx, transcriptStr, m.wordBudget)
 	if err != nil {
+		// Scrub: the tts client redacts at source, but this event is fanned to
+		// all SSE clients, Telegram, and the replay buffer -- defense in depth.
 		m.broadcast("office:standupAudioError", map[string]interface{}{
 			"id":      id,
-			"message": "script condensation failed: " + err.Error(),
+			"message": logscrub.All("script condensation failed: " + err.Error()),
 		})
 		return
 	}
@@ -208,6 +255,18 @@ func (m *AudioJobManager) run(id string) {
 		segs = append(segs, segment{voice: voice, text: seg.Text, label: label})
 	}
 
+	// The condense step can return valid JSON with an empty intro and all-empty
+	// segment texts. Without this guard the voicing loop runs zero times,
+	// ConcatMP3 returns a 0-byte slice, and a 0-byte file would be written and
+	// advertised as "ready" -- the client would serve an empty audio/mpeg.
+	if len(segs) == 0 {
+		m.broadcast("office:standupAudioError", map[string]interface{}{
+			"id":      id,
+			"message": "no speakable content after condensing",
+		})
+		return
+	}
+
 	mp3Parts := make([][]byte, 0, len(segs))
 	for _, s := range segs {
 		m.broadcast("office:standupAudioProgress", map[string]interface{}{
@@ -222,7 +281,7 @@ func (m *AudioJobManager) run(id string) {
 		if err != nil {
 			m.broadcast("office:standupAudioError", map[string]interface{}{
 				"id":      id,
-				"message": fmt.Sprintf("speech synthesis failed for %s: %v", s.label, err),
+				"message": logscrub.All(fmt.Sprintf("speech synthesis failed for %s: %v", s.label, err)),
 			})
 			return
 		}
@@ -266,6 +325,10 @@ func (ctx *Context) OfficePostStandupAudio(w http.ResponseWriter, r *http.Reques
 		}
 		if errors.Is(err, os.ErrNotExist) {
 			request.WriteError(w, http.StatusNotFound, "no completed standup found")
+			return
+		}
+		if errors.Is(err, ErrTooManyAudioJobs) {
+			request.WriteError(w, http.StatusTooManyRequests, "audio generation busy, try again shortly")
 			return
 		}
 		request.WriteError(w, http.StatusInternalServerError, "failed to start audio generation")

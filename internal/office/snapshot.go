@@ -131,7 +131,7 @@ func (m *Manager) CreateSnapshot(name, workingDir string, claudeSessionIDsByConf
 		}
 		entry := SnapshotMemberEntry{
 			ConfigID: a.ConfigID,
-			Config:   *a.Config,
+			Config:   a.SnapshotConfig(), // locked copy: Voice is mutated by SetVoice
 			Tasks:    a.GetTasks(),
 		}
 		if wb, ok := whiteboard[a.SessionID]; ok && wb != nil {

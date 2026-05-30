@@ -10,6 +10,16 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/kshaham/jarvis/internal/logscrub"
+)
+
+const (
+	// maxResponseBytes caps a successful response body so a misbehaving or
+	// hostile endpoint (baseURL is operator-configurable) can't OOM the daemon.
+	maxResponseBytes = 32 << 20 // 32 MiB
+	// maxErrorBodyBytes caps the echoed error body.
+	maxErrorBodyBytes = 8 << 10 // 8 KiB
 )
 
 // ErrNoAPIKey is returned when no OpenAI key is configured. The handler maps
@@ -138,12 +148,21 @@ func (c *Client) post(ctx context.Context, path string, payload any) ([]byte, er
 		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Read only a bounded slice of the error body and SCRUB it: OpenAI's 401
+		// body echoes the submitted key ("Incorrect API key provided: sk-..."),
+		// and this error string is surfaced to SSE clients / Telegram / the
+		// replay buffer. logscrub.All redacts the key; the cap bounds a hostile
+		// baseURL returning a huge body.
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return nil, fmt.Errorf("tts: openai %s -> %d: %s", path, resp.StatusCode,
+			logscrub.All(strings.TrimSpace(string(errBody))))
+	}
+	// Bound the success body so an arbitrarily large (or attacker-streamed)
+	// response can't exhaust memory within the request timeout window.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("tts: openai %s -> %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	return data, nil
 }

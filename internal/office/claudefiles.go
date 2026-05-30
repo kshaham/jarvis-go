@@ -175,11 +175,26 @@ var ErrNoCwd = errors.New("claudefiles: cwd is required")
 // hits) catches the prefix without us paying per-call tokenisation.
 const appendSystemPromptFileName = "jarvis-append-system-prompt.md"
 
-// AppendSystemPromptPath returns the absolute path the prefix file
-// will be written to for a given cwd. Useful for callers that need
-// to pass the path into SessionConfig.AppendSystemPromptFile.
-func AppendSystemPromptPath(cwd string) string {
-	return filepath.Join(cwd, ".claude", appendSystemPromptFileName)
+// AppendSystemPromptPath returns the absolute path the prefix file will be
+// written to for a given cwd and variant. The variant (e.g. the agent tier)
+// is folded into the filename so members that share a working dir but have
+// DIFFERENT prompt content (BuildStableSystemPrompt varies by tier) don't
+// clobber each other's file — while same-variant members still share one file
+// for cache reuse. An empty variant uses the base filename.
+func AppendSystemPromptPath(cwd, variant string) string {
+	name := appendSystemPromptFileName
+	if variant != "" {
+		base := strings.TrimSuffix(name, ".md")
+		// sanitize: keep alnum/dash so the variant can't escape the filename
+		safe := make([]rune, 0, len(variant))
+		for _, r := range variant {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+				safe = append(safe, r)
+			}
+		}
+		name = base + "-" + string(safe) + ".md"
+	}
+	return filepath.Join(cwd, ".claude", name)
 }
 
 // WriteAppendSystemPromptFile installs the stable system-prompt
@@ -191,7 +206,7 @@ func AppendSystemPromptPath(cwd string) string {
 // safety pattern as the other claudefiles helpers. Returns the
 // absolute path written (or pre-existing operator path) so the
 // spawn handler can forward it unconditionally.
-func WriteAppendSystemPromptFile(cwd, content string) (string, error) {
+func WriteAppendSystemPromptFile(cwd, variant, content string) (string, error) {
 	if cwd == "" {
 		return "", ErrNoCwd
 	}
@@ -202,7 +217,7 @@ func WriteAppendSystemPromptFile(cwd, content string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("claudefiles: mkdir .claude: %w", err)
 	}
-	path := AppendSystemPromptPath(cwd)
+	path := AppendSystemPromptPath(cwd, variant)
 	// If a file exists and wasn't authored by jarvis, leave it alone
 	// and return its path -- the operator wants their content used.
 	if existing, err := os.ReadFile(path); err == nil {

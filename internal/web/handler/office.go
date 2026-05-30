@@ -1779,8 +1779,13 @@ func (ctx *Context) OfficePostStandup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	standup := ctx.OfficeManager.StartStandup(ids)
-	ok(w, map[string]interface{}{"standup": standup})
+	// StartStandup launches the round-robin goroutine that concurrently mutates
+	// the live *StandupState (its Responses map + Transcript). Respond with the
+	// lock-protected deep copy from GetStandup(), NOT StartStandup's live
+	// pointer -- marshaling the live map would be a fatal concurrent map
+	// read/write that crashes the daemon.
+	ctx.OfficeManager.StartStandup(ids)
+	ok(w, map[string]interface{}{"standup": ctx.OfficeManager.GetStandup()})
 }
 
 // OfficePostStandupUserMessage sends a user message during standup.
@@ -3188,8 +3193,11 @@ func (ctx *Context) OfficeGetMemberPersonality(w http.ResponseWriter, r *http.Re
 		})
 		return
 	}
-	personality := agent.Config.Personality
-	systemPrompt := agent.Config.SystemPrompt
+	// Read the config under the agent lock (SetVoice mutates a sibling field of
+	// the same *TeamMemberConfig under a.mu, so an unguarded read here is a race).
+	cfg := agent.SnapshotConfig()
+	personality := cfg.Personality
+	systemPrompt := cfg.SystemPrompt
 	if override := agent.GetPersonalityOverride(); override != nil {
 		if override.Personality != "" {
 			personality = override.Personality

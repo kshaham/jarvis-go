@@ -762,6 +762,14 @@ func (s *Session) processOutput(rawData string) {
 
 	// Debounced: token parsing (100ms batch)
 	s.mu.Lock()
+	// Don't arm a new debounce timer once stopped: Stop() has already cancelled
+	// the timer and closed (or is about to close) the events channel, so a timer
+	// armed here would fire post-shutdown. (emitEvent is also guarded, but not
+	// scheduling avoids the wasted timer entirely.)
+	if s.isStopped {
+		s.mu.Unlock()
+		return
+	}
 	s.pendingData.WriteString(clean)
 	if s.debounceTimer == nil {
 		s.debounceTimer = time.AfterFunc(100*time.Millisecond, func() {
@@ -1029,6 +1037,19 @@ func (s *Session) handleExit() {
 }
 
 func (s *Session) emitEvent(event SessionEvent) {
+	// Parity with SDKSession/CodexSession emitEvent: the events channel is closed
+	// by the cleanup goroutine after wg.Wait(), but untracked emitters (the
+	// auto-respond goroutines and the debounce AfterFunc) can race that close.
+	// Short-circuit when stopped and recover the send so a late emit after the
+	// channel closes is swallowed instead of crashing the daemon with a fatal
+	// send-on-closed-channel.
+	s.mu.RLock()
+	stopped := s.isStopped
+	s.mu.RUnlock()
+	if stopped {
+		return
+	}
+	defer func() { _ = recover() }()
 	select {
 	case s.events <- event:
 	default:

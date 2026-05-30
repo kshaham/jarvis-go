@@ -118,9 +118,10 @@ func (ctx *Context) cleanupSessionResources(sessionID string) {
 	delete(ctx.SessionColors, sessionID)
 	ctx.SessionColorsMu.Unlock()
 
-	ctx.ScheduledTasksMu.Lock()
-	delete(ctx.ScheduledTasks, sessionID)
-	ctx.ScheduledTasksMu.Unlock()
+	// NOTE: ScheduledTasks is keyed by a task UUID, never by sessionID, so a
+	// delete(ScheduledTasks, sessionID) here is always a no-op — removed. If
+	// scheduled tasks ever need session-scoped cleanup, store the owning
+	// sessionID in each task and iterate, like ActivePlanOrchestrators below.
 
 	ctx.ActivePlanOrchestratorsMu.Lock()
 	for orchID, sid := range ctx.ActivePlanOrchestrators {

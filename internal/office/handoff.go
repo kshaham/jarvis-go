@@ -260,15 +260,6 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 	if pending >= HandoffMaxPendingPerSender {
 		return nil, fmt.Errorf("too many pending handoffs (limit %d)", HandoffMaxPendingPerSender)
 	}
-	// Check existing handoff before status so the error message is
-	// specific ("already pending" beats "not in_progress" because
-	// handoff_pending tasks report handoff_pending, not in_progress).
-	if targetTask.Handoff != nil {
-		return nil, fmt.Errorf("task already has a pending handoff")
-	}
-	if targetTask.Status != TaskInProgress {
-		return nil, fmt.Errorf("task must be in_progress to hand off (current: %s)", targetTask.Status)
-	}
 
 	fromName := ""
 	if sender.Config != nil {
@@ -293,8 +284,22 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 		CreatedAt:     time.Now(),
 	}
 
-	// Commit under the sender's mutex: set status + pointer + progress log.
+	// Commit under the sender's mutex with the existence/status checks INSIDE
+	// the critical section, so two concurrent initiates for the same task can't
+	// both pass a nil-check and clobber each other's Handoff pointer (orphaning
+	// the first handoff). The specific "already pending" message beats
+	// "not in_progress" since a handoff_pending task no longer reports
+	// in_progress.
 	sender.mu.Lock()
+	if targetTask.Handoff != nil {
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("task already has a pending handoff")
+	}
+	if targetTask.Status != TaskInProgress {
+		status := targetTask.Status
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("task must be in_progress to hand off (current: %s)", status)
+	}
 	targetTask.Status = TaskHandoffPending
 	targetTask.Handoff = h
 	targetTask.ProgressLog = append(targetTask.ProgressLog, TaskProgressEntry{
@@ -319,7 +324,7 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 // queue to receiver's queue with Source=HandoffSource. Called by the
 // receiver (via CLI or force-accept). Returns the accepted request.
 func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffRequest, error) {
-	h, task, sender, receiver, err := m.resolveHandoffPair(taskID, "")
+	h, _, sender, receiver, err := m.resolveHandoffPair(taskID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -327,14 +332,45 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 		return nil, fmt.Errorf("not your handoff")
 	}
 
-	// Physically move the task: remove from sender, append to receiver.
-	copied := *task
+	// Atomically re-verify, CLAIM, and remove the task under the sender's mutex.
+	// resolveHandoffPair's pending-check ran lock-free, so two concurrent accepts
+	// (receiver CLI + operator force-accept) could both pass it and both
+	// copy+AddTask the task into the receiver's queue -> duplicate. Re-checking
+	// the LIVE task's handoff status under sender.mu and flipping it to
+	// HandoffAccepted in the same critical section makes the loser observe the
+	// claimed status (or a missing task) and bail.
+	sender.mu.Lock()
+	idx := -1
+	for i, t := range sender.taskQueue.Tasks {
+		if t.ID == taskID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("handoff task no longer in sender queue")
+	}
+	live := sender.taskQueue.Tasks[idx]
+	if live.Handoff == nil || live.Handoff.Status != HandoffPending {
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("handoff no longer pending")
+	}
+	resolvedAt := time.Now()
+	live.Handoff.Status = HandoffAccepted // claim — blocks a concurrent accept's re-check
+	live.Handoff.ResolvedAt = resolvedAt
+	copied := *live
+	// Remove from sender queue while still holding the lock.
+	sender.taskQueue.Tasks = append(sender.taskQueue.Tasks[:idx], sender.taskQueue.Tasks[idx+1:]...)
+	sender.mu.Unlock()
+
+	// Prepare the moved copy for the receiver. Deep-copy ProgressLog so the
+	// receiver's append can't mutate the (shared) backing array of the snapshot.
 	copied.Handoff = nil
 	copied.Status = TaskInProgress
 	copied.Source = HandoffSource
-	// AssignedAt updates so "new owner got this now" timelines are accurate.
-	copied.AssignedAt = time.Now()
-	copied.ProgressLog = append(copied.ProgressLog, TaskProgressEntry{
+	copied.AssignedAt = resolvedAt // "new owner got this now"
+	copied.ProgressLog = append(append([]TaskProgressEntry(nil), copied.ProgressLog...), TaskProgressEntry{
 		Timestamp: copied.AssignedAt,
 		Note:      fmt.Sprintf("[handoff accepted by %s]", receiver.Config.Name),
 	})
@@ -342,20 +378,10 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 		copied.ProgressLog = copied.ProgressLog[len(copied.ProgressLog)-taskProgressLogCap:]
 	}
 
-	// Remove from sender queue (under sender mutex).
-	sender.mu.Lock()
-	for i, t := range sender.taskQueue.Tasks {
-		if t.ID == taskID {
-			sender.taskQueue.Tasks = append(sender.taskQueue.Tasks[:i], sender.taskQueue.Tasks[i+1:]...)
-			break
-		}
-	}
-	sender.mu.Unlock()
-
 	receiver.AddTask(&copied)
 
 	h.Status = HandoffAccepted
-	h.ResolvedAt = time.Now()
+	h.ResolvedAt = resolvedAt
 	m.ensureHandoffStore().append(*h)
 
 	senderName := ""

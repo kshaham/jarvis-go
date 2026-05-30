@@ -349,10 +349,34 @@ func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// stopAnySession stops a session across ALL three backends (PTY, SDK, Codex).
+// The dedicated StopSession is PTY-only, so calling it alone left SDK/Codex
+// sessions (their subprocesses, trackers, respawn controllers, and the Codex
+// CODEX_HOME with its 0600 OAuth credential) orphaned — yet the UI lists and
+// issues DELETE on those IDs. Returns nil when any backend matched; a not-found
+// error only when none did.
+func (ctx *Context) stopAnySession(reqCtx context.Context, id string) error {
+	stoppers := []func() error{
+		func() error { return ctx.SessionManager.StopSession(reqCtx, id) },
+		func() error { return ctx.SessionManager.StopSDKSession(id) },
+		func() error { return ctx.SessionManager.StopCodexSession(id) },
+	}
+	for _, stop := range stoppers {
+		err := stop()
+		if err == nil {
+			return nil
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			return err // a real failure in the matching backend
+		}
+	}
+	return fmt.Errorf("session not found: %s", id)
+}
+
 // DeleteSession stops and removes a session.
 func (ctx *Context) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := ctx.SessionManager.StopSession(r.Context(), id); err != nil {
+	if err := ctx.stopAnySession(r.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			request.WriteError(w, http.StatusNotFound, err.Error())
 		} else {

@@ -604,8 +604,21 @@ func (ctx *Context) UpdatePromptProcessorContextInjector(w http.ResponseWriter, 
 		request.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// Nest contextInjector INSIDE the promptProcessor map (where
+	// GetPromptProcessor reads it). UpdateSettings does a flat top-level merge,
+	// so writing "promptProcessor.contextInjector" created a dotted top-level
+	// key no reader ever consumed -- the config silently never applied. Copy the
+	// existing map so we don't mutate the shared settings map in place.
+	settings := ctx.StateStore.GetSettings()
+	pp := make(map[string]interface{})
+	if existing, ok := settings["promptProcessor"].(map[string]interface{}); ok {
+		for k, v := range existing {
+			pp[k] = v
+		}
+	}
+	pp["contextInjector"] = body.Config
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
-		"promptProcessor.contextInjector": body.Config,
+		"promptProcessor": pp,
 	})
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,

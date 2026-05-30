@@ -173,6 +173,13 @@ func runWeb() {
 		}
 	}
 
+	// Cancel the root context BEFORE Stop on EVERY path (idempotent on the
+	// signal path). The errCh path -- server.Start() returning a runtime
+	// listener error -- otherwise leaves rootCtx live, so in-flight background
+	// jobs (e.g. standup audio) that derive their context from it wouldn't
+	// abort, and Stop()'s drain could block well past the shutdown budget.
+	cancel()
+
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*1e9)
 	defer shutdownCancel()

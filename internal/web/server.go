@@ -510,6 +510,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	httpsSrv := s.httpsServer
 	schedRunner := s.schedulerRunner
 	notifRouter := s.notificationsRouter
+	hctx := s.handlerCtx
 	s.srvMu.Unlock()
 
 	// Close SSE clients FIRST so their in-flight /events handlers return; an
@@ -551,6 +552,22 @@ func (s *Server) Stop(ctx context.Context) error {
 	var shutdownErr error
 	if httpSrv != nil {
 		shutdownErr = httpSrv.Shutdown(ctx)
+	}
+
+	// Drain in-flight standup-audio jobs after the listeners stop accepting new
+	// ones. main.go cancels the root context before Stop, so each job's OpenAI
+	// calls abort and the goroutines finish promptly; this avoids leaking a job
+	// goroutine mid-write and orphaning a .mp3.tmp. Bound the wait by ctx so a
+	// stuck job can never push shutdown past the budget (defense in depth in
+	// case the root context wasn't cancelled on some path).
+	if hctx != nil && hctx.AudioJobs != nil {
+		done := make(chan struct{})
+		go func() { hctx.AudioJobs.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			slog.Warn("server: audio jobs did not drain within shutdown budget")
+		}
 	}
 
 	// Stop the subagent watcher AFTER the listeners are drained. Stopping it

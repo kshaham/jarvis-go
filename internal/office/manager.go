@@ -461,6 +461,9 @@ func (m *Manager) UnregisterAgent(sessionID string) {
 		delete(m.agents, sessionID)
 		delete(m.configIndex, agent.ConfigID)
 	}
+	// Reclaim the per-session recovery timestamp so it doesn't leak one stale
+	// entry per dead/restarted session for the lifetime of the team.
+	delete(m.lastRecoveryAt, sessionID)
 	// Release any file locks owned by the departing agent.
 	for path, lock := range m.fileLocks {
 		if lock.Owner == sessionID {
@@ -617,6 +620,9 @@ func (m *Manager) SetTeamSpawned(v bool) {
 		m.triageAttempts = make(map[string]int)
 		m.lastTriageAt = make(map[string]time.Time)
 		m.lastRecoveryAt = make(map[string]time.Time)
+		// lastAskAt accumulates one entry per distinct (session, question) pair
+		// and is otherwise never pruned; reset it on teardown like the siblings.
+		m.lastAskAt = make(map[string]time.Time)
 	}
 	m.mu.Unlock()
 
@@ -868,9 +874,17 @@ func (m *Manager) GetAuditEntries() []AuditEntry {
 	return m.auditWriter.Entries()
 }
 
-// GetConfig returns the current office configuration.
+// GetConfig returns a COPY of the current office configuration, taken under the
+// lock. A copy (not the live *m.config) so a caller reading fields can't race
+// UpdateOfficeSettings, which mutates m.config's fields in place under m.mu.
 func (m *Manager) GetConfig() *Config {
-	return m.config
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.config == nil {
+		return &Config{}
+	}
+	cp := *m.config
+	return &cp
 }
 
 // SetConfig replaces the office configuration.
@@ -1061,14 +1075,31 @@ func (m *Manager) SetStandup(s *StandupState) {
 	m.standup = s
 }
 
-// GetWhiteboard returns all whiteboard notes keyed by sessionID.
+// GetWhiteboard returns all whiteboard notes keyed by sessionID. The
+// WhiteboardNote field is written under each agent's a.mu (SetWhiteboardNote),
+// so it must be READ under a.mu too -- reading it under only m.mu (a different
+// lock) is a data race. Snapshot the (sessionID, agent) pairs under m.mu, then
+// read each note under its own a.mu and return a copy.
 func (m *Manager) GetWhiteboard() map[string]*WhiteboardNote {
+	type pair struct {
+		sid string
+		a   *AgentState
+	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	pairs := make([]pair, 0, len(m.agents))
+	for sid, a := range m.agents {
+		pairs = append(pairs, pair{sid, a})
+	}
+	m.mu.RUnlock()
+
 	result := make(map[string]*WhiteboardNote)
-	for _, a := range m.agents {
-		if a.WhiteboardNote != nil {
-			result[a.SessionID] = a.WhiteboardNote
+	for _, p := range pairs {
+		p.a.mu.Lock()
+		note := p.a.WhiteboardNote
+		p.a.mu.Unlock()
+		if note != nil {
+			cp := *note
+			result[p.sid] = &cp
 		}
 	}
 	return result
@@ -2050,13 +2081,15 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	}
 
 	status := "idle"
-	activeTask := a.ActiveTask()
+	// Deep copy: activeTask is marshaled into the payload below and the live
+	// *Task is mutated under a.mu (applyTaskStatusLocked / SetTaskProgress).
+	activeTask := a.ActiveTaskCopy()
 	if activeTask != nil {
 		status = "working"
 	} else if a.GetSDKWorking() {
 		status = "working"
 	} else {
-		for _, t := range a.GetTasks() {
+		for _, t := range a.GetTasksCopy() {
 			if t.Status == TaskInProgress {
 				status = "working"
 				break
@@ -2184,7 +2217,9 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	for _, a := range roster {
 		taskQueues = append(taskQueues, map[string]interface{}{
 			"sessionId": a.SessionID,
-			"tasks":     a.GetTasks(),
+			// Deep copies: this is marshaled by the handler outside any lock
+			// while the live tasks are mutated under a.mu.
+			"tasks": a.GetTasksCopy(),
 		})
 	}
 
