@@ -21,6 +21,30 @@ import { settleLayout } from '../lib/forceLayout';
 import { useOfficeMessages } from '../hooks/useOfficeData';
 import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import type { AgentStatus, OfficeMember } from '../api/types';
+import type { CSSProperties, ReactNode } from 'react';
+
+// ─── module-scope style constants ─────────────────────────────────────────────
+const relayoutButtonStyle: CSSProperties = {
+  padding: '6px 14px',
+  background: 'var(--lg-fill)',
+  border: '1px solid var(--lg-rim)',
+  borderRadius: 'var(--radius-pill)',
+  color: 'var(--text-primary)',
+  fontSize: 12,
+  fontWeight: 600,
+  WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+  backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+  boxShadow: 'var(--lg-shadow-rest)',
+};
+
+const toggleChipBaseStyle: CSSProperties = {
+  padding: '6px 12px',
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 600,
+  WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+};
 
 // NetworkScreen — agents as nodes, messages as edges, rendered with
 // React Flow. Layout is a one-shot d3-force settle (see settleLayout);
@@ -110,20 +134,7 @@ export function NetworkScreen() {
             onClick={() => setActiveOnly((v) => !v)}
           />
           <Press pressScale={0.96} onClick={() => setRelayoutSeed((s) => s + 1)}>
-            <span
-              style={{
-                padding: '6px 14px',
-                background: 'var(--lg-fill)',
-                border: '1px solid var(--lg-rim)',
-                borderRadius: 'var(--radius-pill)',
-                color: 'var(--text-primary)',
-                fontSize: 12,
-                fontWeight: 600,
-                WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
-                backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
-                boxShadow: 'var(--lg-shadow-rest)',
-              }}
-            >
+            <span style={relayoutButtonStyle}>
               Relayout
             </span>
           </Press>
@@ -134,7 +145,7 @@ export function NetworkScreen() {
         style={{
           display: 'flex',
           gap: 18,
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
           padding: '4px 0',
         }}
@@ -144,8 +155,8 @@ export function NetworkScreen() {
         <Legend status="meeting" label="Meeting" />
         <Legend status="stuck" label="Stuck" />
         <span style={{ marginLeft: 'auto' }}>
-          <Metric value={visibleMembers.length} size={11} /> nodes ·{' '}
-          <Metric value={visibleEdges.length} size={11} /> edges
+          <Metric value={visibleMembers.length} size={12} /> nodes ·{' '}
+          <Metric value={visibleEdges.length} size={12} /> edges
         </span>
       </div>
 
@@ -186,7 +197,7 @@ export function NetworkScreen() {
                 <span
                   style={{
                     display: 'block',
-                    fontSize: 10,
+                    fontSize: 12,
                     textTransform: 'uppercase',
                     letterSpacing: 0.4,
                   }}
@@ -329,7 +340,7 @@ function PeerEdges({
       <h3
         style={{
           margin: '8px 0',
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
           letterSpacing: 0.4,
           textTransform: 'uppercase',
@@ -360,10 +371,10 @@ function PeerEdges({
   );
 }
 
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <span style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
         {label}
       </span>
       <span style={{ fontSize: 14, color: 'var(--text-primary)', fontWeight: 600, textTransform: 'capitalize' }}>
@@ -395,15 +406,10 @@ function ToggleChip({
     <Press pressScale={0.94} onClick={onClick}>
       <span
         style={{
-          padding: '6px 12px',
+          ...toggleChipBaseStyle,
           background: active ? 'var(--lg-fill-accent)' : 'var(--lg-fill)',
           border: '1px solid ' + (active ? 'rgb(var(--accent-rgb) / 0.6)' : 'var(--lg-rim)'),
-          borderRadius: 999,
           color: active ? 'var(--accent)' : 'var(--text-secondary)',
-          fontSize: 11,
-          fontWeight: 600,
-          WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-          backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
           boxShadow: active ? 'var(--lg-shadow-rest), var(--glow-violet-sm)' : 'var(--lg-shadow-rest)',
         }}
       >

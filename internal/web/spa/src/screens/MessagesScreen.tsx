@@ -11,6 +11,72 @@ import { fetchJSON } from '@/api/client';
 import { useOfficeMessages } from '@/hooks/useOfficeData';
 import { useOfficeStatus } from '@/hooks/useOfficeStatus';
 import type { OfficeMember, OfficeMessageWire } from '@/api/types';
+import type { CSSProperties } from 'react';
+
+// ─── module-scope style constants ─────────────────────────────────────────────
+const agentRailAsideStyle: CSSProperties = {
+  padding: 10,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  overflowY: 'auto',
+};
+
+const threadMainStyle: CSSProperties = {
+  padding: 14,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  minHeight: 0,
+};
+
+const agentAvatarStyle: CSSProperties = {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: '#fff',
+  fontSize: 14,
+  fontWeight: 700,
+  flexShrink: 0,
+};
+
+const bubbleBodBaseStyle: CSSProperties = {
+  padding: '10px 14px',
+  borderRadius: 'var(--radius-card)',
+  fontSize: 13,
+  lineHeight: 1.55,
+  whiteSpace: 'pre-wrap',
+};
+
+const emptyThreadStyle: CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  color: 'var(--text-muted)',
+  fontSize: 13,
+};
+
+const composerContainerStyle: CSSProperties = {
+  padding: 10,
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+};
 
 // MessagesScreen — agent-to-agent chat. Left rail: agent list with
 // unread / latest preview. Right pane: thread between local viewer
@@ -126,18 +192,7 @@ export function MessagesScreen() {
             flex: 1,
           }}
         >
-          <aside
-            style={{
-              padding: 10,
-              borderRadius: 'var(--radius-card)',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              overflowY: 'auto',
-            }}
-          >
+          <aside style={agentRailAsideStyle}>
             {railRows.map(({ member, last }) => (
               <AgentRail
                 key={member.sessionId}
@@ -149,18 +204,7 @@ export function MessagesScreen() {
             ))}
           </aside>
 
-          <main
-            style={{
-              padding: 14,
-              borderRadius: 'var(--radius-card)',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              minHeight: 0,
-            }}
-          >
+          <main style={threadMainStyle}>
             <div
               ref={threadRef}
               style={{
@@ -230,19 +274,7 @@ function AgentRail({
       }}
     >
       <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          background: member.avatarColor ?? 'var(--bg-pressed)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
-          fontSize: 14,
-          fontWeight: 700,
-          flexShrink: 0,
-        }}
+        style={{ ...agentAvatarStyle, background: member.avatarColor ?? 'var(--bg-pressed)' }}
       >
         {member.avatarEmoji || member.avatarInitial || member.name?.[0] || '?'}
       </div>
@@ -261,7 +293,7 @@ function AgentRail({
         </span>
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--text-muted)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -274,7 +306,7 @@ function AgentRail({
         </span>
       </span>
       {last ? (
-        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
           {relativeTime(last.timestamp)}
         </span>
       ) : null}
@@ -305,18 +337,14 @@ function Bubble({
         gap: 6,
       }}
     >
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
         {fromName} → {toName} · {relativeTime(msg.timestamp)}
       </span>
       <div
         style={{
-          padding: '10px 14px',
-          borderRadius: 'var(--radius-card)',
+          ...bubbleBodBaseStyle,
           background: isOutboundToSelected ? 'var(--accent)' : 'var(--bg-elevated)',
           color: isOutboundToSelected ? '#fff' : 'var(--text-primary)',
-          fontSize: 13,
-          lineHeight: 1.55,
-          whiteSpace: 'pre-wrap',
           border: '1px solid ' + (isOutboundToSelected ? 'var(--accent-strong)' : 'var(--border-subtle)'),
         }}
       >
@@ -346,17 +374,7 @@ function Composer({
   recipient: string;
 }) {
   return (
-    <div
-      style={{
-        padding: 10,
-        borderRadius: 'var(--radius-md)',
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
+    <div style={composerContainerStyle}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
         <span>From</span>
         <select
@@ -382,8 +400,8 @@ function Composer({
         style={{ resize: 'vertical' }}
       />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-        <span style={{ fontSize: 11, color: text.length > 480 ? 'var(--status-warn)' : 'var(--text-muted)' }}>
-          <Metric value={text.length} size={11} /> / 500
+        <span style={{ fontSize: 12, color: text.length > 480 ? 'var(--status-warn)' : 'var(--text-muted)' }}>
+          <Metric value={text.length} size={12} /> / 500
         </span>
         <Button onClick={onSend} disabled={pending || !text.trim() || !fromAgent}>
           {pending ? 'Sending…' : 'Send'}
@@ -423,17 +441,7 @@ function ThreadSkeleton() {
 
 function EmptyThread({ name }: { name: string }) {
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        color: 'var(--text-muted)',
-        fontSize: 13,
-      }}
+    <div style={emptyThreadStyle}
     >
       No messages with <strong style={{ color: 'var(--text-primary)' }}>{name}</strong> yet.
     </div>

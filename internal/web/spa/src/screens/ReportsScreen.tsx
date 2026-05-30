@@ -73,7 +73,7 @@ export function ReportsScreen() {
       <Section
         title="Saved reports"
         trailing={
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             <Metric value={list.length} size={11} pulseOnChange /> on disk
           </span>
         }
@@ -124,7 +124,7 @@ export function ReportsScreen() {
                       <span
                         style={{
                           display: 'block',
-                          fontSize: 11,
+                          fontSize: 12,
                           color: 'var(--text-muted)',
                           marginTop: 4,
                           overflow: 'hidden',
@@ -137,7 +137,7 @@ export function ReportsScreen() {
                     ) : null}
                   </span>
                   {r.generatedAt ? (
-                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
                       {relativeTime(r.generatedAt)}
                     </span>
                   ) : null}

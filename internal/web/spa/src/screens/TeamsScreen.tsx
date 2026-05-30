@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { toast } from 'sonner';
 import { UsersRound, X } from 'lucide-react';
+import type { CSSProperties } from 'react';
 
 import { Metric, StatusDot } from '../components/motion';
 import { Modal } from '../components/motion/Modal';
@@ -18,6 +19,105 @@ import {
   useUpdateIdentity,
 } from '../hooks/usePeers';
 import type { Peer, PeerStatus } from '../api/types';
+
+// ─── module-scope style constants ─────────────────────────────────────────────
+const avatarBoxStyle: CSSProperties = {
+  width: 56,
+  height: 56,
+  borderRadius: 14,
+  background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: '#fff',
+  fontSize: 22,
+  fontWeight: 700,
+};
+
+const teamLabelStyle: CSSProperties = {
+  fontSize: 12,
+  color: 'var(--text-muted)',
+  letterSpacing: 0.4,
+  textTransform: 'uppercase',
+};
+
+const statLabelStyle: CSSProperties = {
+  fontSize: 12,
+  color: 'var(--text-muted)',
+  letterSpacing: 0.4,
+  textTransform: 'uppercase',
+};
+
+const peerUrlStyle: CSSProperties = {
+  fontSize: 12,
+  color: 'var(--text-muted)',
+  fontFamily: 'var(--font-mono)',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const peerMetaRowStyle: CSSProperties = {
+  display: 'flex',
+  gap: 12,
+  fontSize: 12,
+  color: 'var(--text-muted)',
+  flexWrap: 'wrap',
+};
+
+const peerErrorStyle: CSSProperties = {
+  fontSize: 12,
+  color: 'var(--status-error)',
+  background: 'rgba(255,90,95,0.08)',
+  padding: '6px 8px',
+  borderRadius: 'var(--radius-sm)',
+};
+
+const unreadBadgeStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 22,
+  height: 20,
+  padding: '0 7px',
+  borderRadius: 999,
+  background: 'var(--accent-muted)',
+  color: 'var(--accent)',
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const statTextStyle: CSSProperties = {
+  fontSize: 14,
+  color: 'var(--text-primary)',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  maxWidth: 280,
+};
+
+const tokenSectionStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  padding: 14,
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+};
+
+const tokenCodeStyle: CSSProperties = {
+  display: 'block',
+  marginTop: 8,
+  padding: 8,
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+  background: 'var(--bg-app)',
+  color: 'var(--accent)',
+  borderRadius: 'var(--radius-sm)',
+  wordBreak: 'break-all',
+};
 
 // TeamsScreen — the "all teams in one view" page. Top zone shows this
 // jarvis instance's identity + stats; below is the grid of registered
@@ -66,31 +166,11 @@ export function TeamsScreen() {
         className="flex flex-col gap-4 p-5"
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 14,
-              background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: 22,
-              fontWeight: 700,
-            }}
-          >
+          <div style={avatarBoxStyle}>
             {identity.data?.displayName?.[0]?.toUpperCase() ?? '?'}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--text-muted)',
-                letterSpacing: 0.4,
-                textTransform: 'uppercase',
-              }}
-            >
+            <div style={teamLabelStyle}>
               This team
             </div>
             <div
@@ -227,14 +307,7 @@ function StatTile({
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-        }}
-      >
+      <span style={statLabelStyle}>
         {label}
       </span>
       {typeof value === 'number' ? (
@@ -242,14 +315,9 @@ function StatTile({
       ) : (
         <span
           style={{
-            fontSize: 14,
-            color: 'var(--text-primary)',
+            ...statTextStyle,
             fontFamily: text === 'unset' ? 'var(--font-sans)' : 'var(--font-mono)',
             fontStyle: text === 'unset' ? 'italic' : 'normal',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            maxWidth: 280,
           }}
         >
           {text}
@@ -301,49 +369,17 @@ function PeerCard({ peer }: { peer: Peer }) {
           >
             {peer.displayName}
           </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--text-muted)',
-              fontFamily: 'var(--font-mono)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <div style={peerUrlStyle}>
             {peer.publicUrl}
           </div>
         </div>
         {peer.unreadInbound ? (
-          <span
-            className="shadow-glow-sm"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: 22,
-              height: 20,
-              padding: '0 7px',
-              borderRadius: 999,
-              background: 'var(--accent-muted)',
-              color: 'var(--accent)',
-              fontSize: 11,
-              fontWeight: 700,
-            }}
-          >
-            <Metric value={peer.unreadInbound} size={11} tone="accent" pulseOnChange />
+          <span className="shadow-glow-sm" style={unreadBadgeStyle}>
+            <Metric value={peer.unreadInbound} size={12} tone="accent" pulseOnChange />
           </span>
         ) : null}
       </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 12,
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          flexWrap: 'wrap',
-        }}
-      >
+      <div style={peerMetaRowStyle}>
         <span>
           status: <strong style={{ color: peerStatusColor(peer.status) }}>{peer.status}</strong>
         </span>
@@ -361,15 +397,7 @@ function PeerCard({ peer }: { peer: Peer }) {
         ) : null}
       </div>
       {peer.lastError ? (
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--status-error)',
-            background: 'rgba(255,90,95,0.08)',
-            padding: '6px 8px',
-            borderRadius: 'var(--radius-sm)',
-          }}
-        >
+        <div style={peerErrorStyle}>
           {peer.lastError}
         </div>
       ) : null}
@@ -409,7 +437,7 @@ function PeerCardSkeleton() {
   return (
     <div className="surface-card flex flex-col gap-2.5 p-4">
       <div className="flex items-center gap-2.5">
-        <Skeleton className="h-2 w-2 shrink-0 rounded-full" />
+        <Skeleton className="size-2 shrink-0 rounded-full" />
         <div className="flex-1 space-y-2">
           <Skeleton className="h-3.5 w-32" />
           <Skeleton className="h-2.5 w-40" />
@@ -510,18 +538,7 @@ function IdentityEditModal({ open, onClose }: { open: boolean; onClose: () => vo
           </code>
         </Field>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            padding: 14,
-            borderRadius: 'var(--radius-md)',
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
+        <div style={tokenSectionStyle}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
               Generate pair token
@@ -530,19 +547,7 @@ function IdentityEditModal({ open, onClose }: { open: boolean; onClose: () => vo
               Share this 32-byte token with the operator who wants to register you as a peer.
             </div>
             {genToken.data?.token ? (
-              <code
-                style={{
-                  display: 'block',
-                  marginTop: 8,
-                  padding: 8,
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 11,
-                  background: 'var(--bg-app)',
-                  color: 'var(--accent)',
-                  borderRadius: 'var(--radius-sm)',
-                  wordBreak: 'break-all',
-                }}
-              >
+              <code style={tokenCodeStyle}>
                 {genToken.data.token}
               </code>
             ) : null}

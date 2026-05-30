@@ -7,6 +7,34 @@ import { relativeTime } from '@/lib/relativeTime';
 import { useTaskQueues } from '@/hooks/useOfficeData';
 import { useOfficeStatus } from '@/hooks/useOfficeStatus';
 import type { Task, TaskPriority, TaskStatus } from '@/api/types';
+import type { CSSProperties } from 'react';
+
+// ─── module-scope style constants ─────────────────────────────────────────────
+const taskTitleStyle: CSSProperties = {
+  fontSize: 13,
+  color: 'var(--text-primary)',
+  fontWeight: 600,
+  lineHeight: 1.35,
+  display: '-webkit-box',
+  WebkitLineClamp: 3,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+};
+
+const columnSectionBaseStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  background: 'var(--lg-fill)',
+  border: '1px solid var(--lg-rim)',
+  borderRadius: 'var(--radius-card)',
+  WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  boxShadow: 'var(--lg-shadow-rest)',
+  padding: 10,
+  gap: 10,
+  minHeight: 0,
+  overflow: 'hidden',
+};
 
 // Kanban columns mirror the vanilla shell: pending → acknowledged →
 // in_progress → review-equivalent (failed/handoff) → completed.
@@ -190,20 +218,9 @@ function Column({
   return (
     <section
       style={{
-        display: 'flex',
-        flexDirection: 'column',
+        ...columnSectionBaseStyle,
         // Glass kanban lane — translucent over the aurora, accent-coded top.
-        background: 'var(--lg-fill)',
-        border: '1px solid var(--lg-rim)',
         borderTop: '2px solid ' + borderTone,
-        borderRadius: 'var(--radius-card)',
-        WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-        backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-        boxShadow: 'var(--lg-shadow-rest)',
-        padding: 10,
-        gap: 10,
-        minHeight: 0,
-        overflow: 'hidden',
       }}
     >
       <header
@@ -216,7 +233,7 @@ function Column({
       >
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--text-muted)',
             letterSpacing: 0.6,
             textTransform: 'uppercase',
@@ -244,7 +261,7 @@ function Column({
               borderRadius: 'var(--radius-md)',
               border: '1px dashed var(--border-default)',
               color: 'var(--text-faint)',
-              fontSize: 11,
+              fontSize: 12,
               textAlign: 'center',
             }}
           >
@@ -282,18 +299,7 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
         boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
       }}
     >
-      <span
-        style={{
-          fontSize: 13,
-          color: 'var(--text-primary)',
-          fontWeight: 600,
-          lineHeight: 1.35,
-          display: '-webkit-box',
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}
-      >
+      <span style={taskTitleStyle}>
         {task.title}
       </span>
       <div
@@ -302,7 +308,7 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 6,
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
         }}
       >
@@ -317,7 +323,7 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
             <span
               key={lab}
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 padding: '1px 6px',
                 borderRadius: 999,
                 background: 'var(--bg-pressed)',
@@ -333,14 +339,14 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
       {task.blockerDescription && task.status === 'blocked' ? (
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--status-warn)',
             background: 'rgba(255,180,84,0.10)',
             padding: '4px 6px',
             borderRadius: 4,
           }}
         >
-          🚧 {task.blockerDescription}
+          {task.blockerDescription}
         </span>
       ) : null}
     </GlowCard>
@@ -360,7 +366,7 @@ function StatTile({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <span
         style={{
-          fontSize: 10,
+          fontSize: 12,
           color: 'var(--text-muted)',
           textTransform: 'uppercase',
           letterSpacing: 0.4,

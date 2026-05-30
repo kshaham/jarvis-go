@@ -86,7 +86,7 @@ export function MetricsScreen() {
         <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 8 }}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--text-muted)',
               letterSpacing: 0.4,
               textTransform: 'uppercase',
@@ -113,7 +113,7 @@ export function MetricsScreen() {
             <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
               Uptime by agent
             </h2>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>seconds since spawn</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>seconds since spawn</span>
           </header>
           <ul
             style={{
@@ -163,7 +163,7 @@ function Tile({
     <GlowCard interactive className="flex flex-col gap-1.5 p-4">
       <span
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
           letterSpacing: 0.4,
           textTransform: 'uppercase',
@@ -194,7 +194,7 @@ function Big({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
           letterSpacing: 0.4,
           textTransform: 'uppercase',

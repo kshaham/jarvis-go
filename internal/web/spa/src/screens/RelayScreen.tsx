@@ -14,6 +14,66 @@ import {
   useRelayMessages,
 } from '../hooks/useRelayMessages';
 import type { Peer, RelayMessage } from '../api/types';
+import type { CSSProperties } from 'react';
+
+// ─── module-scope style constants ─────────────────────────────────────────────
+const peerRailAsideStyle: CSSProperties = {
+  padding: 12,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  overflowY: 'auto',
+};
+
+const conversationMainStyle: CSSProperties = {
+  padding: 18,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  minHeight: 0,
+  overflow: 'hidden',
+};
+
+const peerRailButtonBaseStyle: CSSProperties = {
+  textAlign: 'left',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '10px 12px',
+  borderRadius: 'var(--radius-md)',
+  cursor: 'pointer',
+  color: 'inherit',
+  font: 'inherit',
+  width: '100%',
+};
+
+const unreadPillStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 20,
+  height: 18,
+  padding: '0 6px',
+  borderRadius: 999,
+  background: 'var(--accent)',
+  color: '#fff',
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const bubbleBodyBaseStyle: CSSProperties = {
+  padding: '10px 14px',
+  borderRadius: 'var(--radius-card)',
+  fontSize: 14,
+  lineHeight: 1.55,
+  whiteSpace: 'pre-wrap',
+};
 
 // RelayScreen — inter-team message log. Left rail picks the
 // conversation; right pane shows messages between local team and the
@@ -106,18 +166,7 @@ export function RelayScreen() {
           }}
         >
           {/* Left rail: peer list */}
-          <aside
-            style={{
-              padding: 12,
-              borderRadius: 'var(--radius-card)',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              overflowY: 'auto',
-            }}
-          >
+          <aside style={peerRailAsideStyle}>
             {peerList.map((peer) => (
               <PeerRail
                 key={peer.peerId}
@@ -129,19 +178,7 @@ export function RelayScreen() {
           </aside>
 
           {/* Right pane: conversation */}
-          <main
-            style={{
-              padding: 18,
-              borderRadius: 'var(--radius-card)',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-              minHeight: 0,
-              overflow: 'hidden',
-            }}
-          >
+          <main style={conversationMainStyle}>
             {messages.isError ? (
               <ErrorPanel
                 message={
@@ -204,18 +241,9 @@ function PeerRail({
       onClick={onSelect}
       className={selected ? 'shadow-glow-sm transition-shadow' : 'transition-shadow'}
       style={{
-        textAlign: 'left',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '10px 12px',
-        borderRadius: 'var(--radius-md)',
+        ...peerRailButtonBaseStyle,
         border: '1px solid ' + (selected ? 'rgb(var(--accent-rgb))' : 'transparent'),
         background: selected ? 'var(--accent-muted)' : 'transparent',
-        cursor: 'pointer',
-        color: 'inherit',
-        font: 'inherit',
-        width: '100%',
       }}
     >
       <StatusDot status={mapStatus(peer.status)} size={8} />
@@ -236,7 +264,7 @@ function PeerRail({
         <span
           style={{
             display: 'block',
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--text-muted)',
             fontFamily: 'var(--font-mono)',
             overflow: 'hidden',
@@ -252,21 +280,9 @@ function PeerRail({
           animate={{ scale: [1, 1.12, 1] }}
           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
           className="shadow-glow-sm"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minWidth: 20,
-            height: 18,
-            padding: '0 6px',
-            borderRadius: 999,
-            background: 'var(--accent)',
-            color: '#fff',
-            fontSize: 11,
-            fontWeight: 700,
-          }}
+          style={unreadPillStyle}
         >
-          <Metric value={peer.unreadInbound} size={11} />
+          <Metric value={peer.unreadInbound} size={12} />
         </motion.span>
       ) : null}
     </Press>
@@ -298,7 +314,7 @@ function Bubble({
     >
       <span
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
           letterSpacing: 0.3,
         }}
@@ -316,18 +332,14 @@ function Bubble({
       </span>
       <div
         style={{
-          padding: '10px 14px',
-          borderRadius: 'var(--radius-card)',
+          ...bubbleBodyBaseStyle,
           background: isOutbound ? 'var(--accent)' : 'var(--bg-elevated)',
           color: isOutbound ? '#fff' : 'var(--text-primary)',
-          fontSize: 14,
-          lineHeight: 1.55,
-          whiteSpace: 'pre-wrap',
           border: '1px solid ' + (isOutbound ? 'var(--accent-strong)' : 'var(--border-subtle)'),
         }}
       >
         {message.content || (
-          <span style={{ opacity: 0.7, fontStyle: 'italic' }}>(no body — attachments only)</span>
+          <span style={{ opacity: 0.7, fontStyle: 'italic' }}>(no body - attachments only)</span>
         )}
         {message.attachments && message.attachments.length > 0 ? (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -402,7 +414,7 @@ function EmptyNoMessages({ onCompose }: { onCompose: () => void }) {
       <EmptyState
         icon={<Send size={22} />}
         title="No messages exchanged yet"
-        description="Send a message — share something your team learned that this peer team could use."
+        description="Send a message: share something your team learned that this peer team could use."
         action={
           <Button variant="primary" onClick={onCompose}>
             Compose first message →

@@ -57,8 +57,8 @@ export function HandoffsScreen() {
         </p>
       </header>
 
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-        <Metric value={pending.length} size={11} pulseOnChange /> awaiting decision
+      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <Metric value={pending.length} size={12} pulseOnChange /> awaiting decision
       </span>
 
       {pending.length === 0 ? (
@@ -96,14 +96,14 @@ export function HandoffsScreen() {
                   >
                     {row.title}
                   </span>
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
                     from <strong style={{ color: 'var(--text-secondary)' }}>{row.fromName}</strong>
                     {row.when ? ` · ${relativeTime(row.when)}` : ''}
                   </span>
                 </span>
                 <span
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     color: 'var(--status-warn)',
                     padding: '4px 10px',
                     background: 'rgba(255,180,84,0.10)',
