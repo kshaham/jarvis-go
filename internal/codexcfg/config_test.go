@@ -56,6 +56,29 @@ func TestRender_FeatureKnobs(t *testing.T) {
 	}
 }
 
+func TestRender_WorkspaceWriteSandbox(t *testing.T) {
+	out := Render(Config{
+		Model:                 "gpt-5.4",
+		SandboxMode:           "workspace-write",
+		WorkspaceWriteNetwork: true,
+		ApprovalPolicy:        "never",
+	})
+	for _, want := range []string{
+		"sandbox_mode = \"workspace-write\"",
+		"[sandbox_workspace_write]",
+		"network_access = true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Render missing %q\n---\n%s", want, out)
+		}
+	}
+	// The table is only meaningful under workspace-write; danger-full-access omits it.
+	full := Render(Config{Model: "gpt-5.4", SandboxMode: "danger-full-access"})
+	if strings.Contains(full, "[sandbox_workspace_write]") {
+		t.Errorf("danger-full-access must not render [sandbox_workspace_write]:\n%s", full)
+	}
+}
+
 func TestRender_CustomProvider(t *testing.T) {
 	out := Render(Config{
 		Model:           "gpt-5.5",

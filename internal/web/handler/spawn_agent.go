@@ -547,8 +547,15 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	cfg := codexcfg.Config{
 		Model:           model,
 		ReasoningEffort: codexcfg.MapReasoningEffort(tuning.Effort),
-		SandboxMode:     "danger-full-access",
-		ApprovalPolicy:  "never",
+		// workspace-write confines model-run commands' writes to the agent's
+		// workspace (real OS-level enforcement that works in `codex exec` —
+		// unlike hooks, which don't fire in exec) so an agent can't tamper with
+		// secrets, the agent token, other repos, or system files outside its
+		// worktree. network_access stays on so builds / dep installs / git
+		// fetch keep working.
+		SandboxMode:           "workspace-write",
+		WorkspaceWriteNetwork: true,
+		ApprovalPolicy:        "never",
 		Provider:        prov,
 		MCPServers:      codexMCPFromMap(leanCodexMCPServers(ctx.buildOfficeMCPServers(req, sessionID, agentToken))),
 		WebSearch:       webSearch,

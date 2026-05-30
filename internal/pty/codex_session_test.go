@@ -95,7 +95,7 @@ func TestCodexExecArgs_NoApprovalFlagAndShape(t *testing.T) {
 	// --ask-for-approval; resume turns must additionally omit --sandbox and
 	// -C (the `resume` subcommand rejects them). Pin both invocations.
 	first := codexExecArgs("", "/work/dir", "do a thing")
-	wantFirst := []string{"exec", "--json", "--skip-git-repo-check", "--sandbox", "danger-full-access", "-C", "/work/dir", "do a thing"}
+	wantFirst := []string{"exec", "--json", "--skip-git-repo-check", "-C", "/work/dir", "do a thing"}
 	if len(first) != len(wantFirst) {
 		t.Fatalf("first-turn args=%v want %v", first, wantFirst)
 	}

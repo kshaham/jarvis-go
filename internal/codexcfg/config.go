@@ -44,10 +44,16 @@ type Provider struct {
 type Config struct {
 	Model           string // e.g. "gpt-5.5"
 	ReasoningEffort string // minimal|low|medium|high|xhigh ("" omits the key)
-	SandboxMode     string // e.g. "danger-full-access" (we run in a container)
+	SandboxMode     string // read-only | workspace-write | danger-full-access
 	ApprovalPolicy  string // e.g. "never"
 	Provider        *Provider
 	MCPServers      map[string]MCPServer
+
+	// WorkspaceWriteNetwork sets [sandbox_workspace_write].network_access. Only
+	// rendered when SandboxMode == "workspace-write" (the table is meaningless
+	// otherwise). true keeps outbound network (dep installs, git fetch) while
+	// confining writes to the workspace; false also blocks the network.
+	WorkspaceWriteNetwork bool
 
 	// WebSearch sets the top-level `web_search` mode: disabled|cached|live
 	// (Codex 0.135 — the search_tool feature flag is gone; this replaces it).
@@ -144,6 +150,14 @@ func Render(c Config) string {
 	}
 	if c.Personality != "" {
 		fmt.Fprintf(&b, "personality = %s\n", tomlStr(c.Personality))
+	}
+
+	// [sandbox_workspace_write] — only meaningful under workspace-write.
+	// Confines model-run commands' writes to the workspace; network_access
+	// toggles outbound network. Written as a table after the top-level keys.
+	if c.SandboxMode == "workspace-write" {
+		b.WriteString("\n[sandbox_workspace_write]\n")
+		fmt.Fprintf(&b, "network_access = %t\n", c.WorkspaceWriteNetwork)
 	}
 
 	// [agents] bounds for Codex's multi-agent fan-out. Written before the

@@ -197,6 +197,11 @@ func (s *CodexSession) worker(ctx context.Context) {
 //     previously failed every turn after the first.
 //   - Both accept --json and --skip-git-repo-check.
 //
+// The sandbox is NOT passed as a flag: it comes from config.toml's
+// sandbox_mode (codexcfg writes it) on BOTH turn shapes, so the flag can't
+// override the configured policy and the first/resume turns stay consistent.
+// cwd is set via cmd.Dir; -C is passed on the first turn for clarity.
+//
 // Keep aligned with `codex exec --help` / `codex exec resume --help`; the
 // regression test in codex_session_test.go pins both shapes.
 func codexExecArgs(resume, workingDir, prompt string) []string {
@@ -208,7 +213,6 @@ func codexExecArgs(resume, workingDir, prompt string) []string {
 		"exec",
 		"--json",
 		"--skip-git-repo-check",
-		"--sandbox", "danger-full-access", // we run in a hardened container
 		"-C", workingDir,
 		prompt,
 	}
