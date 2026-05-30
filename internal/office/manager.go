@@ -195,6 +195,7 @@ type BugTask struct {
 
 // StandupState tracks an active standup meeting.
 type StandupState struct {
+	ID           string
 	Active       bool
 	Participants []string
 	Responses    map[string]string
@@ -1038,6 +1039,7 @@ func (m *Manager) GetStandup() *StandupState {
 	transcript := make([]StandupMessage, len(m.standup.Transcript))
 	copy(transcript, m.standup.Transcript)
 	return &StandupState{
+		ID:           m.standup.ID,
 		Active:       m.standup.Active,
 		Participants: participants,
 		Responses:    responses,

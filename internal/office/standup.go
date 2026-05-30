@@ -85,6 +85,7 @@ func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 
 	standupID := uuid.New().String()
 	m.standup = &StandupState{
+		ID:           standupID,
 		Active:       true,
 		Participants: active,
 		Responses:    make(map[string]string),
