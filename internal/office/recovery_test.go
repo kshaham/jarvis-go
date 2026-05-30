@@ -176,7 +176,7 @@ func TestCheckForReflectionOpportunity_Fires(t *testing.T) {
 	})
 	// Ensure no active or pending tasks.
 
-	m.checkForReflectionOpportunity()
+	m.checkForReflectionOpportunity(m.GetRoster())
 
 	writes := store.writesForSession("sess-reflect")
 	found := false
@@ -222,7 +222,7 @@ func TestCheckForReflectionOpportunity_Cooldown(t *testing.T) {
 	agent.LastReflectionAt = time.Now()
 	agent.mu.Unlock()
 
-	m.checkForReflectionOpportunity()
+	m.checkForReflectionOpportunity(m.GetRoster())
 
 	writes := store.writesForSession("sess-cooldown-r")
 	for _, w := range writes {
@@ -247,7 +247,7 @@ func TestCheckForCuriousAgents_Sends(t *testing.T) {
 	m.RegisterAgent("sess-curious", "curious-agent", cfg)
 
 	// Agent has no tasks and no LastCuriosityAt.
-	m.checkForCuriousAgents()
+	m.checkForCuriousAgents(m.GetRoster())
 
 	writes := store.writesForSession("sess-curious")
 	found := false
@@ -272,7 +272,7 @@ func TestCheckForCuriousAgents_RespectsDisabled(t *testing.T) {
 	cfg := &TeamMemberConfig{ID: "no-curiosity", Name: "NoCuriosity", Tier: "worker"}
 	m.RegisterAgent("sess-nocuriosity", "no-curiosity", cfg)
 
-	m.checkForCuriousAgents()
+	m.checkForCuriousAgents(m.GetRoster())
 
 	writes := store.writesForSession("sess-nocuriosity")
 	for _, w := range writes {
@@ -306,7 +306,7 @@ func TestCheckBlockedTasksForLeaderTriage_Prompts(t *testing.T) {
 		AssignedAt:  time.Now().Add(-10 * time.Minute),
 	})
 
-	m.checkBlockedTasksForLeaderTriage()
+	m.checkBlockedTasksForLeaderTriage(m.GetRoster())
 
 	writes := store.writesForSession("sess-leader-triage")
 	found := false

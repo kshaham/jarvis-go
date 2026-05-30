@@ -361,6 +361,7 @@ func (m *Manager) endMeeting(meetingID string) {
 	mtg, ok := m.meetings[meetingID]
 	if ok {
 		mtg.Active = false
+		m.rebuildActiveMeetingMembersLocked()
 	}
 	m.mu.Unlock()
 
@@ -385,6 +386,7 @@ func (m *Manager) EndMeeting(meetingID string) bool {
 	mtg, ok := m.meetings[meetingID]
 	if ok {
 		mtg.Active = false
+		m.rebuildActiveMeetingMembersLocked()
 	}
 	m.mu.Unlock()
 	if ok {
@@ -405,5 +407,6 @@ func (m *Manager) startMeetingByID(id, meetingType string, participants []string
 		Active:       true,
 	}
 	m.meetings[meeting.ID] = meeting
+	m.rebuildActiveMeetingMembersLocked()
 	return meeting
 }

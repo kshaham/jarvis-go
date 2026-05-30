@@ -36,10 +36,11 @@ type Manager struct {
 	agents      map[string]*AgentState // sessionId -> state
 	configIndex map[string]string      // configId -> sessionId
 
-	fileLocks map[string]*FileLock
-	meetings  map[string]*Meeting
-	bugTasks  map[string]*BugTask
-	messages  []OfficeMessage
+	fileLocks            map[string]*FileLock
+	meetings             map[string]*Meeting
+	activeMeetingMembers map[string]bool // sessionID -> true iff in an active meeting; derived index for O(1) IsInActiveMeeting
+	bugTasks             map[string]*BugTask
+	messages             []OfficeMessage
 
 	standup *StandupState
 
@@ -83,8 +84,8 @@ type Manager struct {
 	// Which template the current team was spawned from + its resolved
 	// working directory. Exposed in the status payload so the UI can show
 	// a "current team" banner while a team is running.
-	lastTemplateID    string
-	lastWorkingDir    string
+	lastTemplateID string
+	lastWorkingDir string
 	// R3.6 · Optional PR linkage. When the operator spawned the team
 	// via the "work on PR #N" flow, the PR number lives here so the
 	// dashboard / mobile / external tooling can map PR -> session IDs
@@ -92,7 +93,7 @@ type Manager struct {
 	// linkage. Persisted on the in-memory team state only — recreated
 	// on next spawn rather than disk-persisted because PRs are
 	// short-lived and the linkage rarely outlives a team session.
-	teamPRNumber int
+	teamPRNumber      int
 	lastBrainstormAt  time.Time
 	lastWaterCoolerAt time.Time
 	triageAttempts    map[string]int       // taskID -> triage attempt count
@@ -103,6 +104,10 @@ type Manager struct {
 	// checkBlockedTasksForLeaderTriage so orphaned entries from deleted
 	// agents don't linger forever.
 	lastRecoveryAt map[string]time.Time // sessionID -> last recovery prompt time (backoff)
+
+	// Fix 4: cached handoff stale threshold to avoid per-tick file reads.
+	handoffStaleThreshold   time.Duration
+	handoffStaleThresholdAt time.Time // zero means never loaded
 
 	// Q&A primitive (cm ask). Populated lazily by AskQuestion / AnswerQuestion
 	// in questions.go. pendingQuestions is keyed by question ID;
@@ -139,13 +144,13 @@ type Manager struct {
 	leadReplyCb func(sessionID, text string)
 
 	// Telegram integration
-	telegramNotifier   TelegramNotifier
-	telegramEnabled    bool
-	updateInterval     time.Duration
-	updateTicker       *time.Ticker
-	updateStopCh       chan struct{}
-	updateStopOnce     *sync.Once
-	updateWg           sync.WaitGroup
+	telegramNotifier TelegramNotifier
+	telegramEnabled  bool
+	updateInterval   time.Duration
+	updateTicker     *time.Ticker
+	updateStopCh     chan struct{}
+	updateStopOnce   *sync.Once
+	updateWg         sync.WaitGroup
 	// telegramLifecycleMu serializes StopTelegramUpdates and
 	// startPeriodicUpdates so a start's updateWg.Add(1) can never run
 	// concurrently with a stop's updateWg.Wait() (which would be a WaitGroup
@@ -153,7 +158,7 @@ type Manager struct {
 	// m.mu so the up-to-5s Wait doesn't block the manager.
 	telegramLifecycleMu sync.Mutex
 	lastTelegramUpdate  time.Time
-	pendingLeaderQuery *PendingLeaderQuery
+	pendingLeaderQuery  *PendingLeaderQuery
 }
 
 // OfficeMessage represents a team message.
@@ -214,25 +219,26 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		config = DefaultConfig()
 	}
 	mgr := &Manager{
-		agents:             make(map[string]*AgentState),
-		configIndex:        make(map[string]string),
-		fileLocks:          make(map[string]*FileLock),
-		meetings:           make(map[string]*Meeting),
-		bugTasks:           make(map[string]*BugTask),
-		messages:           make([]OfficeMessage, 0),
-		sessions:           sessions,
-		broadcast:          broadcast,
-		auditWriter:        NewAuditWriter(config.AuditMaxEntries),
-		metrics:            NewMetrics(),
-		config:             config,
-		autoStandupEnabled: true,
-		curiosityEnabled:   true,
-		triageAttempts:     make(map[string]int),
-		lastTriageAt:       make(map[string]time.Time),
-		lastRecoveryAt:     make(map[string]time.Time),
-		pendingQuestions:   make(map[string]*Question),
-		lastAskAt:          make(map[string]time.Time),
-		events:             make(chan OfficeEvent, 64),
+		agents:               make(map[string]*AgentState),
+		configIndex:          make(map[string]string),
+		fileLocks:            make(map[string]*FileLock),
+		meetings:             make(map[string]*Meeting),
+		activeMeetingMembers: make(map[string]bool),
+		bugTasks:             make(map[string]*BugTask),
+		messages:             make([]OfficeMessage, 0),
+		sessions:             sessions,
+		broadcast:            broadcast,
+		auditWriter:          NewAuditWriter(config.AuditMaxEntries),
+		metrics:              NewMetrics(),
+		config:               config,
+		autoStandupEnabled:   true,
+		curiosityEnabled:     true,
+		triageAttempts:       make(map[string]int),
+		lastTriageAt:         make(map[string]time.Time),
+		lastRecoveryAt:       make(map[string]time.Time),
+		pendingQuestions:     make(map[string]*Question),
+		lastAskAt:            make(map[string]time.Time),
+		events:               make(chan OfficeEvent, 64),
 	}
 	mgr.loadPersistedMission()
 	mgr.loadPersistedInvariants()
@@ -347,6 +353,9 @@ func (m *Manager) abortMeetingsFacilitatedBy(sessionID, facilitatorName, reason 
 			toAbort = append(toAbort, mtg)
 			mtg.Active = false
 		}
+	}
+	if len(toAbort) > 0 {
+		m.rebuildActiveMeetingMembersLocked()
 	}
 	m.mu.Unlock()
 
@@ -539,25 +548,37 @@ func (m *Manager) GetAgentAndTouch(sessionID string) *AgentState {
 	return agent
 }
 
+// rebuildActiveMeetingMembersLocked recomputes the activeMeetingMembers
+// derived index from the live meetings map. Must be called under m.mu.Lock.
+func (m *Manager) rebuildActiveMeetingMembersLocked() {
+	// Reuse the existing map allocation when possible.
+	for k := range m.activeMeetingMembers {
+		delete(m.activeMeetingMembers, k)
+	}
+	for _, mtg := range m.meetings {
+		if mtg == nil || !mtg.Active {
+			continue
+		}
+		for _, p := range mtg.Participants {
+			m.activeMeetingMembers[p] = true
+		}
+	}
+}
+
 // IsInActiveMeeting reports whether the given session is currently
 // a participant in any active meeting (brainstorm etc). Used by the
 // idle-check loops to avoid piling curiosity / water-cooler / other
 // discretionary prompts on top of a meeting prompt the agent has
 // yet to read.
+//
+// O(1) lookup via the activeMeetingMembers derived index, which is
+// kept in sync by every meeting-mutation site (StartMeeting,
+// startMeetingByID, endMeeting, EndMeeting, abortMeetingsFacilitatedBy,
+// sweepStaleMeetings, SweepMeetings).
 func (m *Manager) IsInActiveMeeting(sessionID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, mtg := range m.meetings {
-		if !mtg.Active {
-			continue
-		}
-		for _, p := range mtg.Participants {
-			if p == sessionID {
-				return true
-			}
-		}
-	}
-	return false
+	return m.activeMeetingMembers[sessionID]
 }
 
 // Sessions returns the session store for direct PTY writes.
@@ -916,6 +937,7 @@ func (m *Manager) StartMeeting(meetingType string, participants []string) *Meeti
 		Active:       true,
 	}
 	m.meetings[meeting.ID] = meeting
+	m.rebuildActiveMeetingMembersLocked()
 	return meeting
 }
 
@@ -2044,25 +2066,44 @@ type WrapUpStatus struct {
 	AgentStatus []WrapUpAgentStatus `json:"agentStatus"`
 }
 
+// wrapUpAgentSnap is an intermediate snapshot used by GetWrapUpStatus.
+type wrapUpAgentSnap struct {
+	agent      *AgentState
+	configID   string
+	name       string
+	wrappingUp bool
+}
+
 // GetWrapUpStatus returns the current wrap-up status with per-agent details.
+// Snapshot pattern mirrors GetWhiteboard: take agent pointers + scalar fields
+// under m.mu.RLock, release, THEN call agent.ActiveTask() (which takes a.mu)
+// outside m.mu to avoid holding m.mu across N per-agent lock acquisitions.
 func (m *Manager) GetWrapUpStatus() WrapUpStatus {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	var startedAtMs int64
 	if !m.wrapUpStartedAt.IsZero() {
 		startedAtMs = m.wrapUpStartedAt.UnixMilli()
 	}
-
-	agentStatus := make([]WrapUpAgentStatus, 0, len(m.agents))
+	wrappingUp := m.wrappingUp
+	snaps := make([]wrapUpAgentSnap, 0, len(m.agents))
 	for _, agent := range m.agents {
 		if agent.Config == nil {
 			continue
 		}
-		active := agent.ActiveTask()
+		snaps = append(snaps, wrapUpAgentSnap{
+			agent:    agent,
+			configID: agent.ConfigID,
+			name:     agent.Config.Name,
+		})
+	}
+	m.mu.RUnlock()
+
+	agentStatus := make([]WrapUpAgentStatus, 0, len(snaps))
+	for _, s := range snaps {
+		active := s.agent.ActiveTask()
 		status := WrapUpAgentStatus{
-			ConfigID:      agent.ConfigID,
-			Name:          agent.Config.Name,
+			ConfigID:      s.configID,
+			Name:          s.name,
 			HasActiveTask: active != nil,
 		}
 		if active != nil {
@@ -2073,7 +2114,7 @@ func (m *Manager) GetWrapUpStatus() WrapUpStatus {
 	}
 
 	return WrapUpStatus{
-		Active:      m.wrappingUp,
+		Active:      wrappingUp,
 		StartedAt:   startedAtMs,
 		AgentStatus: agentStatus,
 	}
@@ -2211,7 +2252,8 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	meetings := m.GetMeetings()
 	locks := m.GetLocks()
 	bugTasks := m.GetBugTasks()
-	auditEntries := m.GetAuditEntries()
+	// Fix 3: copy only the last 50 entries directly, avoiding a full-ring copy.
+	recentAudit := m.auditWriter.LastN(50)
 
 	whiteboardMap := m.GetWhiteboard()
 	whiteboardNotes := make([]interface{}, 0, len(whiteboardMap))
@@ -2231,11 +2273,6 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 			// while the live tasks are mutated under a.mu.
 			"tasks": a.GetTasksCopy(),
 		})
-	}
-
-	recentAudit := auditEntries
-	if len(recentAudit) > 50 {
-		recentAudit = recentAudit[len(recentAudit)-50:]
 	}
 
 	var wrapUp interface{}
@@ -2531,6 +2568,12 @@ func (m *Manager) SweepMeetings() int {
 			swept++
 		}
 	}
+	if swept > 0 {
+		// Inactive meetings have no members in the index, so a rebuild
+		// is only needed when entries were actually deleted; in practice
+		// inactive meetings never appear in activeMeetingMembers.
+		m.rebuildActiveMeetingMembersLocked()
+	}
 	return swept
 }
 
@@ -2556,6 +2599,9 @@ func (m *Manager) sweepStaleMeetings() []string {
 			mtg.Active = false
 			stale = append(stale, mtg)
 		}
+	}
+	if len(stale) > 0 {
+		m.rebuildActiveMeetingMembersLocked()
 	}
 	m.mu.Unlock()
 

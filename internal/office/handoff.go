@@ -142,6 +142,25 @@ func loadHandoffStaleThreshold() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+// handoffStaleThresholdTTL is how long the Manager caches the handoff stale
+// threshold before re-reading the override file. The file changes rarely
+// (power-user escape hatch) so a 5-minute TTL eliminates per-tick disk reads.
+const handoffStaleThresholdTTL = 5 * time.Minute
+
+// cachedHandoffStaleThreshold returns the handoff stale threshold, re-reading
+// the override file only when the TTL has expired. Guarded by m.mu so it is
+// safe to call from the monitoring goroutine.
+func (m *Manager) cachedHandoffStaleThreshold() time.Duration {
+	m.mu.Lock()
+	if m.handoffStaleThresholdAt.IsZero() || time.Since(m.handoffStaleThresholdAt) >= handoffStaleThresholdTTL {
+		m.handoffStaleThreshold = loadHandoffStaleThreshold()
+		m.handoffStaleThresholdAt = time.Now()
+	}
+	v := m.handoffStaleThreshold
+	m.mu.Unlock()
+	return v
+}
+
 // loadPersistedHandoffs reads the audit log. Missing file = empty
 // slice. Parse failures quarantine the file the same way other
 // persisted stores do (via quarantineFile helper in persistence.go).

@@ -402,3 +402,177 @@ func TestSweepMeetings_RemovesStaleInactive(t *testing.T) {
 		t.Error("expected old-active meeting to be preserved (active meetings are never swept)")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Fix 1: meeting-membership index (O(1) IsInActiveMeeting)
+// ---------------------------------------------------------------------------
+
+// TestIsInActiveMeetingIndex verifies that IsInActiveMeeting returns the
+// correct answer via the derived activeMeetingMembers index and that the index
+// is kept in sync through StartMeeting / endMeeting / EndMeeting /
+// abortMeetingsFacilitatedBy / sweepStaleMeetings / SweepMeetings.
+func TestIsInActiveMeetingIndex(t *testing.T) {
+	m := newTestManager()
+
+	cfg1 := &TeamMemberConfig{ID: "idx-a", Name: "A", Tier: "worker"}
+	cfg2 := &TeamMemberConfig{ID: "idx-b", Name: "B", Tier: "worker"}
+	m.RegisterAgent("sess-idx-a", "idx-a", cfg1)
+	m.RegisterAgent("sess-idx-b", "idx-b", cfg2)
+
+	// Before any meeting: both agents are not in a meeting.
+	if m.IsInActiveMeeting("sess-idx-a") {
+		t.Error("expected sess-idx-a NOT in active meeting before any meeting")
+	}
+	if m.IsInActiveMeeting("sess-idx-b") {
+		t.Error("expected sess-idx-b NOT in active meeting before any meeting")
+	}
+
+	// Start a meeting with both participants.
+	mtg := m.StartMeeting("brainstorm", []string{"sess-idx-a", "sess-idx-b"})
+	if !m.IsInActiveMeeting("sess-idx-a") {
+		t.Error("expected sess-idx-a IN active meeting after StartMeeting")
+	}
+	if !m.IsInActiveMeeting("sess-idx-b") {
+		t.Error("expected sess-idx-b IN active meeting after StartMeeting")
+	}
+	if m.IsInActiveMeeting("sess-nonexistent") {
+		t.Error("expected nonexistent session NOT in active meeting")
+	}
+
+	// End the meeting via EndMeeting (public API).
+	m.EndMeeting(mtg.ID)
+	if m.IsInActiveMeeting("sess-idx-a") {
+		t.Error("expected sess-idx-a NOT in active meeting after EndMeeting")
+	}
+	if m.IsInActiveMeeting("sess-idx-b") {
+		t.Error("expected sess-idx-b NOT in active meeting after EndMeeting")
+	}
+
+	// Start another meeting, end via endMeeting (internal).
+	mtg2 := m.startMeetingByID("test-mtg-2", "brainstorm", []string{"sess-idx-a"})
+	if !m.IsInActiveMeeting("sess-idx-a") {
+		t.Error("expected sess-idx-a IN active meeting after startMeetingByID")
+	}
+	m.endMeeting(mtg2.ID)
+	if m.IsInActiveMeeting("sess-idx-a") {
+		t.Error("expected sess-idx-a NOT in active meeting after endMeeting")
+	}
+
+	// sweepStaleMeetings: inject an over-age active meeting and verify sweep clears the index.
+	m.mu.Lock()
+	m.meetings["stale-mtg"] = &Meeting{
+		ID:           "stale-mtg",
+		Type:         "brainstorm",
+		Participants: []string{"sess-idx-b"},
+		StartedAt:    time.Now().Add(-3 * time.Hour),
+		Active:       true,
+	}
+	m.rebuildActiveMeetingMembersLocked()
+	m.mu.Unlock()
+
+	if !m.IsInActiveMeeting("sess-idx-b") {
+		t.Error("expected sess-idx-b IN meeting before sweepStaleMeetings")
+	}
+	m.sweepStaleMeetings()
+	if m.IsInActiveMeeting("sess-idx-b") {
+		t.Error("expected sess-idx-b NOT in meeting after sweepStaleMeetings")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix 2: GetWrapUpStatus snapshot-then-unlock
+// ---------------------------------------------------------------------------
+
+// TestGetWrapUpStatusSnapshot verifies correctness of GetWrapUpStatus after
+// the snapshot-then-unlock refactor: per-agent ActiveTask() is now called
+// outside m.mu, so the result must still reflect live task state.
+func TestGetWrapUpStatusSnapshot(t *testing.T) {
+	m := newTestManager()
+	cfg := &TeamMemberConfig{ID: "wus-agent", Name: "WUSAgent", Role: "Backend"}
+	m.RegisterAgent("sess-wus", "wus-agent", cfg)
+
+	agent := m.GetAgent("sess-wus")
+	agent.AddTask(&Task{
+		ID:     "wus-task-1",
+		Title:  "Active task",
+		Status: TaskInProgress,
+	})
+
+	m.SetWrappingUp(true)
+	status := m.GetWrapUpStatus()
+
+	if !status.Active {
+		t.Error("expected Active=true")
+	}
+	if status.StartedAt <= 0 {
+		t.Error("expected StartedAt > 0")
+	}
+	if len(status.AgentStatus) != 1 {
+		t.Fatalf("expected 1 AgentStatus, got %d", len(status.AgentStatus))
+	}
+	s := status.AgentStatus[0]
+	if !s.HasActiveTask {
+		t.Error("expected HasActiveTask=true")
+	}
+	if s.TaskTitle == nil || *s.TaskTitle != "Active task" {
+		t.Errorf("expected TaskTitle='Active task', got %v", s.TaskTitle)
+	}
+	if s.Name != "WUSAgent" {
+		t.Errorf("expected Name='WUSAgent', got %q", s.Name)
+	}
+
+	// Wrap-up not active: AgentStatus still populated, Active=false.
+	m.SetWrappingUp(false)
+	status2 := m.GetWrapUpStatus()
+	if status2.Active {
+		t.Error("expected Active=false after SetWrappingUp(false)")
+	}
+	if len(status2.AgentStatus) != 1 {
+		t.Fatalf("expected 1 AgentStatus even when not wrapping up, got %d", len(status2.AgentStatus))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix 3: AuditWriter.LastN
+// ---------------------------------------------------------------------------
+
+// TestAuditLastN verifies that LastN returns the correct suffix of audit
+// entries in insertion order, matching what a full Entries() + slice would
+// return, without requiring a full-ring allocation.
+func TestAuditLastN(t *testing.T) {
+	const maxSize = 500
+	const pushCount = 60
+	const wantCount = 50
+
+	aw := NewAuditWriter(maxSize)
+
+	for i := 0; i < pushCount; i++ {
+		aw.Log(AuditEntry{Event: "evt", AgentName: string(rune('A' + i%26))})
+	}
+
+	got := aw.LastN(wantCount)
+	if len(got) != wantCount {
+		t.Fatalf("expected %d entries from LastN(%d), got %d", wantCount, wantCount, len(got))
+	}
+
+	// The last entry should be the most recently pushed.
+	all := aw.Entries()
+	want := all[len(all)-wantCount:]
+	for i, e := range got {
+		if e.Event != want[i].Event || e.AgentName != want[i].AgentName {
+			t.Errorf("entry[%d]: got {%q %q}, want {%q %q}", i, e.Event, e.AgentName, want[i].Event, want[i].AgentName)
+		}
+	}
+
+	// LastN with n >= total returns all.
+	allViaLastN := aw.LastN(maxSize + 1)
+	if len(allViaLastN) != pushCount {
+		t.Errorf("LastN(big) expected %d, got %d", pushCount, len(allViaLastN))
+	}
+
+	// LastN(0) returns nil/empty.
+	empty := aw.LastN(0)
+	if len(empty) != 0 {
+		t.Errorf("LastN(0) expected empty, got %d entries", len(empty))
+	}
+}

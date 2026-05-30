@@ -74,7 +74,7 @@ func TestWedged_StopsWorkingAgentPastTimeout(t *testing.T) {
 	a.LastPromptSentAt = time.Now().Add(-500 * time.Millisecond)
 	a.mu.Unlock()
 
-	m.checkForWedgedWorkingAgents()
+	m.checkForWedgedWorkingAgents(m.GetRoster())
 
 	stopped := store.stoppedSessions()
 	if len(stopped) != 1 || stopped[0] != "sess-a" {
@@ -101,7 +101,7 @@ func TestWedged_IgnoresNonWorkingAgent(t *testing.T) {
 	a.LastPromptSentAt = time.Now().Add(-500 * time.Millisecond)
 	a.mu.Unlock()
 
-	m.checkForWedgedWorkingAgents()
+	m.checkForWedgedWorkingAgents(m.GetRoster())
 
 	if stopped := store.stoppedSessions(); len(stopped) != 0 {
 		t.Fatalf("expected no stops for non-working agent, got %v", stopped)
@@ -119,7 +119,7 @@ func TestWedged_IgnoresWithinTimeout(t *testing.T) {
 	a.LastPromptSentAt = time.Now() // fresh
 	a.mu.Unlock()
 
-	m.checkForWedgedWorkingAgents()
+	m.checkForWedgedWorkingAgents(m.GetRoster())
 
 	if stopped := store.stoppedSessions(); len(stopped) != 0 {
 		t.Fatalf("expected no stop within timeout, got %v", stopped)
@@ -137,7 +137,7 @@ func TestWedged_DisabledWhenTimeoutZero(t *testing.T) {
 	a.LastPromptSentAt = time.Now().Add(-10 * time.Minute)
 	a.mu.Unlock()
 
-	m.checkForWedgedWorkingAgents()
+	m.checkForWedgedWorkingAgents(m.GetRoster())
 
 	if stopped := store.stoppedSessions(); len(stopped) != 0 {
 		t.Fatalf("expected no stop when timeout is 0, got %v", stopped)

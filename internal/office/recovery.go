@@ -83,6 +83,12 @@ func (m *Manager) StartIdleMonitoring() {
 					}
 				}()
 
+				// Fix 5: snapshot the roster once per tick so sub-functions
+				// that each called GetRoster() (RLock + alloc) can share
+				// a single snapshot. Agents are live pointers; they are
+				// not freed mid-tick, so reuse within this tick is safe.
+				roster := m.GetRoster()
+
 				m.checkSessionHealth()
 				m.CleanupExpiredLocks()
 				m.SweepBugTasks()
@@ -96,17 +102,23 @@ func (m *Manager) StartIdleMonitoring() {
 				m.checkUnacknowledgedTasks()
 				m.checkStaleInProgressTasks()
 				m.checkForStuckAgents()
-				m.checkForWedgedWorkingAgents()
-				m.CheckForIdleAgents()
-				m.checkForCuriousAgents()
-				m.checkForReflectionOpportunity()
-				m.checkBlockedTasksForLeaderTriage()
+				m.checkForWedgedWorkingAgents(roster)
+				m.checkForIdleAgents(roster)
+				m.checkForCuriousAgents(roster)
+				m.checkForReflectionOpportunity(roster)
+				m.checkBlockedTasksForLeaderTriage(roster)
 				// R29 · Auto-reject pending handoffs whose receiver has
 				// left the roster. Threshold can be overridden via
 				// ~/.jarvis/office-memory/handoff-stale-seconds.txt.
-				m.SweepStaleHandoffs(loadHandoffStaleThreshold())
-				m.PersistMetrics()
-				m.maybeTriggerWaterCoolerChat()
+				m.SweepStaleHandoffs(m.cachedHandoffStaleThreshold())
+				// Fix 6: persist metrics every 5th tick (~75 s) instead
+				// of every tick to avoid a synchronous disk write on each
+				// idle-ticker iteration. Metrics are advisory; occasional
+				// skips are fine.
+				if tickCount%5 == 0 {
+					m.PersistMetrics()
+				}
+				m.maybeTriggerWaterCoolerChat(roster)
 				// Ping the announced dev URL; after 3 consecutive failures
 				// the health checker auto-clears the slot so teammates
 				// stop being pointed at a dead server.
@@ -640,7 +652,7 @@ func (m *Manager) checkSessionHealth() {
 // Rarely trips in healthy operation. When it does, the agent gets
 // stopped the same way an operator-initiated kill does, and an
 // office:agentIdleStopped event fires for the dashboard.
-func (m *Manager) checkForWedgedWorkingAgents() {
+func (m *Manager) checkForWedgedWorkingAgents(roster []*AgentState) {
 	m.mu.RLock()
 	cfg := m.config
 	sessions := m.sessions
@@ -657,7 +669,7 @@ func (m *Manager) checkForWedgedWorkingAgents() {
 		return
 	}
 
-	for _, agent := range m.GetRoster() {
+	for _, agent := range roster {
 		if agent == nil || agent.Config == nil {
 			continue
 		}
@@ -1038,7 +1050,15 @@ func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDurat
 
 // CheckForIdleAgents looks for agents with empty task queues and no active work,
 // then attempts to find them new work via brainstorm or self-replenishment.
+// This is the public interface method (implements claudehooks.AgentRegistry);
+// it fetches the roster itself. The tick body calls checkForIdleAgents(roster)
+// with the pre-snapshotted roster to avoid redundant GetRoster() calls.
 func (m *Manager) CheckForIdleAgents() {
+	m.checkForIdleAgents(m.GetRoster())
+}
+
+// checkForIdleAgents is the internal implementation, accepting a pre-snapshotted roster.
+func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 	if m.IsWrappingUp() {
 		return // Don't assign new work during wrap-up
 	}
@@ -1051,7 +1071,6 @@ func (m *Manager) CheckForIdleAgents() {
 	m.mu.RLock()
 	sessions := m.sessions
 	m.mu.RUnlock()
-	roster := m.GetRoster()
 	for _, agent := range roster {
 		if agent.Config == nil {
 			continue
@@ -1288,9 +1307,7 @@ DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, roleName)
 // checkBlockedTasksForLeaderTriage finds blocked tasks and asks a strategic-tier
 // agent (leader) to triage them. After BlockedTriageMaxAttempts failed attempts,
 // the task is auto-failed.
-func (m *Manager) checkBlockedTasksForLeaderTriage() {
-	roster := m.GetRoster()
-
+func (m *Manager) checkBlockedTasksForLeaderTriage(roster []*AgentState) {
 	m.mu.RLock()
 	sessions := m.sessions
 	maxAttempts := m.config.BlockedTriageMaxAttempts
@@ -1300,16 +1317,24 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 		return
 	}
 
-	// Collect the set of live task IDs across every agent so we can reclaim
-	// triage-map entries for tasks that no longer exist (completed, failed,
-	// or owned by a deleted agent). This is a defense in depth -- the
-	// direct path in UpdateTaskStatus only fires when a known task changes
-	// status, but drifts from agent deletions still happen.
+	// Fix 5: call GetTasks() once per agent and reuse for both the sweep
+	// (building liveTaskIDs) and the per-task triage loop, eliminating the
+	// second GetTasks() call that existed in the old two-pass design.
+	type agentTasks struct {
+		agent *AgentState
+		tasks []*Task
+	}
+	snaps := make([]agentTasks, 0, len(roster))
 	liveTaskIDs := make(map[string]struct{}, 32)
 	for _, agent := range roster {
-		for _, t := range agent.GetTasks() {
-			// Only blocked tasks participate in triage; prune anything that
-			// moved on.
+		tasks := agent.GetTasks()
+		snaps = append(snaps, agentTasks{agent: agent, tasks: tasks})
+		// Collect the set of live blocked task IDs so we can reclaim
+		// triage-map entries for tasks that no longer exist (completed, failed,
+		// or owned by a deleted agent). This is a defense in depth -- the
+		// direct path in UpdateTaskStatus only fires when a known task changes
+		// status, but drifts from agent deletions still happen.
+		for _, t := range tasks {
 			if t.Status == TaskBlocked {
 				liveTaskIDs[t.ID] = struct{}{}
 			}
@@ -1317,14 +1342,14 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 	}
 	m.SweepTriageMaps(liveTaskIDs)
 
-	for _, agent := range roster {
+	for _, snap := range snaps {
+		agent := snap.agent
 		if agent.Config == nil {
 			continue
 		}
 		agentName := agent.Config.Name
 
-		tasks := agent.GetTasks()
-		for _, task := range tasks {
+		for _, task := range snap.tasks {
 			if task.Status != TaskBlocked {
 				continue
 			}
@@ -1405,7 +1430,7 @@ type CuriosityEvent struct {
 func (CuriosityEvent) officeEventType() string { return "curiosityTriggered" }
 
 // checkForCuriousAgents sends curiosity prompts to idle agents with no tasks.
-func (m *Manager) checkForCuriousAgents() {
+func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 	if m.IsWrappingUp() {
 		return
 	}
@@ -1419,7 +1444,6 @@ func (m *Manager) checkForCuriousAgents() {
 		return
 	}
 
-	roster := m.GetRoster()
 	for _, agent := range roster {
 		if agent.Config == nil {
 			continue
@@ -1508,7 +1532,7 @@ func (WaterCoolerEvent) officeEventType() string { return "waterCoolerChat" }
 
 // maybeTriggerWaterCoolerChat has a 30% chance of pairing two idle agents
 // for an informal chat about the codebase. Respects a cooldown period.
-func (m *Manager) maybeTriggerWaterCoolerChat() {
+func (m *Manager) maybeTriggerWaterCoolerChat(roster []*AgentState) {
 	if m.IsWrappingUp() {
 		return
 	}
@@ -1544,7 +1568,6 @@ func (m *Manager) maybeTriggerWaterCoolerChat() {
 
 	// Find idle agents (no active task, no pending tasks, NOT mid-turn,
 	// NOT already in a brainstorm or other active meeting).
-	roster := m.GetRoster()
 	var idle []*AgentState
 	for _, agent := range roster {
 		if agent.ActiveTask() != nil || agent.PendingTaskCount() != 0 {
@@ -1627,7 +1650,7 @@ func (ReflectionEvent) officeEventType() string { return "reflectionTriggered" }
 
 // checkForReflectionOpportunity sends a reflection prompt to agents that
 // just completed all their tasks and haven't reflected recently.
-func (m *Manager) checkForReflectionOpportunity() {
+func (m *Manager) checkForReflectionOpportunity(roster []*AgentState) {
 	if m.IsWrappingUp() {
 		return
 	}
@@ -1642,7 +1665,6 @@ func (m *Manager) checkForReflectionOpportunity() {
 		return
 	}
 
-	roster := m.GetRoster()
 	for _, agent := range roster {
 		if agent.Config == nil {
 			continue
