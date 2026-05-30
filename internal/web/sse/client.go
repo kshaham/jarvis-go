@@ -106,6 +106,11 @@ func (c *Client) MatchesSubscription(event string) bool {
 	return false
 }
 
+// maxFlushBatch is the maximum number of queued events written before a
+// single Flush() call in writePump. Keeping it small (4) bounds latency
+// while coalescing flush syscalls when events arrive in bursts.
+const maxFlushBatch = 4
+
 func (c *Client) writePump() {
 	defer close(c.done)
 
@@ -118,17 +123,29 @@ func (c *Client) writePump() {
 			if !ok {
 				return
 			}
-			// Include id: line so browsers track Last-Event-ID automatically
-			// on reconnect. Events broadcast before ID assignment (init)
-			// have ID=0 and omit the id line.
-			var err error
-			if msg.ID > 0 {
-				_, err = fmt.Fprintf(c.w, "id: %d\nevent: %s\ndata: %s\n\n", msg.ID, msg.Event, msg.Data)
-			} else {
-				_, err = fmt.Fprintf(c.w, "event: %s\ndata: %s\n\n", msg.Event, msg.Data)
-			}
-			if err != nil {
+			// Write the first event from the blocking select, then drain any
+			// additional queued events (non-blocking) up to maxFlushBatch before
+			// issuing a single Flush. This coalesces flush syscalls on burst
+			// traffic while never dropping events and preserving FIFO order.
+			// Fix 2c: batch flush to reduce per-event Flush() syscall overhead.
+			if err := c.writeEvent(msg); err != nil {
 				return
+			}
+			for i := 1; i < maxFlushBatch; i++ {
+				select {
+				case next, ok2 := <-c.ch:
+					if !ok2 {
+						// Channel closed mid-batch: flush what we have and exit.
+						c.flusher.Flush()
+						return
+					}
+					if err := c.writeEvent(next); err != nil {
+						return
+					}
+				default:
+					// No more events queued right now — stop draining.
+					i = maxFlushBatch // break inner loop
+				}
 			}
 			c.flusher.Flush()
 
@@ -142,4 +159,18 @@ func (c *Client) writePump() {
 			return
 		}
 	}
+}
+
+// writeEvent formats a single SSE event frame. Does NOT flush.
+func (c *Client) writeEvent(msg EventMessage) error {
+	// Include id: line so browsers track Last-Event-ID automatically on
+	// reconnect. Events broadcast before ID assignment (init) have ID=0
+	// and omit the id line.
+	var err error
+	if msg.ID > 0 {
+		_, err = fmt.Fprintf(c.w, "id: %d\nevent: %s\ndata: %s\n\n", msg.ID, msg.Event, msg.Data)
+	} else {
+		_, err = fmt.Fprintf(c.w, "event: %s\ndata: %s\n\n", msg.Event, msg.Data)
+	}
+	return err
 }

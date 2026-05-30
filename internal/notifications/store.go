@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,9 +20,10 @@ var ErrNotFound = errors.New("notification route not found")
 // Store persists Route entries to a single JSON file with backup rotation
 // mirroring internal/scheduler/store.go. Safe for concurrent use.
 type Store struct {
-	mu     sync.RWMutex
-	path   string
-	routes map[string]*Route
+	mu         sync.RWMutex
+	path       string
+	routes     map[string]*Route
+	routeCount atomic.Int64 // len(routes); updated under mu, read lock-free
 }
 
 // NewStore opens or creates the backing file and loads any persisted routes.
@@ -34,7 +36,7 @@ func NewStore(path string) *Store {
 	return s
 }
 
-// List returns a stable snapshot sorted by Name.
+// List returns a stable snapshot sorted by Name. Used by the operator UI.
 func (s *Store) List() []*Route {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -44,6 +46,26 @@ func (s *Store) List() []*Route {
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// Len returns the number of routes without allocating. Safe for concurrent use
+// without holding mu (uses the atomic counter maintained on mutations).
+func (s *Store) Len() int64 {
+	return s.routeCount.Load()
+}
+
+// routesSnapshot returns an unsorted copy of the routes for event matching.
+// Matching does not require order; keeping this unsorted avoids a sort.Slice
+// on every broadcast.
+func (s *Store) routesSnapshot() []*Route {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*Route, 0, len(s.routes))
+	for _, r := range s.routes {
+		cp := *r
+		out = append(out, &cp)
+	}
 	return out
 }
 
@@ -72,6 +94,7 @@ func (s *Store) Create(r Route) *Route {
 	defer s.mu.Unlock()
 	stored := r
 	s.routes[stored.ID] = &stored
+	s.routeCount.Store(int64(len(s.routes)))
 	s.save()
 	cp := stored
 	return &cp
@@ -103,6 +126,7 @@ func (s *Store) Delete(id string) error {
 		return ErrNotFound
 	}
 	delete(s.routes, id)
+	s.routeCount.Store(int64(len(s.routes)))
 	s.save()
 	return nil
 }
@@ -138,6 +162,7 @@ func (s *Store) load() {
 	for _, r := range list {
 		s.routes[r.ID] = r
 	}
+	s.routeCount.Store(int64(len(s.routes)))
 	s.mu.Unlock()
 }
 

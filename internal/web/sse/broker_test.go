@@ -1,8 +1,11 @@
 package sse
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -155,12 +158,13 @@ func TestSubscriptionIndex_DirectMatch(t *testing.T) {
 	b.indexClient(c3)
 	b.indexClient(c4)
 
-	got := b.matchingClients("session:created")
-	if len(got) != 3 {
-		t.Errorf("expected 3 matches (2 exact + wildcard), got %d", len(got))
+	pp := b.matchingClients("session:created")
+	defer putClientSlice(pp)
+	if len(*pp) != 3 {
+		t.Errorf("expected 3 matches (2 exact + wildcard), got %d", len(*pp))
 	}
 	// c4 must not appear.
-	for _, c := range got {
+	for _, c := range *pp {
 		if c == c4 {
 			t.Errorf("c4 subscribed only to office:standup; should not match session:created")
 		}
@@ -176,9 +180,10 @@ func TestSubscriptionIndex_PrefixMatch(t *testing.T) {
 	b.indexClient(prefixClient)
 	b.indexClient(otherClient)
 
-	got := b.matchingClients("session:terminal")
-	if len(got) != 1 || got[0] != prefixClient {
-		t.Errorf("expected only prefix client to match, got %v", got)
+	pp := b.matchingClients("session:terminal")
+	defer putClientSlice(pp)
+	if len(*pp) != 1 || (*pp)[0] != prefixClient {
+		t.Errorf("expected only prefix client to match, got %v", *pp)
 	}
 }
 
@@ -189,13 +194,17 @@ func TestSubscriptionIndex_UnindexRemovesClient(t *testing.T) {
 	b.indexClient(c)
 	b.unindexClient(c)
 
-	got := b.matchingClients("session:created")
-	if len(got) != 0 {
-		t.Errorf("unindexed client should not appear in matches, got %d", len(got))
+	pp1 := b.matchingClients("session:created")
+	n1 := len(*pp1)
+	putClientSlice(pp1)
+	if n1 != 0 {
+		t.Errorf("unindexed client should not appear in matches, got %d", n1)
 	}
-	got = b.matchingClients("office:standup")
-	if len(got) != 0 {
-		t.Errorf("unindexed client should not appear in matches, got %d", len(got))
+	pp2 := b.matchingClients("office:standup")
+	n2 := len(*pp2)
+	putClientSlice(pp2)
+	if n2 != 0 {
+		t.Errorf("unindexed client should not appear in matches, got %d", n2)
 	}
 }
 
@@ -216,5 +225,65 @@ func TestPostBroadcastHook_FiresOncePerBroadcast(t *testing.T) {
 	}
 	if received[0] != "test:one" || received[1] != "test:two" {
 		t.Errorf("unexpected event order: %v", received)
+	}
+}
+
+// TestSubscriptionIndex_NoDoubleDelivery verifies that a client subscribed to
+// both a prefix and an exact event (which could match the same broadcast) is
+// delivered the event exactly once.
+func TestSubscriptionIndex_NoDoubleDelivery(t *testing.T) {
+	b := NewBroker(10, 10)
+	// This client has both a prefix and an exact subscription that both match
+	// "session:created". The dedup logic must prevent double-delivery.
+	c := &Client{subscriptions: []string{"session:*", "session:created"}}
+	b.indexClient(c)
+
+	pp := b.matchingClients("session:created")
+	defer putClientSlice(pp)
+	if len(*pp) != 1 {
+		t.Errorf("expected exactly 1 delivery (no double-deliver), got %d", len(*pp))
+	}
+}
+
+// TestBroker_ConcurrentBroadcastSubscribe exercises concurrent Broadcast calls
+// interleaved with Subscribe/unsubscribe to catch data races under -race.
+// Clients disconnect via context cancellation (not CloseAllClients) so we
+// avoid the known pre-existing race between Send recovery and close(ch).
+func TestBroker_ConcurrentBroadcastSubscribe(t *testing.T) {
+	b := NewBroker(50, 10)
+
+	const broadcasts = 200
+	const subscribers = 5
+
+	var wg sync.WaitGroup
+	var received atomic.Int64
+
+	// Goroutines that each subscribe via a cancellable context, then disconnect.
+	for i := 0; i < subscribers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recorder := httptest.NewRecorder()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+			defer cancel()
+			req := httptest.NewRequest("GET", "/api/events", nil).WithContext(ctx)
+			// Subscribe blocks until context expires; no data races with Broadcast.
+			b.Subscribe(recorder, req)
+		}()
+	}
+
+	// Concurrent broadcaster.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < broadcasts; i++ {
+			b.Broadcast("test:race", map[string]int{"i": i})
+			received.Add(1)
+		}
+	}()
+
+	wg.Wait()
+	if n := received.Load(); n != broadcasts {
+		t.Errorf("expected %d broadcasts, counted %d", broadcasts, n)
 	}
 }

@@ -88,10 +88,17 @@ func (r *Router) OnEvent(event string, data json.RawMessage) {
 	if r.stopped.Load() {
 		return
 	}
-	// Decode payload loosely so match-on-session-id can inspect it. Errors
-	// here are non-fatal -- we still match on event type even if the payload
-	// doesn't unmarshal -- but log them so corrupt broker payloads are
-	// discoverable rather than silent.
+	// Fix 1a: skip ALL per-event work (unmarshal, snapshot, sort) when no
+	// routes are registered. The atomic read is a few nanoseconds; the work
+	// it avoids is O(routes) allocations + sort + json.Unmarshal.
+	if r.store.Len() == 0 {
+		return
+	}
+
+	// Fix 1c: gate the unmarshal behind the count>0 check above so it only
+	// runs when at least one route exists. Errors are non-fatal -- we still
+	// match on event type even if the payload doesn't unmarshal -- but we log
+	// them so corrupt broker payloads are discoverable rather than silent.
 	var payload map[string]interface{}
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &payload); err != nil {
@@ -101,7 +108,9 @@ func (r *Router) OnEvent(event string, data json.RawMessage) {
 
 	sessionID := extractSessionID(payload)
 	now := time.Now()
-	for _, route := range r.store.List() {
+	// Fix 1b: use routesSnapshot (unsorted) instead of List (sorted). Matching
+	// does not require order; sort only matters for the operator UI list.
+	for _, route := range r.store.routesSnapshot() {
 		if !route.Enabled {
 			continue
 		}

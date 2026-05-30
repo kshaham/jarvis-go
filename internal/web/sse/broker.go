@@ -12,6 +12,17 @@ import (
 	"github.com/kshaham/jarvis/internal/metrics"
 )
 
+// clientSlicePool reduces per-broadcast allocations for the fan-out slice
+// built in matchingClients. Each pool entry is a *[]*Client whose backing
+// array is reused across broadcasts. Callers borrow via matchingClients and
+// must call putClientSlice to return the slice when fan-out is complete.
+var clientSlicePool = sync.Pool{
+	New: func() interface{} {
+		s := make([]*Client, 0, 32)
+		return &s
+	},
+}
+
 // replayBufferSize bounds how many recent events are kept for replay to
 // reconnecting clients. 200 covers ~60s of typical event throughput.
 const replayBufferSize = 200
@@ -59,11 +70,12 @@ type Broker struct {
 	prefixIdx       map[string]map[*Client]struct{}
 	wildcardClients map[*Client]struct{}
 
-	// postBroadcastHooks fire after every successful Broadcast. Used by the
-	// notifications subsystem to fan events out to user-configured routes
-	// (Telegram, webhooks, log). Hooks run outside the mutex so slow
-	// webhook calls don't block the SSE hot path.
-	postBroadcastHooks []func(EventMessage)
+	// postBroadcastHooks stores a []func(EventMessage) in an atomic.Value.
+	// Hooks are registered at startup and never removed, so the Value is
+	// written once (or a small number of times); reads on the broadcast hot
+	// path are lock-free and allocation-free (no per-broadcast copy needed).
+	// Fix 2b: replaced the per-broadcast slice copy with an atomic.Value load.
+	postBroadcastHooks atomic.Value // stores []func(EventMessage)
 }
 
 // NewBroker creates a new SSE broker.
@@ -129,46 +141,85 @@ func (b *Broker) unindexClient(c *Client) {
 }
 
 // matchingClients collects every client interested in `event` using the
-// index. Returns a fresh slice so callers can safely release b.mu before
-// fanning out sends. Caller must hold b.mu (RLock is fine).
-func (b *Broker) matchingClients(event string) []*Client {
-	capHint := len(b.wildcardClients)
-	if set, ok := b.exactIdx[event]; ok {
-		capHint += len(set)
-	}
+// index. Returns a *[]*Client borrowed from clientSlicePool; the caller MUST
+// return it via putClientSlice after fan-out so the backing array is reused.
+// Caller must hold b.mu (RLock is fine).
+//
+// Fix 2a: the backing array is recycled via clientSlicePool. The dedup map
+// (seen) is only allocated when multiple non-empty buckets overlap; in the
+// common case (all clients are wildcard-only or subscription-only) no map is
+// allocated.
+func (b *Broker) matchingClients(event string) *[]*Client {
+	pp := clientSlicePool.Get().(*[]*Client)
+	out := (*pp)[:0] // reset length, keep backing array
+
+	exactSet := b.exactIdx[event]
+	var prefixSets []map[*Client]struct{}
 	for prefix, set := range b.prefixIdx {
 		if strings.HasPrefix(event, prefix) {
-			capHint += len(set)
+			prefixSets = append(prefixSets, set)
 		}
 	}
-	out := make([]*Client, 0, capHint)
-	seen := make(map[*Client]struct{}, capHint)
-	for c := range b.wildcardClients {
-		if _, dup := seen[c]; !dup {
+
+	// Build dedup set only when buckets can overlap. A client can appear in
+	// both wildcardClients and exactIdx/prefixIdx (a wildcard client can also
+	// match an exact subscription); without dedup we would double-deliver.
+	// Correctness is non-negotiable.
+	needDedup := (len(b.wildcardClients) > 0 && (len(exactSet) > 0 || len(prefixSets) > 0)) ||
+		(len(exactSet) > 0 && len(prefixSets) > 0)
+
+	if needDedup {
+		capHint := len(b.wildcardClients) + len(exactSet)
+		for _, ps := range prefixSets {
+			capHint += len(ps)
+		}
+		seen := make(map[*Client]struct{}, capHint)
+		for c := range b.wildcardClients {
 			seen[c] = struct{}{}
 			out = append(out, c)
 		}
-	}
-	if set, ok := b.exactIdx[event]; ok {
-		for c := range set {
+		for c := range exactSet {
 			if _, dup := seen[c]; !dup {
 				seen[c] = struct{}{}
 				out = append(out, c)
 			}
 		}
-	}
-	for prefix, set := range b.prefixIdx {
-		if !strings.HasPrefix(event, prefix) {
-			continue
+		for _, ps := range prefixSets {
+			for c := range ps {
+				if _, dup := seen[c]; !dup {
+					seen[c] = struct{}{}
+					out = append(out, c)
+				}
+			}
 		}
-		for c := range set {
-			if _, dup := seen[c]; !dup {
-				seen[c] = struct{}{}
+	} else {
+		// No overlap possible — skip the dedup map.
+		for c := range b.wildcardClients {
+			out = append(out, c)
+		}
+		for c := range exactSet {
+			out = append(out, c)
+		}
+		for _, ps := range prefixSets {
+			for c := range ps {
 				out = append(out, c)
 			}
 		}
 	}
-	return out
+
+	*pp = out
+	return pp
+}
+
+// putClientSlice returns a pooled container to the pool.
+// Nils out stored pointers so the pool does not retain *Client references.
+func putClientSlice(pp *[]*Client) {
+	s := *pp
+	for i := range s {
+		s[i] = nil
+	}
+	*pp = s[:0]
+	clientSlicePool.Put(pp)
 }
 
 // storeInReplayBuffer adds an event to the circular replay buffer.
@@ -350,18 +401,21 @@ func (b *Broker) Broadcast(event string, data interface{}) {
 
 	b.mu.Lock()
 	b.storeInReplayBuffer(msg)
-	clients := b.matchingClients(event)
-	hooks := make([]func(EventMessage), len(b.postBroadcastHooks))
-	copy(hooks, b.postBroadcastHooks)
+	pp := b.matchingClients(event) // returns pooled *[]*Client
 	b.mu.Unlock()
 
 	metrics.SSEEventsBroadcast.WithLabelValues(eventPrefix(event)).Inc()
 
-	for _, c := range clients {
+	for _, c := range *pp {
 		c.Send(msg)
 	}
-	for _, h := range hooks {
-		h(msg)
+	putClientSlice(pp) // return backing array to pool
+
+	// Fix 2b: read hooks via atomic.Value — no allocation, no lock.
+	if v := b.postBroadcastHooks.Load(); v != nil {
+		for _, h := range v.([]func(EventMessage)) {
+			h(msg)
+		}
 	}
 }
 
@@ -383,18 +437,21 @@ func (b *Broker) BroadcastPreSerialized(msg EventMessage) {
 
 	b.mu.Lock()
 	b.storeInReplayBuffer(msg)
-	clients := b.matchingClients(msg.Event)
-	hooks := make([]func(EventMessage), len(b.postBroadcastHooks))
-	copy(hooks, b.postBroadcastHooks)
+	pp := b.matchingClients(msg.Event) // returns pooled *[]*Client
 	b.mu.Unlock()
 
 	metrics.SSEEventsBroadcast.WithLabelValues(eventPrefix(msg.Event)).Inc()
 
-	for _, c := range clients {
+	for _, c := range *pp {
 		c.Send(msg)
 	}
-	for _, h := range hooks {
-		h(msg)
+	putClientSlice(pp) // return backing array to pool
+
+	// Fix 2b: read hooks via atomic.Value — no allocation, no lock.
+	if v := b.postBroadcastHooks.Load(); v != nil {
+		for _, h := range v.([]func(EventMessage)) {
+			h(msg)
+		}
 	}
 }
 
@@ -403,9 +460,21 @@ func (b *Broker) BroadcastPreSerialized(msg EventMessage) {
 // broker mutex so they can do arbitrary work without blocking other
 // broadcasts, but they must NOT query broker state -- they get the event
 // message as their input and nothing else.
+//
+// Fix 2b: hooks are stored in an atomic.Value so Broadcast reads them with a
+// single load instead of copying the slice under b.mu on every broadcast.
+// AddPostBroadcastHook is called only at startup (typically once) so the
+// write path (append + Store) is not performance-sensitive.
 func (b *Broker) AddPostBroadcastHook(fn func(EventMessage)) {
 	b.mu.Lock()
-	b.postBroadcastHooks = append(b.postBroadcastHooks, fn)
+	var prev []func(EventMessage)
+	if v := b.postBroadcastHooks.Load(); v != nil {
+		prev = v.([]func(EventMessage))
+	}
+	next := make([]func(EventMessage), len(prev)+1)
+	copy(next, prev)
+	next[len(prev)] = fn
+	b.postBroadcastHooks.Store(next)
 	b.mu.Unlock()
 }
 
