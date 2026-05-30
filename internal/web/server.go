@@ -626,8 +626,10 @@ func (s *Server) setupRouter() chi.Router {
 	// each job start so key changes take effect without a restart, and
 	// delegates voice selection to the office manager's per-agent config.
 	voiceFor := func(sid string, i int) string {
-		if a := s.officeManager.GetAgent(sid); a != nil && a.Config != nil && tts.IsValidVoice(a.Config.Voice) {
-			return a.Config.Voice
+		if a := s.officeManager.GetAgent(sid); a != nil {
+			if v := a.GetVoice(); tts.IsValidVoice(v) {
+				return v
+			}
 		}
 		return tts.DefaultVoiceForIndex(i)
 	}

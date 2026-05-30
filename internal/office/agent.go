@@ -680,6 +680,19 @@ func (a *AgentState) SetVoice(voice string) {
 	a.mu.Unlock()
 }
 
+// GetVoice returns the member's TTS voice under the mutex. Use this rather
+// than reading a.Config.Voice directly from another goroutine -- SetVoice
+// writes it under the lock, so an unguarded cross-goroutine read is a data
+// race.
+func (a *AgentState) GetVoice() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.Config == nil {
+		return ""
+	}
+	return a.Config.Voice
+}
+
 // RemoveTask removes a task by ID and returns it, or nil if not found.
 func (a *AgentState) RemoveTask(taskID string) *Task {
 	a.mu.Lock()

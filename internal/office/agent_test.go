@@ -209,3 +209,19 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected 30min lock TTL, got %v", cfg.FileLockTTL)
 	}
 }
+
+func TestAgentStateGetVoiceUnderLock(t *testing.T) {
+	a := &AgentState{Config: &TeamMemberConfig{}}
+	if a.GetVoice() != "" {
+		t.Fatalf("expected empty voice initially")
+	}
+	a.SetVoice("marin")
+	if got := a.GetVoice(); got != "marin" {
+		t.Fatalf("GetVoice = %q, want marin", got)
+	}
+	// nil Config must not panic.
+	var b AgentState
+	if b.GetVoice() != "" {
+		t.Fatalf("nil-config GetVoice should be empty")
+	}
+}
