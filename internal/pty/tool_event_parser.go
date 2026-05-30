@@ -122,10 +122,14 @@ func (t *toolEventTracker) observeUser(raw []byte) []toolInvocationEmit {
 
 // reset clears any pending tool_use entries — called at turn
 // boundaries so stale pairings don't leak across turns.
+// Uses clear() to reuse the existing map allocation rather than
+// reallocating; safe because no caller holds a reference to the
+// map itself (observeAssistant/observeUser work with values, not
+// the map pointer).
 func (t *toolEventTracker) reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.pending = map[string]*toolPending{}
+	clear(t.pending)
 }
 
 type toolInvocationEmit struct {

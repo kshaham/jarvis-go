@@ -512,7 +512,7 @@ func (s *CodexSession) setIdle() {
 	s.mu.Lock()
 	s.isWorking = false
 	s.status = StatusIdle
-	s.activeTools = make(map[string]bool)
+	clear(s.activeTools)
 	s.mu.Unlock()
 }
 
@@ -551,11 +551,14 @@ func (s *CodexSession) emitEvent(event SessionEvent) {
 	}
 }
 
+// notifyOutputObservers calls all registered output observers.
+// Clones into a []func(string) slice (same pattern as session.go) so
+// the hot path allocates a slice header rather than a full map.
 func (s *CodexSession) notifyOutputObservers(data string) {
 	s.observerMu.Lock()
-	observers := make(map[int]func(string), len(s.outputObservers))
-	for k, v := range s.outputObservers {
-		observers[k] = v
+	observers := make([]func(string), 0, len(s.outputObservers))
+	for _, fn := range s.outputObservers {
+		observers = append(observers, fn)
 	}
 	s.observerMu.Unlock()
 	for _, fn := range observers {

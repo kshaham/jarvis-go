@@ -162,9 +162,9 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		fromPRNumber:                       config.FromPRNumber,
 		chromeEnabled:                      config.ChromeEnabled,
 		channels:                           sanitizeChannels(config.Channels, "sdk:"+id),
-		outputObservers:    make(map[int]func(string)),
-		activeTools:        make(map[string]bool),
-		toolTracker:        newToolEventTracker(),
+		outputObservers:                    make(map[int]func(string)),
+		activeTools:                        make(map[string]bool),
+		toolTracker:                        newToolEventTracker(),
 	}
 }
 
@@ -463,7 +463,7 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 				s.claudeSessionID = event.Result.SessionID
 				s.isWorking = false
 				s.status = StatusIdle
-				s.activeTools = make(map[string]bool)
+				clear(s.activeTools)
 				currentCost := s.totalCostUSD
 				// Best-effort model name: pick the key with the largest usage
 				// out of ModelUsages. Multi-model turns are rare; in the common
@@ -683,11 +683,13 @@ func (s *SDKSession) DroppedEvents() uint64 {
 }
 
 // notifyOutputObservers calls all registered output observers.
+// Clones into a []func(string) slice (same pattern as session.go) so
+// the hot path allocates a slice header rather than a full map.
 func (s *SDKSession) notifyOutputObservers(data string) {
 	s.observerMu.Lock()
-	observers := make(map[int]func(string), len(s.outputObservers))
-	for k, v := range s.outputObservers {
-		observers[k] = v
+	observers := make([]func(string), 0, len(s.outputObservers))
+	for _, fn := range s.outputObservers {
+		observers = append(observers, fn)
 	}
 	s.observerMu.Unlock()
 	for _, fn := range observers {

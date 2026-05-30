@@ -34,6 +34,19 @@ const (
 	eventChannelSize   = 256
 )
 
+// readBufPool recycles 32 KB byte-slice buffers across PTY reads.
+// The pool holds *[]byte so the pointer is stable and we can Put the
+// same pointer we Got. The buffer is only pooled AFTER its contents
+// have been copied into a Go string (string((*buf)[:n])), which makes
+// a heap copy of the bytes — at that point the slice backing array is
+// no longer referenced and is safe to return to the pool.
+var readBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, readBufSize)
+		return &b
+	},
+}
+
 // workingIndicators is a package-level slice to avoid allocation per call.
 var workingIndicators = []string{
 	"Thinking", "Writing", "Reading", "Running",
@@ -96,6 +109,12 @@ type Session struct {
 	outputObservers   map[int]func(string)
 	outputObserverSeq int
 	observerMu        sync.Mutex
+
+	// inkWriteMu serializes concurrent WriteInkPrompt background goroutines
+	// so their chunk+sleep+CR sequences are not interleaved on the PTY.
+	// Distinct from mu: WriteToPTY holds mu.RLock per write, so reusing mu
+	// here would deadlock.
+	inkWriteMu sync.Mutex
 
 	// Active tool tracking
 	activeTools map[string]bool
@@ -489,41 +508,67 @@ func (s *Session) WriteViaScreen(input string) bool {
 // WriteInkPrompt sends a large prompt to a Claude/Ink session by chunking
 // the text and sending Enter separately. This is needed because Ink's input
 // buffer can't handle large writes, and text+Enter must be separate PTY writes.
+//
+// The bool return indicates writability at call time: true means the prompt is
+// non-empty and the PTY is open ("dispatched"), not that delivery is complete.
+// Actual delivery — the chunked write, inter-chunk sleeps, and trailing CR
+// sequence — runs asynchronously in a background goroutine. Concurrent calls
+// on the same session are serialized via inkWriteMu so their write sequences
+// never interleave on the PTY. WriteInkPrompt itself always returns promptly.
 func (s *Session) WriteInkPrompt(prompt string) bool {
 	prompt = strings.TrimRight(prompt, " \t\r\n")
 	if prompt == "" {
 		return false
 	}
-
-	// Send text in chunks to avoid overflowing Ink's input buffer
-	for i := 0; i < len(prompt); i += inkChunkSize {
-		end := i + inkChunkSize
-		if end > len(prompt) {
-			end = len(prompt)
-		}
-		if !s.WriteToPTY(prompt[i:end]) {
-			return false
-		}
-		// Small delay between chunks so Ink can process each one
-		if end < len(prompt) {
-			time.Sleep(50 * time.Millisecond)
-		}
+	// Validate writability upfront (non-blocking) before committing to
+	// the background goroutine. This preserves the false-return contract
+	// for callers that check the bool.
+	s.mu.RLock()
+	ptyFile := s.ptyFile
+	s.mu.RUnlock()
+	if ptyFile == nil {
+		return false
 	}
 
-	// Delay before sending Enter so Ink finishes processing all pasted text.
-	// Longer prompts need more time -- scale delay by prompt length.
-	baseDelay := 2 * time.Second
-	if len(prompt) > 2000 {
-		baseDelay = 3 * time.Second
-	}
-	time.Sleep(baseDelay)
+	// Capture prompt length for the delay calculation before launching.
+	promptLen := len(prompt)
+	safego.Go("pty.writeInkPrompt", func() {
+		// Serialize concurrent WriteInkPrompt goroutines so their chunk+sleep+CR
+		// sequences are never interleaved on the PTY. The lock is held inside the
+		// goroutine (not in WriteInkPrompt itself) so the caller always returns promptly.
+		s.inkWriteMu.Lock()
+		defer s.inkWriteMu.Unlock()
 
-	// Send CR multiple times with delays as reliability measure.
-	// Ink sometimes doesn't respond to the first CR if it's still processing.
-	for attempt := 0; attempt < 3; attempt++ {
-		s.WriteToPTY("\r")
-		time.Sleep(800 * time.Millisecond)
-	}
+		// Send text in chunks to avoid overflowing Ink's input buffer.
+		for i := 0; i < len(prompt); i += inkChunkSize {
+			end := i + inkChunkSize
+			if end > len(prompt) {
+				end = len(prompt)
+			}
+			if !s.WriteToPTY(prompt[i:end]) {
+				return
+			}
+			// Small delay between chunks so Ink can process each one.
+			if end < len(prompt) {
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+
+		// Delay before sending Enter so Ink finishes processing all pasted text.
+		// Longer prompts need more time -- scale delay by prompt length.
+		baseDelay := 2 * time.Second
+		if promptLen > 2000 {
+			baseDelay = 3 * time.Second
+		}
+		time.Sleep(baseDelay)
+
+		// Send CR multiple times with delays as reliability measure.
+		// Ink sometimes doesn't respond to the first CR if it's still processing.
+		for attempt := 0; attempt < 3; attempt++ {
+			s.WriteToPTY("\r")
+			time.Sleep(800 * time.Millisecond)
+		}
+	})
 	return true
 }
 
@@ -630,8 +675,16 @@ func (s *Session) readLoop(ctx context.Context) {
 	// PTY file descriptors don't support SetReadDeadline. Use a SINGLE long-lived
 	// reader goroutine to avoid spawning N goroutines (one per iteration) which
 	// could leak if Stop() races with a blocking read.
+	//
+	// readResult carries a string (not []byte) so the inner goroutine can
+	// copy the pooled buffer into a Go string — which is always a heap copy —
+	// and immediately return the buffer to readBufPool. By the time the outer
+	// goroutine receives from readCh the string owns its own backing array and
+	// the pool buffer is free for the next read. This is provably safe: Go
+	// string conversion from []byte always copies (spec §Conversions), so there
+	// is no shared backing array between the returned string and the pool buf.
 	type readResult struct {
-		data []byte
+		data string
 		err  error
 	}
 	readCh := make(chan readResult, 1)
@@ -647,18 +700,23 @@ func (s *Session) readLoop(ctx context.Context) {
 	// Single reader goroutine: exits when the PTY file is closed (f.Read returns error).
 	go func(f *os.File) {
 		for {
-			buf := make([]byte, readBufSize)
-			n, err := f.Read(buf)
+			bufp := readBufPool.Get().(*[]byte)
+			n, err := f.Read(*bufp)
 			if err != nil {
+				readBufPool.Put(bufp)
 				// Use non-blocking send so we don't block forever if no one is reading.
 				select {
-				case readCh <- readResult{nil, err}:
+				case readCh <- readResult{"", err}:
 				default:
 				}
 				return
 			}
+			// Convert to string (always copies) before releasing the pool buffer.
+			// After this line the pool buffer is unreferenced.
+			text := string((*bufp)[:n])
+			readBufPool.Put(bufp)
 			select {
-			case readCh <- readResult{buf[:n], nil}:
+			case readCh <- readResult{text, nil}:
 			case <-ctx.Done():
 				return
 			}
@@ -677,7 +735,7 @@ func (s *Session) readLoop(ctx context.Context) {
 				s.handleExit()
 				return
 			}
-			s.processOutput(string(result.data))
+			s.processOutput(result.data)
 		}
 	}
 }
