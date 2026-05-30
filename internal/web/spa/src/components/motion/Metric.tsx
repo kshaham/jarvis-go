@@ -1,6 +1,5 @@
 import NumberFlow, { type Format } from '@number-flow/react';
 import { m, useAnimationControls, useReducedMotion } from 'motion/react';
-import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 
 type Tone = 'primary' | 'muted' | 'accent' | 'success' | 'warning' | 'danger';
@@ -54,22 +53,23 @@ export function Metric({
 }: Props) {
   const reduce = useReducedMotion();
   const controls = useAnimationControls();
-  const prev = useRef(value);
 
-  useEffect(() => {
-    if (pulseOnChange && !reduce && prev.current !== value) {
-      controls.start({
-        scale: [1, 1.08, 1],
-        textShadow: [
-          '0 0 0px rgba(34,197,94,0)',
-          '0 0 10px rgba(34,197,94,0.7)',
-          '0 0 0px rgba(34,197,94,0)',
-        ],
-        transition: { duration: 0.5, ease: 'easeOut' },
-      });
-    }
-    prev.current = value;
-  }, [value, pulseOnChange, reduce, controls]);
+  // Pulse is triggered declaratively via NumberFlow's onAnimationsStart
+  // callback rather than a useEffect guard, so there is no effect watching
+  // a prop to decide whether to fire a side effect (no-event-handler).
+  const handleAnimationsStart = pulseOnChange && !reduce
+    ? () => {
+        controls.start({
+          scale: [1, 1.08, 1],
+          textShadow: [
+            '0 0 0px rgba(34,197,94,0)',
+            '0 0 10px rgba(34,197,94,0.7)',
+            '0 0 0px rgba(34,197,94,0)',
+          ],
+          transition: { duration: 0.5, ease: 'easeOut' },
+        });
+      }
+    : undefined;
 
   const numberFlow = (
     <NumberFlow
@@ -78,6 +78,7 @@ export function Metric({
       prefix={prefix}
       suffix={suffix}
       className={className}
+      onAnimationsStart={handleAnimationsStart}
       style={{
         fontSize: size,
         color: TONE_VAR[tone],
