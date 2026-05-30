@@ -1,5 +1,5 @@
 import { useIsFetching } from '@tanstack/react-query';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -37,14 +37,14 @@ export function TopProgress() {
   return (
     <AnimatePresence>
       {active ? (
-        <motion.div
+        <m.div
           key="topbar"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           style={barContainerStyle}
         >
-          <motion.div
+          <m.div
             animate={reduce ? { x: 0 } : { x: ['-100%', '250%'] }}
             transition={reduce ? { duration: 0 } : { duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
             style={{
@@ -54,7 +54,7 @@ export function TopProgress() {
                 'linear-gradient(90deg, transparent, rgb(var(--accent-rgb)), rgb(var(--accent-strong-rgb)), transparent)',
             }}
           />
-        </motion.div>
+        </m.div>
       ) : null}
     </AnimatePresence>
   );

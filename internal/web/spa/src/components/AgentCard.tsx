@@ -1,4 +1,4 @@
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 
 import { cn } from '@/lib/cn';
 import { StatusPill } from './StatusPill';
@@ -65,7 +65,7 @@ export function AgentCard({ member, onSelect }: Props) {
       <div className="flex items-start gap-3">
         {/* Shared-element morph target — the avatar flies into the
             MemberDetailModal header on open (gated by reduced motion). */}
-        <motion.div
+        <m.div
           layoutId={reduce ? undefined : `agent-avatar-${member.sessionId}`}
           className={cn(
             'flex size-10 shrink-0 items-center justify-center rounded-lg text-base font-semibold',
@@ -73,7 +73,7 @@ export function AgentCard({ member, onSelect }: Props) {
           )}
         >
           {avatar}
-        </motion.div>
+        </m.div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
             {member.name}

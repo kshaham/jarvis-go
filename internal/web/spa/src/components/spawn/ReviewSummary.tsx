@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import type { TeamTemplate } from '../../api/types';
 import { Button } from '@/components/ui';
 import { AvatarStack } from './Avatar';
@@ -138,7 +138,7 @@ export function ReviewSummary({
   const spawnDisabled = !validity.ok || pending;
 
   return (
-    <motion.div
+    <m.div
       // Subtle rise-and-fade as the sticky review bar mounts (after a
       // template is chosen). Disabled under reduced motion.
       initial={reduce ? false : { opacity: 0, y: 12 }}
@@ -209,7 +209,7 @@ export function ReviewSummary({
           {validity.reason}
         </p>
       ) : null}
-    </motion.div>
+    </m.div>
   );
 }
 

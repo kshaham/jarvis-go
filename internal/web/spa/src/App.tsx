@@ -1,4 +1,5 @@
 import { Suspense, lazy } from 'react';
+import { LazyMotion, domMax } from 'motion/react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 
 import { AgentsScreen } from './screens/AgentsScreen';
@@ -57,6 +58,7 @@ function ScreenFallback() {
 // CommandBar, Toaster) persists across navigations.
 export function App() {
   return (
+    <LazyMotion features={domMax} strict={false}>
     <BrowserRouter basename="/office-v2">
       <Routes>
         <Route element={<AppShell />}>
@@ -104,5 +106,6 @@ export function App() {
         </Route>
       </Routes>
     </BrowserRouter>
+    </LazyMotion>
   );
 }

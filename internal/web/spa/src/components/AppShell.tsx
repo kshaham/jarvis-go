@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -255,7 +255,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
               {({ isActive }) => (
                 <>
                   {isActive && !reduce ? (
-                    <motion.span
+                    <m.span
                       layoutId="nav-active"
                       transition={spring.smooth}
                       style={navActivePillStyle}
@@ -408,7 +408,7 @@ function AnimatedOutlet() {
   const reduce = useReducedMotion();
   return (
     <AnimatePresence mode="wait" initial={false}>
-      <motion.div
+      <m.div
         key={location.pathname}
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
         animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
@@ -417,7 +417,7 @@ function AnimatedOutlet() {
         style={{ flex: 1, minHeight: 0, minWidth: 0 }}
       >
         {element}
-      </motion.div>
+      </m.div>
     </AnimatePresence>
   );
 }

@@ -1,4 +1,4 @@
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import type { HTMLMotionProps } from 'motion/react';
 import { useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
@@ -73,7 +73,7 @@ export function Press({
   }
 
   return (
-    <motion.button
+    <m.button
       whileHover={whileHover}
       whileTap={whileTap}
       transition={spring.snappy}
@@ -85,7 +85,7 @@ export function Press({
       {children}
       {ripple && !reduce
         ? ripples.map((r) => (
-            <motion.span
+            <m.span
               key={r.id}
               initial={{ scale: 0.8, opacity: 0.4 }}
               animate={{ scale: 2.5, opacity: 0 }}
@@ -97,6 +97,6 @@ export function Press({
             />
           ))
         : null}
-    </motion.button>
+    </m.button>
   );
 }

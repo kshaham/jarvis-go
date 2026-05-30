@@ -1,4 +1,4 @@
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import { useRef } from 'react';
 
 import { spring } from '../../lib/motion';
@@ -64,7 +64,7 @@ export function StatusDot({ status, size = 8 }: Props) {
     >
       {/* Ripple: scales 1 → 2.4 with opacity 0.6 → 0 on every status flip. */}
       {!reduce && (
-        <motion.span
+        <m.span
           key={rippleKey.current}
           initial={{ scale: 1, opacity: 0.6 }}
           animate={{ scale: 2.4, opacity: 0 }}
@@ -78,7 +78,7 @@ export function StatusDot({ status, size = 8 }: Props) {
           }}
         />
       )}
-      <motion.span
+      <m.span
         animate={reduce ? { opacity: 1 } : breatheAnimate}
         transition={reduce ? { duration: 0 } : breatheTransition}
         style={{

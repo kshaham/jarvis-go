@@ -1,4 +1,4 @@
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { CSSProperties } from 'react';
 
 import { useSSEConnected } from '@/hooks/useSSEConnected';
@@ -26,7 +26,7 @@ export function ConnectionBanner() {
   return (
     <AnimatePresence>
       {!connected ? (
-        <motion.div
+        <m.div
           key="offline"
           initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
           animate={reduce ? { opacity: 1 } : { opacity: 1, height: 'auto' }}
@@ -35,14 +35,14 @@ export function ConnectionBanner() {
           style={{ overflow: 'hidden' }}
         >
           <div style={bannerInnerStyle}>
-            <motion.span
+            <m.span
               animate={reduce ? { opacity: 1 } : { opacity: [1, 0.4, 1] }}
               transition={reduce ? { duration: 0 } : { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
               style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--status-warn)' }}
             />
             Reconnecting… live updates paused
           </div>
-        </motion.div>
+        </m.div>
       ) : null}
     </AnimatePresence>
   );

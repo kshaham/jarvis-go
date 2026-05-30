@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Modal } from './motion/Modal';
@@ -57,7 +57,7 @@ export function MemberDetailModal({ member, onClose }: Props) {
           {/* Header — the avatar is the shared-element morph target: it
               flies in from the clicked AgentCard. */}
           <header style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <motion.div
+            <m.div
               layoutId={reduce ? undefined : `agent-avatar-${member.sessionId}`}
               className={cn(
                 'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-lg font-semibold',
@@ -65,7 +65,7 @@ export function MemberDetailModal({ member, onClose }: Props) {
               )}
             >
               {agentAvatarGlyph(member)}
-            </motion.div>
+            </m.div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>
                 {member.name}

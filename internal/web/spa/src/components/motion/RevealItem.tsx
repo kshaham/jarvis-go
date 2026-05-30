@@ -1,4 +1,4 @@
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import type { HTMLMotionProps } from 'motion/react';
 import type { ReactNode } from 'react';
 
@@ -41,7 +41,7 @@ export function RevealItem({
       : { opacity: 0, y: -yOffset, transition: timing.short },
   };
   return (
-    <motion.div
+    <m.div
       variants={variants}
       initial="hidden"
       animate="visible"
@@ -53,6 +53,6 @@ export function RevealItem({
       {...rest}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }

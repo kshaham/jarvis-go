@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { spring, timing } from '../../lib/motion';
@@ -92,7 +92,7 @@ export function Modal({
         {open ? (
           <Dialog.Portal forceMount>
             <Dialog.Overlay asChild>
-              <motion.div
+              <m.div
                 key="overlay"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -102,7 +102,7 @@ export function Modal({
               />
             </Dialog.Overlay>
             <Dialog.Content asChild aria-describedby={description ? 'modal-desc' : undefined}>
-              <motion.div
+              <m.div
                 key="content"
                 className={refract ? 'lg-refract' : undefined}
                 // Horizontal centering is done via Motion's own `x`
@@ -196,7 +196,7 @@ export function Modal({
                     {footer}
                   </footer>
                 ) : null}
-              </motion.div>
+              </m.div>
             </Dialog.Content>
           </Dialog.Portal>
         ) : null}

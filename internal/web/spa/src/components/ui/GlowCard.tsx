@@ -1,4 +1,4 @@
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import type { HTMLMotionProps } from 'motion/react';
 import { useRef } from 'react';
 import type { PointerEvent, ReactNode } from 'react';
@@ -48,7 +48,7 @@ export function GlowCard({
   }
 
   return (
-    <motion.div
+    <m.div
       ref={ref}
       onPointerMove={handlePointerMove}
       whileHover={interactive && !reduce ? { y: -2 } : undefined}
@@ -67,6 +67,6 @@ export function GlowCard({
       {...rest}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }

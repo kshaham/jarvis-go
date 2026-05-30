@@ -1,5 +1,5 @@
 import { Monitor, Moon, Sun } from 'lucide-react';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { CSSProperties } from 'react';
 
 import { Press } from '@/components/motion/Press';
@@ -44,7 +44,7 @@ export function ThemeToggle() {
       style={toggleButtonStyle}
     >
       <AnimatePresence mode="wait" initial={false}>
-        <motion.span
+        <m.span
           key={theme}
           initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, rotate: -30 }}
           animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, rotate: 0 }}
@@ -53,7 +53,7 @@ export function ThemeToggle() {
           style={{ display: 'inline-flex' }}
         >
           <Icon size={15} />
-        </motion.span>
+        </m.span>
       </AnimatePresence>
     </Press>
   );

@@ -1,4 +1,4 @@
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import { useId } from 'react';
 
 import { spring } from '@/lib/motion';
@@ -37,7 +37,7 @@ export function SegmentedControl<T extends string>({
               reduce ? (
                 <span className="lg-segment__thumb" aria-hidden />
               ) : (
-                <motion.span
+                <m.span
                   layoutId={`seg-thumb-${groupId}`}
                   className="lg-segment__thumb"
                   transition={spring.smooth}

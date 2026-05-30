@@ -1,4 +1,4 @@
-import { motion } from 'motion/react';
+import { m } from 'motion/react';
 
 import { useSSEConnected } from '../../hooks/useSSEConnected';
 
@@ -23,7 +23,7 @@ export function SSEPulse({ size = 6 }: Props) {
       aria-label={connected ? 'Real-time connected' : 'Real-time disconnected'}
       title={connected ? 'Real-time connected' : 'Real-time disconnected'}
     >
-      <motion.span
+      <m.span
         animate={
           connected
             ? { opacity: [1, 0.55, 1] }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, m } from 'motion/react';
 
 import { RevealItem } from '../components/motion/RevealItem';
 import { Button } from '../components/ui/Button';
@@ -132,7 +132,7 @@ export function AddPeerScreen() {
 
           <AnimatePresence initial={false}>
             {error ? (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
@@ -147,7 +147,7 @@ export function AddPeerScreen() {
                 }}
               >
                 {error}
-              </motion.div>
+              </m.div>
             ) : null}
           </AnimatePresence>
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { m } from 'motion/react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Inbox, MessagesSquare, Send } from 'lucide-react';
 
@@ -279,14 +279,14 @@ function PeerRail({
         </span>
       </span>
       {peer.unreadInbound ? (
-        <motion.span
+        <m.span
           animate={{ scale: [1, 1.12, 1] }}
           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
           className="shadow-glow-sm"
           style={unreadPillStyle}
         >
           <Metric value={peer.unreadInbound} size={12} />
-        </motion.span>
+        </m.span>
       ) : null}
     </Press>
   );
@@ -305,7 +305,7 @@ function Bubble({
   const senderName = isOutbound ? localDisplayName : message.fromDisplayName;
   void localPeerId;
   return (
-    <motion.div
+    <m.div
       transition={spring.smooth}
       style={{
         alignSelf: isOutbound ? 'flex-end' : 'flex-start',
@@ -375,13 +375,13 @@ function Bubble({
           </div>
         ) : null}
       </div>
-    </motion.div>
+    </m.div>
   );
 }
 
 function ErrorPanel({ message }: { message: string }) {
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={spring.smooth}
@@ -395,7 +395,7 @@ function ErrorPanel({ message }: { message: string }) {
       }}
     >
       Couldn't load this conversation: {message}
-    </motion.div>
+    </m.div>
   );
 }
 

@@ -1,5 +1,5 @@
 import NumberFlow, { type Format } from '@number-flow/react';
-import { motion, useAnimationControls, useReducedMotion } from 'motion/react';
+import { m, useAnimationControls, useReducedMotion } from 'motion/react';
 import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 
@@ -91,8 +91,8 @@ export function Metric({
   if (!pulseOnChange) return numberFlow;
 
   return (
-    <motion.span animate={controls} style={{ display: 'inline-block' }}>
+    <m.span animate={controls} style={{ display: 'inline-block' }}>
       {numberFlow}
-    </motion.span>
+    </m.span>
   );
 }

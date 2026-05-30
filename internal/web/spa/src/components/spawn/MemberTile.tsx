@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 
 import { GlowCard } from '@/components/ui';
 import { cn } from '@/lib/cn';
@@ -96,7 +96,7 @@ export function MemberTile({
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
           {tier ? <TierBadge tier={tier} variant="pill" /> : null}
           {edited ? (
-            <motion.span
+            <m.span
               aria-label="Edited"
               title="Overridden from the template"
               initial={reduce ? false : { scale: 0.8, opacity: 0 }}
@@ -109,7 +109,7 @@ export function MemberTile({
                 style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--status-warn)' }}
               />
               Edited
-            </motion.span>
+            </m.span>
           ) : null}
         </div>
       </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { m, useReducedMotion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { toast } from 'sonner';
@@ -328,11 +328,11 @@ function SpotlightRow({
   return (
     <section style={spotlightSectionStyle}>
       {standup.participants.map((pid) => {
-        const m = memberLookup.get(pid);
+        const mem = memberLookup.get(pid);
         const isCurrent = standup.currentSpeakerId === pid;
         const size = isCurrent ? 56 : 36;
         return (
-          <motion.div
+          <m.div
             key={pid}
             animate={{ scale: isCurrent ? 1.05 : 1, opacity: isCurrent ? 1 : 0.55 }}
             transition={spring.smooth}
@@ -345,7 +345,7 @@ function SpotlightRow({
           >
             {/* The active speaker's avatar pulses a violet halo so the eye
                 jumps to whoever is talking (gated by reduced motion). */}
-            <motion.div
+            <m.div
               animate={
                 isCurrent && !reduce
                   ? {
@@ -368,14 +368,14 @@ function SpotlightRow({
                 height: size,
                 borderRadius: size / 2,
                 background:
-                  m?.color ??
+                  mem?.color ??
                   'linear-gradient(135deg, var(--accent), var(--accent-strong))',
                 fontSize: isCurrent ? 18 : 13,
                 border: isCurrent ? '2px solid var(--accent)' : '1px solid var(--border-strong)',
               }}
             >
-              {m?.emoji || m?.name?.[0] || '?'}
-            </motion.div>
+              {mem?.emoji || mem?.name?.[0] || '?'}
+            </m.div>
             <span
               style={{
                 fontSize: 12,
@@ -387,9 +387,9 @@ function SpotlightRow({
                 whiteSpace: 'nowrap',
               }}
             >
-              {m?.name ?? pid.slice(0, 6)}
+              {mem?.name ?? pid.slice(0, 6)}
             </span>
-          </motion.div>
+          </m.div>
         );
       })}
     </section>
@@ -475,7 +475,7 @@ function EmptyTranscript({ active }: { active: boolean }) {
         gap: 10,
       }}
     >
-      <motion.div
+      <m.div
         animate={{ scale: [1, 0.92, 1], opacity: [0.6, 0.85, 0.6] }}
         transition={{ duration: 4, repeat: Infinity }}
         style={{
