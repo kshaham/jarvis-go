@@ -71,6 +71,13 @@ const (
 	defaultMaxRetries = 3
 	maxMessageLength  = 3900
 	apiTimeout        = 15 * time.Second
+	// maxQueueDepth bounds the backlog so a sustained outage (Telegram down,
+	// or a broadcast storm) can't grow the slice without limit. When full we
+	// drop the OLDEST queued message -- for notifications the newest matters
+	// most, and an unbounded backlog is a memory leak.
+	maxQueueDepth = 1000
+	// drainDeadline caps total best-effort send time during shutdown.
+	drainDeadline = 10 * time.Second
 )
 
 type queuedMessage struct {
@@ -90,13 +97,39 @@ type queuedMessage struct {
 // provided bot token and http.Client, without going through the Bot struct.
 type MessageQueue struct {
 	mu      sync.Mutex
-	token   string
+	token   string            // fallback / initial token
+	tokenFn func() string     // live-token provider (set by the Handler); wins over token
 	client  *http.Client
 	queue   []queuedMessage
 	limiter *tokenBucket
 	notify  chan struct{}
 	stopCh  chan struct{}
 	stopped chan struct{}
+}
+
+// SetTokenProvider installs a function returning the CURRENT bot token, so the
+// queue follows runtime token (re)configuration instead of using the value
+// frozen at construction. Without this, setting/rotating the token at runtime
+// silently broke all queued sends (the poll loop reads the live token, the
+// queue didn't).
+func (mq *MessageQueue) SetTokenProvider(fn func() string) {
+	mq.mu.Lock()
+	mq.tokenFn = fn
+	mq.mu.Unlock()
+}
+
+// currentToken returns the live token from the provider when set + non-empty,
+// else the construction-time token.
+func (mq *MessageQueue) currentToken() string {
+	mq.mu.Lock()
+	fn, tok := mq.tokenFn, mq.token
+	mq.mu.Unlock()
+	if fn != nil {
+		if live := fn(); live != "" {
+			return live
+		}
+	}
+	return tok
 }
 
 // NewMessageQueue creates a MessageQueue that sends via the Telegram Bot API.
@@ -121,6 +154,12 @@ func NewMessageQueue(token string, client *http.Client, ratePerMinute int) *Mess
 // keyboard may be nil for plain text messages.
 func (mq *MessageQueue) Enqueue(chatID, text string, keyboard *InlineKeyboardMarkup) {
 	mq.mu.Lock()
+	if len(mq.queue) >= maxQueueDepth {
+		dropped := mq.queue[0]
+		mq.queue = mq.queue[1:]
+		log.Printf("[telegram/queue] backlog at cap (%d); dropping oldest message to chat %s",
+			maxQueueDepth, dropped.ChatID)
+	}
 	mq.queue = append(mq.queue, queuedMessage{
 		ChatID:     chatID,
 		Text:       text,
@@ -271,7 +310,9 @@ func (mq *MessageQueue) maybeRetry(msg queuedMessage, err error) {
 	}()
 }
 
-// drainOnShutdown attempts to send remaining queued messages best-effort.
+// drainOnShutdown attempts to send remaining queued messages best-effort,
+// bounded by a wall-clock deadline so a slow/unreachable Telegram (each send
+// can block up to apiTimeout) can't hang process shutdown indefinitely.
 func (mq *MessageQueue) drainOnShutdown() {
 	mq.mu.Lock()
 	remaining := make([]queuedMessage, len(mq.queue))
@@ -279,7 +320,13 @@ func (mq *MessageQueue) drainOnShutdown() {
 	mq.queue = mq.queue[:0]
 	mq.mu.Unlock()
 
-	for _, msg := range remaining {
+	deadline := time.Now().Add(drainDeadline)
+	for i, msg := range remaining {
+		if time.Now().After(deadline) {
+			log.Printf("[telegram/queue] shutdown drain deadline reached; dropping %d undelivered message(s)",
+				len(remaining)-i)
+			return
+		}
 		text := msg.Text
 		if len(text) > maxMessageLength {
 			text = text[:maxMessageLength]
@@ -308,7 +355,7 @@ func (e *telegramAPIError) Error() string {
 
 // sendTelegram sends a message to the Telegram Bot API directly.
 func (mq *MessageQueue) sendTelegram(chatID, text string, keyboard *InlineKeyboardMarkup) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", mq.token)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", mq.currentToken())
 
 	payload := map[string]interface{}{
 		"chat_id":    chatID,

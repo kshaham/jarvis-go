@@ -87,25 +87,30 @@ func (w *Watcher) Watch(path string, cb EventCallback) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.watchCount >= w.maxWatches {
+	// watchCount tracks DISTINCT paths (Unwatch removes the whole path + all its
+	// callbacks, decrementing by 1). Counting per-call instead would desync the
+	// count from reality when a path is watched more than once, eventually
+	// exhausting the watch budget with phantom watches.
+	_, existed := w.callbacks[path]
+	if !existed && w.watchCount >= w.maxWatches {
 		return ErrMaxWatchesReached
 	}
 
-	w.callbacks[path] = append(w.callbacks[path], cb)
-
-	if !w.fallbackMode {
+	if !existed && !w.fallbackMode {
 		if err := w.fsWatcher.Add(path); err != nil {
-			// Check for inotify exhaustion
-			if isWatchLimitError(err) {
+			if isWatchLimitError(err) { // inotify exhaustion
 				slog.Warn("inotify limit reached, switching to fallback polling", "path", path)
 				w.switchToFallback()
 			} else {
-				return err
+				return err // don't register a callback / count for a watch that didn't take
 			}
 		}
 	}
 
-	w.watchCount++
+	w.callbacks[path] = append(w.callbacks[path], cb)
+	if !existed {
+		w.watchCount++
+	}
 	return nil
 }
 

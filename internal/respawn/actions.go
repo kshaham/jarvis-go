@@ -70,6 +70,16 @@ func (rc *Controller) startSendUpdate() {
 	rc.mu.Unlock()
 
 	rc.timers.Start("step-delay", time.Duration(delayMs)*time.Millisecond, "delay before update", func() {
+		// Re-check state: a transition out of SendingUpdate (e.g. back to
+		// Watching) during the delay must abort the send, or we'd inject a
+		// stale command into a session that's moved on.
+		rc.mu.Lock()
+		state := rc.state
+		rc.mu.Unlock()
+		if state != StateSendingUpdate {
+			return
+		}
+
 		rc.logAction("command", fmt.Sprintf("sending update: %s", truncate(prompt, 50)))
 
 		if !rc.sendToSession(prompt+"\r", "update") {
@@ -90,6 +100,13 @@ func (rc *Controller) startSendClear() {
 	rc.mu.Unlock()
 
 	rc.timers.Start("step-delay", time.Duration(delayMs)*time.Millisecond, "delay before /clear", func() {
+		rc.mu.Lock()
+		state := rc.state
+		rc.mu.Unlock()
+		if state != StateSendingClear {
+			return
+		}
+
 		rc.logAction("command", "sending /clear")
 
 		if !rc.sendToSession(ClearCommand+"\r", "clear") {
@@ -110,6 +127,13 @@ func (rc *Controller) startSendInit() {
 	rc.mu.Unlock()
 
 	rc.timers.Start("step-delay", time.Duration(delayMs)*time.Millisecond, "delay before /init", func() {
+		rc.mu.Lock()
+		state := rc.state
+		rc.mu.Unlock()
+		if state != StateSendingInit {
+			return
+		}
+
 		rc.logAction("command", "sending /init")
 
 		if !rc.sendToSession(InitCommand+"\r", "init") {
@@ -163,6 +187,13 @@ func (rc *Controller) startSendKickstart() {
 	}
 
 	rc.timers.Start("step-delay", time.Duration(delayMs)*time.Millisecond, "delay before kickstart", func() {
+		rc.mu.Lock()
+		state := rc.state
+		rc.mu.Unlock()
+		if state != StateSendingKickstart {
+			return
+		}
+
 		rc.logAction("command", fmt.Sprintf("sending kickstart: %s", truncate(prompt, 50)))
 
 		if !rc.sendToSession(prompt+"\r", "kickstart") {

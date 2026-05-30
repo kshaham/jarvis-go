@@ -66,16 +66,35 @@ func LedgerPath() string {
 	return filepath.Join(root, ".promotion-ledger.json")
 }
 
-// OpenLedger returns a Ledger ready to use. Load is lazy — the
-// first method call hits disk; subsequent calls use the in-memory
-// map. Returns nil + nil error when the library root is
-// unavailable (graceful degradation matching the rest of library).
+// ledgerCache holds one *Ledger per resolved path so OpenLedger returns a
+// PROCESS-WIDE SINGLETON. Without this, every OpenLedger() built a fresh Ledger
+// with its own mutex+map, so the mutex serialized nothing across the shared
+// .promotion-ledger.json file: the background memify goroutine (MarkPromoted)
+// and HTTP revoke handlers (MarkRevoked) ran concurrent load->mutate->flush
+// sequences and lost-update'd each other (silently undoing an operator revoke).
+var (
+	ledgerCacheMu sync.Mutex
+	ledgerCache   = map[string]*Ledger{}
+)
+
+// OpenLedger returns the shared Ledger for the current library path (same
+// instance on every call, so its mutex serializes all read-modify-write-flush
+// sequences against the file). Load is lazy — the first method call hits disk;
+// subsequent calls use the in-memory map. Returns nil + nil error when the
+// library root is unavailable (graceful degradation matching the rest of library).
 func OpenLedger() (*Ledger, error) {
 	path := LedgerPath()
 	if path == "" {
 		return nil, nil
 	}
-	return &Ledger{path: path, entries: map[string]*LedgerEntry{}}, nil
+	ledgerCacheMu.Lock()
+	defer ledgerCacheMu.Unlock()
+	if l := ledgerCache[path]; l != nil {
+		return l, nil
+	}
+	l := &Ledger{path: path, entries: map[string]*LedgerEntry{}}
+	ledgerCache[path] = l
+	return l, nil
 }
 
 // load reads the ledger from disk (idempotent — subsequent calls

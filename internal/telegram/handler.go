@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,6 +75,10 @@ func NewHandler(bot *Bot, settingsStore *SettingsStore, server ServerBridge) *Ha
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	queue := NewMessageQueue(settings.BotToken, client, settings.RateLimitPerMinute)
+	// Follow runtime token (re)configuration: read the live token from the bot
+	// (same source getUpdates uses) so a setup/rotation without a restart doesn't
+	// leave the queue sending with a stale/empty token.
+	queue.SetTokenProvider(func() string { tok, _ := bot.GetConfig(); return tok })
 	streamer := NewOutputStreamer(queue)
 
 	h := &Handler{
@@ -355,6 +360,18 @@ func (h *Handler) getUpdates(ctx context.Context, offset int64, timeout int) ([]
 
 // handleUpdate routes an incoming update to the appropriate handler.
 func (h *Handler) handleUpdate(update Update) {
+	// Single choke point for panic recovery. handleUpdate runs as a bare
+	// goroutine in webhook mode (`go h.handleUpdate`) and synchronously inside
+	// the bare pollLoop goroutine in polling mode — neither is covered by the
+	// HTTP Recovery middleware (recover() can't catch a panic from another
+	// goroutine). Without this, one malformed/attacker-shaped update panicking
+	// anywhere downstream (command router, formatters, office bridges) would take
+	// down the whole daemon (webhook) or silently kill the poll loop (polling).
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("telegram: panic handling update", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
 	if update.Message != nil {
 		h.handleMessage(update.Message)
 	} else if update.CallbackQuery != nil {

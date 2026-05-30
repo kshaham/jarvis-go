@@ -58,11 +58,17 @@ func LookupPricing(model string) ModelPricing {
 	if p, ok := modelPricing[m]; ok {
 		return p
 	}
-	// Prefix match -- handles variants like "claude-sonnet-4-6-20251001".
+	// Prefix match -- handles dated variants like "claude-sonnet-4-6-20251001".
+	// LONGEST prefix wins so "gpt-5-mini-2026..." resolves to "gpt-5-mini" and
+	// not the shorter "gpt-5" (a 5x cost error). Ranging the map directly is
+	// non-deterministic, so pick the longest matching key explicitly.
+	bestLen := -1
+	best := defaultPricing
 	for prefix, p := range modelPricing {
-		if strings.HasPrefix(m, prefix) {
-			return p
+		if len(prefix) > bestLen && strings.HasPrefix(m, prefix) {
+			bestLen = len(prefix)
+			best = p
 		}
 	}
-	return defaultPricing
+	return best
 }

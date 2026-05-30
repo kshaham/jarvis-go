@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // ansiRegex matches ANSI escape sequences for stripping from terminal output.
@@ -70,16 +71,18 @@ func (s *OutputStreamer) HandleOutput(chatID, data string) {
 		return
 	}
 
-	// Schedule a delayed flush using time.AfterFunc.
-	// The AfterFunc callback checks the dirty flag to avoid races.
+	// Schedule a delayed flush using time.AfterFunc. The callback flushes only
+	// if the live buffer for chatID is STILL this exact object -- if RemoveChat
+	// deleted it and HandleOutput recreated a new buffer for the same chatID
+	// while the timer was in flight, an unconditional flush would prematurely
+	// flush the new buffer mid-fill. Identity is checked under the lock.
 	s.mu.Lock()
 	if buf.timer != nil {
 		buf.timer.Stop()
 	}
+	captured := buf
 	buf.timer = time.AfterFunc(streamFlushDelay, func() {
-		if buf.dirty.Load() {
-			s.flushBuffer(chatID)
-		}
+		s.flushBufferMatching(chatID, captured)
 	})
 	s.mu.Unlock()
 }
@@ -118,9 +121,16 @@ func (s *OutputStreamer) RemoveChat(chatID string) {
 }
 
 func (s *OutputStreamer) flushBuffer(chatID string) {
+	s.flushBufferMatching(chatID, nil)
+}
+
+// flushBufferMatching flushes chatID's buffer. When expected is non-nil it only
+// flushes if the live buffer is still that exact object (timer-path identity
+// guard); nil means flush whatever is current (FlushAll/FlushChat/RemoveChat).
+func (s *OutputStreamer) flushBufferMatching(chatID string, expected *outputBuffer) {
 	s.mu.Lock()
 	buf, exists := s.buffers[chatID]
-	if !exists || buf.data.Len() == 0 {
+	if !exists || buf.data.Len() == 0 || (expected != nil && buf != expected) {
 		s.mu.Unlock()
 		return
 	}
@@ -134,9 +144,15 @@ func (s *OutputStreamer) flushBuffer(chatID string) {
 	}
 	s.mu.Unlock()
 
-	// Truncate if necessary.
+	// Truncate if necessary, backing up to a rune boundary so we never split a
+	// multi-byte rune (the truncated text is HTML-escaped below; a half rune
+	// would corrupt the <pre> payload).
 	if len(text) > streamMaxMessage {
-		text = text[:streamMaxMessage-len(streamTruncateNote)] + streamTruncateNote
+		limit := streamMaxMessage - len(streamTruncateNote)
+		for limit > 0 && !utf8.RuneStart(text[limit]) {
+			limit--
+		}
+		text = text[:limit] + streamTruncateNote
 	}
 
 	// Wrap in <pre> tags for monospace rendering.

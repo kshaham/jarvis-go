@@ -2,6 +2,7 @@ package peers
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -106,7 +107,9 @@ func (r *Registry) FindByToken(token string) (Peer, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, p := range r.peers {
-		if p.PairToken == token {
+		// Constant-time compare: this gates the public /api/relay/inbox endpoint,
+		// so a `==` short-circuit would leak token bytes via response timing.
+		if subtle.ConstantTimeCompare([]byte(p.PairToken), []byte(token)) == 1 {
 			return *p, true
 		}
 	}

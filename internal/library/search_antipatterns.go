@@ -234,10 +234,7 @@ func extractSection(body, heading string) string {
 	}
 	tail = strings.TrimSpace(tail)
 	const max = 240
-	if len(tail) > max {
-		tail = tail[:max] + "…"
-	}
-	return tail
+	return truncateOnRune(tail, max) + ellipsisIfTrunc(tail, max)
 }
 
 // extractListSection pulls bullet list items under a `## Heading`.

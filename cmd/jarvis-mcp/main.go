@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
 	"log"
 	"os"
 )
@@ -16,26 +18,28 @@ const (
 func main() {
 	log.SetOutput(os.Stderr) // MCP uses stdout for protocol messages
 
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
+	// bufio.Reader.ReadBytes reads a full newline-delimited line of ANY length
+	// (it accumulates across buffer fills), unlike bufio.Scanner whose 1MB token
+	// cap made any oversized request abort the read loop and kill the whole
+	// server. A too-big or malformed line now fails as a per-request parse error
+	// (-32700) and the loop continues.
+	reader := bufio.NewReaderSize(os.Stdin, 1024*1024)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
+			var req JSONRPCRequest
+			if uerr := json.Unmarshal(trimmed, &req); uerr != nil {
+				writeError(nil, -32700, "Parse error: "+uerr.Error())
+			} else {
+				handleRequest(req)
+			}
 		}
-
-		var req JSONRPCRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			writeError(nil, -32700, "Parse error: "+err.Error())
-			continue
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			log.Fatalf("stdin read error: %v", err)
 		}
-
-		handleRequest(req)
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Fatalf("stdin read error: %v", err)
 	}
 }
 

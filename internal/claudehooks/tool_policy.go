@@ -80,8 +80,12 @@ var DefaultToolPolicy = ToolPolicy{
 			Description: "Refuses eval/exec of command-substituted strings.",
 		},
 		{
-			Tool:        "Bash",
-			Pattern:     `\bchmod\s+(-[a-zA-Z]+\s+)*[0-9]*[7][0-9]*\s+`,
+			Tool: "Bash",
+			// World-writable ⟺ the others (last) octal digit grants write: one
+			// of 2,3,6,7. The previous pattern matched any mode CONTAINING a 7,
+			// which both false-positived on safe modes (chmod 700/755) and
+			// missed world-writable modes with no 7 (chmod 666/022).
+			Pattern:     `\bchmod\s+(-[a-zA-Z]+\s+)*[0-7]{2,3}[2367]\b`,
 			Description: "Refuses world-writable chmods.",
 		},
 		{
@@ -156,25 +160,28 @@ func (s *ToolPolicyStore) Replace(next ToolPolicy) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Persist to disk FIRST. If the write fails we return the error with the
+	// in-memory policy UNTOUCHED, so live policy always matches what's persisted
+	// (previously replaceLocked ran first, so a write failure left the live
+	// gating diverged from disk until the next restart).
+	if s.path != "" {
+		if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+			return fmt.Errorf("toolpolicy: mkdir: %w", err)
+		}
+		data, err := json.MarshalIndent(next, "", "  ")
+		if err != nil {
+			return fmt.Errorf("toolpolicy: marshal: %w", err)
+		}
+		tmp := s.path + ".tmp"
+		if err := os.WriteFile(tmp, data, 0o600); err != nil {
+			return fmt.Errorf("toolpolicy: write tmp: %w", err)
+		}
+		if err := os.Rename(tmp, s.path); err != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("toolpolicy: rename: %w", err)
+		}
+	}
 	s.replaceLocked(next)
-	if s.path == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("toolpolicy: mkdir: %w", err)
-	}
-	data, err := json.MarshalIndent(next, "", "  ")
-	if err != nil {
-		return fmt.Errorf("toolpolicy: marshal: %w", err)
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("toolpolicy: write tmp: %w", err)
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("toolpolicy: rename: %w", err)
-	}
 	return nil
 }
 

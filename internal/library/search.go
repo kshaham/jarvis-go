@@ -42,6 +42,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Query is the input to a library search. Empty fields are treated
@@ -298,10 +299,29 @@ func extractApproach(body string) string {
 	}
 	tail = strings.TrimSpace(tail)
 	const maxApproachLen = 240
-	if len(tail) > maxApproachLen {
-		tail = tail[:maxApproachLen] + "…"
+	return truncateOnRune(tail, maxApproachLen) + ellipsisIfTrunc(tail, maxApproachLen)
+}
+
+// truncateOnRune returns s cut to at most max bytes, backing up to a rune
+// boundary so a multi-byte rune is never split (a half rune renders as a
+// replacement char and can corrupt downstream markdown/YAML).
+func truncateOnRune(s string, max int) string {
+	if len(s) <= max {
+		return s
 	}
-	return tail
+	limit := max
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit]
+}
+
+// ellipsisIfTrunc returns the ellipsis marker only when s exceeds max bytes.
+func ellipsisIfTrunc(s string, max int) string {
+	if len(s) > max {
+		return "…"
+	}
+	return ""
 }
 
 // computeSimilarity returns a [0, 1] score for how well q matches

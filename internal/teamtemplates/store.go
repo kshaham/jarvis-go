@@ -69,7 +69,7 @@ func (s *Store) List() []*TeamTemplate {
 func (s *Store) listLocked() []*TeamTemplate {
 	result := make([]*TeamTemplate, 0, len(s.templates))
 	for _, t := range s.templates {
-		result = append(result, t)
+		result = append(result, copyTemplate(t))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
@@ -79,7 +79,23 @@ func (s *Store) listLocked() []*TeamTemplate {
 func (s *Store) Get(id string) *TeamTemplate {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.templates[id]
+	return copyTemplate(s.templates[id])
+}
+
+// copyTemplate returns a deep-enough copy so callers never hold a pointer the
+// store later mutates under its write lock in Update (which would be a data
+// race: Get/List readers vs Update writers on the same *TeamTemplate). Copies
+// the struct and the Members slice (Update replaces .Members wholesale).
+func copyTemplate(t *TeamTemplate) *TeamTemplate {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	if t.Members != nil {
+		cp.Members = make([]TeamTemplateMember, len(t.Members))
+		copy(cp.Members, t.Members)
+	}
+	return &cp
 }
 
 // Create adds a new custom team template and persists it.

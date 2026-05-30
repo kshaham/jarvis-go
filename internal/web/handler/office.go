@@ -655,6 +655,24 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	// R23's team-wide daily cap write was removed in R24 — operator
 	// uses subscription plans where the $ cap is meaningless.
 
+	// Validate every per-member working directory UP FRONT, before spawning any
+	// agent. A workingDir failure discovered mid-loop would otherwise leave the
+	// members already spawned in this request orphaned + unmonitored (and free
+	// the spawn slot for a duplicate overlapping team). Failing here — before the
+	// first spawn — keeps the validation phase all-or-nothing.
+	for _, member := range members {
+		var mov *memberOverride
+		if ov, has := memberOverrideMap[member.ID]; has {
+			ov := ov
+			mov = &ov
+		}
+		if _, dirErr := office.ResolveMemberWorkingDir(req.WorkingDir, member.ID, mov, ctx.ResolveWorkingDir); dirErr != nil {
+			ctx.OfficeManager.ReleaseTeamSpawnSlot()
+			request.WriteError(w, http.StatusBadRequest, dirErr.Error())
+			return
+		}
+	}
+
 	for i, member := range members {
 		// Use the member-specific provider env ONLY when the override actually
 		// changed the provider. A snapshot restore (and model-only overrides)
@@ -685,14 +703,15 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		}
 		resolvedDir, dirErr := office.ResolveMemberWorkingDir(req.WorkingDir, member.ID, memberOv, ctx.ResolveWorkingDir)
 		if dirErr != nil {
-			// Release the spawn-slot claim taken by TrySetTeamSpawning before
-			// bailing — otherwise teamSpawned stays true forever and every
-			// later spawn POST is rejected with 409 until jarvis restarts. A
-			// single malformed memberOverride workingDir would lock the operator
-			// out. (The len(spawned)==0 rollback below only runs after the loop.)
-			ctx.OfficeManager.ReleaseTeamSpawnSlot()
-			request.WriteError(w, http.StatusBadRequest, dirErr.Error())
-			return
+			// All workingDirs were pre-validated above, so this is unexpected.
+			// Don't release the slot + return here: members earlier in this loop
+			// may already be spawned, and returning would orphan them. Treat it
+			// as a per-member spawn failure (the post-loop len(spawned)==0
+			// rollback releases the slot if nothing spawned).
+			slog.Error("unexpected per-member workingDir error after pre-validation",
+				"member", member.ID, "error", dirErr)
+			errors = append(errors, fmt.Sprintf("workingDir error for %s: %s", member.Name, dirErr))
+			continue
 		}
 		spawnReq.WorkingDir = resolvedDir
 

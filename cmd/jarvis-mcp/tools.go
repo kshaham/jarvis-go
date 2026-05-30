@@ -1087,9 +1087,15 @@ func dispatchToolCall(params ToolCallParams) ToolResult {
 	dynamicToolsMu.RUnlock()
 
 	if found {
-		// Execute dynamic tool by running its prompt
+		// Execute dynamic tool by running its prompt. The tool's schema
+		// advertises an "input" arg, so fold the caller's input into the
+		// prompt instead of dropping it silently.
+		prompt := dynTool.Prompt
+		if input := getStringArg(params.Arguments, "input", ""); input != "" {
+			prompt = prompt + "\n\n" + input
+		}
 		return handleRunPrompt(map[string]interface{}{
-			"prompt":     dynTool.Prompt,
+			"prompt":     prompt,
 			"workingDir": dynTool.WorkingDir,
 		})
 	}
@@ -1153,7 +1159,10 @@ func handleOfficeTaskSelfAdd(args map[string]interface{}) ToolResult {
 	if !ok {
 		return toolError("title is required")
 	}
-	desc, _ := requireStringArg(args, "description")
+	desc, ok := requireStringArg(args, "description")
+	if !ok {
+		return toolError("description is required")
+	}
 	priority := getStringArg(args, "priority", "medium")
 	result, err := apiPost("/api/office/agent/task/self-add", map[string]interface{}{
 		"sessionId":   sid,
@@ -1225,8 +1234,10 @@ func handleOfficeTaskProgress(args map[string]interface{}) ToolResult {
 		return toolError("taskId is required")
 	}
 	note, _ := requireStringArg(args, "note")
+	// The server (agentTaskProgressRequest) reads json:"progress", not "note" —
+	// sending "note" silently dropped the progress text. Match the cm CLI.
 	result, err := apiPost("/api/office/agent/task-progress", map[string]interface{}{
-		"sessionId": sid, "taskId": taskID, "note": note,
+		"sessionId": sid, "taskId": taskID, "progress": note,
 	})
 	if err != nil {
 		return toolError(err.Error())
