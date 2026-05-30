@@ -1,6 +1,26 @@
 import type { CSSProperties } from 'react';
 import { tierColor, type Tier } from './TierBadge';
 
+const avatarBaseStyle: CSSProperties = {
+  position: 'relative',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+};
+
+const overflowChipBaseStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'var(--bg-pressed)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--text-secondary)',
+  fontSize: 12,
+  fontWeight: 700,
+};
+
 type Size = 'sm' | 'md' | 'lg';
 
 const SIZE_PX: Record<Size, number> = {
@@ -58,10 +78,7 @@ export function Avatar({
       aria-label={name || 'member avatar'}
       title={name}
       style={{
-        position: 'relative',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        ...avatarBaseStyle,
         width: px,
         height: px,
         background: showEmoji
@@ -69,7 +86,6 @@ export function Avatar({
           : `color-mix(in srgb, ${swatch} 22%, transparent)`,
         border: ring ? `2px solid ${ringColor}` : `1px solid var(--border-subtle)`,
         borderRadius: 'var(--radius-md)',
-        flexShrink: 0,
         ...style,
       }}
     >
@@ -135,20 +151,7 @@ export function AvatarStack({
       })}
       {overflow > 0 ? (
         <span
-          style={{
-            marginLeft: -8,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: px,
-            height: px,
-            background: 'var(--bg-pressed)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--text-secondary)',
-            fontSize: 11,
-            fontWeight: 700,
-          }}
+          style={{ ...overflowChipBaseStyle, marginLeft: -8, width: px, height: px }}
         >
           +{overflow}
         </span>

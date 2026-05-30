@@ -6,6 +6,42 @@ import { leadOf } from './templateHelpers';
 import { TierCounts } from './TierBadge';
 import type { Tier } from './TierBadge';
 
+const cardNameStyle: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  fontSize: 15,
+  fontWeight: 700,
+  color: 'var(--text-primary)',
+  lineHeight: 1.3,
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+};
+
+const cardDescStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  color: 'var(--text-secondary)',
+  lineHeight: 1.4,
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+};
+
+const categoryChipStyle: CSSProperties = {
+  padding: '2px 8px',
+  background: 'var(--bg-pressed)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-pill)',
+  color: 'var(--text-muted)',
+  fontSize: 12,
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: 0.4,
+};
+
 export function TemplateCard({
   tpl,
   selected,
@@ -56,37 +92,13 @@ export function TemplateCard({
             ring
           />
         ) : null}
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 15,
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            lineHeight: 1.3,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}
-        >
+        <span style={cardNameStyle}>
           {tpl.name}
         </span>
       </header>
 
       {tpl.description ? (
-        <p
-          style={{
-            margin: 0,
-            fontSize: 12,
-            color: 'var(--text-secondary)',
-            lineHeight: 1.4,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}
-        >
+        <p style={cardDescStyle}>
           {tpl.description}
         </p>
       ) : null}
@@ -114,19 +126,7 @@ export function TemplateCard({
       >
         <TierCounts members={tpl.members.map((m) => ({ tier: m.tier as Tier | undefined }))} />
         {tpl.category ? (
-          <span
-            style={{
-              padding: '2px 8px',
-              background: 'var(--bg-pressed)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-pill)',
-              color: 'var(--text-muted)',
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: 0.4,
-            }}
-          >
+          <span style={categoryChipStyle}>
             {tpl.category}
           </span>
         ) : null}

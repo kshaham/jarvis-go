@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
 import { RevealItem } from '../motion';
 import { SectionCard } from './formPrimitives';
@@ -7,6 +8,18 @@ import type { MemberEdit } from './MemberEditor';
 import { MemberTile } from './MemberTile';
 import { TierBadge } from './TierBadge';
 import type { Tier } from './TierBadge';
+
+const emptyEditorStyle: CSSProperties = {
+  padding: 16,
+  background: 'var(--lg-fill)',
+  border: '1px dashed var(--lg-rim-strong)',
+  borderRadius: 'var(--radius-md)',
+  WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  color: 'var(--text-muted)',
+  fontSize: 12,
+  textAlign: 'center' as const,
+};
 
 export function MembersSection({
   tpl,
@@ -64,11 +77,11 @@ export function MembersSection({
       trailing={
         <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
           <TierBadge tier="strategic" variant="dot" />
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Strategic</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Strategic</span>
           <TierBadge tier="worker" variant="dot" />
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Worker</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Worker</span>
           <TierBadge tier="support" variant="dot" />
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Support</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Support</span>
         </span>
       }
     >
@@ -86,13 +99,13 @@ export function MembersSection({
           const next = members[(idx + delta + members.length) % members.length];
           if (next) setSelectedMemberId(next.id);
         }}
+        className="focus-ring"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
           gap: 10,
           padding: 2,
           marginBottom: 12,
-          outline: 'none',
         }}
       >
         {members.map((m, i) => {
@@ -127,19 +140,7 @@ export function MembersSection({
           onReset={resetSelected}
         />
       ) : (
-        <div
-          style={{
-            padding: 16,
-            background: 'var(--lg-fill)',
-            border: '1px dashed var(--lg-rim-strong)',
-            borderRadius: 'var(--radius-md)',
-            WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-            backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-            color: 'var(--text-muted)',
-            fontSize: 12,
-            textAlign: 'center',
-          }}
-        >
+        <div style={emptyEditorStyle}>
           Select a card above to edit that member.
         </div>
       )}

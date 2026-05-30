@@ -30,7 +30,7 @@ export function EmptyState({
         // Convex glass bead — inner highlight + accent bloom simulate depth
         // without nesting a second backdrop-filter (perf + artifact-safe).
         <div
-          className="grid h-12 w-12 place-items-center rounded-full"
+          className="grid size-12 place-items-center rounded-full"
           style={{
             background: 'var(--lg-fill-accent)',
             border: '1px solid rgb(var(--accent-rgb) / 0.35)',

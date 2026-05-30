@@ -21,7 +21,7 @@ export function MissionSection({
       trailing={
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: near ? 'var(--status-warn)' : 'var(--text-muted)',
             fontVariantNumeric: 'tabular-nums',
           }}

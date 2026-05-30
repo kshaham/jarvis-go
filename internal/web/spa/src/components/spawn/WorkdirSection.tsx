@@ -81,7 +81,7 @@ export function WorkdirSection({
           />
           <span
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--text-muted)',
               fontFamily: 'var(--font-mono)',
             }}
@@ -103,7 +103,7 @@ export function WorkdirSection({
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   color: 'var(--text-faint)',
                   letterSpacing: 0.4,
                   textTransform: 'uppercase',

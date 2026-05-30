@@ -6,6 +6,19 @@ import { cn } from '@/lib/cn';
 import { Avatar } from './Avatar';
 import { TierBadge, type Tier } from './TierBadge';
 
+const editedBadgeStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '2px 8px',
+  borderRadius: 'var(--radius-pill)',
+  background: 'color-mix(in srgb, var(--status-warn) 16%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--status-warn) 36%, transparent)',
+  color: 'var(--status-warn)',
+  fontSize: 12,
+  fontWeight: 600,
+};
+
 // MemberTile — a roomy roster card. Shows the agent's avatar plus the
 // FULL name and role (wrapping, never truncated) and a tier pill, so an
 // operator can read who's on the team at a glance. Built on GlowCard for
@@ -86,21 +99,10 @@ export function MemberTile({
             <motion.span
               aria-label="Edited"
               title="Overridden from the template"
-              initial={reduce ? false : { scale: 0, opacity: 0 }}
+              initial={reduce ? false : { scale: 0.8, opacity: 0 }}
               animate={reduce ? undefined : { scale: 1, opacity: 1 }}
               transition={{ duration: 0.3, ease: 'easeOut' }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '2px 8px',
-                borderRadius: 'var(--radius-pill)',
-                background: 'color-mix(in srgb, var(--status-warn) 16%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--status-warn) 36%, transparent)',
-                color: 'var(--status-warn)',
-                fontSize: 10,
-                fontWeight: 600,
-              }}
+              style={editedBadgeStyle}
             >
               <span
                 aria-hidden

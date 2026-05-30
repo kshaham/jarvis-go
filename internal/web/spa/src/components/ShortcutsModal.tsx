@@ -1,4 +1,17 @@
+import type { CSSProperties } from 'react';
 import { Modal } from './motion/Modal';
+
+const kbdStyle: CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+  minWidth: 22,
+  textAlign: 'center',
+  padding: '2px 6px',
+  borderRadius: 6,
+  background: 'var(--bg-pressed)',
+  border: '1px solid var(--border-default)',
+  color: 'var(--text-primary)',
+};
 
 const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['⌘', 'K'], label: 'Open the command palette' },
@@ -26,20 +39,7 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
             <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{s.label}</span>
             <span style={{ display: 'inline-flex', gap: 4 }}>
               {s.keys.map((k) => (
-                <kbd
-                  key={k}
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 12,
-                    minWidth: 22,
-                    textAlign: 'center',
-                    padding: '2px 6px',
-                    borderRadius: 6,
-                    background: 'var(--bg-pressed)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-primary)',
-                  }}
-                >
+                <kbd key={k} style={kbdStyle}>
                   {k}
                 </kbd>
               ))}

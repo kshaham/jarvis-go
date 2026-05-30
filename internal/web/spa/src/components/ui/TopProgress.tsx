@@ -1,7 +1,19 @@
 import { useIsFetching } from '@tanstack/react-query';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
+
+const barContainerStyle: CSSProperties = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  height: 2,
+  zIndex: 80,
+  pointerEvents: 'none',
+  overflow: 'hidden',
+};
 
 // TopProgress — a slim indeterminate bar pinned to the very top of the
 // viewport. Shows while react-query has in-flight requests, plus a brief
@@ -30,16 +42,7 @@ export function TopProgress() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 2,
-            zIndex: 80,
-            pointerEvents: 'none',
-            overflow: 'hidden',
-          }}
+          style={barContainerStyle}
         >
           <motion.div
             animate={reduce ? { x: 0 } : { x: ['-100%', '250%'] }}

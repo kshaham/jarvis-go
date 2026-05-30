@@ -1,8 +1,34 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { spring, timing } from '../../lib/motion';
+
+const overlayStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 60,
+  background: 'rgba(3,20,14,0.55)',
+  backdropFilter: 'blur(var(--elev-command-blur))',
+  WebkitBackdropFilter: 'blur(var(--elev-command-blur))',
+};
+
+const contentBaseStyle: CSSProperties = {
+  position: 'fixed',
+  top: '8vh',
+  left: '50%',
+  zIndex: 61,
+  maxHeight: '84vh',
+  display: 'flex',
+  flexDirection: 'column',
+  background: 'var(--lg-panel-bg)',
+  border: '1px solid var(--lg-rim-strong)',
+  borderRadius: 'var(--radius-xl)',
+  overflow: 'hidden',
+  // Focus ring suppressed: Radix focuses the container; inner controls
+  // keep their own rings via .focus-ring.
+  outline: 'none',
+};
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'wide' | 'full';
 
@@ -72,14 +98,7 @@ export function Modal({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={timing.short}
-                style={{
-                  position: 'fixed',
-                  inset: 0,
-                  zIndex: 60,
-                  background: 'rgba(3,20,14,0.55)',
-                  backdropFilter: 'blur(var(--elev-command-blur))',
-                  WebkitBackdropFilter: 'blur(var(--elev-command-blur))',
-                }}
+                style={overlayStyle}
               />
             </Dialog.Overlay>
             <Dialog.Content asChild aria-describedby={description ? 'modal-desc' : undefined}>
@@ -98,20 +117,8 @@ export function Modal({
                 }
                 transition={spring.smooth}
                 style={{
-                  position: 'fixed',
-                  top: '8vh',
-                  left: '50%',
-                  zIndex: 61,
+                  ...contentBaseStyle,
                   width: 'min(100% - 32px, ' + SIZE_MAX_WIDTH[size] + ')',
-                  maxHeight: '84vh',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  // Liquid-glass panel — a frosted, rim-lit surface over the
-                  // blurred page. The convex specular adds the top highlight
-                  // (no ::after needed on an inline-styled element).
-                  background: 'var(--lg-panel-bg)',
-                  border: '1px solid var(--lg-rim-strong)',
-                  borderRadius: 'var(--radius-xl)',
                   // When refracting, let the `.lg-refract` class own the
                   // backdrop-filter (inline would beat the class). Otherwise
                   // apply the plain glass blur here.
@@ -126,11 +133,6 @@ export function Modal({
                   boxShadow: glow
                     ? 'var(--elev-command-shadow), var(--glow-violet-md), var(--lg-specular-convex)'
                     : 'var(--elev-command-shadow), var(--lg-specular-convex)',
-                  overflow: 'hidden',
-                  // Radix focuses the content container on open; suppress
-                  // the default browser outline (inner controls keep their
-                  // own focus rings via .focus-ring).
-                  outline: 'none',
                 }}
               >
                 {hideHeader ? (

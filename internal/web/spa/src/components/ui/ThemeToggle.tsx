@@ -1,8 +1,25 @@
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import type { CSSProperties } from 'react';
 
 import { Press } from '@/components/motion/Press';
 import { useTheme, type ThemePref } from '@/hooks/useTheme';
+
+const toggleButtonStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 32,
+  height: 32,
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--lg-rim)',
+  background: 'var(--lg-fill)',
+  boxShadow: 'var(--lg-shadow-rest)',
+  WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+  backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
+  color: 'var(--text-secondary)',
+  cursor: 'pointer',
+};
 
 const NEXT_LABEL: Record<ThemePref, string> = {
   dark: 'Theme: dark — switch to light',
@@ -24,21 +41,7 @@ export function ThemeToggle() {
       onClick={cycle}
       aria-label={NEXT_LABEL[theme]}
       title={NEXT_LABEL[theme]}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 32,
-        height: 32,
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--lg-rim)',
-        background: 'var(--lg-fill)',
-        boxShadow: 'var(--lg-shadow-rest)',
-        WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
-        backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
-        color: 'var(--text-secondary)',
-        cursor: 'pointer',
-      }}
+      style={toggleButtonStyle}
     >
       <AnimatePresence mode="wait" initial={false}>
         <motion.span

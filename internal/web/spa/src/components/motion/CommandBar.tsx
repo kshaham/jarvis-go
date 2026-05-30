@@ -1,11 +1,27 @@
 import { Command, useCommandState } from 'cmdk';
 import { useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Modal } from './Modal';
 import { Metric } from './Metric';
 import { useOfficeStatus } from '../../hooks/useOfficeStatus';
 import { usePeers } from '../../hooks/usePeers';
+
+const glyphStyle: CSSProperties = {
+  width: 26,
+  height: 26,
+  borderRadius: 6,
+  background: 'var(--bg-pressed)',
+  border: '1px solid var(--border-default)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'var(--text-primary)',
+  fontWeight: 700,
+  fontSize: 12,
+  flexShrink: 0,
+};
 
 type Action = {
   id: string;
@@ -150,7 +166,7 @@ export function CommandBar({ open, onClose, actions }: Props) {
             display: 'flex',
             justifyContent: 'space-between',
             padding: '0 14px 6px',
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--text-muted)',
           }}
         >
@@ -212,22 +228,7 @@ function CommandRow({
 }) {
   return (
     <Command.Item value={`${action.label} ${action.hint ?? ''}`} onSelect={onSelect}>
-      <span
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 6,
-          background: 'var(--bg-pressed)',
-          border: '1px solid var(--border-default)',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--text-primary)',
-          fontWeight: 700,
-          fontSize: 12,
-          flexShrink: 0,
-        }}
-      >
+      <span style={glyphStyle}>
         {action.glyph}
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
@@ -249,7 +250,7 @@ function CommandRow({
             style={{
               display: 'block',
               color: 'var(--text-muted)',
-              fontSize: 11,
+              fontSize: 12,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',

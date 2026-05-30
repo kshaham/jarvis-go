@@ -1,5 +1,16 @@
 import type { CSSProperties } from 'react';
 
+// Static base for the pill variant — hoisted to avoid per-render allocations.
+const pillBaseStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '2px 8px',
+  borderRadius: 'var(--radius-pill)',
+  fontSize: 12,
+  fontWeight: 600,
+};
+
 export type Tier = 'strategic' | 'worker' | 'support';
 
 type Variant = 'dot' | 'pill';
@@ -47,7 +58,7 @@ export function TierBadge({
           display: 'inline-flex',
           alignItems: 'center',
           gap: 4,
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-secondary)',
           ...style,
         }}
@@ -72,16 +83,10 @@ export function TierBadge({
     <span
       aria-label={label}
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '2px 8px',
+        ...pillBaseStyle,
         background: 'color-mix(in srgb, ' + color + ' 16%, transparent)',
         border: '1px solid color-mix(in srgb, ' + color + ' 36%, transparent)',
-        borderRadius: 'var(--radius-pill)',
         color,
-        fontSize: 11,
-        fontWeight: 600,
         ...style,
       }}
     >

@@ -22,7 +22,7 @@ export function TeamHeader() {
         <div className="flex items-center gap-3">
           {/* Brand mark — accent glass chip with a top sheen + bloom. */}
           <div
-            className="h-7 w-7 rounded-md"
+            className="size-7 rounded-md"
             style={{
               background:
                 'linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)',
@@ -34,7 +34,7 @@ export function TeamHeader() {
             <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
               Jarvis · Office
             </div>
-            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               React beta /office-v2
             </div>
           </div>

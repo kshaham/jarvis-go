@@ -1,6 +1,20 @@
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import type { CSSProperties } from 'react';
 
 import { useSSEConnected } from '@/hooks/useSSEConnected';
+
+const bannerInnerStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  padding: '6px 12px',
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--status-warn)',
+  background: 'rgb(var(--status-warn-rgb) / 0.12)',
+  borderBottom: '1px solid rgb(var(--status-warn-rgb) / 0.25)',
+};
 
 // ConnectionBanner — a slim amber strip that slides in under the header
 // whenever the SSE stream is down, making "live updates paused" obvious
@@ -20,20 +34,7 @@ export function ConnectionBanner() {
           transition={{ duration: 0.2 }}
           style={{ overflow: 'hidden' }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              padding: '6px 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              color: 'var(--status-warn)',
-              background: 'rgb(var(--status-warn-rgb) / 0.12)',
-              borderBottom: '1px solid rgb(var(--status-warn-rgb) / 0.25)',
-            }}
-          >
+          <div style={bannerInnerStyle}>
             <motion.span
               animate={reduce ? { opacity: 1 } : { opacity: [1, 0.4, 1] }}
               transition={reduce ? { duration: 0 } : { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}

@@ -1,10 +1,21 @@
 import { motion, useReducedMotion } from 'motion/react';
 import type { HTMLMotionProps } from 'motion/react';
 import { useRef, useState } from 'react';
-import type { PointerEvent, ReactNode } from 'react';
+import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 
 import { cn } from '../../lib/cn';
 import { spring } from '../../lib/motion';
+
+const rippleBaseStyle: CSSProperties = {
+  position: 'absolute',
+  width: 14,
+  height: 14,
+  marginLeft: -7,
+  marginTop: -7,
+  borderRadius: '50%',
+  background: 'rgb(var(--accent-rgb) / 0.5)',
+  pointerEvents: 'none',
+};
 
 type Ripple = { id: number; x: number; y: number };
 
@@ -76,24 +87,13 @@ export function Press({
         ? ripples.map((r) => (
             <motion.span
               key={r.id}
-              initial={{ scale: 0, opacity: 0.4 }}
+              initial={{ scale: 0.8, opacity: 0.4 }}
               animate={{ scale: 2.5, opacity: 0 }}
               transition={{ duration: 0.5, ease: 'easeOut' }}
               onAnimationComplete={() =>
                 setRipples((prev) => prev.filter((p) => p.id !== r.id))
               }
-              style={{
-                position: 'absolute',
-                left: r.x,
-                top: r.y,
-                width: 14,
-                height: 14,
-                marginLeft: -7,
-                marginTop: -7,
-                borderRadius: '50%',
-                background: 'rgb(var(--accent-rgb) / 0.5)',
-                pointerEvents: 'none',
-              }}
+              style={{ ...rippleBaseStyle, left: r.x, top: r.y }}
             />
           ))
         : null}

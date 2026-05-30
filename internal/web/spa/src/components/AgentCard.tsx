@@ -67,7 +67,7 @@ export function AgentCard({ member, onSelect }: Props) {
         <motion.div
           layoutId={reduce ? undefined : `agent-avatar-${member.sessionId}`}
           className={cn(
-            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-base font-semibold',
+            'flex size-10 shrink-0 items-center justify-center rounded-lg text-base font-semibold',
             color,
           )}
         >
@@ -84,7 +84,7 @@ export function AgentCard({ member, onSelect }: Props) {
         <StatusPill status={member.status} />
       </div>
 
-      <div className="flex items-center justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
+      <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
         {/* Cost ticks digit-by-digit and flashes when more tokens get billed. */}
         <Metric
           value={cost}
@@ -97,7 +97,7 @@ export function AgentCard({ member, onSelect }: Props) {
       </div>
 
       {member.score?.grade && (
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex items-center gap-2 text-xs">
           <span
             className="rounded px-1.5 py-0.5 font-semibold"
             style={{
@@ -127,7 +127,7 @@ export function AgentCardSkeleton() {
   return (
     <div className="surface-card flex flex-col gap-3 p-4">
       <div className="flex items-start gap-3">
-        <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
+        <Skeleton className="size-10 shrink-0 rounded-lg" />
         <div className="flex-1 space-y-2">
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-2.5 w-16" />

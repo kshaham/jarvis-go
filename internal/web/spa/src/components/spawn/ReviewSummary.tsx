@@ -7,6 +7,34 @@ import type { MemberEdit } from './MemberEditor';
 import { TierCounts } from './TierBadge';
 import type { Tier } from './TierBadge';
 
+const stickyBarStyle: React.CSSProperties = {
+  position: 'sticky',
+  bottom: 0,
+  zIndex: 10,
+  background: 'color-mix(in srgb, var(--bg-app) 92%, transparent)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  borderTop: '1px solid var(--border-default)',
+  padding: 12,
+  marginInline: -12,
+  marginTop: 8,
+};
+
+const chipStyle: React.CSSProperties = {
+  padding: '4px 10px',
+  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-pill)',
+  color: 'var(--text-secondary)',
+  fontSize: 12,
+  fontWeight: 600,
+  maxWidth: 360,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  display: 'inline-block',
+};
+
 type Validity = {
   ok: boolean;
   reason: string;
@@ -116,18 +144,7 @@ export function ReviewSummary({
       initial={reduce ? false : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-      style={{
-        position: 'sticky',
-        bottom: 0,
-        zIndex: 10,
-        background: 'color-mix(in srgb, var(--bg-app) 92%, transparent)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        borderTop: '1px solid var(--border-default)',
-        padding: 12,
-        marginInline: -12,
-        marginTop: 8,
-      }}
+      style={stickyBarStyle}
     >
       {error ? (
         <div
@@ -185,7 +202,7 @@ export function ReviewSummary({
         <p
           style={{
             margin: '8px 0 0',
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--text-muted)',
           }}
         >
@@ -199,21 +216,7 @@ export function ReviewSummary({
 function Chip({ children, mono }: { children: React.ReactNode; mono?: boolean }) {
   return (
     <span
-      style={{
-        padding: '4px 10px',
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-pill)',
-        color: 'var(--text-secondary)',
-        fontSize: 11,
-        fontWeight: 600,
-        fontFamily: mono ? 'var(--font-mono)' : 'inherit',
-        maxWidth: 360,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-        display: 'inline-block',
-      }}
+      style={{ ...chipStyle, fontFamily: mono ? 'var(--font-mono)' : 'inherit' }}
     >
       {children}
     </span>
