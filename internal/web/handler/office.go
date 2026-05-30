@@ -3077,3 +3077,58 @@ func (ctx *Context) OfficePutMemberPersonality(w http.ResponseWriter, r *http.Re
 	}
 	ok(w, nil)
 }
+
+// ---------------------------------------------------------------------------
+// Project invariants handlers
+// ---------------------------------------------------------------------------
+
+// OfficeGetProjectInvariants returns the current project invariants list.
+func (ctx *Context) OfficeGetProjectInvariants(w http.ResponseWriter, r *http.Request) {
+	ok(w, map[string]interface{}{"invariants": ctx.OfficeManager.GetProjectInvariants()})
+}
+
+// OfficePutProjectInvariants replaces the full invariants list.
+func (ctx *Context) OfficePutProjectInvariants(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Invariants []string `json:"invariants"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Invariants == nil {
+		req.Invariants = []string{}
+	}
+	ctx.OfficeManager.SetProjectInvariants(req.Invariants)
+	ok(w, map[string]interface{}{"invariants": ctx.OfficeManager.GetProjectInvariants()})
+}
+
+// OfficePostProjectInvariant appends a single invariant to the list.
+func (ctx *Context) OfficePostProjectInvariant(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text string `json:"text"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Text == "" {
+		request.WriteError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	ctx.OfficeManager.AddProjectInvariant(req.Text)
+	ok(w, map[string]interface{}{"invariants": ctx.OfficeManager.GetProjectInvariants()})
+}
+
+// OfficeDeleteProjectInvariant removes a single invariant by index.
+func (ctx *Context) OfficeDeleteProjectInvariant(w http.ResponseWriter, r *http.Request) {
+	idxStr := chi.URLParam(r, "index")
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		request.WriteError(w, http.StatusBadRequest, "invalid index: must be an integer")
+		return
+	}
+	if err := ctx.OfficeManager.RemoveProjectInvariant(idx); err != nil {
+		request.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{"invariants": ctx.OfficeManager.GetProjectInvariants()})
+}

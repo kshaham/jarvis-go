@@ -127,6 +127,10 @@ func main() {
 	case "onboard", "onboarding":
 		handleOnboard(args)
 
+	// Project management (invariants, etc.)
+	case "project":
+		handleProject(args)
+
 	// Help
 	case "help", "--help", "-h":
 		printUsage()
@@ -1097,6 +1101,108 @@ func handleMemory(args []string) {
 	}
 }
 
+// handleProject dispatches project-level subcommands.
+func handleProject(args []string) {
+	if len(args) < 1 {
+		fatal("Usage: cm project <invariants> [subcommand]")
+	}
+	switch args[0] {
+	case "invariants":
+		handleProjectInvariants(args[1:])
+	default:
+		fatal("Unknown project subcommand: " + args[0] + " (expected: invariants)")
+	}
+}
+
+// handleProjectInvariants manages the project-level invariants list.
+//
+//	cm project invariants              -- list all invariants
+//	cm project invariants list         -- list all invariants
+//	cm project invariants add "<rule>" -- append a rule
+//	cm project invariants remove <n>   -- remove rule at 1-based index
+//	cm project invariants set "<r1>" "<r2>" ...  -- replace full list
+func handleProjectInvariants(args []string) {
+	subCmd := "list"
+	if len(args) > 0 {
+		subCmd = args[0]
+		args = args[1:]
+	}
+	switch subCmd {
+	case "list", "ls", "":
+		result := get("/api/office/project/invariants")
+		printInvariantsList(result)
+	case "add":
+		if len(args) < 1 {
+			fatal("Usage: cm project invariants add \"<rule>\"")
+		}
+		text := strings.Join(args, " ")
+		result := postBody("/api/office/project/invariants", map[string]interface{}{"text": text})
+		printInvariantsList(result)
+	case "remove", "rm", "del", "delete":
+		if len(args) < 1 {
+			fatal("Usage: cm project invariants remove <index>")
+		}
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fatal("index must be an integer")
+		}
+		delResult := delBody(fmt.Sprintf("/api/office/project/invariants/%s", args[0]))
+		printInvariantsList(delResult)
+	case "set":
+		if len(args) < 1 {
+			fatal("Usage: cm project invariants set \"<r1>\" \"<r2>\" ...")
+		}
+		result := put("/api/office/project/invariants", map[string]interface{}{"invariants": args})
+		printInvariantsList(result)
+	default:
+		fatal("Unknown invariants subcommand: " + subCmd + " (expected: list|add|remove|set)")
+	}
+}
+
+// delBody issues an HTTP DELETE and returns the decoded JSON response body.
+// del() exists for fire-and-forget deletes; this variant captures the body.
+func delBody(path string) interface{} {
+	requireEnv()
+	req, err := http.NewRequest("DELETE", apiURL+path, nil)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	addAgentAuth(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		text, _ := io.ReadAll(resp.Body)
+		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
+	}
+	var out interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out
+}
+
+// printInvariantsList pretty-prints the invariants array from a server response.
+func printInvariantsList(result interface{}) {
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		printJSON(result)
+		return
+	}
+	raw, ok := m["invariants"]
+	if !ok {
+		printJSON(result)
+		return
+	}
+	arr, ok := raw.([]interface{})
+	if !ok || len(arr) == 0 {
+		fmt.Println("(no invariants)")
+		return
+	}
+	for i, v := range arr {
+		fmt.Printf("%d. %v\n", i, v)
+	}
+}
+
 // --- Helpers ---
 
 // addAgentAuth attaches the agent token header (when set via env) so the
@@ -1158,6 +1264,31 @@ func del(path string) {
 		text, _ := io.ReadAll(resp.Body)
 		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
 	}
+}
+
+// put issues an HTTP PUT request with a JSON body against the given path.
+// Returns the decoded JSON response. Fatal-exits on non-2xx.
+func put(path string, body map[string]interface{}) interface{} {
+	requireEnv()
+	data, _ := json.Marshal(body)
+	req, err := http.NewRequest("PUT", apiURL+path, bytes.NewReader(data))
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	req.Header.Set("Content-Type", "application/json")
+	addAgentAuth(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		fatal("HTTP error: " + err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		text, _ := io.ReadAll(resp.Body)
+		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
+	}
+	var out interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out
 }
 
 func get(path string) interface{} {
@@ -1295,6 +1426,10 @@ Commands:
   dev creds set <text...> [--name <s>]
                                       Lead: set dev login blob for slot s
   dev creds clear [--name <s>]        Lead: clear dev credentials for slot s
+  project invariants                  List project invariants (non-negotiable rules)
+  project invariants add "<rule>"     Append a rule to the invariants list
+  project invariants remove <index>   Remove rule at given 0-based index
+  project invariants set "<r1>" ...   Replace full invariants list
   help                                Show this help
 
 Environment:

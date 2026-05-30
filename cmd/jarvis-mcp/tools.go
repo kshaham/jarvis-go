@@ -585,6 +585,10 @@ var allTools = map[string]ToolHandler{
 	"office_skill_search":    handleSearchSkills,
 	"office_skill_read":      handleGetSkill,
 	"office_skill_create":    handleCreateSkill,
+
+	// Project invariants
+	"office_project_invariants_get": handleOfficeProjectInvariantsGet,
+	"office_project_invariants_set": handleOfficeProjectInvariantsSet,
 }
 
 // --- Session Tool Handlers ---
@@ -1377,6 +1381,46 @@ func handleOfficeMemoryAppend(args map[string]interface{}) ToolResult {
 	}
 	result, err := apiPost("/api/office/agent/memory/append", map[string]interface{}{
 		"sessionId": sid, "entry": entry,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+// --- Project Invariants Tool Handlers ---
+
+// handleOfficeProjectInvariantsGet returns the current project invariants list.
+func handleOfficeProjectInvariantsGet(_ map[string]interface{}) ToolResult {
+	result, err := apiGet("/api/office/project/invariants")
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+// handleOfficeProjectInvariantsSet replaces the project invariants list.
+// Input: { "invariants": ["rule1", "rule2", ...] }
+func handleOfficeProjectInvariantsSet(args map[string]interface{}) ToolResult {
+	raw, ok := args["invariants"]
+	if !ok {
+		return toolError("invariants is required")
+	}
+	// Accept []interface{} (from JSON decoding) and convert to []string.
+	rawSlice, ok := raw.([]interface{})
+	if !ok {
+		return toolError("invariants must be an array of strings")
+	}
+	items := make([]string, 0, len(rawSlice))
+	for i, v := range rawSlice {
+		s, ok := v.(string)
+		if !ok {
+			return toolError(fmt.Sprintf("invariants[%d] must be a string", i))
+		}
+		items = append(items, s)
+	}
+	result, err := apiPut("/api/office/project/invariants", map[string]interface{}{
+		"invariants": items,
 	})
 	if err != nil {
 		return toolError(err.Error())

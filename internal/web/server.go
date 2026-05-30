@@ -1218,6 +1218,8 @@ func (s *Server) setupRouter() chi.Router {
 				// R34 · task screenshot attachments (operator-visible
 				// evidence for UI-keyword tasks).
 				r.Get("/task-screenshots/{filename}", h.OfficeGetTaskScreenshot)
+				// Project invariants (non-negotiable rules injected into agent prompts).
+				r.Get("/project/invariants", h.OfficeGetProjectInvariants)
 				// PreToolUse safety policy (operator-editable denylist).
 				r.Get("/tool-policy", h.GetToolPolicy)
 				// R3.6 · map a PR number back to its linked team (and
@@ -1296,6 +1298,10 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/task/complete", h.OfficeAgentTaskComplete)
 					r.Post("/task/progress", h.OfficeAgentTaskProgress)
 					r.Post("/task/ack", h.OfficeAgentTaskAck)
+					// Project invariants mutations.
+					r.Put("/project/invariants", h.OfficePutProjectInvariants)
+					r.Post("/project/invariants", h.OfficePostProjectInvariant)
+					r.Delete("/project/invariants/{index}", h.OfficeDeleteProjectInvariant)
 					// PreToolUse safety policy replace (operator-editable).
 					r.Put("/tool-policy", h.PutToolPolicy)
 					// R4.2 · mobile -> claude.ai web session bridge.

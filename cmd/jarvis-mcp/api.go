@@ -84,3 +84,11 @@ func apiPost(path string, payload interface{}) (interface{}, error) {
 func apiDelete(path string) (interface{}, error) {
 	return doRequest(http.MethodDelete, path, nil, "")
 }
+
+func apiPut(path string, payload interface{}) (interface{}, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	return doRequest(http.MethodPut, path, bytes.NewReader(data), "application/json")
+}
