@@ -96,6 +96,7 @@ func BuildRestoreOverrides(snap *TeamSnapshot, forkRequested bool) ([]spawnpaylo
 			Tier:         m.Config.Tier,
 			Color:        m.Config.Color,
 			Personality:  m.Config.Personality,
+			Voice:        m.Config.Voice,
 			SystemPrompt: m.Config.SystemPrompt,
 			Skills:       m.Config.Skills,
 		}

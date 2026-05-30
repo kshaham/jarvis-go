@@ -38,6 +38,7 @@ type MemberOverride struct {
 	Color        string   `json:"color,omitempty"`
 	Emoji        string   `json:"emoji,omitempty"`
 	Personality  string   `json:"personality,omitempty"`
+	Voice        string   `json:"voice,omitempty"`
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 	WorkingDir   string   `json:"workingDir,omitempty"`

@@ -14,6 +14,7 @@ type TeamMemberConfig struct {
 	Tier         string   `json:"tier"` // "strategic" or "worker"
 	Color        string   `json:"color"`
 	Personality  string   `json:"personality"`
+	Voice        string   `json:"voice,omitempty"`
 	Skills       []string `json:"skills"`
 	SystemPrompt string   `json:"systemPrompt"`
 }

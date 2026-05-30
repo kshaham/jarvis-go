@@ -226,6 +226,7 @@ func (m *Manager) SnapshotRosterAsTemplateMembers() []teamtemplates.TeamTemplate
 			m.SystemPrompt = cfg.SystemPrompt
 		}
 		m.Skills = cfg.Skills
+		m.Voice = cfg.Voice
 		members = append(members, m)
 	}
 	return members
@@ -659,6 +660,7 @@ func BuildRestartTemplateMember(agent *AgentState) (teamtemplates.TeamTemplateMe
 		Tier:         cfg.Tier,
 		Color:        cfg.Color,
 		Personality:  cfg.Personality,
+		Voice:        cfg.Voice,
 		SystemPrompt: cfg.SystemPrompt,
 		Skills:       cfg.Skills,
 	}, nil

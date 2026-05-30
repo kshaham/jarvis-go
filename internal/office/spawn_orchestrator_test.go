@@ -529,6 +529,7 @@ func TestBuildRestartTemplateMember_CopiesAllFields(t *testing.T) {
 		ID: "alpha", Name: "Alpha", Role: "lead", Tier: "strategic",
 		Color: "teal", Personality: "calm", SystemPrompt: "lead-sp",
 		Skills: []string{"office-protocols", "git-workflows"},
+		Voice: "aria",
 	})
 	agent := m.GetAgent("sess-restart-001")
 	got, err := BuildRestartTemplateMember(agent)
@@ -539,6 +540,9 @@ func TestBuildRestartTemplateMember_CopiesAllFields(t *testing.T) {
 		got.Tier != "strategic" || got.Color != "teal" ||
 		got.Personality != "calm" || got.SystemPrompt != "lead-sp" {
 		t.Errorf("field projection wrong: %+v", got)
+	}
+	if got.Voice != "aria" {
+		t.Errorf("Voice=%q want aria", got.Voice)
 	}
 	if len(got.Skills) != 2 {
 		t.Errorf("Skills=%v want 2 entries", got.Skills)

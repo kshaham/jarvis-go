@@ -147,6 +147,7 @@ func ResolveMemberList(req spawnpayload.SpawnTeamRequest, lookup TemplateLookup)
 			Color:        strs.FirstNonEmpty(ov.Color, "blue"),
 			Emoji:        ov.Emoji,
 			Personality:  ov.Personality,
+			Voice:        ov.Voice,
 			SystemPrompt: ov.SystemPrompt,
 			Skills:       ov.Skills,
 		})
@@ -434,6 +435,7 @@ func BuildTeamMemberConfigs(members []teamtemplates.TeamTemplateMember) []*TeamM
 			Tier:         m.Tier,
 			Color:        m.Color,
 			Personality:  m.Personality,
+			Voice:        m.Voice,
 			SystemPrompt: m.SystemPrompt,
 			Skills:       m.Skills,
 		})
@@ -484,6 +486,9 @@ func ApplyMemberOverrides(members []teamtemplates.TeamTemplateMember, overrides 
 		}
 		if ov.Personality != "" {
 			members[i].Personality = ov.Personality
+		}
+		if ov.Voice != "" {
+			members[i].Voice = ov.Voice
 		}
 		if ov.SystemPrompt != "" {
 			members[i].SystemPrompt = ov.SystemPrompt

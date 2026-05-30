@@ -33,6 +33,7 @@ type TeamTemplateMember struct {
 	Color        string   `json:"color"`
 	Emoji        string   `json:"emoji"`
 	Personality  string   `json:"personality,omitempty"`
+	Voice        string   `json:"voice,omitempty"`
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 	WorkingDir   string   `json:"workingDir,omitempty"`

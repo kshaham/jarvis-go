@@ -800,6 +800,7 @@ func TestBuildTeamMemberConfigs_PreservesFields(t *testing.T) {
 			Personality:  "calm",
 			SystemPrompt: "you are the lead",
 			Skills:       []string{"office-protocols", "implementation-plan"},
+			Voice:        "nova",
 		},
 		{
 			ID: "m2", Name: "Bolt", Role: "backend", Tier: "worker",
@@ -816,6 +817,9 @@ func TestBuildTeamMemberConfigs_PreservesFields(t *testing.T) {
 		g.Color != "purple" || g.Personality != "calm" ||
 		g.SystemPrompt != "you are the lead" {
 		t.Errorf("m1 field mismatch: %+v", g)
+	}
+	if g.Voice != "nova" {
+		t.Errorf("m1 Voice=%q want nova", g.Voice)
 	}
 	if len(g.Skills) != 2 || g.Skills[0] != "office-protocols" {
 		t.Errorf("m1 Skills not preserved: %+v", g.Skills)
