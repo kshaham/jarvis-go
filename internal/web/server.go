@@ -1190,6 +1190,7 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/standup", h.OfficePostStandup)
 					r.Post("/standup/user-message", h.OfficePostStandupUserMessage)
 					r.Put("/member/{sessionId}/personality", h.OfficePutMemberPersonality)
+					r.Put("/member/{sessionId}/voice", h.OfficePutMemberVoice)
 					r.Post("/brainstorm", h.OfficeBrainstorm)
 					r.Put("/telegram-config", h.OfficePutTelegramConfig)
 					// Operator-facing task mutations. Same handlers as the

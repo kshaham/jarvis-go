@@ -181,6 +181,22 @@ func itoa(i int) string {
 	return string(buf[pos:])
 }
 
+func TestAgentStateSetVoice(t *testing.T) {
+	cfg := &TeamMemberConfig{ID: "v1", Name: "Alice"}
+	a := NewAgentState("sess-1", "v1", cfg)
+
+	a.SetVoice("marin")
+	if a.Config.Voice != "marin" {
+		t.Errorf("Config.Voice = %q, want marin", a.Config.Voice)
+	}
+
+	// Overwrite with a different voice.
+	a.SetVoice("cedar")
+	if a.Config.Voice != "cedar" {
+		t.Errorf("Config.Voice = %q, want cedar after overwrite", a.Config.Voice)
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.StandupMaxNudges != 3 {

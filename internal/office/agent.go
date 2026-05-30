@@ -671,6 +671,15 @@ func (a *AgentState) SetPersonalityOverride(override *PersonalityOverride) {
 	a.mu.Unlock()
 }
 
+// SetVoice sets the member's TTS voice under the mutex.
+func (a *AgentState) SetVoice(voice string) {
+	a.mu.Lock()
+	if a.Config != nil {
+		a.Config.Voice = voice
+	}
+	a.mu.Unlock()
+}
+
 // RemoveTask removes a task by ID and returns it, or nil if not found.
 func (a *AgentState) RemoveTask(taskID string) *Task {
 	a.mu.Lock()

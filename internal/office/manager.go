@@ -2083,6 +2083,7 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	model := a.Model
 	activeTool := a.ActiveTool
 	sessionMode := a.SessionMode
+	voice := a.Config.Voice
 	a.mu.Unlock()
 
 	// lastActivityAt is the most recent of "last turn" or "right now" (if
@@ -2118,6 +2119,7 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 		"provider":       provider,
 		"model":          model,
 		"sessionMode":    sessionMode, // "sdk" | "hooks" | "legacy" | ""; drives the via-mode badge
+		"voice":          voice,
 		"lastActivityAt": lastActivityMs,
 		"workingDir":     "",
 		"activeTool":     activeTool,

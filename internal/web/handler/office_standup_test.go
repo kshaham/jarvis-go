@@ -1,14 +1,18 @@
 package handler
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/kshaham/jarvis/internal/office"
 )
 
@@ -247,4 +251,66 @@ func keysOf(m map[string]json.RawMessage) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// ---------------------------------------------------------------------------
+// TestPutMemberVoiceRejectsInvalid — bogus voice name → 400
+// ---------------------------------------------------------------------------
+
+func TestPutMemberVoiceRejectsInvalid(t *testing.T) {
+	ctx := newSnapshotCtx(t)
+
+	// Register an agent so the handler can find it.
+	ctx.OfficeManager.RegisterAgent("s1", "cfg1", &office.TeamMemberConfig{ID: "cfg1", Name: "Alice"})
+
+	body := bytes.NewBufferString(`{"voice":"bogus"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/office/member/s1/voice", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("sessionId", "s1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	ctx.OfficePutMemberVoice(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid voice") {
+		t.Errorf("expected 'invalid voice' in body, got: %s", rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestPutMemberVoiceSetsConfig — valid voice → 200 and Config.Voice updated
+// ---------------------------------------------------------------------------
+
+func TestPutMemberVoiceSetsConfig(t *testing.T) {
+	ctx := newSnapshotCtx(t)
+
+	ctx.OfficeManager.RegisterAgent("s1", "cfg1", &office.TeamMemberConfig{ID: "cfg1", Name: "Alice"})
+
+	body := bytes.NewBufferString(`{"voice":"marin"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/office/member/s1/voice", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("sessionId", "s1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	ctx.OfficePutMemberVoice(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	agent := ctx.OfficeManager.GetAgent("s1")
+	if agent == nil {
+		t.Fatal("agent s1 not found after PUT")
+	}
+	if agent.Config.Voice != "marin" {
+		t.Errorf("Config.Voice = %q, want marin", agent.Config.Voice)
+	}
 }

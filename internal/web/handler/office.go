@@ -24,6 +24,7 @@ import (
 	"github.com/kshaham/jarvis/internal/safego"
 	"github.com/kshaham/jarvis/internal/strs"
 	"github.com/kshaham/jarvis/internal/teamtemplates"
+	"github.com/kshaham/jarvis/internal/tts"
 	"github.com/kshaham/jarvis/internal/web/request"
 )
 
@@ -269,6 +270,10 @@ type brainstormRequest struct {
 type personalityRequest struct {
 	Personality  string `json:"personality"`
 	SystemPrompt string `json:"systemPrompt"`
+}
+
+type memberVoiceRequest struct {
+	Voice string `json:"voice"`
 }
 
 type codeGraphImpactRequest struct {
@@ -3020,6 +3025,30 @@ func (ctx *Context) OfficeGetMemberPersonality(w http.ResponseWriter, r *http.Re
 		"personality":  personality,
 		"systemPrompt": systemPrompt,
 	})
+}
+
+// OfficePutMemberVoice sets the TTS voice for a specific member.
+func (ctx *Context) OfficePutMemberVoice(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	var req memberVoiceRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if !tts.IsValidVoice(req.Voice) {
+		request.WriteError(w, http.StatusBadRequest, "invalid voice")
+		return
+	}
+	agent := ctx.OfficeManager.GetAgent(sessionID)
+	if agent == nil {
+		request.WriteError(w, http.StatusNotFound, "member not found")
+		return
+	}
+	agent.SetVoice(req.Voice)
+	ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
+		"sessionId": sessionID,
+		"voice":     req.Voice,
+	})
+	ok(w, map[string]interface{}{"voice": req.Voice})
 }
 
 // OfficePutMemberPersonality updates personality for a specific member.
