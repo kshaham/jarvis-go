@@ -2076,13 +2076,15 @@ func (m *Manager) BuildMemberPayload(a *AgentState) map[string]interface{} {
 	}
 
 	status := "idle"
-	activeTask := a.ActiveTask()
+	// Deep copy: activeTask is marshaled into the payload below and the live
+	// *Task is mutated under a.mu (applyTaskStatusLocked / SetTaskProgress).
+	activeTask := a.ActiveTaskCopy()
 	if activeTask != nil {
 		status = "working"
 	} else if a.GetSDKWorking() {
 		status = "working"
 	} else {
-		for _, t := range a.GetTasks() {
+		for _, t := range a.GetTasksCopy() {
 			if t.Status == TaskInProgress {
 				status = "working"
 				break
@@ -2210,7 +2212,9 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	for _, a := range roster {
 		taskQueues = append(taskQueues, map[string]interface{}{
 			"sessionId": a.SessionID,
-			"tasks":     a.GetTasks(),
+			// Deep copies: this is marshaled by the handler outside any lock
+			// while the live tasks are mutated under a.mu.
+			"tasks": a.GetTasksCopy(),
 		})
 	}
 

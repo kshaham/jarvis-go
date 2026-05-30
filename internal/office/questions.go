@@ -184,13 +184,21 @@ func (m *Manager) AskQuestion(fromSession, content, aboutTaskID string, totalWai
 	}
 
 	if len(q.Tried) == 0 {
+		// q is still in m.pendingQuestions, so this terminal-status write must
+		// hold m.mu (AnswerQuestion/ListPendingQuestionsFor read q.Status under
+		// m.mu; markAnswered writes it under m.mu). Release before the notify,
+		// which itself locks.
+		m.mu.Lock()
 		q.Status = QuestionNoRecipient
+		m.mu.Unlock()
 		m.NotifyOfficeEvent("Agent stuck-asking",
 			fmt.Sprintf("%s asked the team a question and nobody was available (about: %q)", askerName, q.AboutTitle))
 		slog.Warn("cm ask: no recipient available", "asker", askerName, "qid", q.ID)
 		return q, nil
 	}
+	m.mu.Lock()
 	q.Status = QuestionTimeout
+	m.mu.Unlock()
 	m.NotifyOfficeEvent("Agent stuck-asking",
 		fmt.Sprintf("%s asked %d teammates (%s) and got no answer in %s (about: %q)",
 			askerName, len(q.Tried), strings.Join(q.triedNames(m), ", "),
@@ -225,6 +233,7 @@ func (m *Manager) askOnce(q *Question, recipient *AgentState, maxWait time.Durat
 		recipient.QuestionSlot.finish()
 	}
 	recipient.QuestionSlot = slot
+	recipient.QuestionSlotQID = q.ID
 	recipient.mu.Unlock()
 
 	recipientName := recipient.SessionID
@@ -265,6 +274,7 @@ func (m *Manager) askOnce(q *Question, recipient *AgentState, maxWait time.Durat
 		// may have already replaced it.
 		if recipient.QuestionSlot == slot {
 			recipient.QuestionSlot = nil
+			recipient.QuestionSlotQID = ""
 		}
 		recipient.mu.Unlock()
 	}()
@@ -317,8 +327,12 @@ func (m *Manager) AnswerQuestion(qID, fromSession, answer string) error {
 	// standup/brainstorm late replies.
 	responder.mu.Lock()
 	slot := responder.QuestionSlot
+	slotQID := responder.QuestionSlotQID
 	responder.mu.Unlock()
-	if slot == nil || !slot.deliver(answer) {
+	// Only deliver if the recipient's CURRENT slot serves THIS question. If a
+	// newer question re-targeted the same recipient, its slot replaced ours, so
+	// answering the older question must NOT deliver to the newer one's asker.
+	if slot == nil || slotQID != qID || !slot.deliver(answer) {
 		recordLateResponse("question", fromSession)
 		return fmt.Errorf("asker stopped waiting; answer dropped")
 	}

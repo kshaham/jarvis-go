@@ -1215,16 +1215,25 @@ func (ctx *Context) CancelPlanGeneration(w http.ResponseWriter, r *http.Request)
 		})
 		cancelled = append(cancelled, req.OrchestratorID)
 	} else {
-		// Cancel all active plan generations
+		// Cancel all: snapshot the pairs under the lock, clear the map, release,
+		// THEN stop sessions outside the lock — StopSession blocks on process
+		// teardown, so holding ActivePlanOrchestratorsMu across N teardowns would
+		// serialize every plan create/cancel behind them (the specific-
+		// orchestrator branch above already releases before stopping).
+		pairs := make(map[string]string, len(ctx.ActivePlanOrchestrators))
 		for orchID, sessionID := range ctx.ActivePlanOrchestrators {
+			pairs[orchID] = sessionID
+		}
+		ctx.ActivePlanOrchestrators = make(map[string]string)
+		ctx.ActivePlanOrchestratorsMu.Unlock()
+
+		for orchID, sessionID := range pairs {
 			_ = ctx.SessionManager.StopSession(r.Context(), sessionID)
 			ctx.SSEBroker.Broadcast("plan:cancelled", map[string]interface{}{
 				"orchestratorId": orchID,
 			})
 			cancelled = append(cancelled, orchID)
 		}
-		ctx.ActivePlanOrchestrators = make(map[string]string)
-		ctx.ActivePlanOrchestratorsMu.Unlock()
 	}
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{

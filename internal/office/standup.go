@@ -125,6 +125,20 @@ func (m *Manager) StartStandup(participantIDs []string) *StandupState {
 // runStandupRoundRobin iterates through participants, sending prompts and
 // waiting for responses with nudge/timeout logic.
 func (m *Manager) runStandupRoundRobin(standupID string, participants []string, sessions SessionStore, cfg *Config) {
+	// Capture the StandupState THIS goroutine owns. All shared-state mutations
+	// below are guarded by pointer identity (m.standup == st), not just
+	// "m.standup != nil": if this standup is stopped and a NEW one starts (or
+	// the auto-standup tick fires) while this goroutine is parked in
+	// waitForStandupResponse, the live m.standup becomes a different object —
+	// without the identity check this goroutine would corrupt the new standup's
+	// transcript/responses and prematurely mark it complete.
+	m.mu.RLock()
+	st := m.standup
+	m.mu.RUnlock()
+	if st == nil {
+		return
+	}
+
 	openingMsg := StandupMessage{
 		SessionID:   "system",
 		SpeakerName: "Standup",
@@ -136,7 +150,7 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 
 	// Also store the opening on the shared standup state so GetOfficeState returns it.
 	m.mu.Lock()
-	if m.standup != nil {
+	if m.standup == st {
 		m.standup.Transcript = append(m.standup.Transcript, openingMsg)
 	}
 	m.mu.Unlock()
@@ -145,16 +159,16 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 	m.broadcast("office:standupMessage", openingMsg)
 
 	for i, sessionID := range participants {
-		// Check if standup was cancelled.
+		// Check if standup was cancelled OR replaced by a newer standup.
 		m.mu.RLock()
-		active := m.standup != nil && m.standup.Active
+		active := m.standup == st && m.standup.Active
 		m.mu.RUnlock()
 		if !active {
 			break
 		}
 
 		m.mu.Lock()
-		if m.standup != nil {
+		if m.standup == st {
 			m.standup.CurrentIndex = i
 		}
 		m.mu.Unlock()
@@ -220,9 +234,10 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 			Timestamp:   time.Now().UnixMilli(),
 		}
 
-		// Record response AND append to shared transcript so GetOfficeState can return it.
+		// Record response AND append to shared transcript so GetOfficeState can
+		// return it -- but only if THIS standup is still the live one.
 		m.mu.Lock()
-		if m.standup != nil {
+		if m.standup == st {
 			m.standup.Responses[sessionID] = response
 			m.standup.Transcript = append(m.standup.Transcript, msg)
 		}
@@ -232,9 +247,9 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 		m.broadcast("office:standupMessage", msg)
 	}
 
-	// Complete the standup.
+	// Complete the standup -- only if THIS standup is still the live, active one.
 	m.mu.RLock()
-	stillActive := m.standup != nil && m.standup.Active
+	stillActive := m.standup == st && m.standup.Active
 	m.mu.RUnlock()
 
 	if stillActive {
@@ -249,7 +264,7 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 
 		m.mu.Lock()
 		var standupStartedAt time.Time
-		if m.standup != nil {
+		if m.standup == st {
 			standupStartedAt = m.standup.StartedAt
 			m.standup.Active = false
 			// Keep transcript on state so GetOfficeState returns it after standup ends.

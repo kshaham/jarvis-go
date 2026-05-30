@@ -159,6 +159,11 @@ type AgentState struct {
 	// field when re-targeting and finishes the previous slot to drop any
 	// late reply that lands during the rotation.
 	QuestionSlot *waitSlot
+	// QuestionSlotQID is the ID of the question the currently-installed
+	// QuestionSlot serves. AnswerQuestion checks it so that when two questions
+	// target the same recipient (e.g. both pick the same team lead), an answer
+	// for the OLDER question isn't misdelivered to the newer question's slot.
+	QuestionSlotQID string
 	// Reflection / curiosity are still raw channels — they're not
 	// part of the round-pollution pattern (single reply, slot is torn
 	// down on the reader side). Leaving them untouched keeps the
@@ -321,6 +326,54 @@ func (a *AgentState) ActiveTask() *Task {
 		}
 	}
 	return nil
+}
+
+// deepCopyTask returns a fully independent copy of t (all reference fields
+// cloned) so a marshaled snapshot can't race in-place mutations of the live
+// task under a.mu.
+func deepCopyTask(t *Task) *Task {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	if t.BlockedBy != nil {
+		cp.BlockedBy = append([]string(nil), t.BlockedBy...)
+	}
+	if t.Labels != nil {
+		cp.Labels = append([]string(nil), t.Labels...)
+	}
+	if t.ProgressLog != nil {
+		cp.ProgressLog = append([]TaskProgressEntry(nil), t.ProgressLog...)
+	}
+	if t.Handoff != nil {
+		h := *t.Handoff
+		cp.Handoff = &h
+	}
+	return &cp
+}
+
+// ActiveTaskCopy returns a DEEP COPY of the first in_progress task for safe
+// marshaling into payloads (the live pointer is mutated under a.mu).
+func (a *AgentState) ActiveTaskCopy() *Task {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.taskQueue.Tasks {
+		if t.Status == TaskInProgress {
+			return deepCopyTask(t)
+		}
+	}
+	return nil
+}
+
+// GetTasksCopy returns DEEP COPIES of all tasks, safe to marshal outside a.mu.
+func (a *AgentState) GetTasksCopy() []*Task {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	result := make([]*Task, len(a.taskQueue.Tasks))
+	for i, t := range a.taskQueue.Tasks {
+		result[i] = deepCopyTask(t)
+	}
+	return result
 }
 
 // PendingTaskCount returns the number of pending/acknowledged tasks.

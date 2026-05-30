@@ -59,11 +59,33 @@ const maxBulkItems = 500
 // direct WriteFile was interrupted. Same pattern round 4 applied to
 // the template + memory stores.
 func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
+	// Use a UNIQUE temp file (not a fixed "<path>.tmp"): multiple callers write
+	// the same per-session @fix_plan.md (agent write + dashboard PATCH), and a
+	// shared temp name lets two concurrent writers interleave into the same
+	// tmp and rename a corrupted/partial file into place.
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // BulkDeleteSessions stops and removes multiple sessions in one call.

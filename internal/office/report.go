@@ -489,8 +489,9 @@ func writeAgentSection(b *strings.Builder, a *AgentState, workdir string) {
 		name = cfg.Name
 	}
 
-	// Completed + in-flight task summary.
-	tasks := a.GetTasks()
+	// Completed + in-flight task summary. Deep copies so reading t.Status here
+	// doesn't race in-place task mutations under a.mu during a live run.
+	tasks := a.GetTasksCopy()
 	completed := make([]*Task, 0)
 	inflight := make([]*Task, 0)
 	for _, t := range tasks {
