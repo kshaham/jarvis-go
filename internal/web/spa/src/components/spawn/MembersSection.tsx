@@ -10,6 +10,19 @@ import { MemberTile } from './MemberTile';
 import { TierBadge } from './TierBadge';
 import type { Tier } from './TierBadge';
 
+// Static trailing element for MembersSection — hoisted so it's the
+// same reference on every render (satisfies jsx-no-jsx-as-prop).
+const MEMBERS_TRAILING = (
+  <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+    <TierBadge tier="strategic" variant="dot" />
+    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Strategic</span>
+    <TierBadge tier="worker" variant="dot" />
+    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Worker</span>
+    <TierBadge tier="support" variant="dot" />
+    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Support</span>
+  </span>
+);
+
 const emptyEditorStyle: CSSProperties = {
   padding: 16,
   background: 'var(--lg-fill)',
@@ -75,16 +88,7 @@ export function MembersSection({
     <SectionCard
       title={`Members (${members.length})`}
       hint="Click a card to edit. Amber pill = overridden from the template."
-      trailing={
-        <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
-          <TierBadge tier="strategic" variant="dot" />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Strategic</span>
-          <TierBadge tier="worker" variant="dot" />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Worker</span>
-          <TierBadge tier="support" variant="dot" />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Support</span>
-        </span>
-      }
+      trailing={MEMBERS_TRAILING}
     >
       <div
         role="listbox"

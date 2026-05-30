@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useReducer, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -80,7 +80,10 @@ export function SettingsScreen() {
   const brainstorm = useMutation({
     mutationFn: (prompt: string) =>
       fetchJSON('/api/office/brainstorm', { method: 'POST', body: { prompt } }),
-    onSuccess: () => toast.success('Brainstorm started'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['office', 'status'] });
+      toast.success('Brainstorm started');
+    },
     onError: () => toast.error('Failed to start brainstorm'),
   });
 
@@ -274,6 +277,40 @@ function Stat({
 // meetings / file-locks form blocks. Each commits independently via
 // the shared putSettings mutation so a save only touches one section
 // at a time.
+
+interface AdvancedState {
+  autoStandupEnabled: boolean;
+  autoStandupHours: number;
+  brainstormCooldown: number;
+  brainstormTimeout: number;
+  idleEnabled: boolean;
+  idleThreshold: number;
+  meetingInactivity: number;
+  meetingStandupTimeout: number;
+  lockExpiry: number;
+}
+
+type AdvancedAction =
+  | { type: 'hydrate'; payload: AdvancedState }
+  | { type: 'set'; field: keyof AdvancedState; value: boolean | number };
+
+function advancedReducer(state: AdvancedState, action: AdvancedAction): AdvancedState {
+  if (action.type === 'hydrate') return action.payload;
+  return { ...state, [action.field]: action.value };
+}
+
+const ADVANCED_DEFAULT: AdvancedState = {
+  autoStandupEnabled: false,
+  autoStandupHours: 1,
+  brainstormCooldown: 15,
+  brainstormTimeout: 120,
+  idleEnabled: true,
+  idleThreshold: 10,
+  meetingInactivity: 60,
+  meetingStandupTimeout: 120,
+  lockExpiry: 15,
+};
+
 function AdvancedSections({
   settings,
   onSave,
@@ -283,16 +320,18 @@ function AdvancedSections({
   onSave: (patch: Partial<OfficeSettings>) => void;
   pending: boolean;
 }) {
-  // Per-section local state, hydrated from server data on first load.
-  const [autoStandupEnabled, setAutoStandupEnabled] = useState(false);
-  const [autoStandupHours, setAutoStandupHours] = useState(1);
-  const [brainstormCooldown, setBrainstormCooldown] = useState(15);
-  const [brainstormTimeout, setBrainstormTimeout] = useState(120);
-  const [idleEnabled, setIdleEnabled] = useState(true);
-  const [idleThreshold, setIdleThreshold] = useState(10);
-  const [meetingInactivity, setMeetingInactivity] = useState(60);
-  const [meetingStandupTimeout, setMeetingStandupTimeout] = useState(120);
-  const [lockExpiry, setLockExpiry] = useState(15);
+  const [state, dispatch] = useReducer(advancedReducer, ADVANCED_DEFAULT);
+  const {
+    autoStandupEnabled,
+    autoStandupHours,
+    brainstormCooldown,
+    brainstormTimeout,
+    idleEnabled,
+    idleThreshold,
+    meetingInactivity,
+    meetingStandupTimeout,
+    lockExpiry,
+  } = state;
 
   // One-shot hydration on first non-empty server response. Use a ref —
   // the flag is never rendered, so useState would only add an extra
@@ -300,19 +339,25 @@ function AdvancedSections({
   const hydratedRef = useRef(false);
   if (settings && !hydratedRef.current) {
     hydratedRef.current = true;
-    setAutoStandupEnabled(!!settings.autoStandup?.enabled);
-    setAutoStandupHours(
-      settings.autoStandup?.intervalHours ??
-        (settings.autoStandup?.intervalMinutes ? settings.autoStandup.intervalMinutes / 60 : 1),
-    );
-    setBrainstormCooldown(settings.brainstorm?.cooldownMinutes ?? 15);
-    setBrainstormTimeout(settings.brainstorm?.responseTimeoutSeconds ?? 120);
-    setIdleEnabled(settings.idleDetection?.enabled ?? true);
-    setIdleThreshold(settings.idleDetection?.thresholdMinutes ?? 10);
-    setMeetingInactivity(settings.meetings?.inactivityTimeoutSeconds ?? 60);
-    setMeetingStandupTimeout(settings.meetings?.standupResponseTimeoutSeconds ?? 120);
-    setLockExpiry(settings.fileLocks?.lockExpiryMinutes ?? 15);
+    dispatch({
+      type: 'hydrate',
+      payload: {
+        autoStandupEnabled: !!settings.autoStandup?.enabled,
+        autoStandupHours:
+          settings.autoStandup?.intervalHours ??
+          (settings.autoStandup?.intervalMinutes ? settings.autoStandup.intervalMinutes / 60 : 1),
+        brainstormCooldown: settings.brainstorm?.cooldownMinutes ?? 15,
+        brainstormTimeout: settings.brainstorm?.responseTimeoutSeconds ?? 120,
+        idleEnabled: settings.idleDetection?.enabled ?? true,
+        idleThreshold: settings.idleDetection?.thresholdMinutes ?? 10,
+        meetingInactivity: settings.meetings?.inactivityTimeoutSeconds ?? 60,
+        meetingStandupTimeout: settings.meetings?.standupResponseTimeoutSeconds ?? 120,
+        lockExpiry: settings.fileLocks?.lockExpiryMinutes ?? 15,
+      },
+    });
   }
+  const set = (field: keyof AdvancedState) => (value: boolean | number) =>
+    dispatch({ type: 'set', field, value });
 
   return (
     <>
@@ -321,11 +366,11 @@ function AdvancedSections({
         hint="When enabled, jarvis calls a standup every N hours so the team stays synced."
       >
         <FormRow>
-          <Toggle label="Enabled" value={autoStandupEnabled} onChange={setAutoStandupEnabled} />
+          <Toggle label="Enabled" value={autoStandupEnabled} onChange={set('autoStandupEnabled')} />
           <NumField
             label="Interval (hours)"
             value={autoStandupHours}
-            onChange={setAutoStandupHours}
+            onChange={set('autoStandupHours')}
             min={0.5}
             max={24}
             step={0.5}
@@ -349,14 +394,14 @@ function AdvancedSections({
           <NumField
             label="Cooldown (min)"
             value={brainstormCooldown}
-            onChange={setBrainstormCooldown}
+            onChange={set('brainstormCooldown')}
             min={1}
             max={120}
           />
           <NumField
             label="Response timeout (sec)"
             value={brainstormTimeout}
-            onChange={setBrainstormTimeout}
+            onChange={set('brainstormTimeout')}
             min={30}
             max={600}
           />
@@ -376,11 +421,11 @@ function AdvancedSections({
 
       <Section title="Idle detection" hint="Flag an agent as idle if they haven't taken a turn in this many minutes.">
         <FormRow>
-          <Toggle label="Enabled" value={idleEnabled} onChange={setIdleEnabled} />
+          <Toggle label="Enabled" value={idleEnabled} onChange={set('idleEnabled')} />
           <NumField
             label="Threshold (min)"
             value={idleThreshold}
-            onChange={setIdleThreshold}
+            onChange={set('idleThreshold')}
             min={1}
             max={60}
           />
@@ -400,14 +445,14 @@ function AdvancedSections({
           <NumField
             label="Inactivity timeout (sec)"
             value={meetingInactivity}
-            onChange={setMeetingInactivity}
+            onChange={set('meetingInactivity')}
             min={10}
             max={600}
           />
           <NumField
             label="Standup response timeout (sec)"
             value={meetingStandupTimeout}
-            onChange={setMeetingStandupTimeout}
+            onChange={set('meetingStandupTimeout')}
             min={30}
             max={600}
           />
@@ -433,7 +478,7 @@ function AdvancedSections({
           <NumField
             label="Lock expiry (min)"
             value={lockExpiry}
-            onChange={setLockExpiry}
+            onChange={set('lockExpiry')}
             min={1}
             max={120}
           />

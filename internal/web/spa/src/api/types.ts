@@ -402,7 +402,7 @@ export interface Whiteboard {
 // page offers in its dropdown. Mirrors the harness/pricing support on the
 // Go side (internal/state/pricing.go, internal/office/spawn_helpers.go).
 // openai-codex / openai-custom run on the Codex CLI; the rest on Claude Code.
-export const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
+const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
   'claude-subscription': ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
   'claude-api': ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
   'zai-glm': ['glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],

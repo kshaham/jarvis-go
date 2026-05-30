@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Chip, Input } from '@/components/ui';
 import { SectionCard, SegmentedControl } from './formPrimitives';
 import { loadRecents } from './workdirSection.utils';
@@ -23,21 +23,26 @@ export function WorkdirSection({
   // mount-time effect flash that no-initialize-state flags.
   const [recents] = useState<string[]>(loadRecents);
 
+  const trailing = useMemo(
+    () => (
+      <SegmentedControl<'existing' | 'new'>
+        ariaLabel="Workdir mode"
+        options={[
+          { value: 'existing', label: 'Existing folder' },
+          { value: 'new', label: 'New project' },
+        ]}
+        value={newProject ? 'new' : 'existing'}
+        onChange={(v) => setNewProject(v === 'new')}
+      />
+    ),
+    [newProject, setNewProject],
+  );
+
   return (
     <SectionCard
       title="Working directory"
       hint="Where the team's agents run. Match this to workingDirAllowlist."
-      trailing={
-        <SegmentedControl<'existing' | 'new'>
-          ariaLabel="Workdir mode"
-          options={[
-            { value: 'existing', label: 'Existing folder' },
-            { value: 'new', label: 'New project' },
-          ]}
-          value={newProject ? 'new' : 'existing'}
-          onChange={(v) => setNewProject(v === 'new')}
-        />
-      }
+      trailing={trailing}
     >
       {newProject ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

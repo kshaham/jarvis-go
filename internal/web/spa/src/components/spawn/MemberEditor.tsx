@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { TeamTemplate, TeamTemplateMember } from '../../api/types';
 import { Button, Input, Textarea } from '@/components/ui';
 import { Avatar } from './Avatar';
@@ -30,17 +31,20 @@ export function MemberEditor({
   onReset: () => void;
 }) {
   const edited = baseMember ? isMemberEdited(member, baseMember) : false;
+  const trailing = useMemo(
+    () =>
+      edited ? (
+        <Button variant="secondary" size="sm" onClick={onReset}>
+          Reset to template
+        </Button>
+      ) : null,
+    [edited, onReset],
+  );
   return (
     <SectionCard
       title="Editing member"
       hint="Overrides apply only to this team. The bundled template stays untouched."
-      trailing={
-        edited ? (
-          <Button variant="secondary" size="sm" onClick={onReset}>
-            Reset to template
-          </Button>
-        ) : null
-      }
+      trailing={trailing}
     >
       <header style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Avatar

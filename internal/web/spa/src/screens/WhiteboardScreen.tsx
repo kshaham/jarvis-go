@@ -1,4 +1,4 @@
-import { Suspense, lazy, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { fetchJSON } from '../api/client';
@@ -30,11 +30,14 @@ export function WhiteboardScreen() {
     },
   });
 
-  function saveCanvasChange(json: string) {
-    if (json === lastSaved.current) return;
-    lastSaved.current = json;
-    save.mutate(json);
-  }
+  const saveCanvasChange = useCallback(
+    (json: string) => {
+      if (json === lastSaved.current) return;
+      lastSaved.current = json;
+      save.mutate(json);
+    },
+    [save],
+  );
 
   const status = save.isPending
     ? 'Saving…'

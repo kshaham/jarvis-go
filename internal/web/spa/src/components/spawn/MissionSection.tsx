@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Textarea } from '@/components/ui';
 import { SectionCard } from './formPrimitives';
 
@@ -14,21 +15,25 @@ export function MissionSection({
 }) {
   const len = value.length;
   const near = len > MAX * 0.8;
+  const trailing = useMemo(
+    () => (
+      <span
+        style={{
+          fontSize: 12,
+          color: near ? 'var(--status-warn)' : 'var(--text-muted)',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {len} / {MAX}
+      </span>
+    ),
+    [len, near],
+  );
   return (
     <SectionCard
       title="Mission"
       hint="What's the team working on?"
-      trailing={
-        <span
-          style={{
-            fontSize: 12,
-            color: near ? 'var(--status-warn)' : 'var(--text-muted)',
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          {len} / {MAX}
-        </span>
-      }
+      trailing={trailing}
     >
       <Textarea
         value={value}

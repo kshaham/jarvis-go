@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -40,6 +41,15 @@ export function KnowledgeScreen() {
 
   const list = promotions.data?.promotions ?? [];
 
+  const promotionsTrailing = useMemo(
+    () => (
+      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <Metric value={list.length} size={12} pulseOnChange /> entries
+      </span>
+    ),
+    [list.length],
+  );
+
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <header>
@@ -68,11 +78,7 @@ export function KnowledgeScreen() {
 
       <Section
         title="Promotions"
-        trailing={
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            <Metric value={list.length} size={12} pulseOnChange /> entries
-          </span>
-        }
+        trailing={promotionsTrailing}
       >
         {promotions.isLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

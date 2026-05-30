@@ -120,9 +120,11 @@ export function MessagesScreen() {
   // chatted) so the operator can start fresh threads.
   const railRows = useMemo(() => {
     return members.map((m) => {
-      const last = allMessages
-        .filter((x) => x.fromSessionId === m.sessionId || x.toSessionId === m.sessionId)
-        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+      let last: OfficeMessageWire | undefined;
+      for (const x of allMessages) {
+        if (x.fromSessionId !== m.sessionId && x.toSessionId !== m.sessionId) continue;
+        if (!last || x.timestamp.localeCompare(last.timestamp) > 0) last = x;
+      }
       return { member: m, last };
     });
   }, [members, allMessages]);
@@ -413,7 +415,9 @@ function Composer({
 
 function latestAgentId(messages: OfficeMessageWire[]): string {
   if (messages.length === 0) return '';
-  const last = [...messages].sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+  const last = messages.reduce((best, m) =>
+    m.timestamp.localeCompare(best.timestamp) > 0 ? m : best,
+  );
   return last.toSessionId || last.fromSessionId;
 }
 

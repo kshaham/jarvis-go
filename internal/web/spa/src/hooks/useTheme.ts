@@ -55,11 +55,11 @@ function ensureSystemWatch(): void {
   });
 }
 
-export function getThemePref(): ThemePref {
+function getThemePref(): ThemePref {
   return current;
 }
 
-export function setThemePref(pref: ThemePref): void {
+function setThemePref(pref: ThemePref): void {
   current = pref;
   try {
     localStorage.setItem(KEY, pref);

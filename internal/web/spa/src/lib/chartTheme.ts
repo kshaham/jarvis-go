@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 // Recharts paints SVG via explicit prop values, not CSS classes, so we
 // resolve the design tokens to concrete colors at runtime. Re-reads on
@@ -48,18 +48,21 @@ function read(): ChartTheme {
   };
 }
 
+// subscribe wires the MutationObserver so useSyncExternalStore can
+// notify React when [data-theme] or class changes (theme switches).
+function subscribeChartTheme(cb: () => void): () => void {
+  if (typeof document === 'undefined') return () => undefined;
+  const obs = new MutationObserver(cb);
+  obs.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme', 'class'],
+  });
+  return () => obs.disconnect();
+}
+
 export function useChartTheme(): ChartTheme {
-  // Lazy initializer: useState(read) reads the tokens synchronously on
-  // first render, so no mount effect is needed for initialization — only
-  // the MutationObserver needs to subscribe for subsequent theme changes.
-  const [theme, setTheme] = useState<ChartTheme>(read);
-  useEffect(() => {
-    const obs = new MutationObserver(() => setTheme(read()));
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme', 'class'],
-    });
-    return () => obs.disconnect();
-  }, []);
-  return theme;
+  // useSyncExternalStore reads the theme from the DOM on each render
+  // (getSnapshot) and subscribes to DOM mutations, eliminating the
+  // useState+useEffect pattern that no-initialize-state flags.
+  return useSyncExternalStore(subscribeChartTheme, read, () => FALLBACK);
 }

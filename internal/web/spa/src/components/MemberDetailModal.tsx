@@ -255,6 +255,7 @@ function PersonalityTab({ member, onSaved }: { member: OfficeMember; onSaved: ()
 }
 
 function SendTab({ member }: { member: OfficeMember }) {
+  const qc = useQueryClient();
   const [prompt, setPrompt] = useState('');
   const inject = useMutation({
     mutationFn: () =>
@@ -262,7 +263,10 @@ function SendTab({ member }: { member: OfficeMember }) {
         method: 'POST',
         body: { sessionId: member.sessionId, prompt },
       }),
-    onSuccess: () => setPrompt(''),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['office', 'status'] });
+      setPrompt('');
+    },
   });
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

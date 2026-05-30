@@ -61,9 +61,15 @@ export function useUpdateIdentity() {
 // out of band with another team. Each call returns a new token; the
 // server holds no per-token state until a peer registers us using it.
 export function useGenerateToken() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
       fetchJSON<{ token: string }>('/api/identity/token', { method: 'POST' }),
+    // Invalidate identity so any UI showing the peerId / publicUrl stays
+    // in sync after a token is generated (identity may be created lazily).
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: IDENTITY_KEY });
+    },
   });
 }
 

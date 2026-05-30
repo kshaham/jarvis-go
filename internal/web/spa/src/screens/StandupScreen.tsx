@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useReducer } from 'react';
 import { m, useReducedMotion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -113,9 +113,29 @@ export function StandupScreen() {
     onError: () => toast.error('Message failed to send'),
   });
 
-  const [audioStage, setAudioStage] = useState<string | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [audioNonce, setAudioNonce] = useState(0);
+  const [{ audioStage, audioUrl, audioNonce, text, asTask }, dispatchUi] = useReducer(
+    (
+      s: { audioStage: string | null; audioUrl: string | null; audioNonce: number; text: string; asTask: boolean },
+      a:
+        | { type: 'setAudioStage'; value: string | null }
+        | { type: 'setAudioUrl'; value: string | null }
+        | { type: 'incNonce' }
+        | { type: 'setText'; value: string }
+        | { type: 'setAsTask'; value: boolean }
+        | { type: 'clearText' },
+    ) => {
+      switch (a.type) {
+        case 'setAudioStage': return { ...s, audioStage: a.value };
+        case 'setAudioUrl': return { ...s, audioUrl: a.value };
+        case 'incNonce': return { ...s, audioNonce: s.audioNonce + 1 };
+        case 'setText': return { ...s, text: a.value };
+        case 'setAsTask': return { ...s, asTask: a.value };
+        case 'clearText': return { ...s, text: '' };
+        default: return s;
+      }
+    },
+    { audioStage: null, audioUrl: null, audioNonce: 0, text: '', asTask: false },
+  );
   const historyQ = useStandupHistory();
 
   const latestHistoryId = historyQ.data?.history?.[0]?.id ?? null;
@@ -146,12 +166,12 @@ export function StandupScreen() {
           p.stage === 'voicing'
             ? `Voicing ${p.detail ?? ''}…`.trim()
             : 'Summarizing…';
-        setAudioStage(label);
+        dispatchUi({ type: 'setAudioStage', value: label });
       } else if (evt.name === 'office:standupAudioReady') {
-        setAudioStage(null);
-        setAudioUrl((p.url ?? (p.id ? `/api/office/standup/${p.id}/audio` : null)) ?? null);
+        dispatchUi({ type: 'setAudioStage', value: null });
+        dispatchUi({ type: 'setAudioUrl', value: (p.url ?? (p.id ? `/api/office/standup/${p.id}/audio` : null)) ?? null });
       } else {
-        setAudioStage(null);
+        dispatchUi({ type: 'setAudioStage', value: null });
         toast.error(p.message || 'Audio generation failed');
       }
     });
@@ -164,11 +184,15 @@ export function StandupScreen() {
         method: 'POST',
       }),
     onMutate: () => {
-      setAudioStage('Summarizing…');
-      setAudioNonce((n) => n + 1);
+      dispatchUi({ type: 'setAudioStage', value: 'Summarizing…' });
+      dispatchUi({ type: 'incNonce' });
+    },
+    onSuccess: () => {
+      // Invalidate standup history so the new audio entry is reflected.
+      qc.invalidateQueries({ queryKey: ['office', 'standup', 'history'] });
     },
     onError: (err: unknown) => {
-      setAudioStage(null);
+      dispatchUi({ type: 'setAudioStage', value: null });
       const msg = err instanceof Error ? err.message : '';
       if (msg.toLowerCase().includes('openai') || msg.toLowerCase().includes('key')) {
         toast.error('Configure your OpenAI key in Settings');
@@ -178,8 +202,6 @@ export function StandupScreen() {
     },
   });
 
-  const [text, setText] = useState('');
-  const [asTask, setAsTask] = useState(false);
   const transcript = data?.transcript ?? [];
 
   const [transcriptRef] = useAutoAnimate<HTMLDivElement>();
@@ -191,7 +213,7 @@ export function StandupScreen() {
       { content, asTask },
       {
         onSuccess: () => {
-          setText('');
+          dispatchUi({ type: 'clearText' });
           toast.success(asTask ? 'Task injected' : 'Message sent');
         },
       },
@@ -302,11 +324,11 @@ export function StandupScreen() {
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {asTask ? 'Injecting a task' : 'Sending a message'}
             </span>
-            <Toggle label="/task" value={asTask} onChange={setAsTask} />
+            <Toggle label="/task" value={asTask} onChange={(v) => dispatchUi({ type: 'setAsTask', value: v })} />
           </div>
           <Textarea
             value={text}
-            onChange={(e) => setText(e.target.value.slice(0, 500))}
+            onChange={(e) => dispatchUi({ type: 'setText', value: e.target.value.slice(0, 500) })}
             placeholder={asTask ? 'Describe a task to assign…' : 'Type a message…'}
             rows={2}
             style={{ resize: 'vertical' }}

@@ -1,4 +1,4 @@
-import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useReducer, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -36,42 +36,111 @@ const stepCircleBaseStyle: React.CSSProperties = {
 // review bar on the right. Selecting a template collapses the picker
 // to a slim chip; clicking that chip's Change button clears the
 // selection and expands the picker back.
+interface SpawnState {
+  templateId: string;
+  query: string;
+  category: string;
+  mission: string;
+  workingDir: string;
+  newProject: boolean;
+  projectName: string;
+  perpetual: boolean;
+  defaultProvider: string;
+  defaultModel: string;
+  openaiBaseUrl: string;
+  openaiApiKey: string;
+  openaiKeyConfigured: boolean;
+  telegramEnabled: boolean;
+  telegramInterval: number;
+  workflowsEnabled: boolean;
+  members: MemberEdit[];
+  selectedMemberId: string | null;
+}
+
+type SpawnAction =
+  | { type: 'set'; field: keyof SpawnState; value: SpawnState[keyof SpawnState] }
+  | { type: 'hydrateTemplate'; tpl: TeamTemplate; members: MemberEdit[] }
+  | { type: 'hydrateAccounts'; keyConfigured: boolean; baseUrl?: string };
+
+const SPAWN_DEFAULT: SpawnState = {
+  templateId: '',
+  query: '',
+  category: '',
+  mission: '',
+  workingDir: '',
+  newProject: false,
+  projectName: '',
+  perpetual: true,
+  defaultProvider: 'claude-subscription',
+  defaultModel: '',
+  openaiBaseUrl: '',
+  openaiApiKey: '',
+  openaiKeyConfigured: false,
+  telegramEnabled: false,
+  telegramInterval: 60,
+  workflowsEnabled: true,
+  members: [],
+  selectedMemberId: null,
+};
+
+function spawnReducer(state: SpawnState, action: SpawnAction): SpawnState {
+  if (action.type === 'set') return { ...state, [action.field]: action.value };
+  if (action.type === 'hydrateTemplate') {
+    const { tpl, members } = action;
+    return {
+      ...state,
+      members,
+      selectedMemberId: members[0]?.id ?? null,
+      defaultProvider: tpl.defaultProvider ?? state.defaultProvider,
+      defaultModel: tpl.defaultModel ?? state.defaultModel,
+      perpetual: typeof tpl.perpetualImprovement === 'boolean' ? tpl.perpetualImprovement : state.perpetual,
+      telegramEnabled: tpl.telegram ? !!tpl.telegram.enabled : state.telegramEnabled,
+      telegramInterval: tpl.telegram?.intervalMinutes ?? state.telegramInterval,
+    };
+  }
+  if (action.type === 'hydrateAccounts') {
+    return {
+      ...state,
+      openaiKeyConfigured: action.keyConfigured,
+      openaiBaseUrl: action.baseUrl ?? state.openaiBaseUrl,
+    };
+  }
+  return state;
+}
+
 export function SpawnScreen() {
   const templates = useTeamTemplates();
   const qc = useQueryClient();
   const navigate = useNavigate();
 
-  const [templateId, setTemplateId] = useState<string>('');
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<string>('');
+  const [state, dispatch] = useReducer(spawnReducer, SPAWN_DEFAULT);
+  const {
+    templateId,
+    query,
+    category,
+    mission,
+    workingDir,
+    newProject,
+    projectName,
+    perpetual,
+    defaultProvider,
+    defaultModel,
+    openaiBaseUrl,
+    openaiApiKey,
+    openaiKeyConfigured,
+    telegramEnabled,
+    telegramInterval,
+    workflowsEnabled,
+    members,
+    selectedMemberId,
+  } = state;
+  const set = <K extends keyof SpawnState>(field: K) => (value: SpawnState[K]) =>
+    dispatch({ type: 'set', field, value });
 
   const tpl: TeamTemplate | undefined = useMemo(
     () => (templates.data?.templates ?? []).find((t) => t.id === templateId),
     [templates.data?.templates, templateId],
   );
-
-  // Form state
-  const [mission, setMission] = useState('');
-  const [workingDir, setWorkingDir] = useState('');
-  const [newProject, setNewProject] = useState(false);
-  const [projectName, setProjectName] = useState('');
-  const [perpetual, setPerpetual] = useState(true);
-  const [defaultProvider, setDefaultProvider] = useState('claude-subscription');
-  const [defaultModel, setDefaultModel] = useState('');
-  // OpenAI / Codex custom-endpoint operator settings. Persisted to /api/settings
-  // on spawn (the backend reads them from the settings store, not the spawn
-  // payload). openaiKeyConfigured prefills the "configured ✓" indicator when a
-  // key (operator setting or shared deployment OPENAI_API_KEY) already exists.
-  const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
-  const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [openaiKeyConfigured, setOpenaiKeyConfigured] = useState(false);
-  const [telegramEnabled, setTelegramEnabled] = useState(false);
-  const [telegramInterval, setTelegramInterval] = useState(60);
-  // Dynamic Workflows are on by default; this toggle lets the operator
-  // disable them for the team (sends disableWorkflows to the backend).
-  const [workflowsEnabled, setWorkflowsEnabled] = useState(true);
-  const [members, setMembers] = useState<MemberEdit[]>([]);
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
 
   // When the operator picks a template, hydrate the per-member
   // overrides + the team-wide defaults from the template.
@@ -85,15 +154,7 @@ export function SpawnScreen() {
     const hydrated = tpl.members.map((m: TeamTemplateMember, i) =>
       memberFromTemplate(m, `${tpl.id}-${i}`),
     );
-    setMembers(hydrated);
-    setSelectedMemberId(hydrated[0]?.id ?? null);
-    if (tpl.defaultProvider) setDefaultProvider(tpl.defaultProvider);
-    if (tpl.defaultModel) setDefaultModel(tpl.defaultModel);
-    if (typeof tpl.perpetualImprovement === 'boolean') setPerpetual(tpl.perpetualImprovement);
-    if (tpl.telegram) {
-      setTelegramEnabled(!!tpl.telegram.enabled);
-      setTelegramInterval(tpl.telegram.intervalMinutes ?? 60);
-    }
+    dispatch({ type: 'hydrateTemplate', tpl, members: hydrated });
   }
 
   // Prefill the OpenAI/Codex config indicator from settings once on mount.
@@ -103,8 +164,11 @@ export function SpawnScreen() {
     fetchJSON<SettingsAccounts>('/api/settings/accounts')
       .then((accounts) => {
         if (cancelled || !accounts) return;
-        setOpenaiKeyConfigured(!!accounts.openaiKeyConfigured);
-        if (accounts.openaiBaseUrl) setOpenaiBaseUrl(accounts.openaiBaseUrl);
+        dispatch({
+          type: 'hydrateAccounts',
+          keyConfigured: !!accounts.openaiKeyConfigured,
+          baseUrl: accounts.openaiBaseUrl,
+        });
       })
       .catch(() => {
         /* non-fatal: spawn still works, the indicator just stays unset */
@@ -212,34 +276,34 @@ export function SpawnScreen() {
           <div className="spawn-grid">
             {/* Column 1 — team-level setup. */}
             <div className="spawn-col">
-              <TemplateChip tpl={tpl} onChange={() => setTemplateId('')} />
-              <MissionSection value={mission} onChange={setMission} templateName={tpl.name} />
+              <TemplateChip tpl={tpl} onChange={() => dispatch({ type: 'set', field: 'templateId', value: '' })} />
+              <MissionSection value={mission} onChange={set('mission')} templateName={tpl.name} />
               <WorkdirSection
                 newProject={newProject}
-                setNewProject={setNewProject}
+                setNewProject={set('newProject')}
                 workingDir={workingDir}
-                setWorkingDir={setWorkingDir}
+                setWorkingDir={set('workingDir')}
                 projectName={projectName}
-                setProjectName={setProjectName}
+                setProjectName={set('projectName')}
               />
               <DefaultsSection
                 defaultProvider={defaultProvider}
-                setDefaultProvider={setDefaultProvider}
+                setDefaultProvider={set('defaultProvider')}
                 defaultModel={defaultModel}
-                setDefaultModel={setDefaultModel}
+                setDefaultModel={set('defaultModel')}
                 openaiBaseUrl={openaiBaseUrl}
-                setOpenaiBaseUrl={setOpenaiBaseUrl}
+                setOpenaiBaseUrl={set('openaiBaseUrl')}
                 openaiApiKey={openaiApiKey}
-                setOpenaiApiKey={setOpenaiApiKey}
+                setOpenaiApiKey={set('openaiApiKey')}
                 openaiKeyConfigured={openaiKeyConfigured}
                 perpetual={perpetual}
-                setPerpetual={setPerpetual}
+                setPerpetual={set('perpetual')}
                 telegramEnabled={telegramEnabled}
-                setTelegramEnabled={setTelegramEnabled}
+                setTelegramEnabled={set('telegramEnabled')}
                 telegramInterval={telegramInterval}
-                setTelegramInterval={setTelegramInterval}
+                setTelegramInterval={set('telegramInterval')}
                 workflowsEnabled={workflowsEnabled}
-                setWorkflowsEnabled={setWorkflowsEnabled}
+                setWorkflowsEnabled={set('workflowsEnabled')}
               />
             </div>
             {/* Column 2 — the roster leads. */}
@@ -247,9 +311,9 @@ export function SpawnScreen() {
               <MembersSection
                 tpl={tpl}
                 members={members}
-                setMembers={setMembers}
+                setMembers={set('members')}
                 selectedMemberId={selectedMemberId}
-                setSelectedMemberId={setSelectedMemberId}
+                setSelectedMemberId={set('selectedMemberId')}
                 defaultProvider={defaultProvider}
                 defaultModel={defaultModel}
               />
@@ -279,13 +343,13 @@ export function SpawnScreen() {
       ) : (
         <TemplateStep
           query={query}
-          setQuery={setQuery}
+          setQuery={set('query')}
           category={category}
-          setCategory={setCategory}
+          setCategory={set('category')}
           categories={categories}
           templates={filteredTemplates}
           selected={templateId}
-          onSelect={(id) => setTemplateId(id)}
+          onSelect={set('templateId')}
           loading={templates.isLoading}
         />
       )}

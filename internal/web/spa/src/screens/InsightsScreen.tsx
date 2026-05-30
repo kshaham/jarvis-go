@@ -61,8 +61,8 @@ export function InsightsScreen() {
 
   // Cost-by-label top 12.
   const labelRows = useMemo(() => {
-    return [...(labels.data?.rollups ?? [])]
-      .sort((a, b) => (b.totalCostUSD ?? 0) - (a.totalCostUSD ?? 0))
+    return (labels.data?.rollups ?? [])
+      .toSorted((a, b) => (b.totalCostUSD ?? 0) - (a.totalCostUSD ?? 0))
       .slice(0, 12);
   }, [labels.data?.rollups]);
 

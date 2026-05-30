@@ -38,15 +38,13 @@ export function AgentsScreen() {
   }, [members]);
 
   const visible = useMemo(() => {
-    const filtered =
-      statusFilter === 'all' ? members : members.filter((m) => m.status === statusFilter);
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      if (sort === 'cost') return (b.totalCost ?? 0) - (a.totalCost ?? 0);
-      if (sort === 'name') return a.name.localeCompare(b.name);
-      return (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0);
-    });
-    return arr;
+    return members
+      .flatMap((m) => (statusFilter === 'all' || m.status === statusFilter ? [m] : []))
+      .toSorted((a, b) => {
+        if (sort === 'cost') return (b.totalCost ?? 0) - (a.totalCost ?? 0);
+        if (sort === 'name') return a.name.localeCompare(b.name);
+        return (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0);
+      });
   }, [members, statusFilter, sort]);
 
   if (isLoading) {
@@ -117,17 +115,19 @@ export function AgentsScreen() {
               All
               <span style={{ opacity: 0.65 }}>{members.length}</span>
             </Chip>
-            {STATUS_ORDER.filter((s) => counts[s.value] > 0).map((s) => (
-              <Chip
-                key={s.value}
-                active={statusFilter === s.value}
-                onClick={() => setStatusFilter((cur) => (cur === s.value ? 'all' : s.value))}
-              >
-                <StatusDot status={s.value} size={6} />
-                {s.label}
-                <span style={{ opacity: 0.65 }}>{counts[s.value]}</span>
-              </Chip>
-            ))}
+            {STATUS_ORDER.flatMap((s) =>
+              counts[s.value] > 0 ? (
+                <Chip
+                  key={s.value}
+                  active={statusFilter === s.value}
+                  onClick={() => setStatusFilter((cur) => (cur === s.value ? 'all' : s.value))}
+                >
+                  <StatusDot status={s.value} size={6} />
+                  {s.label}
+                  <span style={{ opacity: 0.65 }}>{counts[s.value]}</span>
+                </Chip>
+              ) : []
+            )}
           </div>
           <SegmentedControl<SortKey>
             ariaLabel="Sort agents"

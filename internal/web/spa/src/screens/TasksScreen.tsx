@@ -113,9 +113,15 @@ export function TasksScreen() {
       attention: [],
       completed: [],
     };
+    // Build a Map<TaskStatus, ColumnId> once so bucket lookup is O(1)
+    // instead of O(columns * accepts) per item.
+    const statusToCol = new Map<string, ColumnId>();
+    for (const col of COLUMNS) {
+      for (const s of col.accepts) statusToCol.set(s, col.id);
+    }
     for (const item of filtered) {
-      const col = COLUMNS.find((c) => c.accepts.includes(item.task.status));
-      if (col) grouped[col.id].push(item);
+      const colId = statusToCol.get(item.task.status);
+      if (colId) grouped[colId].push(item);
     }
     for (const k of Object.keys(grouped) as ColumnId[]) {
       grouped[k].sort((a, b) => {

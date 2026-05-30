@@ -255,9 +255,9 @@ function NetworkGraph({
     const nodeIds = members.map((m) => m.sessionId);
     const memberById = new Map(members.map((m) => [m.sessionId, m] as const));
     const topoKey =
-      [...nodeIds].sort().join(',') +
+      nodeIds.toSorted().join(',') +
       '||' +
-      edges.map((e) => `${e.source}-${e.target}`).sort().join(',') +
+      edges.map((e) => `${e.source}-${e.target}`).toSorted().join(',') +
       '||' +
       relayoutSeed;
 
@@ -330,12 +330,12 @@ function PeerEdges({
     return m;
   }, [members]);
   const peers = edges
-    .filter((e) => e.source === sessionId || e.target === sessionId)
-    .map((e) => {
+    .flatMap((e) => {
+      if (e.source !== sessionId && e.target !== sessionId) return [];
       const otherId = e.source === sessionId ? e.target : e.source;
-      return { name: lookup.get(otherId) ?? otherId.slice(0, 6), count: e.count, lastTs: e.lastTs };
+      return [{ name: lookup.get(otherId) ?? otherId.slice(0, 6), count: e.count, lastTs: e.lastTs }];
     })
-    .sort((a, b) => b.count - a.count);
+    .toSorted((a, b) => b.count - a.count);
   if (peers.length === 0) return null;
   return (
     <div>
