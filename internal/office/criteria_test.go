@@ -1,0 +1,55 @@
+package office
+
+import "testing"
+
+func TestValidateAcceptanceCriterion(t *testing.T) {
+	if err := ValidateAcceptanceCriterion("all tests pass"); err != nil {
+		t.Fatalf("valid criterion rejected: %v", err)
+	}
+	if ValidateAcceptanceCriterion("") == nil {
+		t.Fatalf("empty must be rejected")
+	}
+	long := make([]byte, 201)
+	for i := range long {
+		long[i] = 'x'
+	}
+	if ValidateAcceptanceCriterion(string(long)) == nil {
+		t.Fatalf("over-length must be rejected")
+	}
+}
+
+func TestSetTaskCriteriaAndReject(t *testing.T) {
+	// taskQueue is a *TaskQueue (agent.go:170), nil on a bare AgentState{} --
+	// initialize it explicitly.
+	a := &AgentState{taskQueue: &TaskQueue{Tasks: []*Task{{ID: "t1", Status: TaskInProgress}}}}
+	if err := a.SetTaskCriteria("t1", "set", []string{"crit a", "crit b"}); err != nil {
+		t.Fatal(err)
+	}
+	task := findTaskForTest(a, "t1")
+	if len(task.AcceptanceCriteria) != 2 {
+		t.Fatalf("want 2 criteria, got %d", len(task.AcceptanceCriteria))
+	}
+	_ = a.SetTaskCriteria("t1", "add", []string{"crit c"})
+	if len(findTaskForTest(a, "t1").AcceptanceCriteria) != 3 {
+		t.Fatalf("add failed")
+	}
+	_ = a.SetTaskCriteria("t1", "remove", []string{"0"}) // remove first by index
+	if len(findTaskForTest(a, "t1").AcceptanceCriteria) != 2 {
+		t.Fatalf("remove failed")
+	}
+	// reject counter does not transition status
+	n := a.IncrementCriteriaReject("t1")
+	if n != 1 || findTaskForTest(a, "t1").Status != TaskInProgress {
+		t.Fatalf("reject must not change status; n=%d status=%s", n, findTaskForTest(a, "t1").Status)
+	}
+}
+
+// findTaskForTest is a test-only helper (no locking).
+func findTaskForTest(a *AgentState, id string) *Task {
+	for _, t := range a.taskQueue.Tasks {
+		if t.ID == id {
+			return t
+		}
+	}
+	return nil
+}

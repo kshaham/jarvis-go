@@ -69,6 +69,15 @@ type Task struct {
 	// via ValidateTaskLabel (lowercase alphanumeric + '-', ≤40 chars,
 	// ≤10 per task).
 	Labels []string `json:"labels,omitempty"`
+	// AcceptanceCriteria holds the operator/goal-contract conditions
+	// that must be satisfied before the task is considered complete.
+	// Validated and mutated via SetTaskCriteria; capped at
+	// maxCriteriaPerTask (10). Never changes task Status.
+	AcceptanceCriteria []string `json:"acceptanceCriteria,omitempty"`
+	// CriteriaRejectCount is bumped by IncrementCriteriaReject each
+	// time a reviewer determines the current criteria have not been
+	// met. Advisory only -- never transitions task Status.
+	CriteriaRejectCount int `json:"criteriaRejectCount,omitempty"`
 	// R36 · Cost / turn snapshots captured at the transitions into
 	// TaskInProgress (start) and TaskCompleted/TaskFailed (final
 	// delta). FinalCostUSD = agent.TotalCostUSD at completion minus
