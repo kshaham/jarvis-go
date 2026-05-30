@@ -17,7 +17,7 @@ function fmtTime(t: number): string {
   return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function costTokensChart({ data }: { data: MetricPoint[] }) {
+export default function CostTokensChartImpl({ data }: { data: MetricPoint[] }) {
   const theme = useChartTheme();
   const reduce = useReducedMotion();
   const [rc, setRc] = useState<Recharts | null>(rechartsCache);

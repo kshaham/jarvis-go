@@ -15,7 +15,7 @@ const rechartsPromise = import('recharts').then((m) => { rechartsCache = m; retu
 
 type Tone = 'accent' | 'success' | 'warn' | 'error';
 
-export default function metricSparkline({
+export default function MetricSparklineImpl({
   data,
   dataKey,
   tone = 'accent',

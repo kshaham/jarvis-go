@@ -86,7 +86,7 @@ export function MembersSection({
         </span>
       }
     >
-      <ul
+      <div
         role="listbox"
         aria-label="Team roster"
         aria-activedescendant={selectedMemberId ? `member-tile-${selectedMemberId}` : undefined}
@@ -131,7 +131,7 @@ export function MembersSection({
             </RevealItem>
           );
         })}
-      </ul>
+      </div>
 
       {selected ? (
         <MemberEditor

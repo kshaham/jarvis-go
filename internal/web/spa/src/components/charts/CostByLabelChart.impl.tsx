@@ -19,7 +19,7 @@ function fmtCost(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-export default function costByLabelChart({ rollups }: { rollups: LabelRollup[] }) {
+export default function CostByLabelChartImpl({ rollups }: { rollups: LabelRollup[] }) {
   const theme = useChartTheme();
   const reduce = useReducedMotion();
   const [rc, setRc] = useState<Recharts | null>(rechartsCache);
