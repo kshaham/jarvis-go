@@ -52,11 +52,11 @@ export function WhiteboardScreen() {
             Whiteboard
           </h1>
           <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
-            Shared infinite canvas. Sketch, diagram, and annotate — every agent in the team can read it.
+            Shared infinite canvas. Sketch, diagram, and annotate. Every agent in the team can read it.
           </p>
         </div>
         <span
-          style={{ fontSize: 11, color: save.isPending ? 'var(--status-warn)' : 'var(--text-muted)' }}
+          style={{ fontSize: 12, color: save.isPending ? 'var(--status-warn)' : 'var(--text-muted)' }}
         >
           {status}
         </span>

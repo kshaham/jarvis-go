@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Modal } from './motion/Modal';
@@ -10,6 +10,18 @@ import { relativeTime } from '../lib/relativeTime';
 type Props = {
   open: boolean;
   onClose: () => void;
+};
+
+const nameInputStyle: React.CSSProperties = {
+  flex: 1,
+  padding: 8,
+  background: 'var(--bg-app)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--text-primary)',
+  fontSize: 13,
+  outlineColor: 'var(--accent)',
+  outlineOffset: 2,
 };
 
 // SnapshotsModal — list / create / restore / delete saved team
@@ -79,16 +91,7 @@ export function SnapshotsModal({ open, onClose }: Props) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="snapshot name (e.g. 'pre-migration')"
-            style={{
-              flex: 1,
-              padding: 8,
-              background: 'var(--bg-app)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-primary)',
-              fontSize: 13,
-              outline: 'none',
-            }}
+            style={nameInputStyle}
           />
           <Press
             pressScale={0.96}
@@ -114,7 +117,7 @@ export function SnapshotsModal({ open, onClose }: Props) {
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
           <span
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--text-muted)',
               letterSpacing: 0.4,
               textTransform: 'uppercase',
@@ -122,8 +125,8 @@ export function SnapshotsModal({ open, onClose }: Props) {
           >
             Saved
           </span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            <Metric value={list.length} size={11} /> snapshots
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <Metric value={list.length} size={12} /> snapshots
           </span>
         </div>
         {list.length === 0 ? (
@@ -170,7 +173,7 @@ export function SnapshotsModal({ open, onClose }: Props) {
                       <span
                         style={{
                           display: 'block',
-                          fontSize: 11,
+                          fontSize: 12,
                           color: 'var(--text-muted)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -182,7 +185,7 @@ export function SnapshotsModal({ open, onClose }: Props) {
                     ) : null}
                   </span>
                   {s.createdAt ? (
-                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
                       {relativeTime(s.createdAt)}
                     </span>
                   ) : null}
@@ -201,7 +204,7 @@ export function SnapshotsModal({ open, onClose }: Props) {
                         background: 'var(--accent-muted)',
                         color: 'var(--accent)',
                         borderRadius: 'var(--radius-sm)',
-                        fontSize: 11,
+                        fontSize: 12,
                         fontWeight: 600,
                       }}
                     >
@@ -222,7 +225,7 @@ export function SnapshotsModal({ open, onClose }: Props) {
                         border: '1px solid var(--border-default)',
                         color: 'var(--text-muted)',
                         borderRadius: 'var(--radius-sm)',
-                        fontSize: 11,
+                        fontSize: 12,
                         fontWeight: 600,
                       }}
                     >

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -17,6 +17,17 @@ import { recordRecentWorkdir, WorkdirSection } from '../components/spawn/Workdir
 import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
 import type { SettingsAccounts, TeamTemplate, TeamTemplateMember } from '../api/types';
+
+const stepCircleBaseStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 18,
+  height: 18,
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 700,
+};
 
 // SpawnScreen — the wizard formerly known as the spawn-team modal.
 // Two panes: template picker on the left, configure form + sticky
@@ -303,14 +314,7 @@ function StepIndicator({ step }: { step: 1 | 2 }) {
           >
             <span
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 18,
-                height: 18,
-                borderRadius: 999,
-                fontSize: 10,
-                fontWeight: 700,
+                ...stepCircleBaseStyle,
                 background: step >= s.n ? 'var(--accent)' : 'var(--bg-elevated)',
                 color: step >= s.n ? '#fff' : 'var(--text-muted)',
                 border: '1px solid ' + (step >= s.n ? 'var(--accent)' : 'var(--border-default)'),
@@ -417,7 +421,7 @@ function TemplateCardSkeleton() {
   return (
     <div className="surface-card flex flex-col gap-2.5 p-3">
       <div className="flex items-center gap-2.5">
-        <Skeleton className="h-10 w-10 shrink-0 rounded-md" />
+        <Skeleton className="size-10 shrink-0 rounded-md" />
         <Skeleton className="h-3.5 w-32" />
       </div>
       <Skeleton className="h-2.5 w-full" />

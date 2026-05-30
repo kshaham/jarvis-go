@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -7,6 +7,17 @@ import { Button, Field, Input, Section } from '../components/ui';
 import { spring } from '../lib/motion';
 import { useAddPeer, useGenerateToken, useIdentity } from '../hooks/usePeers';
 import { toast } from 'sonner';
+
+const tokenCodeStyle: React.CSSProperties = {
+  padding: 12,
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+  background: 'var(--bg-app)',
+  color: 'var(--accent)',
+  borderRadius: 'var(--radius-sm)',
+  wordBreak: 'break-all',
+  border: '1px solid var(--border-default)',
+};
 
 // AddPeerScreen is a two-step inline wizard. Step 1 reveals this
 // team's pair token so the operator can share it with the peer.
@@ -78,18 +89,7 @@ export function AddPeerScreen() {
             </Button>
           </div>
           {genToken.data?.token ? (
-            <code
-              style={{
-                padding: 12,
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-                background: 'var(--bg-app)',
-                color: 'var(--accent)',
-                borderRadius: 'var(--radius-sm)',
-                wordBreak: 'break-all',
-                border: '1px solid var(--border-default)',
-              }}
-            >
+            <code style={tokenCodeStyle}>
               {genToken.data.token}
             </code>
           ) : null}

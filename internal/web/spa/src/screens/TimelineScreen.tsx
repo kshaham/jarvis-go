@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Activity } from 'lucide-react';
 
@@ -16,6 +16,22 @@ const KIND_CHIPS: { id: string; label: string }[] = [
   { id: 'audit', label: 'Audit' },
   { id: 'taskReviewed', label: 'Reviews' },
 ];
+
+const entryKindLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: 0.4,
+  textTransform: 'uppercase',
+};
+
+const spineDotBaseStyle: React.CSSProperties = {
+  position: 'relative',
+  display: 'block',
+  width: 8,
+  height: 8,
+  borderRadius: '50%',
+  margin: '0 auto',
+};
 
 const KIND_COLOR: Record<string, string> = {
   task: 'var(--accent)',
@@ -123,31 +139,18 @@ function Entry({ entry }: { entry: TimelineEntry }) {
         {/* The spine dot glows in its kind color for emphasis. */}
         <span
           style={{
-            position: 'relative',
-            display: 'block',
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
+            ...spineDotBaseStyle,
             background: color,
-            margin: '0 auto',
             boxShadow: `0 0 6px ${color}`,
           }}
         />
       </div>
       <GlowCard interactive className="flex flex-1 flex-col gap-1 p-3">
         <header style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-          <span
-            style={{
-              fontSize: 11,
-              color,
-              fontWeight: 700,
-              letterSpacing: 0.4,
-              textTransform: 'uppercase',
-            }}
-          >
+          <span style={{ ...entryKindLabelStyle, color }}>
             {entry.kind}
           </span>
-          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
             {relativeTime(entry.timestamp)}
           </span>
         </header>
@@ -155,7 +158,7 @@ function Entry({ entry }: { entry: TimelineEntry }) {
           {entry.title}
         </div>
         {entry.agentName ? (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{entry.agentName}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{entry.agentName}</div>
         ) : null}
         {entry.summary ? (
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
@@ -181,7 +184,7 @@ function EntrySkeleton() {
             background: 'var(--border-subtle)',
           }}
         />
-        <Skeleton className="relative mx-auto h-2 w-2 rounded-full" />
+        <Skeleton className="relative mx-auto size-2 rounded-full" />
       </div>
       <div className="surface-card flex flex-1 flex-col gap-2 p-3">
         <div className="flex justify-between gap-8">

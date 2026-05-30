@@ -82,7 +82,7 @@ export function FileLocksScreen() {
                   >
                     {lock.path}
                   </span>
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
                     {lock.ownerName ?? lock.owner} · acquired {relativeTime(lock.acquiredAt)}
                     {lock.expiresAt ? ` · expires ${relativeTime(lock.expiresAt)}` : ''}
                   </span>

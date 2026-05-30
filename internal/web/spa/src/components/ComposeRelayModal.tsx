@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Modal } from './motion/Modal';
@@ -10,6 +10,20 @@ import { useOfficeStatus } from '../hooks/useOfficeStatus';
 import type { RelayAttachment } from '../api/types';
 
 const MAX_CONTENT = 4000;
+
+const previewPanelStyle: React.CSSProperties = {
+  flex: 1,
+  padding: 14,
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  overflowY: 'auto',
+  fontSize: 13,
+  color: 'var(--text-primary)',
+  lineHeight: 1.55,
+  whiteSpace: 'pre-wrap',
+  fontFamily: 'var(--font-sans)',
+};
 
 type Props = {
   open: boolean;
@@ -134,7 +148,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
           <span
             style={{
               flex: 1,
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--text-muted)',
               display: 'inline-flex',
               alignItems: 'center',
@@ -312,7 +326,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--text-muted)',
               letterSpacing: 0.4,
               textTransform: 'uppercase',
@@ -320,21 +334,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
           >
             Preview
           </div>
-          <div
-            style={{
-              flex: 1,
-              padding: 14,
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              overflowY: 'auto',
-              fontSize: 13,
-              color: 'var(--text-primary)',
-              lineHeight: 1.55,
-              whiteSpace: 'pre-wrap',
-              fontFamily: 'var(--font-sans)',
-            }}
-          >
+          <div style={previewPanelStyle}>
             {content.trim() ? content : (
               <span style={{ color: 'var(--text-faint)', fontStyle: 'italic' }}>
                 The message body shows here as the operator types.
@@ -351,7 +351,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
                 />
                 <div
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     color: 'var(--text-muted)',
                     letterSpacing: 0.4,
                     textTransform: 'uppercase',

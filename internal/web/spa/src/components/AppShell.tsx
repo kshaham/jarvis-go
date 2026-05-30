@@ -1,3 +1,4 @@
+import React from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { useEffect, useState } from 'react';
@@ -12,6 +13,79 @@ import { spring } from '../lib/motion';
 import { usePeers } from '../hooks/usePeers';
 import { useToastBridge } from '../hooks/useToastBridge';
 import { useTheme } from '../hooks/useTheme';
+
+const navLinkBaseStyle: React.CSSProperties = {
+  textDecoration: 'none',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '8px 10px',
+  borderRadius: 'var(--radius-md)',
+  fontSize: 14,
+  fontWeight: 600,
+  position: 'relative',
+};
+
+const navActivePillStyle: React.CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--lg-fill-accent)',
+  border: '1px solid rgb(var(--accent-rgb) / 0.35)',
+  boxShadow: 'inset 2px 0 0 var(--accent), var(--lg-specular-convex), var(--glow-violet-sm)',
+  zIndex: 0,
+};
+
+const railGlyphStyle: React.CSSProperties = {
+  width: 24,
+  height: 24,
+  borderRadius: 6,
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 12,
+  fontWeight: 700,
+  flexShrink: 0,
+};
+
+const railButtonStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '8px 10px',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--text-secondary)',
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const navBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 22,
+  height: 18,
+  padding: '0 6px',
+  borderRadius: 999,
+  background: 'var(--status-error)',
+  color: '#fff',
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const classicLinkStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '6px 10px',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--text-muted)',
+  fontSize: 12,
+  textDecoration: 'none',
+  marginTop: 4,
+};
 
 // Per-route document titles (pathname is basename-relative).
 const ROUTE_TITLES: Record<string, string> = {
@@ -164,22 +238,14 @@ export function AppShell({ children }: { children?: ReactNode }) {
               end={item.to === '/'}
               className="transition-colors hover:bg-[var(--bg-elevated)]"
               style={({ isActive }) => ({
+                ...navLinkBaseStyle,
                 marginTop: item.divider ? 12 : 0,
                 borderTop: item.divider ? '1px solid var(--border-subtle)' : 'none',
                 paddingTop: item.divider ? 12 : undefined,
-                textDecoration: 'none',
                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                 // Active background is the sliding layoutId pill below
                 // (or a static fill under reduced motion).
                 background: isActive && reduce ? 'var(--lg-fill-accent)' : undefined,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 10px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 14,
-                fontWeight: 600,
-                position: 'relative',
               })}
             >
               {({ isActive }) => (
@@ -188,16 +254,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                     <motion.span
                       layoutId="nav-active"
                       transition={spring.smooth}
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        borderRadius: 'var(--radius-md)',
-                        background: 'var(--lg-fill-accent)',
-                        border: '1px solid rgb(var(--accent-rgb) / 0.35)',
-                        boxShadow:
-                          'inset 2px 0 0 var(--accent), var(--lg-specular-convex), var(--glow-violet-sm)',
-                        zIndex: 0,
-                      }}
+                      style={navActivePillStyle}
                     />
                   ) : null}
                   <span
@@ -213,40 +270,17 @@ export function AppShell({ children }: { children?: ReactNode }) {
                   >
                     <span
                       style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: 6,
+                        ...railGlyphStyle,
                         border: '1px solid ' + (isActive ? 'rgb(var(--accent-rgb) / 0.6)' : 'var(--lg-rim)'),
                         background: isActive ? 'rgb(var(--accent-rgb) / 0.92)' : 'var(--lg-fill)',
                         color: isActive ? '#04150e' : 'var(--text-secondary)',
-                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        flexShrink: 0,
                       }}
                     >
                       {item.glyph}
                     </span>
                     <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
                     {item.badge ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          minWidth: 22,
-                          height: 18,
-                          padding: '0 6px',
-                          borderRadius: 999,
-                          background: 'var(--status-error)',
-                          color: '#fff',
-                          fontSize: 11,
-                          fontWeight: 700,
-                        }}
-                      >
+                      <span style={navBadgeStyle}>
                         <Metric value={item.badge} size={11} />
                       </span>
                     ) : null}
@@ -259,17 +293,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           <button
             onClick={() => setQuickAddOpen(true)}
             className="focus-ring lg-button"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '8px 10px',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-secondary)',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            style={railButtonStyle}
           >
             <span
               style={{
@@ -287,17 +311,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           <button
             onClick={() => setCommandOpen(true)}
             className="focus-ring lg-button"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '8px 10px',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-secondary)',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            style={railButtonStyle}
           >
             <span
               style={{
@@ -320,17 +334,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
               keeps the old shell alive for fallback. */}
           <a
             href="/office-classic"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 10px',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-muted)',
-              fontSize: 11,
-              textDecoration: 'none',
-              marginTop: 4,
-            }}
+            style={classicLinkStyle}
           >
             <span style={{ opacity: 0.7 }}>↗</span>
             Classic UI

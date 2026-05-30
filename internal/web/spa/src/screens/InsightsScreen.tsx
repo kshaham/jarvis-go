@@ -267,7 +267,7 @@ function Kpi({
     <GlowCard interactive className="flex flex-col gap-1 p-4">
       <span
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
           letterSpacing: 0.4,
           textTransform: 'uppercase',

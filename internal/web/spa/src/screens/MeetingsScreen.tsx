@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { CalendarClock, SearchX } from 'lucide-react';
 
@@ -6,6 +6,30 @@ import { Metric, RevealItem } from '../components/motion';
 import { EmptyState, GlowCard, Input, Skeleton } from '../components/ui';
 import { relativeTime } from '../lib/relativeTime';
 import { useStandupDetail, useStandupHistory } from '../hooks/useOfficeData';
+
+const sidebarStyle: React.CSSProperties = {
+  padding: 10,
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-card)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  minHeight: 0,
+  overflow: 'hidden',
+};
+
+const transcriptPanelStyle: React.CSSProperties = {
+  padding: 18,
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-card)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  minHeight: 0,
+  overflow: 'hidden',
+};
 
 // MeetingsScreen — past standups. Master-detail split: list of
 // completed standups on the left with search; transcript on the
@@ -58,19 +82,7 @@ export function MeetingsScreen() {
           minHeight: 0,
         }}
       >
-        <aside
-          style={{
-            padding: 10,
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-card)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-            minHeight: 0,
-            overflow: 'hidden',
-          }}
-        >
+        <aside style={sidebarStyle}>
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -118,7 +130,7 @@ export function MeetingsScreen() {
                           minute: '2-digit',
                         })}
                       </span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                         {(s.participants?.length ?? 0)} participant{s.participants?.length === 1 ? '' : 's'} ·{' '}
                         {(s.messageCount ?? 0)} turns ·{' '}
                         {relativeTime(s.startedAt)}
@@ -131,19 +143,7 @@ export function MeetingsScreen() {
           </div>
         </aside>
 
-        <main
-          style={{
-            padding: 18,
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-card)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            minHeight: 0,
-            overflow: 'hidden',
-          }}
-        >
+        <main style={transcriptPanelStyle}>
           {!effectiveId ? (
             <EmptyState
               className="flex-1"
@@ -182,7 +182,7 @@ export function MeetingsScreen() {
                     style={{
                       padding: '8px 0 4px',
                       borderBottom: '1px solid var(--border-subtle)',
-                      fontSize: 11,
+                      fontSize: 12,
                       color: 'var(--text-muted)',
                       letterSpacing: 0.4,
                       textTransform: 'uppercase',
@@ -194,7 +194,7 @@ export function MeetingsScreen() {
                 ) : (
                   <RevealItem key={`turn:${node.entry.sessionId}:${node.entry.timestamp}`} index={Math.min(i, 12)}>
                     <GlowCard interactive className="p-3">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                           {node.entry.speakerName ?? node.entry.sessionId}
                         </span>

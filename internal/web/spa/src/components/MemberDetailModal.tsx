@@ -98,14 +98,9 @@ function TabBar({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
             key={it.id}
             onClick={() => setTab(it.id)}
             style={{
-              padding: '8px 14px',
-              background: 'transparent',
-              border: 'none',
+              ...tabButtonBaseStyle,
               borderBottom: '2px solid ' + (active ? 'var(--accent)' : 'transparent'),
               color: active ? 'var(--accent)' : 'var(--text-muted)',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
             }}
           >
             {it.label}
@@ -345,13 +340,7 @@ function LifecycleTab({ member, onAfter }: { member: OfficeMember; onAfter: () =
           >
             <span
               style={{
-                padding: '8px 14px',
-                background: 'var(--bg-pressed)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-primary)',
-                fontSize: 13,
-                fontWeight: 600,
+                ...actionButtonBaseStyle,
                 opacity: setDir.isPending || !workdir.trim() ? 0.5 : 1,
               }}
             >
@@ -418,7 +407,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
         alignItems: 'center',
       }}
     >
-      <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
         {label}
       </span>
       <span style={{ minWidth: 0 }}>{children}</span>
@@ -437,14 +426,33 @@ function Field({
 }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>
         {label}
       </span>
       {children}
-      {hint ? <span style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.4 }}>{hint}</span> : null}
+      {hint ? <span style={{ fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.4 }}>{hint}</span> : null}
     </label>
   );
 }
+
+const actionButtonBaseStyle: React.CSSProperties = {
+  padding: '8px 14px',
+  background: 'var(--bg-pressed)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--text-primary)',
+  fontSize: 13,
+  fontWeight: 600,
+};
+
+const tabButtonBaseStyle: React.CSSProperties = {
+  padding: '8px 14px',
+  background: 'transparent',
+  border: 'none',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
 
 const textareaStyle: React.CSSProperties = {
   padding: 10,

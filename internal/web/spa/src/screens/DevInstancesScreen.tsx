@@ -1,3 +1,4 @@
+import React from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Server } from 'lucide-react';
 
@@ -5,6 +6,15 @@ import { Metric, StatusDot } from '../components/motion';
 import { GlowCard, EmptyState } from '../components/ui';
 import { relativeTime } from '../lib/relativeTime';
 import { useDevInstances } from '../hooks/useOfficeData';
+
+const statusBadgeBaseStyle: React.CSSProperties = {
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: 0.4,
+  padding: '2px 8px',
+  borderRadius: 'var(--radius-sm)',
+  fontSize: 12,
+};
 
 // DevInstancesScreen — list the team's dev servers (frontend / api /
 // custom slots). Each card shows URL + PID + health and credentials
@@ -28,8 +38,8 @@ export function DevInstancesScreen() {
         </p>
       </header>
 
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-        <Metric value={list.length} size={11} pulseOnChange /> instances running
+      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <Metric value={list.length} size={12} pulseOnChange /> instances running
       </span>
 
       {list.length === 0 ? (
@@ -69,12 +79,7 @@ export function DevInstancesScreen() {
                   {/* Status badge top-right. */}
                   <span
                     style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: 0.4,
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-sm)',
+                      ...statusBadgeBaseStyle,
                       background:
                         dotStatus === 'stuck'
                           ? 'rgba(239,68,68,0.12)'
@@ -92,7 +97,7 @@ export function DevInstancesScreen() {
                     {dotStatus === 'stuck' ? 'Unhealthy' : dotStatus === 'working' ? 'Live' : 'Idle'}
                   </span>
                   {typeof d.pid === 'number' ? (
-                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                    <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
                       pid {d.pid}
                     </span>
                   ) : null}
@@ -114,7 +119,7 @@ export function DevInstancesScreen() {
                 ) : (
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>(no URL recorded)</span>
                 )}
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+                <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-muted)' }}>
                   {d.lastCheckAt ? <span>last check {relativeTime(d.lastCheckAt)}</span> : null}
                   {typeof d.healthFailures === 'number' && d.healthFailures > 0 ? (
                     <span style={{ color: 'var(--status-error)' }}>
@@ -128,7 +133,7 @@ export function DevInstancesScreen() {
                       padding: 8,
                       background: 'var(--bg-app)',
                       borderRadius: 'var(--radius-sm)',
-                      fontSize: 11,
+                      fontSize: 12,
                     }}
                   >
                     <summary style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>

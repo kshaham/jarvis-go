@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -13,6 +13,48 @@ import { subscribeSSE } from '@/api/sse';
 import { useOfficeStatus } from '@/hooks/useOfficeStatus';
 import { useStandup, useStandupHistory } from '@/hooks/useOfficeData';
 import type { OfficeSettings, Standup } from '@/api/types';
+
+const avatarBaseStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: '#fff',
+  fontWeight: 700,
+};
+
+const transcriptSectionStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  padding: 16,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--bg-surface)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  overflow: 'hidden',
+};
+
+const spotlightSectionStyle: React.CSSProperties = {
+  padding: 18,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  gap: 18,
+  alignItems: 'center',
+  flexWrap: 'wrap',
+};
+
+const composerStyle: React.CSSProperties = {
+  padding: 12,
+  borderRadius: 'var(--radius-card)',
+  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border-subtle)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+};
 
 // StandupScreen mirrors the mobile standup design with the speaker
 // spotlight. Top hero: start/stop button + participant ring. Below:
@@ -198,7 +240,7 @@ export function StandupScreen() {
       {audioUrl ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <audio controls src={`${audioUrl}?t=${audioNonce}`} style={{ width: '100%' }} />
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Voices are AI-generated.</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Voices are AI-generated.</span>
         </div>
       ) : null}
 
@@ -208,26 +250,13 @@ export function StandupScreen() {
       ) : null}
 
       {/* Transcript */}
-      <section
-        style={{
-          flex: 1,
-          minHeight: 0,
-          padding: 16,
-          borderRadius: 'var(--radius-card)',
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          overflow: 'hidden',
-        }}
-      >
+      <section style={transcriptSectionStyle}>
         <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
           <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
             Transcript
           </h2>
-          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-            <Metric value={transcript.length} size={11} pulseOnChange /> turns
+          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            <Metric value={transcript.length} size={12} pulseOnChange /> turns
           </span>
         </header>
         <div
@@ -260,17 +289,7 @@ export function StandupScreen() {
 
       {/* Composer */}
       {active ? (
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 'var(--radius-card)',
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-subtle)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-          }}
-        >
+        <div style={composerStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {asTask ? 'Injecting a task' : 'Sending a message'}
@@ -285,8 +304,8 @@ export function StandupScreen() {
             style={{ resize: 'vertical' }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-            <span style={{ fontSize: 11, color: text.length > 480 ? 'var(--status-warn)' : 'var(--text-muted)' }}>
-              <Metric value={text.length} size={11} /> / 500
+            <span style={{ fontSize: 12, color: text.length > 480 ? 'var(--status-warn)' : 'var(--text-muted)' }}>
+              <Metric value={text.length} size={12} /> / 500
             </span>
             <Button onClick={submit} disabled={sendMut.isPending || !text.trim()}>
               {sendMut.isPending ? 'Sending…' : 'Send'}
@@ -307,18 +326,7 @@ function SpotlightRow({
 }) {
   const reduce = useReducedMotion();
   return (
-    <section
-      style={{
-        padding: 18,
-        borderRadius: 'var(--radius-card)',
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
-        display: 'flex',
-        gap: 18,
-        alignItems: 'center',
-        flexWrap: 'wrap',
-      }}
-    >
+    <section style={spotlightSectionStyle}>
       {standup.participants.map((pid) => {
         const m = memberLookup.get(pid);
         const isCurrent = standup.currentSpeakerId === pid;
@@ -355,18 +363,14 @@ function SpotlightRow({
                   : { duration: 0.3 }
               }
               style={{
+                ...avatarBaseStyle,
                 width: size,
                 height: size,
                 borderRadius: size / 2,
                 background:
                   m?.color ??
                   'linear-gradient(135deg, var(--accent), var(--accent-strong))',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#fff',
                 fontSize: isCurrent ? 18 : 13,
-                fontWeight: 700,
                 border: isCurrent ? '2px solid var(--accent)' : '1px solid var(--border-strong)',
               }}
             >
@@ -374,7 +378,7 @@ function SpotlightRow({
             </motion.div>
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color: isCurrent ? 'var(--text-primary)' : 'var(--text-muted)',
                 fontWeight: isCurrent ? 600 : 500,
                 maxWidth: 80,
@@ -416,7 +420,7 @@ function TranscriptTurn({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
         }}
       >

@@ -65,8 +65,8 @@ export function KnowledgeScreen() {
       <Section
         title="Promotions"
         trailing={
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            <Metric value={list.length} size={11} pulseOnChange /> entries
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <Metric value={list.length} size={12} pulseOnChange /> entries
           </span>
         }
       >
@@ -93,7 +93,7 @@ export function KnowledgeScreen() {
               >
                 <span
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     color: 'var(--accent)',
                     fontFamily: 'var(--font-mono)',
                     minWidth: 90,
@@ -105,17 +105,17 @@ export function KnowledgeScreen() {
                   {p.title}
                 </span>
                 {typeof p.reuseCount === 'number' ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    <Metric value={p.reuseCount} size={11} /> reuses
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    <Metric value={p.reuseCount} size={12} /> reuses
                   </span>
                 ) : null}
                 {p.promotedAt ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
                     {relativeTime(p.promotedAt)}
                   </span>
                 ) : null}
                 {p.revoked ? (
-                  <span style={{ fontSize: 11, color: 'var(--status-error)' }}>revoked</span>
+                  <span style={{ fontSize: 12, color: 'var(--status-error)' }}>revoked</span>
                 ) : (
                   <Button
                     variant="danger"
@@ -152,7 +152,7 @@ function StatTile({
     <GlowCard className="flex flex-col gap-1 p-3.5">
       <span
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--text-muted)',
           letterSpacing: 0.4,
           textTransform: 'uppercase',
