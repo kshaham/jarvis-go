@@ -466,6 +466,98 @@ func TestBuildLearningsPromptSection(t *testing.T) {
 	}
 }
 
+// TestLoadLearningDataCachesAndInvalidates verifies that:
+//  1. A second LoadLearningData call within the TTL hits the cache (not disk).
+//  2. A write (AddLearningEntry) invalidates the cache so the next read sees new data.
+func TestLoadLearningDataCachesAndInvalidates(t *testing.T) {
+	learningsPath, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	clearLearningCacheForTest()
+
+	const configID = "cache-test-agent"
+
+	// Seed one entry so the file exists.
+	if err := AddLearningEntry(configID, "technique", "first entry", "t1", "Task One"); err != nil {
+		t.Fatalf("AddLearningEntry: %v", err)
+	}
+
+	// First load populates the cache.
+	first := LoadLearningData(configID)
+	if len(first.Learnings) != 1 {
+		t.Fatalf("expected 1 learning after first load, got %d", len(first.Learnings))
+	}
+
+	// Corrupt (delete) the on-disk file to prove the second load comes from cache.
+	if err := os.Remove(filepath.Join(learningsPath, configID+".json")); err != nil {
+		t.Fatalf("remove on-disk file: %v", err)
+	}
+
+	// Second load within TTL must return the cached data, not hit disk.
+	second := LoadLearningData(configID)
+	if len(second.Learnings) != 1 {
+		t.Fatalf("expected 1 learning from cache (file deleted), got %d", len(second.Learnings))
+	}
+	if second.Learnings[0].Content != "first entry" {
+		t.Errorf("cached content mismatch: got %q", second.Learnings[0].Content)
+	}
+
+	// A write must invalidate the cache so the next read reflects it.
+	// Re-create the file first (AddLearningEntry will write from its in-memory
+	// load path which starts from defaultLearningData after the corrupt path
+	// or from the cache — either way it writes the result to disk AND invalidates).
+	if err := AddLearningEntry(configID, "technique", "second entry", "t2", "Task Two"); err != nil {
+		t.Fatalf("AddLearningEntry (second): %v", err)
+	}
+
+	third := LoadLearningData(configID)
+	found := false
+	for _, l := range third.Learnings {
+		if l.Content == "second entry" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("after write-invalidation, LoadLearningData did not return the new entry; learnings: %+v", third.Learnings)
+	}
+}
+
+// TestLoadLearningDataReturnsCopy verifies that mutating the returned struct
+// does not corrupt the cache for subsequent calls.
+func TestLoadLearningDataReturnsCopy(t *testing.T) {
+	_, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	clearLearningCacheForTest()
+
+	const configID = "copy-test-agent"
+
+	if err := AddLearningEntry(configID, "general", "original content", "t1", "Task"); err != nil {
+		t.Fatalf("AddLearningEntry: %v", err)
+	}
+
+	// First load.
+	first := LoadLearningData(configID)
+	if len(first.Learnings) == 0 {
+		t.Fatal("expected at least one learning")
+	}
+
+	// Mutate the returned slice in place.
+	first.Learnings[0].Content = "mutated content"
+	first.Learnings = append(first.Learnings, AgentLearning{Content: "injected entry"})
+
+	// Second load must return uncorrupted cached data.
+	second := LoadLearningData(configID)
+	if second.Learnings[0].Content != "original content" {
+		t.Errorf("cache corrupted by caller mutation: got %q, want %q",
+			second.Learnings[0].Content, "original content")
+	}
+	for _, l := range second.Learnings {
+		if l.Content == "injected entry" {
+			t.Error("injected entry leaked into cache")
+		}
+	}
+}
+
 // TestBuildCrossAgentContext verifies that the cross-agent context excludes
 // the caller but includes learnings from other agents.
 func TestBuildCrossAgentContext(t *testing.T) {

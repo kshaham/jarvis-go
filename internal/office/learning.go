@@ -58,6 +58,25 @@ type LearningMetrics struct {
 
 var learningMu sync.Mutex
 
+// cachedLearning holds a cached copy of an agent's learning data.
+type cachedLearning struct {
+	data     AgentLearningData
+	loadedAt time.Time
+}
+
+// learningCache is the process-wide learning cache, keyed by configID.
+// All access must be guarded by learningMu.
+var learningCache = map[string]cachedLearning{}
+
+const learningCacheTTL = 30 * time.Second
+
+// clearLearningCacheForTest empties the cache under the lock. Only for tests.
+func clearLearningCacheForTest() {
+	learningMu.Lock()
+	learningCache = map[string]cachedLearning{}
+	learningMu.Unlock()
+}
+
 // learningsDir returns the directory for learning files.
 func learningsDir() string {
 	homeDir, _ := os.UserHomeDir()
@@ -146,12 +165,41 @@ func LoadLearningsForUI(configID string) (interface{}, error) {
 	return parsed.Learnings, nil
 }
 
+// copyLearningData returns a deep copy of ld, duplicating all slice fields
+// so callers cannot mutate the cache through the returned pointer.
+func copyLearningData(ld AgentLearningData) AgentLearningData {
+	out := ld
+	if ld.Learnings != nil {
+		out.Learnings = make([]AgentLearning, len(ld.Learnings))
+		copy(out.Learnings, ld.Learnings)
+	}
+	if ld.Skills != nil {
+		out.Skills = make([]AgentSkillEntry, len(ld.Skills))
+		copy(out.Skills, ld.Skills)
+	}
+	if ld.DistilledInsights != nil {
+		out.DistilledInsights = make([]string, len(ld.DistilledInsights))
+		copy(out.DistilledInsights, ld.DistilledInsights)
+	}
+	return out
+}
+
 // LoadLearningData reads the full AgentLearningData for a given agent.
 // Returns a zero-value struct with sensible defaults if the file is missing or unparseable.
+// Results are cached in memory for learningCacheTTL to avoid repeated disk reads on
+// hot paths (status polls, SSE fan-out). Every write path calls writeLearningData which
+// invalidates the cache, so callers always see fresh data after a write.
 func LoadLearningData(configID string) *AgentLearningData {
 	learningMu.Lock()
 	defer learningMu.Unlock()
-	return loadLearningDataUnsafe(configID)
+	if entry, ok := learningCache[configID]; ok && time.Since(entry.loadedAt) < learningCacheTTL {
+		cp := copyLearningData(entry.data)
+		return &cp
+	}
+	ld := loadLearningDataUnsafe(configID)
+	learningCache[configID] = cachedLearning{data: *ld, loadedAt: time.Now()}
+	cp := copyLearningData(*ld)
+	return &cp
 }
 
 // loadLearningDataUnsafe reads without locking (caller must hold learningMu).
@@ -238,6 +286,14 @@ func writeLearningData(ld *AgentLearningData) error {
 		_ = os.Remove(tmpFile)
 		return err
 	}
+
+	// Write-through: update the cache with the just-written value so the next
+	// read is served from memory. This also handles the invalidation case:
+	// any stale entry is replaced with the current authoritative data.
+	// writeLearningData is the single chokepoint for all disk writes
+	// (AddLearningEntry, AddSkillEntry, SaveLearningData all funnel through here),
+	// so this one site covers all write paths.
+	learningCache[ld.ConfigID] = cachedLearning{data: *ld, loadedAt: time.Now()}
 
 	slog.Debug("Saved agent learning data", "configId", ld.ConfigID,
 		"learnings", len(ld.Learnings), "skills", len(ld.Skills))
