@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -9,8 +9,9 @@ import { Button, GlowCard, Skeleton, Textarea, Toggle } from '@/components/ui';
 import { spring } from '@/lib/motion';
 import { relativeTime } from '@/lib/relativeTime';
 import { fetchJSON } from '@/api/client';
+import { subscribeSSE } from '@/api/sse';
 import { useOfficeStatus } from '@/hooks/useOfficeStatus';
-import { useStandup } from '@/hooks/useOfficeData';
+import { useStandup, useStandupHistory } from '@/hooks/useOfficeData';
 import type { Standup } from '@/api/types';
 
 // StandupScreen mirrors the mobile standup design with the speaker
@@ -70,6 +71,63 @@ export function StandupScreen() {
     onError: () => toast.error('Message failed to send'),
   });
 
+  const [audioStage, setAudioStage] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioNonce, setAudioNonce] = useState(0);
+  const historyQ = useStandupHistory();
+
+  const latestHistoryId = historyQ.data?.history?.[0]?.id ?? null;
+  const targetId = data?.id ?? latestHistoryId;
+  const hasTranscript = (data?.transcript?.length ?? 0) > 0;
+  const completed = !active && !!targetId && (hasTranscript || !!latestHistoryId);
+
+  useEffect(() => {
+    const sub = subscribeSSE((evt) => {
+      if (
+        evt.name !== 'office:standupAudioProgress' &&
+        evt.name !== 'office:standupAudioReady' &&
+        evt.name !== 'office:standupAudioError'
+      ) {
+        return;
+      }
+      const p = (evt.data ?? {}) as { id?: string; stage?: string; detail?: string; url?: string; message?: string };
+      if (evt.name === 'office:standupAudioProgress') {
+        const label =
+          p.stage === 'voicing'
+            ? `Voicing ${p.detail ?? ''}…`.trim()
+            : 'Summarizing…';
+        setAudioStage(label);
+      } else if (evt.name === 'office:standupAudioReady') {
+        setAudioStage(null);
+        setAudioUrl((p.url ?? (p.id ? `/api/office/standup/${p.id}/audio` : null)) ?? null);
+      } else {
+        setAudioStage(null);
+        toast.error(p.message || 'Audio generation failed');
+      }
+    });
+    return () => sub.close();
+  }, []);
+
+  const generateMut = useMutation({
+    mutationFn: () =>
+      fetchJSON<{ id: string }>(`/api/office/standup/${encodeURIComponent(targetId ?? 'latest')}/audio`, {
+        method: 'POST',
+      }),
+    onMutate: () => {
+      setAudioStage('Summarizing…');
+      setAudioNonce((n) => n + 1);
+    },
+    onError: (err: unknown) => {
+      setAudioStage(null);
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.toLowerCase().includes('openai') || msg.toLowerCase().includes('key')) {
+        toast.error('Configure your OpenAI key in Settings');
+      } else {
+        toast.error('Could not start audio generation');
+      }
+    },
+  });
+
   const [text, setText] = useState('');
   const [asTask, setAsTask] = useState(false);
   const transcript = data?.transcript ?? [];
@@ -103,20 +161,38 @@ export function StandupScreen() {
               : 'No standup running. Hit Start to call the team together.'}
           </p>
         </div>
-        <Button
-          variant={active ? 'danger' : 'primary'}
-          onClick={() => (active ? stopMut.mutate() : startMut.mutate())}
-          disabled={startMut.isPending || stopMut.isPending}
-        >
-          {active
-            ? stopMut.isPending
-              ? 'Stopping…'
-              : 'End standup'
-            : startMut.isPending
-              ? 'Starting…'
-              : 'Start standup'}
-        </Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Button
+            variant="secondary"
+            disabled={!completed || !!audioStage || generateMut.isPending}
+            title={completed ? undefined : 'Available after standup ends'}
+            onClick={() => generateMut.mutate()}
+          >
+            {audioStage ?? (audioUrl ? 'Regenerate audio summary' : 'Generate audio summary')}
+          </Button>
+          <Button
+            variant={active ? 'danger' : 'primary'}
+            onClick={() => (active ? stopMut.mutate() : startMut.mutate())}
+            disabled={startMut.isPending || stopMut.isPending}
+          >
+            {active
+              ? stopMut.isPending
+                ? 'Stopping…'
+                : 'End standup'
+              : startMut.isPending
+                ? 'Starting…'
+                : 'Start standup'}
+          </Button>
+        </div>
       </header>
+
+      {/* Audio player */}
+      {audioUrl ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <audio controls src={`${audioUrl}?t=${audioNonce}`} style={{ width: '100%' }} />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Voices are AI-generated.</span>
+        </div>
+      ) : null}
 
       {/* Speaker spotlight */}
       {active && data?.participants?.length ? (
