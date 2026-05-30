@@ -523,6 +523,9 @@ func (m *Manager) GetRoster() []*AgentState {
 // it directly off a roster *AgentState (after GetRoster released m.mu) is a data
 // race. Callers must NOT already hold m.mu.
 func (m *Manager) sessionIDOf(a *AgentState) string {
+	if a == nil {
+		return ""
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return a.SessionID

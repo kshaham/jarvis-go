@@ -364,7 +364,7 @@ func (m *Manager) IsTeamActive() bool {
 func (m *Manager) GetLeadAgentInfo(pinnedSessionID string) (string, string) {
 	if pinnedSessionID != "" {
 		if a := m.GetAgent(pinnedSessionID); a != nil {
-			return a.SessionID, agentDisplayName(a)
+			return m.sessionIDOf(a), agentDisplayName(a)
 		}
 	}
 	// Auto-resolve: first strategic-tier agent, sorted for stability.
@@ -409,7 +409,7 @@ func (m *Manager) GetLeadStatusText(pinnedSessionID string) (string, bool) {
 		fmt.Fprintf(&b, ", %s tier", html.EscapeString(tier))
 	}
 	b.WriteString(")\n")
-	fmt.Fprintf(&b, "<code>%s</code>\n\n", html.EscapeString(shortSessionID(a.SessionID)))
+	fmt.Fprintf(&b, "<code>%s</code>\n\n", html.EscapeString(shortSessionID(m.sessionIDOf(a))))
 
 	active := a.ActiveTask()
 	pending := a.PendingTaskCount()
@@ -436,7 +436,7 @@ func (m *Manager) GetLeadStatusText(pinnedSessionID string) (string, bool) {
 	}
 
 	fmt.Fprintf(&b, "\n%d pending task%s · $%.4f so far",
-		pending, pluralS(pending), a.TotalCostUSD)
+		pending, pluralS(pending), a.Usage().TotalCostUSD)
 	return b.String(), true
 }
 
