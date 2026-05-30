@@ -295,6 +295,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           ))}
           <div style={{ flex: 1 }} />
           <button
+            type="button"
             onClick={() => setQuickAddOpen(true)}
             className="focus-ring lg-button"
             style={railButtonStyle}
@@ -313,6 +314,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             Quick task
           </button>
           <button
+            type="button"
             onClick={() => setCommandOpen(true)}
             className="focus-ring lg-button"
             style={railButtonStyle}

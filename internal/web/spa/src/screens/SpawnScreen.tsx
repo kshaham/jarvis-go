@@ -6,14 +6,16 @@ import { LayoutTemplate } from 'lucide-react';
 
 import { Chip, EmptyState, Input, Section, Skeleton } from '@/components/ui';
 import { DefaultsSection } from '../components/spawn/DefaultsSection';
-import { memberFromTemplate } from '../components/spawn/MemberEditor';
-import type { MemberEdit } from '../components/spawn/MemberEditor';
+import { memberFromTemplate } from '../components/spawn/memberEditor.utils';
+import type { MemberEdit } from '../components/spawn/memberEditor.utils';
 import { MembersSection } from '../components/spawn/MembersSection';
 import { MissionSection } from '../components/spawn/MissionSection';
-import { ReviewSummary, validateSpawnState } from '../components/spawn/ReviewSummary';
+import { ReviewSummary } from '../components/spawn/ReviewSummary';
+import { validateSpawnState } from '../components/spawn/reviewSummary.utils';
 import { TemplateCard } from '../components/spawn/TemplateCard';
 import { TemplateChip } from '../components/spawn/TemplateChip';
-import { recordRecentWorkdir, WorkdirSection } from '../components/spawn/WorkdirSection';
+import { WorkdirSection } from '../components/spawn/WorkdirSection';
+import { recordRecentWorkdir } from '../components/spawn/workdirSection.utils';
 import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
 import type { SettingsAccounts, TeamTemplate, TeamTemplateMember } from '../api/types';
@@ -291,13 +293,15 @@ export function SpawnScreen() {
   );
 }
 
+const STEP_ITEMS: { n: 1 | 2; label: string }[] = [
+  { n: 1, label: 'Template' },
+  { n: 2, label: 'Configure' },
+];
+
 // StepIndicator — orients the two-page flow (Template → Configure). The
 // active step is violet; a completed step keeps a filled marker.
 function StepIndicator({ step }: { step: 1 | 2 }) {
-  const steps: { n: 1 | 2; label: string }[] = [
-    { n: 1, label: 'Template' },
-    { n: 2, label: 'Configure' },
-  ];
+  const steps = STEP_ITEMS;
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
       {steps.map((s, i) => (

@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
-import { agentAvatarClass, agentAvatarGlyph } from '../AgentCard';
+import { agentAvatarClass, agentAvatarGlyph } from '../agentCard.utils';
 import { StatusDot } from '../motion/StatusDot';
 import { cn } from '@/lib/cn';
 import type { OfficeMember } from '@/api/types';

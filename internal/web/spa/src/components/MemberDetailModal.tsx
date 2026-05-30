@@ -6,7 +6,7 @@ import { Modal } from './motion/Modal';
 import { Metric } from './motion/Metric';
 import { Press } from './motion/Press';
 import { StatusDot } from './motion/StatusDot';
-import { agentAvatarClass, agentAvatarGlyph } from './AgentCard';
+import { agentAvatarClass, agentAvatarGlyph } from './agentCard.utils';
 import { cn } from '../lib/cn';
 import { fetchJSON } from '../api/client';
 import { relativeTime } from '../lib/relativeTime';
@@ -84,19 +84,22 @@ export function MemberDetailModal({ member, onClose }: Props) {
   );
 }
 
+const TAB_ITEMS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'personality', label: 'Personality' },
+  { id: 'send', label: 'Send' },
+  { id: 'lifecycle', label: 'Lifecycle' },
+];
+
 function TabBar({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
-  const items: { id: Tab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'personality', label: 'Personality' },
-    { id: 'send', label: 'Send' },
-    { id: 'lifecycle', label: 'Lifecycle' },
-  ];
+  const items = TAB_ITEMS;
   return (
     <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--border-subtle)' }}>
       {items.map((it) => {
         const active = tab === it.id;
         return (
           <button
+            type="button"
             key={it.id}
             onClick={() => setTab(it.id)}
             style={{
@@ -212,6 +215,7 @@ function PersonalityTab({ member, onSaved }: { member: OfficeMember; onSaved: ()
       </Field>
       <Field label="Character" hint="Free-form personality notes the agent sees in its system prompt.">
         <textarea
+          aria-label="Character"
           value={character}
           onChange={(e) => setCharacter(e.target.value)}
           rows={4}
@@ -221,6 +225,7 @@ function PersonalityTab({ member, onSaved }: { member: OfficeMember; onSaved: ()
       </Field>
       <Field label="Role instructions" hint="Optional: extra direction layered on top of the team mission.">
         <textarea
+          aria-label="Role instructions"
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
           rows={4}
@@ -263,6 +268,7 @@ function SendTab({ member }: { member: OfficeMember }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Field label="Inject prompt" hint="Goes straight into this agent's PTY at the next turn boundary.">
         <textarea
+          aria-label="Inject prompt"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={6}
@@ -330,6 +336,7 @@ function LifecycleTab({ member, onAfter }: { member: OfficeMember; onAfter: () =
       <Field label="Change working directory" hint="The agent restarts inside the new directory.">
         <div style={{ display: 'flex', gap: 8 }}>
           <input
+            aria-label="New working directory path"
             value={workdir}
             onChange={(e) => setWorkdir(e.target.value)}
             placeholder={member.workingDir || '/path/to/dir'}

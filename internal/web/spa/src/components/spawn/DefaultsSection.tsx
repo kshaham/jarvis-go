@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui';
-import { ChipGroup, Field, inputStyle, ModelSelect, SectionCard, Toggle } from './formPrimitives';
+import { ChipGroup, Field, ModelSelect, SectionCard, Toggle } from './formPrimitives';
+import { inputStyle } from './formPrimitives.utils';
 
 type Provider =
   | 'claude-subscription'

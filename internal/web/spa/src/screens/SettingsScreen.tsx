@@ -232,6 +232,7 @@ function BrainstormForm({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <input
+        aria-label="Brainstorm prompt"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="Brainstorm prompt (e.g. 'How should we approach the auth migration?')"

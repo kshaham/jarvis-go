@@ -80,6 +80,7 @@ export function NumField({
       <input
         type="number"
         className="field"
+        aria-label={typeof label === 'string' ? label : undefined}
         value={value}
         min={min}
         max={max}

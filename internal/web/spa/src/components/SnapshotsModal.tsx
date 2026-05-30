@@ -90,6 +90,7 @@ export function SnapshotsModal({ open, onClose }: Props) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
+            aria-label="Snapshot name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="snapshot name (e.g. 'pre-migration')"

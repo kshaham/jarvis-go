@@ -301,6 +301,7 @@ export function ComposeRelayModal({ open, onClose, initialPeerId }: Props) {
                   >
                     <span style={{ flex: 1, color: 'var(--text-primary)' }}>{a.title}</span>
                     <button
+                      type="button"
                       onClick={() =>
                         setCustomAttachments((prev) => prev.filter((_, idx) => idx !== i))
                       }

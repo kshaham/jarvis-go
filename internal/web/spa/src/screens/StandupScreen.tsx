@@ -239,7 +239,15 @@ export function StandupScreen() {
       {/* Audio player */}
       {audioUrl ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <audio controls src={`${audioUrl}?t=${audioNonce}`} style={{ width: '100%' }} />
+          <audio
+            controls
+            aria-label="Standup audio summary"
+            src={`${audioUrl}?t=${audioNonce}`}
+            style={{ width: '100%' }}
+          >
+            {/* Captions are not available for AI-generated audio summaries. */}
+            <track kind="captions" />
+          </audio>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Voices are AI-generated.</span>
         </div>
       ) : null}

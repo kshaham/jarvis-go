@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react';
 
+import { tierColor, tierLabel } from './tierBadge.utils';
+
 // Static base for the pill variant — hoisted to avoid per-render allocations.
 const pillBaseStyle: CSSProperties = {
   display: 'inline-flex',
@@ -14,26 +16,6 @@ const pillBaseStyle: CSSProperties = {
 export type Tier = 'strategic' | 'worker' | 'support';
 
 type Variant = 'dot' | 'pill';
-
-const TIER_COLORS: Record<Tier, string> = {
-  strategic: 'var(--accent)',
-  worker: 'var(--status-working)',
-  support: 'var(--status-meeting)',
-};
-
-const TIER_LABELS: Record<Tier, string> = {
-  strategic: 'Strategic',
-  worker: 'Worker',
-  support: 'Support',
-};
-
-export function tierColor(tier: Tier | undefined): string {
-  return tier ? TIER_COLORS[tier] : 'var(--text-muted)';
-}
-
-export function tierLabel(tier: Tier | undefined): string {
-  return tier ? TIER_LABELS[tier] : 'Other';
-}
 
 export function TierBadge({
   tier,

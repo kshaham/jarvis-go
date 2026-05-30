@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
-import { tierColor, type Tier } from './TierBadge';
+import { tierColor } from './tierBadge.utils';
+import type { Tier } from './TierBadge';
 
 const avatarBaseStyle: CSSProperties = {
   position: 'relative',
@@ -74,7 +75,6 @@ export function Avatar({
 
   return (
     <span
-      role="img"
       aria-label={name || 'member avatar'}
       title={name}
       style={{

@@ -417,13 +417,15 @@ function latestAgentId(messages: OfficeMessageWire[]): string {
   return last.toSessionId || last.fromSessionId;
 }
 
+const THREAD_SKELETON_ROWS = [
+  { side: 'flex-start', w: '60%' },
+  { side: 'flex-end', w: '45%' },
+  { side: 'flex-start', w: '70%' },
+  { side: 'flex-end', w: '52%' },
+] as const;
+
 function ThreadSkeleton() {
-  const rows = [
-    { side: 'flex-start', w: '60%' },
-    { side: 'flex-end', w: '45%' },
-    { side: 'flex-start', w: '70%' },
-    { side: 'flex-end', w: '52%' },
-  ] as const;
+  const rows = THREAD_SKELETON_ROWS;
   return (
     <>
       {rows.map((r) => (

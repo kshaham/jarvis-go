@@ -3,8 +3,9 @@ import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
 import { RevealItem } from '../motion/RevealItem';
 import { SectionCard } from './formPrimitives';
-import { MemberEditor, isMemberEdited, memberFromTemplate } from './MemberEditor';
-import type { MemberEdit } from './MemberEditor';
+import { MemberEditor } from './MemberEditor';
+import { isMemberEdited, memberFromTemplate } from './memberEditor.utils';
+import type { MemberEdit } from './memberEditor.utils';
 import { MemberTile } from './MemberTile';
 import { TierBadge } from './TierBadge';
 import type { Tier } from './TierBadge';
@@ -85,7 +86,7 @@ export function MembersSection({
         </span>
       }
     >
-      <div
+      <ul
         role="listbox"
         aria-label="Team roster"
         aria-activedescendant={selectedMemberId ? `member-tile-${selectedMemberId}` : undefined}
@@ -101,10 +102,12 @@ export function MembersSection({
         }}
         className="focus-ring"
         style={{
+          listStyle: 'none',
+          padding: 2,
+          margin: 0,
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
           gap: 10,
-          padding: 2,
           marginBottom: 12,
         }}
       >
@@ -128,7 +131,7 @@ export function MembersSection({
             </RevealItem>
           );
         })}
-      </div>
+      </ul>
 
       {selected ? (
         <MemberEditor
