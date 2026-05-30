@@ -59,6 +59,24 @@ func TestRenderTaskCriteriaSection(t *testing.T) {
 	}
 }
 
+// TestSetTaskCriteriaRemoveRejectsMultipleIndices verifies that passing more
+// than one index to the "remove" op returns an error and leaves the criteria
+// slice unchanged.
+func TestSetTaskCriteriaRemoveRejectsMultipleIndices(t *testing.T) {
+	a := &AgentState{taskQueue: &TaskQueue{Tasks: []*Task{{ID: "t1", Status: TaskInProgress}}}}
+	if err := a.SetTaskCriteria("t1", "set", []string{"alpha", "beta"}); err != nil {
+		t.Fatalf("set failed: %v", err)
+	}
+	err := a.SetTaskCriteria("t1", "remove", []string{"0", "1"})
+	if err == nil {
+		t.Fatal("expected error when remove receives two indices, got nil")
+	}
+	task := findTaskForTest(a, "t1")
+	if len(task.AcceptanceCriteria) != 2 {
+		t.Fatalf("criteria must be unchanged after rejected remove, got %v", task.AcceptanceCriteria)
+	}
+}
+
 // findTaskForTest is a test-only helper (no locking).
 func findTaskForTest(a *AgentState, id string) *Task {
 	for _, t := range a.taskQueue.Tasks {

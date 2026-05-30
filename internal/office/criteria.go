@@ -58,6 +58,9 @@ func (a *AgentState) SetTaskCriteria(taskID, op string, values []string) error {
 		}
 		task.AcceptanceCriteria = base
 	case "remove":
+		if len(values) != 1 {
+			return errors.New("remove takes exactly one index")
+		}
 		for _, v := range values {
 			idx, err := strconv.Atoi(strings.TrimSpace(v))
 			if err != nil || idx < 0 || idx >= len(task.AcceptanceCriteria) {

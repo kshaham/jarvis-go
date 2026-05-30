@@ -1,6 +1,9 @@
 package office
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestNewAgentState(t *testing.T) {
 	cfg := &TeamMemberConfig{ID: "vex", Name: "Vex", Role: "Frontend Engineer"}
@@ -224,4 +227,64 @@ func TestAgentStateGetVoiceUnderLock(t *testing.T) {
 	if b.GetVoice() != "" {
 		t.Fatalf("nil-config GetVoice should be empty")
 	}
+}
+
+// TestTaskGateInfoReturnsCopiedCriteria verifies TaskGateInfo returns correct
+// values and that mutating the returned slice does not affect the live task.
+func TestTaskGateInfoReturnsCopiedCriteria(t *testing.T) {
+	a := &AgentState{taskQueue: &TaskQueue{Tasks: []*Task{{
+		ID:                  "tg1",
+		Status:              TaskInProgress,
+		AcceptanceCriteria:  []string{"crit-a", "crit-b"},
+		Labels:              []string{"gated"},
+		CriteriaRejectCount: 3,
+	}}}}
+
+	criteria, gated, rejectCount, found := a.TaskGateInfo("tg1")
+	if !found {
+		t.Fatal("TaskGateInfo: found=false, want true")
+	}
+	if !gated {
+		t.Error("TaskGateInfo: gated=false, want true")
+	}
+	if rejectCount != 3 {
+		t.Errorf("TaskGateInfo: rejectCount=%d, want 3", rejectCount)
+	}
+	if len(criteria) != 2 || criteria[0] != "crit-a" || criteria[1] != "crit-b" {
+		t.Errorf("TaskGateInfo: criteria=%v, want [crit-a crit-b]", criteria)
+	}
+
+	// Mutate the returned slice; the live task must be unaffected.
+	criteria[0] = "MUTATED"
+	task := a.taskQueue.Tasks[0]
+	if task.AcceptanceCriteria[0] != "crit-a" {
+		t.Errorf("live task criteria[0] was mutated to %q, want crit-a", task.AcceptanceCriteria[0])
+	}
+}
+
+// TestTaskGateInfoRaceWithSetCriteria runs TaskGateInfo concurrently with
+// SetTaskCriteria to detect data races under -race.
+func TestTaskGateInfoRaceWithSetCriteria(t *testing.T) {
+	a := &AgentState{taskQueue: &TaskQueue{Tasks: []*Task{{
+		ID:                 "race-task",
+		Status:             TaskInProgress,
+		AcceptanceCriteria: []string{"initial"},
+	}}}}
+
+	const iters = 100
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			a.TaskGateInfo("race-task")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = a.SetTaskCriteria("race-task", "set", []string{"updated"})
+		}
+	}()
+	wg.Wait()
 }

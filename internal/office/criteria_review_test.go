@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,5 +58,23 @@ func TestEvaluateAcceptanceCriteriaFailOpenOnBadJSON(t *testing.T) {
 	}
 	if v.EvaluatorError == "" {
 		t.Fatalf("expected EvaluatorError set on unparseable output")
+	}
+}
+
+// TestEvaluateAcceptanceCriteriaErrorEnvelope verifies that an envelope with
+// is_error:true produces a diagnosable EvaluatorError (fail-open, nil error).
+func TestEvaluateAcceptanceCriteriaErrorEnvelope(t *testing.T) {
+	fake := writeFakeClaude(t, `{"is_error":true,"result":"rate limit exceeded"}`)
+	prev := SetCriteriaBinaryForTest(fake)
+	defer SetCriteriaBinaryForTest(prev)
+	v, err := EvaluateAcceptanceCriteria(context.Background(), t.TempDir(), "done", []string{"x"})
+	if err != nil {
+		t.Fatalf("must not hard-error on error envelope: %v", err)
+	}
+	if v.EvaluatorError == "" {
+		t.Fatal("EvaluatorError must be set when envelope has is_error:true")
+	}
+	if !strings.Contains(v.EvaluatorError, "rate limit") {
+		t.Errorf("EvaluatorError %q does not contain 'rate limit'", v.EvaluatorError)
 	}
 }

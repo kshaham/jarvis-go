@@ -2109,21 +2109,10 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 		cwd := agent.GetWorktreePath()
 		sid := req.SessionID
 
-		// Criteria gate: non-mutating task lookup to read AcceptanceCriteria,
-		// labels, and CriteriaRejectCount before touching task state.
-		var (
-			taskCriteria    []string
-			taskIsGated     bool
-			taskRejectCount int
-		)
-		for _, t := range agent.GetTasks() {
-			if t != nil && t.ID == req.TaskID {
-				taskCriteria = t.AcceptanceCriteria
-				taskIsGated = office.TaskHasGatedLabel(t)
-				taskRejectCount = t.CriteriaRejectCount
-				break
-			}
-		}
+		// Criteria gate: read AcceptanceCriteria, labels, and CriteriaRejectCount
+		// under the agent mutex via TaskGateInfo so the returned criteria slice is
+		// a copy — no live task field is read after the lock is released.
+		taskCriteria, taskIsGated, taskRejectCount, _ := agent.TaskGateInfo(req.TaskID)
 
 		// Gated path: run evaluator synchronously before CompleteTask.
 		if len(taskCriteria) > 0 && taskIsGated {

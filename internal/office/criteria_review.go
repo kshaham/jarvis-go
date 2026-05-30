@@ -52,9 +52,13 @@ func EvaluateAcceptanceCriteria(ctx context.Context, worktreeDir, summary string
 	// Probe envelope first (mirroring internal/library/llm_extract.go); fall back to
 	// bare JSON. Any parse failure is fail-open (EvaluatorError set, nil error).
 	var envelope struct {
-		Result string `json:"result"`
+		Result  string `json:"result"`
+		IsError bool   `json:"is_error"`
 	}
 	if jErr := json.Unmarshal(out, &envelope); jErr == nil && envelope.Result != "" {
+		if envelope.IsError {
+			return CriteriaVerdict{EvaluatorError: "evaluator reported error: " + envelope.Result}, nil
+		}
 		var v CriteriaVerdict
 		if derr := json.Unmarshal([]byte(stripCriteriaFence(envelope.Result)), &v); derr != nil {
 			return CriteriaVerdict{EvaluatorError: "unparseable evaluator result"}, nil

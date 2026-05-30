@@ -351,6 +351,9 @@ func deepCopyTask(t *Task) *Task {
 	if t.Labels != nil {
 		cp.Labels = append([]string(nil), t.Labels...)
 	}
+	if t.AcceptanceCriteria != nil {
+		cp.AcceptanceCriteria = append([]string(nil), t.AcceptanceCriteria...)
+	}
 	if t.ProgressLog != nil {
 		cp.ProgressLog = append([]TaskProgressEntry(nil), t.ProgressLog...)
 	}
@@ -415,6 +418,23 @@ func (a *AgentState) AddTask(task *Task) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.taskQueue.Tasks = append(a.taskQueue.Tasks, task)
+}
+
+// TaskGateInfo captures the completion-gate inputs for a task under the
+// mutex, returning a copied criteria slice so callers never read live
+// task fields while the lock is released.
+func (a *AgentState) TaskGateInfo(taskID string) (criteria []string, gated bool, rejectCount int, found bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.taskQueue.Tasks {
+		if t != nil && t.ID == taskID {
+			criteria = append([]string(nil), t.AcceptanceCriteria...)
+			gated = TaskHasGatedLabel(t)
+			rejectCount = t.CriteriaRejectCount
+			return criteria, gated, rejectCount, true
+		}
+	}
+	return nil, false, 0, false
 }
 
 // GetTasks returns a shallow copy of the task list under the mutex.
