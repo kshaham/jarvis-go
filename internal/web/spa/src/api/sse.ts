@@ -26,6 +26,9 @@ export type SSEEventName =
   | 'office:standupMessage'
   | 'office:standupSpeaker'
   | 'office:standupEnded'
+  | 'office:standupAudioProgress'
+  | 'office:standupAudioReady'
+  | 'office:standupAudioError'
   | 'office:reportGenerated'
   | 'office:devInstanceChanged'
   | 'office:devInstanceCleared'
@@ -71,6 +74,9 @@ const EVENT_NAMES: SSEEventName[] = [
   'office:standupMessage',
   'office:standupSpeaker',
   'office:standupEnded',
+  'office:standupAudioProgress',
+  'office:standupAudioReady',
+  'office:standupAudioError',
   'office:reportGenerated',
   'office:devInstanceChanged',
   'office:devInstanceCleared',

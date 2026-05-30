@@ -21,6 +21,7 @@ export interface OfficeMember {
   avatarEmoji?: string;
   avatarInitial?: string;
   avatarColor?: string;
+  voice?: string;
   totalCost?: number;
   lastActivityAt?: number;
   workingDir?: string;
