@@ -79,7 +79,35 @@ func ResolveUnderRoot(root, rel string) (string, error) {
 	if err != nil || strings.HasPrefix(relPath, "..") {
 		return "", ErrPathTraversal
 	}
+	// Symlink hardening: the checks above only canonicalize the STRING. A
+	// symlink planted inside root (root/link -> /etc/passwd or -> ../../secret),
+	// which agents can routinely create in their workspace, resolves lexically
+	// inside root but points outside. Dereference symlinks in BOTH the root and
+	// the target (resolving the deepest existing ancestor so a not-yet-existing
+	// file still gets its existing ancestor symlinks followed) and re-verify
+	// containment. Resolving both the same way keeps them consistent even when
+	// the root is itself a symlink (e.g. macOS /var -> /private/var).
+	realRoot := evalSymlinksBestEffort(absRoot)
+	realPath := evalSymlinksBestEffort(absPath)
+	if !pathInsideRoot(realPath, realRoot) {
+		return "", ErrPathTraversal
+	}
 	return absPath, nil
+}
+
+// evalSymlinksBestEffort returns p with symlinks dereferenced. If p doesn't
+// exist, it resolves the longest existing prefix of p via filepath.EvalSymlinks
+// and re-attaches the remaining (non-existent) suffix lexically — so a path for
+// a file about to be created still has its existing ancestor symlinks followed.
+func evalSymlinksBestEffort(p string) string {
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p // reached the filesystem root; nothing more to resolve
+	}
+	return filepath.Join(evalSymlinksBestEffort(parent), filepath.Base(p))
 }
 
 // pathInsideRoot reports whether absPath is the root itself or a

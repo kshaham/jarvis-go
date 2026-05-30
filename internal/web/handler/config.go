@@ -125,6 +125,9 @@ func MaskSensitiveSettings(raw map[string]interface{}) map[string]interface{} {
 	if _, ok := out["openaiApiKey"]; ok {
 		out["openaiApiKey"] = maskSecret(out["openaiApiKey"])
 	}
+	if _, ok := out["geminiApiKey"]; ok {
+		out["geminiApiKey"] = maskSecret(out["geminiApiKey"])
+	}
 	if tg, ok := out["telegram"].(map[string]interface{}); ok {
 		tgCopy := make(map[string]interface{}, len(tg))
 		for k, v := range tg {
@@ -235,6 +238,7 @@ func (ctx *Context) CreateSettingsAccount(w http.ResponseWriter, r *http.Request
 		"claudeApiKey": true,
 		"zaiApiKey":    true,
 		"openaiApiKey": true,
+		"geminiApiKey": true,
 	}
 	updates := make(map[string]interface{})
 	for key, value := range body {

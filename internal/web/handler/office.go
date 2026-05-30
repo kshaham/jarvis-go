@@ -656,10 +656,19 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	// uses subscription plans where the $ cap is meaningless.
 
 	for i, member := range members {
-		// Use member-specific provider env if overridden, else apply default with allocated sonnet
+		// Use the member-specific provider env ONLY when the override actually
+		// changed the provider. A snapshot restore (and model-only overrides)
+		// emit MemberOverrides with Provider="", whose env was built via
+		// getProviderEnvVarsFor("", ...) -> the empty-provider case sets NO auth
+		// vars. Adopting it would strip the team's ANTHROPIC_AUTH_TOKEN/BASE_URL
+		// (zai-glm) or OPENAI_API_KEY (codex), 401-ing every restored agent.
+		// When the provider wasn't changed, keep the team-wide env (+ allocated
+		// zai sonnet); the per-member MODEL still flows via resolvedModel below.
 		envVars := defaultProviderEnv
-		if ov, hasOverride := overrideMap[member.ID]; hasOverride {
-			envVars = ov
+		if mov, has := memberOverrideMap[member.ID]; has && mov.Provider != "" {
+			if envOv, ok := overrideMap[member.ID]; ok {
+				envVars = envOv
+			}
 		} else if isZAI && sonnetAlloc != nil {
 			envVars = ctx.getProviderEnvVarsFor(provider, "", sonnetAlloc[member.ID])
 		}
@@ -676,6 +685,12 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		}
 		resolvedDir, dirErr := office.ResolveMemberWorkingDir(req.WorkingDir, member.ID, memberOv, ctx.ResolveWorkingDir)
 		if dirErr != nil {
+			// Release the spawn-slot claim taken by TrySetTeamSpawning before
+			// bailing — otherwise teamSpawned stays true forever and every
+			// later spawn POST is rejected with 409 until jarvis restarts. A
+			// single malformed memberOverride workingDir would lock the operator
+			// out. (The len(spawned)==0 rollback below only runs after the loop.)
+			ctx.OfficeManager.ReleaseTeamSpawnSlot()
 			request.WriteError(w, http.StatusBadRequest, dirErr.Error())
 			return
 		}

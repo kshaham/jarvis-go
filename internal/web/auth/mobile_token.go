@@ -62,6 +62,10 @@ type MobileTokenManager struct {
 	path    string
 	mu      sync.RWMutex
 	entries map[string]*MobileTokenEntry // deviceID -> entry
+	// lastUsedPersist (unix ms) debounces persisting LastUsedAt bumps so a
+	// synchronous disk write doesn't run under the write lock on every
+	// authenticated request (the auth hot path). See Validate.
+	lastUsedPersist int64
 }
 
 // NewMobileTokenManager loads any existing mobile-token store from disk
@@ -203,7 +207,15 @@ func (m *MobileTokenManager) Validate(presented string) (string, bool) {
 			return "", false
 		}
 		entry.LastUsedAt = now
-		_ = m.persist() // best-effort
+		// Debounce the persist: LastUsedAt is best-effort metadata. Writing it
+		// to disk on EVERY authenticated request would serialize all mobile-token
+		// validation behind a synchronous disk write under the write lock. The
+		// in-memory value is always current; the on-disk "last seen" lags by at
+		// most a minute.
+		if now-m.lastUsedPersist >= 60_000 {
+			m.lastUsedPersist = now
+			_ = m.persist() // best-effort
+		}
 		return deviceID, true
 	}
 	return "", false

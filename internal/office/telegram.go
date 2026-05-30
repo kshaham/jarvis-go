@@ -78,6 +78,11 @@ func (m *Manager) GetTelegramConfig() (enabled bool, intervalMinutes int, lastUp
 // spawn/dismiss cycles. If a Telegram HTTP call is stuck, we bail after 5s
 // and log; the worst case is one orphaned goroutine until its send returns.
 func (m *Manager) StopTelegramUpdates() {
+	// Serialize with startPeriodicUpdates so this Wait() can't race a start's
+	// updateWg.Add(1) (see telegramLifecycleMu).
+	m.telegramLifecycleMu.Lock()
+	defer m.telegramLifecycleMu.Unlock()
+
 	m.mu.Lock()
 	stopCh := m.updateStopCh
 	once := m.updateStopOnce
@@ -105,6 +110,11 @@ func (m *Manager) StopTelegramUpdates() {
 // startPeriodicUpdates launches a goroutine that sends sprint summaries at
 // the configured interval via the TelegramNotifier.
 func (m *Manager) startPeriodicUpdates() {
+	// Serialize with StopTelegramUpdates so this Add(1) can't race a stop's
+	// updateWg.Wait() (see telegramLifecycleMu).
+	m.telegramLifecycleMu.Lock()
+	defer m.telegramLifecycleMu.Unlock()
+
 	m.mu.Lock()
 	if m.telegramNotifier == nil || !m.telegramNotifier.IsConnected() {
 		m.mu.Unlock()

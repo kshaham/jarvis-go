@@ -577,14 +577,16 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 		return "", ""
 	}
 
-	// Subscription: stage the `codex login` OAuth credentials into this agent's
-	// CODEX_HOME so the built-in provider authenticates against the plan. Fail
-	// loudly rather than spawn a teammate that 401s every turn when the
-	// operator hasn't logged in yet.
-	if subscription {
+	// When prov == nil the agent uses Codex's built-in `openai` provider, which
+	// authenticates via `codex login` OAuth (auth.json), NOT an API key. That's
+	// the openai-subscription path AND the openai-codex path with no API key
+	// configured. Stage the operator's auth.json into CODEX_HOME and FAIL LOUDLY
+	// rather than spawn a teammate that silently 401s every turn because nobody
+	// has logged in. (With an API key, prov is non-nil and bearer-auths instead.)
+	if prov == nil {
 		if err := stageCodexAuth(home, codexHome); err != nil {
-			slog.Error("Codex subscription: no auth.json found — run `codex login` in the container first (see CODEX_HOME below)",
-				"name", member.Name, "error", err)
+			slog.Error("Codex built-in openai provider needs auth.json — run `codex login` in the container first",
+				"name", member.Name, "provider", provider, "error", err)
 			return "", ""
 		}
 	}
@@ -620,7 +622,10 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 			Effort:             tuning.Effort,
 			MaxTurnsPerSession: maxTurns,
 			CodexHome:          codexHome,
-			CodexSubscription:  subscription,
+			// Strip any inherited OPENAI_API_KEY from the subprocess env whenever
+			// we use the built-in OAuth provider (prov == nil), so codex
+			// authenticates via the staged auth.json rather than a stray key.
+			CodexSubscription: prov == nil,
 		},
 	)
 	if err != nil {

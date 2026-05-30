@@ -169,7 +169,12 @@ func (ctx *Context) OfficeAgentInjectPrompt(w http.ResponseWriter, r *http.Reque
 		request.WriteError(w, http.StatusInternalServerError, "session store unavailable")
 		return
 	}
-	sessions.WriteInkPrompt(req.SessionID, decorated)
+	if !sessions.WriteInkPrompt(req.SessionID, decorated) {
+		// The session isn't accepting prompts (stopped/unknown id) — don't
+		// report success for a prompt that was never delivered.
+		request.WriteError(w, http.StatusConflict, "agent session is not accepting prompts")
+		return
+	}
 
 	ctx.SSEBroker.Broadcast("office:agentPromptInjected", map[string]interface{}{
 		"sessionId": req.SessionID,
@@ -238,7 +243,13 @@ func (ctx *Context) OfficeAgentBumpWorkdir(w http.ResponseWriter, r *http.Reques
 	}
 	prompt := "[WORKING DIR CHANGE]\n" +
 		"Your assigned working directory has shifted. Start your next turn with `cd " + resolved + "` and perform any further file work, tests, and commits under that directory. Reason: " + reason
-	sessions.WriteInkPrompt(req.SessionID, prompt)
+	// The workdir bookkeeping (SetWorktreePath) already applied above, so don't
+	// fail the request; but surface it if the redirect prompt couldn't be
+	// delivered (the agent won't know to cd into the new path).
+	if !sessions.WriteInkPrompt(req.SessionID, prompt) {
+		slog.Warn("workdir bump: redirect prompt not delivered (session not accepting prompts)",
+			"session", req.SessionID, "name", agentName)
+	}
 
 	ctx.SSEBroker.Broadcast("office:agentWorkdirChanged", map[string]interface{}{
 		"sessionId":  req.SessionID,
@@ -340,10 +351,14 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	// agent's memory, task queue, learnings, personality, recovery
 	// counters — everything — carries over.
 	if !ctx.OfficeManager.ReassignSessionID(req.SessionID, newSessionID) {
-		// Extremely unlikely (collision on UUID v4) but don't leak
-		// a dangling session if it happens.
+		// Extremely unlikely (collision on UUID v4) but don't leak a dangling
+		// session if it happens. The replacement may be a Codex session (the
+		// restart routes to spawnCodexAgentSession for openai-* providers), so
+		// stop BOTH backends — otherwise an orphaned codex worker keeps
+		// launching `codex exec` and spending tokens. One of these is a no-op.
 		if sm != nil {
 			_ = sm.StopSDKSession(newSessionID)
+			_ = sm.StopCodexSession(newSessionID)
 		}
 		request.WriteError(w, http.StatusInternalServerError, "failed to reassign session id")
 		return

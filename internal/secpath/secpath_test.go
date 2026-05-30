@@ -2,9 +2,28 @@ package secpath
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestResolveUnderRoot_SymlinkEscapeBlocked(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir() // a sibling dir OUTSIDE root
+	// Plant a symlink inside root that points outside it (as an agent could).
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Skipf("symlinks unsupported here: %v", err)
+	}
+	// A lexically-in-root path that traverses the symlink to a file outside root
+	// must be rejected (the bug: lexical checks alone passed it through).
+	if _, err := ResolveUnderRoot(root, "escape/secret.txt"); !errors.Is(err, ErrPathTraversal) {
+		t.Errorf("symlink escape not blocked: err=%v want ErrPathTraversal", err)
+	}
+	// A normal in-root (non-symlink) path still resolves fine.
+	if _, err := ResolveUnderRoot(root, "sub/ok.txt"); err != nil {
+		t.Errorf("in-root path wrongly rejected: %v", err)
+	}
+}
 
 func TestResolveUnderRoot_HappyPath(t *testing.T) {
 	root := t.TempDir()

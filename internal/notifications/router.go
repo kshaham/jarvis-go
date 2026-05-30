@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kshaham/jarvis/internal/metrics"
@@ -31,8 +32,9 @@ type Router struct {
 	work chan dispatchJob
 	wg   sync.WaitGroup
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx     context.Context
+	cancel  context.CancelFunc
+	stopped atomic.Bool // set by Stop(); OnEvent early-returns once true
 }
 
 type dispatchJob struct {
@@ -62,10 +64,14 @@ func (r *Router) Start(ctx context.Context) {
 
 // Stop cancels in-flight work and waits up to 5s for workers to exit.
 func (r *Router) Stop() {
+	r.stopped.Store(true)
 	if r.cancel != nil {
 		r.cancel()
 	}
-	close(r.work)
+	// Do NOT close(r.work): OnEvent runs SYNCHRONOUSLY inside broker.Broadcast on
+	// arbitrary goroutines (idle monitor, session forwarders, in-flight handlers)
+	// that can still fire during shutdown, and a send on a closed channel panics.
+	// Workers exit on ctx.Done; OnEvent early-returns once stopped is set.
 	done := make(chan struct{})
 	go func() { r.wg.Wait(); close(done) }()
 	select {
@@ -79,6 +85,9 @@ func (r *Router) Stop() {
 // route and drops a dispatch job on the queue for any matching channel.
 // Returns immediately; actual I/O happens in worker goroutines.
 func (r *Router) OnEvent(event string, data json.RawMessage) {
+	if r.stopped.Load() {
+		return
+	}
 	// Decode payload loosely so match-on-session-id can inspect it. Errors
 	// here are non-fatal -- we still match on event type even if the payload
 	// doesn't unmarshal -- but log them so corrupt broker payloads are
@@ -134,8 +143,13 @@ func (r *Router) Test(routeID string, event string, payload interface{}) error {
 
 func (r *Router) worker() {
 	defer r.wg.Done()
-	for job := range r.work {
-		r.dispatch(job)
+	for {
+		select {
+		case job := <-r.work:
+			r.dispatch(job)
+		case <-r.ctx.Done():
+			return
+		}
 	}
 }
 

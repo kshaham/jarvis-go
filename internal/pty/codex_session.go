@@ -422,6 +422,14 @@ func (s *CodexSession) consumeJSONL(r io.Reader) bool {
 			slog.Error("Codex turn.failed", "session", s.ID, "message", msg)
 		}
 	}
+	// An oversized line (>4MB -> bufio.ErrTooLong) or a read error ends the
+	// scan early. Drain the rest of stdout so the codex process can finish
+	// writing and cmd.Wait() can reap it, instead of wedging the worker. Not
+	// treated as a turn failure on its own (sawCompleted reflects what we saw).
+	if err := sc.Err(); err != nil {
+		slog.Warn("Codex JSONL scan ended early; draining stdout", "session", s.ID, "error", err)
+		_, _ = io.Copy(io.Discard, r)
+	}
 	return sawCompleted
 }
 
@@ -589,6 +597,15 @@ func (s *CodexSession) Stop() {
 	s.outputObservers = nil
 	s.observerMu.Unlock()
 	s.doneOnce.Do(func() { close(s.done) })
+	// Remove the per-agent CODEX_HOME (config.toml + staged OAuth auth.json +
+	// rollout logs). The worker has exited, so the codex process is dead and no
+	// longer reading it. Without this, every spawn/respawn leaks disk and leaves
+	// another 0600 copy of the operator's long-lived OAuth credential on disk.
+	if s.codexHome != "" {
+		if err := os.RemoveAll(s.codexHome); err != nil {
+			slog.Warn("Codex session: failed to remove CODEX_HOME", "session", s.ID, "path", s.codexHome, "error", err)
+		}
+	}
 	slog.Info("Codex session stopped", "session", s.ID)
 }
 

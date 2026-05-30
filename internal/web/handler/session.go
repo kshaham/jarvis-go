@@ -81,6 +81,19 @@ func (ctx *Context) ListSessions(w http.ResponseWriter, r *http.Request) {
 			IsWorking:  sdk.IsWorking(),
 		})
 	})
+	// Include Codex sessions
+	for _, cx := range ctx.SessionManager.GetAllCodexSessions() {
+		result = append(result, sessionJSON{
+			ID:         cx.ID,
+			Name:       cx.GetName(),
+			Status:     string(cx.GetStatus()),
+			Mode:       string(cx.Mode),
+			WorkingDir: cx.WorkingDir,
+			PID:        0,
+			CreatedAt:  cx.CreatedAt.Format(time.RFC3339),
+			IsWorking:  cx.IsWorking(),
+		})
+	}
 	request.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -132,6 +145,18 @@ func (ctx *Context) QuerySessions(w http.ResponseWriter, r *http.Request) {
 			IsWorking:  sdk.IsWorking(),
 		})
 	})
+	for _, cx := range ctx.SessionManager.GetAllCodexSessions() {
+		all = append(all, sessionJSON{
+			ID:         cx.ID,
+			Name:       cx.GetName(),
+			Status:     string(cx.GetStatus()),
+			Mode:       string(cx.Mode),
+			WorkingDir: cx.WorkingDir,
+			PID:        0,
+			CreatedAt:  cx.CreatedAt.Format(time.RFC3339),
+			IsWorking:  cx.IsWorking(),
+		})
+	}
 
 	// Filter.
 	filtered := make([]sessionJSON, 0, len(all))
@@ -382,12 +407,14 @@ func (ctx *Context) GetSessionTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Try PTY session first, then SDK session
+	// Try PTY session first, then SDK, then Codex
 	var buf string
 	if session, ok := ctx.SessionManager.GetSession(id); ok {
 		buf = session.TerminalBuffer()
 	} else if sdkSession, ok := ctx.SessionManager.GetSDKSession(id); ok {
 		buf = sdkSession.GetTerminalBuffer()
+	} else if cx, ok := ctx.SessionManager.GetCodexSession(id); ok {
+		buf = cx.GetTerminalBuffer()
 	} else {
 		request.WriteError(w, http.StatusNotFound, "session not found")
 		return
@@ -586,6 +613,7 @@ func forwardAgentEvents(sessionID string, events <-chan pty.SessionEvent, droppe
 	broker := ctx.SSEBroker
 	slog.Info("Starting agent event forwarding for session", "sessionId", sessionID)
 
+	sawExit := false
 	for event := range events {
 		func() {
 			defer func() {
@@ -713,6 +741,7 @@ func forwardAgentEvents(sessionID string, events <-chan pty.SessionEvent, droppe
 					"numTurns":   e.NumTurns,
 				})
 			case pty.EventExit:
+				sawExit = true
 				broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
 				broker.Broadcast("session:exit", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
 				broker.Broadcast("session:updated", map[string]interface{}{"id": sessionID, "status": "stopped", "isWorking": false})
@@ -724,6 +753,26 @@ func forwardAgentEvents(sessionID string, events <-chan pty.SessionEvent, droppe
 		}()
 	}
 
-	// Channel closed -- final cleanup if EventExit wasn't received
-	slog.Info("SDK session event forwarding ended", "sessionId", sessionID)
+	// The events channel closed -> the session's worker goroutine exited, so the
+	// session is dead. If we never saw an EventExit (e.g. the driver self-stopped
+	// on a turn cap, which closes the channel WITHOUT emitting EventExit), run the
+	// same death cleanup the EventExit case would have.
+	if !sawExit {
+		slog.Info("agent session events closed without EventExit; running death cleanup", "sessionId", sessionID)
+		broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID})
+		broker.Broadcast("session:updated", map[string]interface{}{"id": sessionID, "status": "stopped", "isWorking": false})
+		if ctx.OfficeManager.GetAgent(sessionID) != nil {
+			ctx.OfficeManager.HandleAgentDeath(sessionID)
+		}
+		ctx.cleanupSessionResources(sessionID)
+	}
+	// Drop the now-dead session from the manager maps so it stops counting
+	// against maxSessions and IsSessionAlive returns false. The natural-exit and
+	// self-stop paths leave the map entry behind (the session stops itself, not
+	// via the manager). Idempotent; whichever map it isn't in is a harmless no-op.
+	if ctx.SessionManager != nil {
+		_ = ctx.SessionManager.StopSDKSession(sessionID)
+		_ = ctx.SessionManager.StopCodexSession(sessionID)
+	}
+	slog.Info("agent session event forwarding ended", "sessionId", sessionID)
 }

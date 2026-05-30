@@ -142,7 +142,13 @@ type Manager struct {
 	updateStopCh       chan struct{}
 	updateStopOnce     *sync.Once
 	updateWg           sync.WaitGroup
-	lastTelegramUpdate time.Time
+	// telegramLifecycleMu serializes StopTelegramUpdates and
+	// startPeriodicUpdates so a start's updateWg.Add(1) can never run
+	// concurrently with a stop's updateWg.Wait() (which would be a WaitGroup
+	// misuse / data race under concurrent SetTelegramConfig). Separate from
+	// m.mu so the up-to-5s Wait doesn't block the manager.
+	telegramLifecycleMu sync.Mutex
+	lastTelegramUpdate  time.Time
 	pendingLeaderQuery *PendingLeaderQuery
 }
 
@@ -250,6 +256,16 @@ func (m *Manager) RegisterAgent(sessionID, configID string, config *TeamMemberCo
 func (m *Manager) HandleAgentDeath(sessionID string) {
 	agent := m.GetAgent(sessionID)
 	if agent == nil {
+		return
+	}
+	// Idempotency: HandleAgentDeath races in from the event-forwarder EventExit,
+	// the idle-monitor health check, and the claude-hooks SessionEnd dispatcher
+	// for the same sessionID. The GetAgent!=nil check above is non-atomic (the
+	// lock is released before UnregisterAgent below), so without this guard
+	// concurrent callers would each reassign every pending task (doubling the
+	// strategic agent's queue) and twice SIGTERM the dev-instance process tree.
+	// Only the first caller runs the side effects.
+	if !agent.ClaimDeath() {
 		return
 	}
 
@@ -2285,7 +2301,9 @@ func (m *Manager) SubmitReflectionResponse(sessionID, learning, category, taskID
 	// memory drifts out of sync with what they just learned.
 	// Best-effort: a write failure here doesn't invalidate the learnings
 	// entry above, which is the durable canonical store.
+	m.mu.RLock()
 	workingDir := m.lastWorkingDir
+	m.mu.RUnlock()
 	if workingDir != "" && configID != "" {
 		ts := time.Now().UTC().Format("2006-01-02T15:04Z")
 		line := fmt.Sprintf("- [%s] (%s) %s", ts, category, learning)

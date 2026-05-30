@@ -931,7 +931,9 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 	case RecoveryTier2:
 		// Tier 2: Ctrl+C, wait 3s, send recovery prompt. Exit early if monitor stops.
 		sessions.WriteViaScreen(sessionID, "\x03")
+		m.mu.RLock()
 		monitorDone := m.monitorDone
+		m.mu.RUnlock()
 		// R21 code review: wrap in safeRun so a panic inside
 		// WriteViaScreen (e.g., nil PTY after session tear-down race)
 		// broadcasts office:panicRecovered instead of taking the whole
@@ -957,7 +959,9 @@ func (m *Manager) executeRecoveryTier(sessions SessionStore, sessionID string, t
 	case RecoveryTier3:
 		// Tier 3: Ctrl+C, wait 3s, send diagnostic prompt. Exit early if monitor stops.
 		sessions.WriteViaScreen(sessionID, "\x03")
+		m.mu.RLock()
 		monitorDone := m.monitorDone
+		m.mu.RUnlock()
 		// R21 code review: same panic-recovery wrap as Tier 2.
 		go safeRun("recovery-tier3", m.broadcast, func() {
 			select {

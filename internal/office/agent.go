@@ -252,6 +252,26 @@ type AgentState struct {
 	// broadcast without affecting the UnregisterAgent cleanup
 	// (which is already idempotent via the !ok guard).
 	stopBroadcastOnce sync.Once
+
+	// deathOnce makes Manager.HandleAgentDeath's side effects (task
+	// reassignment, dev-instance kill, agentDied broadcast) run AT MOST ONCE
+	// per agent. HandleAgentDeath is reachable concurrently for the same
+	// sessionID from the event-forwarder EventExit, the idle-monitor health
+	// check, and the claude-hooks SessionEnd dispatcher; its GetAgent!=nil
+	// guard is a non-atomic check-then-act, so without this two callers both
+	// reassign every pending task (doubling the strategic queue) and twice
+	// SIGTERM the dev-instance process tree.
+	deathOnce sync.Once
+}
+
+// ClaimDeath returns true on the first call per agent and false thereafter.
+// HandleAgentDeath checks this before its reassignment/dev-kill/broadcast work
+// so concurrent death notifications for the same sessionID don't double-apply
+// those side effects.
+func (a *AgentState) ClaimDeath() bool {
+	claimed := false
+	a.deathOnce.Do(func() { claimed = true })
+	return claimed
 }
 
 // ClaimStopBroadcast returns true on the first call per agent and

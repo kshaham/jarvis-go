@@ -177,10 +177,16 @@ func (m *Manager) TriageTaskBetweenAgents(sourceSessionID, targetSessionID, task
 	if task == nil {
 		return nil, nil, ErrTriageTaskNotFound
 	}
-	task.Status = TaskPending
-	task.AssignedAt = time.Now()
-	task.Source = "triage"
-	target.AddTask(task)
+	// Deep-copy before stamping the fields: GetTasks hands out the *Task
+	// pointers (only the slice is copied), so a recovery-monitor / handler
+	// goroutine may still hold this pointer and read task.Status concurrently.
+	// Mutating a private copy (as HandleAgentDeath does) avoids that data race;
+	// the source no longer exposes the original after RemoveTask.
+	moved := *task
+	moved.Status = TaskPending
+	moved.AssignedAt = time.Now()
+	moved.Source = "triage"
+	target.AddTask(&moved)
 	return source, target, nil
 }
 

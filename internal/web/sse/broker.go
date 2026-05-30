@@ -230,6 +230,37 @@ func (b *Broker) Subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := NewClient(w, flusher, r.Context(), subscriptions)
+
+	// Queue the init frame (and any Last-Event-ID replay) into the client's
+	// channel BEFORE adding it to b.clients / the subscription index — all under
+	// b.mu, so no concurrent Broadcast (which also takes b.mu) can interleave a
+	// live event ahead of init. writePump drains the channel strictly FIFO, so
+	// this guarantees the frontend sees init first and replayed ids in order.
+	// (Previously the client was indexed first and init sent after unlocking, so
+	// a Broadcast in that window delivered live events before init / out of order
+	// on reconnect.) Reading b.getInitData here under the lock also fixes the
+	// data race with SetInitDataFunc.
+	var initPayload interface{}
+	if b.getInitData != nil {
+		initPayload = b.getInitData()
+	} else {
+		initPayload = map[string]interface{}{"type": "init", "sessions": []interface{}{}, "version": "0.2.0-go"}
+	}
+	initData, _ := json.Marshal(initPayload)
+	client.Send(EventMessage{Event: "init", Data: initData})
+
+	var replayCount int
+	if lastSeenID := parseLastEventID(r); lastSeenID > 0 {
+		replay := b.collectReplayEvents(lastSeenID) // b.mu already held
+		for _, msg := range replay {
+			if client.MatchesSubscription(msg.Event) {
+				client.Send(msg)
+				replayCount++
+			}
+		}
+	}
+
+	// Now make the client broadcast-visible; live events queue after init+replay.
 	b.clients[client] = struct{}{}
 	b.indexClient(client)
 	if sessionID != "" {
@@ -240,33 +271,8 @@ func (b *Broker) Subscribe(w http.ResponseWriter, r *http.Request) {
 
 	metrics.SSEClients.Set(float64(clientCount))
 	slog.Info("SSE client connected", "clients", clientCount, "subscriptions", subscriptions)
-
-	// Send init event so frontend knows connection is established
-	var initPayload interface{}
-	if b.getInitData != nil {
-		initPayload = b.getInitData()
-	} else {
-		initPayload = map[string]interface{}{"type": "init", "sessions": []interface{}{}, "version": "0.2.0-go"}
-	}
-	initData, _ := json.Marshal(initPayload)
-	client.Send(EventMessage{Event: "init", Data: initData})
-
-	// Event replay: if the client is reconnecting and sent Last-Event-ID,
-	// flush any events it missed. Browsers automatically include the header
-	// on EventSource reconnects; we also accept a ?lastEventId= query param.
-	lastSeenID := parseLastEventID(r)
-	if lastSeenID > 0 {
-		b.mu.RLock()
-		replay := b.collectReplayEvents(lastSeenID)
-		b.mu.RUnlock()
-		if len(replay) > 0 {
-			slog.Info("SSE replaying missed events", "count", len(replay), "lastSeenID", lastSeenID)
-			for _, msg := range replay {
-				if client.MatchesSubscription(msg.Event) {
-					client.Send(msg)
-				}
-			}
-		}
+	if replayCount > 0 {
+		slog.Info("SSE replayed missed events", "count", replayCount)
 	}
 
 	// Block until client disconnects
@@ -366,7 +372,11 @@ func (b *Broker) AddPostBroadcastHook(fn func(EventMessage)) {
 // ClientCount returns the number of connected clients.
 // SetInitDataFunc sets the function called to get initial state for new SSE clients.
 func (b *Broker) SetInitDataFunc(fn InitDataFunc) {
+	// Under b.mu so the assignment is synchronized with Subscribe's read of
+	// b.getInitData (both touch the same non-atomic interface field).
+	b.mu.Lock()
 	b.getInitData = fn
+	b.mu.Unlock()
 }
 
 func (b *Broker) ClientCount() int {
