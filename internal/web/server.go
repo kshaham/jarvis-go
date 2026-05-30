@@ -535,12 +535,6 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.officeManager != nil {
 		s.officeManager.StopIdleMonitoring()
 	}
-	// Stop the subagent watcher: this closes its events channel, which is the
-	// only thing that lets the NewServer forwarder goroutine (`for range
-	// Events()`) return instead of leaking until process exit.
-	if s.subagentWatcher != nil {
-		s.subagentWatcher.Stop()
-	}
 	// AppState.save() debounces writes through a 500ms timer. Without
 	// an explicit Flush on shutdown, any setting / token-stats update
 	// from the last half-second is lost on a clean SIGTERM. Flush is
@@ -554,10 +548,21 @@ func (s *Server) Stop(ctx context.Context) error {
 	if httpsSrv != nil {
 		_ = httpsSrv.Shutdown(ctx)
 	}
+	var shutdownErr error
 	if httpSrv != nil {
-		return httpSrv.Shutdown(ctx)
+		shutdownErr = httpSrv.Shutdown(ctx)
 	}
-	return nil
+
+	// Stop the subagent watcher AFTER the listeners are drained. Stopping it
+	// closes its events channel; the /claude/hooks handlers send on that channel
+	// (OnHookStart/OnHookStop), so closing it while a hook request is still
+	// in-flight would panic on send-on-closed. Shutdown has now returned, so no
+	// handler is running. Closing the channel also lets the NewServer forwarder
+	// goroutine (`for range Events()`) return instead of leaking.
+	if s.subagentWatcher != nil {
+		s.subagentWatcher.Stop()
+	}
+	return shutdownErr
 }
 
 // SSEBroker returns the SSE broker for external event broadcasting.

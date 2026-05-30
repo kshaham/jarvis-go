@@ -56,6 +56,10 @@ type RalphStatus struct {
 	Recommendation string           `json:"recommendation"`
 }
 
+// statusStartMarker is the literal RALPH_STATUS start marker, used to detect a
+// start marker that may be split across PTY read boundaries (HasPrefix check).
+const statusStartMarker = "---RALPH_STATUS---"
+
 // Pre-compiled patterns for RALPH_STATUS block fields.
 var (
 	statusStartPattern    = regexp.MustCompile(`^---RALPH_STATUS---\s*$`)

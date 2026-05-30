@@ -168,9 +168,14 @@ func (s *Store) save() {
 	if err := os.Rename(tmp, s.path); err != nil {
 		slog.Error("notifications: rename failed", "error", err)
 		os.Remove(tmp)
-		// Restore the rotated backup so the primary isn't left missing.
-		if _, berr := os.Stat(s.path + ".backup"); berr == nil {
-			_ = os.Rename(s.path+".backup", s.path)
+		// Restore the primary by COPYING the rotated backup (not renaming it):
+		// load() falls back to .backup when the primary is unreadable or corrupt,
+		// so that file must survive. Renaming it back would leave no recovery
+		// copy until the next successful save.
+		if b, rerr := os.ReadFile(s.path + ".backup"); rerr == nil {
+			if werr := os.WriteFile(s.path, b, 0600); werr != nil {
+				slog.Error("notifications: restore from backup failed", "error", werr)
+			}
 		}
 	}
 }

@@ -53,12 +53,14 @@ var agentTokenRe = regexp.MustCompile(`JARVIS_AGENT_TOKEN=[A-Za-z0-9_\-\.]+`)
 // separated to avoid false positives like `MONKEY=`). Matches names
 // like AWS_SECRET_ACCESS_KEY, DB_PASSWORD, GITHUB_TOKEN, OPENAI_API_KEY,
 // MY_CUSTOM_CREDENTIAL in the bare (NAME=val), quoted (NAME="val",
-// NAME='val'), and JSON ("NAME": "val") forms. The optional quote after
-// the name handles JSON keys; the optional quote before the value handles
-// shell/JSON-quoted values. Without these, a quoted secret (the most
-// common diagnostic form) slipped through entirely. Value stops at
-// whitespace, quote, comma, or closing brace.
-var genericEnvSecretRe = regexp.MustCompile(`\b([A-Z][A-Z0-9_]*_(?:SECRET|TOKEN|PASSWORD|KEY|CREDENTIAL))["']?\s*[:=]\s*["']?[^\s"',}]+`)
+// NAME='val'), and JSON ("NAME": "val") forms. The `=` separator allows an
+// optional quote on the value; the `:` (JSON) separator REQUIRES a quote on
+// both sides -- a bare `NAME_KEY: word` in prose/structured logs is NOT a
+// secret assignment, and matching it would corrupt legitimate diagnostics
+// (e.g. `PRIMARY_KEY: id`, `ROUTING_KEY: orders.created`). JSON string values
+// are always quoted, so requiring the quote keeps every real secret matched.
+// Value stops at whitespace, quote, comma, or closing brace.
+var genericEnvSecretRe = regexp.MustCompile(`\b([A-Z][A-Z0-9_]*_(?:SECRET|TOKEN|PASSWORD|KEY|CREDENTIAL))(?:\s*=\s*["']?|["']?\s*:\s*["'])[^\s"',}]+`)
 
 // Bearer redacts Authorization-header style Bearer tokens. Safe to
 // apply to arbitrary user-supplied text — non-Bearer content passes

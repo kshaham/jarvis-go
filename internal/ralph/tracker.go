@@ -285,18 +285,17 @@ func (t *Tracker) processStatusBlocks(data string) {
 		t.statusRemainder = ""
 		return
 	}
-	if t.inStatusBlock {
-		// Mid-block: retain the partial trailing line so a field or end-marker
-		// line split across PTY read boundaries is matched once it completes.
-		// Bounded so a newline-less stream can't grow it without limit.
+	// Retain the trailing partial line when it's relevant to status parsing:
+	// mid-block (a split field/end-marker line) OR when it could still grow into
+	// a START marker (a split start marker). Anything else is ordinary output
+	// and is discarded so it can't pollute the next chunk's first line or
+	// accumulate unboundedly between blocks.
+	if t.inStatusBlock || (trimmed != "" && strings.HasPrefix(statusStartMarker, trimmed)) {
 		if len(buf) > maxStatusRemainder {
 			buf = buf[len(buf)-maxStatusRemainder:]
 		}
 		t.statusRemainder = buf
 	} else {
-		// Not in a block: the trailing partial is ordinary output, not status
-		// data. Discard it so it can't pollute the next chunk's first line (and
-		// can't accumulate unboundedly between blocks).
 		t.statusRemainder = ""
 	}
 }

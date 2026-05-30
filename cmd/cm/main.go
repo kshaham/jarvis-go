@@ -946,7 +946,11 @@ func handleAsk(args []string) {
 		fatal("Usage: cm ask <question> [--about <taskId>] [--wait 5m]")
 	}
 	wait := 5 * time.Minute
-	if w, ok := flags["wait"]; ok {
+	// Treat an empty value (e.g. `--wait` with no argument) as absent and use
+	// the default, rather than feeding "" to ParseDuration (which errors and
+	// would fatal). parseArgsAndFlags now records a value-less flag as present
+	// with an empty string, so check the value, not just presence.
+	if w := flags["wait"]; w != "" {
 		parsed, err := time.ParseDuration(w)
 		if err != nil {
 			fatal(fmt.Sprintf("invalid --wait duration %q: %v", w, err))
