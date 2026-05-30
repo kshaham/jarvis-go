@@ -1406,7 +1406,7 @@ func (ctx *Context) OfficeGetTaskQueues(w http.ResponseWriter, r *http.Request) 
 		queues = append(queues, map[string]interface{}{
 			"sessionId": a.SessionID,
 			"agentName": a.Config.Name,
-			"tasks":     a.GetTasks(),
+			"tasks":     a.GetTasksCopy(), // deep copy: marshaled outside a.mu
 		})
 	}
 	ok(w, map[string]interface{}{"queues": queues})
@@ -1423,7 +1423,7 @@ func (ctx *Context) OfficeGetTaskQueueBySession(w http.ResponseWriter, r *http.R
 	ok(w, map[string]interface{}{"queue": map[string]interface{}{
 		"sessionId": agent.SessionID,
 		"agentName": agent.Config.Name,
-		"tasks":     agent.GetTasks(),
+		"tasks":     agent.GetTasksCopy(), // deep copy: marshaled outside a.mu
 	}})
 }
 
@@ -2087,7 +2087,7 @@ func (ctx *Context) OfficeAgentGetTasks(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	ok(w, map[string]interface{}{
-		"tasks":            agent.GetTasks(),
+		"tasks":            agent.GetTasksCopy(), // deep copy: marshaled outside a.mu
 		"incomingHandoffs": ctx.OfficeManager.IncomingHandoffsFor(sessionID),
 	})
 }
@@ -2729,8 +2729,9 @@ func (ctx *Context) OfficeAgentTaskCriteria(w http.ResponseWriter, r *http.Reque
 		"taskId":    req.TaskID,
 	})
 	// Return the updated criteria list so the caller can confirm the change.
+	// Deep copy: AcceptanceCriteria is mutated under a.mu by SetTaskCriteria.
 	var current []string
-	for _, t := range agent.GetTasks() {
+	for _, t := range agent.GetTasksCopy() {
 		if t.ID == req.TaskID {
 			current = append([]string(nil), t.AcceptanceCriteria...)
 			break

@@ -301,7 +301,7 @@ func (m *Manager) FanOutWrapUpPrompt(prompt string, deliver SessionPromptFunc) (
 		// Cancel queued (not-yet-started) tasks. TaskInProgress is
 		// deliberately left alone so agents finish current work —
 		// step 1 of the wrap-up prompt.
-		for _, t := range agent.GetTasks() {
+		for _, t := range agent.GetTasksCopy() {
 			if t.Status == TaskPending || t.Status == TaskAcknowledged {
 				if agent.UpdateTaskStatus(t.ID, TaskFailed) {
 					cancelledTasks++
@@ -343,7 +343,7 @@ func (m *Manager) PromptNextTask(sessionID, taskTitle, taskID string) {
 	prompt := fmt.Sprintf(nextTaskPromptFormat, taskTitle, taskID, taskID)
 	// Append acceptance criteria checklist when the task has one.
 	if agent := m.GetAgent(sessionID); agent != nil {
-		for _, t := range agent.GetTasks() {
+		for _, t := range agent.GetTasksCopy() {
 			if t != nil && t.ID == taskID {
 				if section := renderTaskCriteriaSection(t); section != "" {
 					prompt = prompt + "\n\n" + section
@@ -373,13 +373,7 @@ func (m *Manager) nextTaskHint(sessionID, taskID, taskTitle string) string {
 	if agent == nil || agent.Config == nil {
 		return ""
 	}
-	var labels []string
-	for _, t := range agent.GetTasks() {
-		if t != nil && t.ID == taskID {
-			labels = t.Labels
-			break
-		}
-	}
+	labels := agent.GetTaskLabels(taskID) // locked copy (Labels mutated under a.mu)
 	hits, err := library.Search(library.Query{
 		AgentRole:  agent.Config.Role,
 		TaskTitle:  taskTitle,
@@ -417,13 +411,7 @@ func (m *Manager) nextTaskAntiPatternHint(sessionID, taskID, taskTitle string) s
 	if agent == nil || agent.Config == nil {
 		return ""
 	}
-	var labels []string
-	for _, t := range agent.GetTasks() {
-		if t != nil && t.ID == taskID {
-			labels = t.Labels
-			break
-		}
-	}
+	labels := agent.GetTaskLabels(taskID) // locked copy (Labels mutated under a.mu)
 	hits, err := library.SearchAntiPatterns(library.Query{
 		AgentRole:  agent.Config.Role,
 		TaskTitle:  taskTitle,

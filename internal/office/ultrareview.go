@@ -290,5 +290,5 @@ func truncateUltrareviewLog(s string) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…(truncated)"
+	return truncRunes(s, max) + "…(truncated)"
 }
