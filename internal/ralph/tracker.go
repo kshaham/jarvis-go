@@ -20,6 +20,15 @@ const (
 	cleanupThrottle         = 30 * time.Second
 	todoSimilarityThreshold = 0.85
 	eventDebounceDuration   = 50 * time.Millisecond
+	// maxStatusBlockLines caps how many lines an in-progress RALPH_STATUS block
+	// may accumulate before we abort it. Without this, an unclosed block (start
+	// marker printed but the end marker never arrives in recognizable form)
+	// would accumulate every subsequent line of agent-controlled terminal
+	// output for the whole session -- unbounded memory growth.
+	maxStatusBlockLines = 64
+	// maxStatusRemainder bounds the cross-chunk line buffer so a pathological
+	// newline-less stream can't grow it without limit.
+	maxStatusRemainder = 64 * 1024
 )
 
 // TodoItem represents a single todo item detected from terminal output.
@@ -115,6 +124,12 @@ type Tracker struct {
 	inStatusBlock    bool
 	statusBlockLines []string
 	lastRalphStatus  *RalphStatus
+	// statusRemainder holds the trailing partial line carried over between
+	// ProcessOutput calls. EventTerminal delivers raw PTY read chunks, not whole
+	// lines, so a marker or field line ("EXIT_SIGNAL: true", "---END_RALPH...")
+	// can be split across two chunks; buffering the partial line and only
+	// parsing COMPLETE \n-terminated lines keeps the anchored regexes matching.
+	statusRemainder string
 
 	// Cleanup throttle
 	lastCleanupTime time.Time
@@ -243,39 +258,85 @@ func (t *Tracker) ProcessOutput(data string) {
 	t.scheduleDebouncedStateEvent()
 }
 
-// processStatusBlocks scans for RALPH_STATUS blocks in the data.
+// processStatusBlocks scans for RALPH_STATUS blocks in the data. Only COMPLETE
+// (\n-terminated) lines are parsed; the trailing partial line is buffered in
+// t.statusRemainder and prepended to the next chunk, so markers/field lines
+// split across PTY read boundaries are still matched as whole lines.
 // Must be called with t.mu held.
 func (t *Tracker) processStatusBlocks(data string) {
-	lines := strings.Split(data, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		if statusStartPattern.MatchString(trimmed) {
-			t.inStatusBlock = true
-			t.statusBlockLines = nil
-			continue
+	buf := t.statusRemainder + data
+	for {
+		idx := strings.IndexByte(buf, '\n')
+		if idx < 0 {
+			break
 		}
+		line := buf[:idx]
+		buf = buf[idx+1:]
+		t.processStatusLine(strings.TrimSpace(line))
+	}
 
-		if statusEndPattern.MatchString(trimmed) {
-			if t.inStatusBlock && len(t.statusBlockLines) > 0 {
-				status := ParseRalphStatusBlock(t.statusBlockLines)
-				t.lastRalphStatus = &status
+	// buf is now the trailing line with no terminating newline. Peek it for a
+	// COMPLETE start/end marker: the anchored patterns only match a whole
+	// marker, so a terminal marker that is the final line (end-of-output, no
+	// trailing newline) still closes/opens the block.
+	trimmed := strings.TrimSpace(buf)
+	if statusStartPattern.MatchString(trimmed) || statusEndPattern.MatchString(trimmed) {
+		t.processStatusLine(trimmed)
+		t.statusRemainder = ""
+		return
+	}
+	if t.inStatusBlock {
+		// Mid-block: retain the partial trailing line so a field or end-marker
+		// line split across PTY read boundaries is matched once it completes.
+		// Bounded so a newline-less stream can't grow it without limit.
+		if len(buf) > maxStatusRemainder {
+			buf = buf[len(buf)-maxStatusRemainder:]
+		}
+		t.statusRemainder = buf
+	} else {
+		// Not in a block: the trailing partial is ordinary output, not status
+		// data. Discard it so it can't pollute the next chunk's first line (and
+		// can't accumulate unboundedly between blocks).
+		t.statusRemainder = ""
+	}
+}
 
-				// Feed circuit breaker
-				if status.ExitSignal {
-					t.circuitBreaker.RecordExitSignal()
-				}
+// processStatusLine applies one complete (trimmed) line to the RALPH_STATUS
+// state machine. Must be called with t.mu held.
+func (t *Tracker) processStatusLine(trimmed string) {
+	if statusStartPattern.MatchString(trimmed) {
+		t.inStatusBlock = true
+		t.statusBlockLines = nil
+		return
+	}
 
-				t.emitEvent(StatusBlockDetected{Status: status})
+	if statusEndPattern.MatchString(trimmed) {
+		if t.inStatusBlock && len(t.statusBlockLines) > 0 {
+			status := ParseRalphStatusBlock(t.statusBlockLines)
+			t.lastRalphStatus = &status
+
+			// Feed circuit breaker
+			if status.ExitSignal {
+				t.circuitBreaker.RecordExitSignal()
 			}
+
+			t.emitEvent(StatusBlockDetected{Status: status})
+		}
+		t.inStatusBlock = false
+		t.statusBlockLines = nil
+		return
+	}
+
+	if t.inStatusBlock {
+		// Abort a runaway/unclosed block instead of accumulating forever.
+		if len(t.statusBlockLines) >= maxStatusBlockLines {
+			slog.Warn("ralph: RALPH_STATUS block exceeded line cap without an end marker; aborting block",
+				"cap", maxStatusBlockLines)
 			t.inStatusBlock = false
 			t.statusBlockLines = nil
-			continue
+			return
 		}
-
-		if t.inStatusBlock {
-			t.statusBlockLines = append(t.statusBlockLines, trimmed)
-		}
+		t.statusBlockLines = append(t.statusBlockLines, trimmed)
 	}
 }
 

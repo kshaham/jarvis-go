@@ -234,6 +234,13 @@ func (b *Broker) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	initFn := b.getInitData
+	// Watermark captured BEFORE releasing the lock: any event broadcast during
+	// the unlocked init-build window gets an ID greater than this, so replaying
+	// from here (for a fresh client) recovers events that are neither in the
+	// init snapshot nor delivered live (the client isn't broadcast-visible yet).
+	// Captured early to guarantee no loss; a few events already reflected in
+	// init may be replayed (harmless — frontend state updates are idempotent).
+	snapshotID := b.nextEventID.Load()
 	b.mu.Unlock()
 
 	client := NewClient(w, flusher, r.Context(), subscriptions)
@@ -260,13 +267,20 @@ func (b *Broker) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client.Send(EventMessage{Event: "init", Data: initData})
-	var replayCount int
+	// Replay floor: a reconnecting client replays from its Last-Event-ID; a
+	// fresh client replays from the init watermark so connect-window events
+	// aren't lost. Either way collectReplayEvents only returns events still in
+	// the bounded replay buffer, and the client isn't broadcast-visible yet, so
+	// init/replay are queued strictly ahead of any live event.
+	replayFloor := snapshotID
 	if lastSeenID := parseLastEventID(r); lastSeenID > 0 {
-		for _, msg := range b.collectReplayEvents(lastSeenID) { // b.mu held
-			if client.MatchesSubscription(msg.Event) {
-				client.Send(msg)
-				replayCount++
-			}
+		replayFloor = lastSeenID
+	}
+	var replayCount int
+	for _, msg := range b.collectReplayEvents(replayFloor) { // b.mu held
+		if client.MatchesSubscription(msg.Event) {
+			client.Send(msg)
+			replayCount++
 		}
 	}
 	b.clients[client] = struct{}{}
@@ -298,6 +312,24 @@ func (b *Broker) Subscribe(w http.ResponseWriter, r *http.Request) {
 	remaining := len(b.clients)
 	b.mu.Unlock()
 	metrics.SSEClients.Set(float64(remaining))
+}
+
+// CloseAllClients unblocks every connected SSE client so their in-flight
+// Subscribe handlers return. Call this at the START of server shutdown, BEFORE
+// http.Server.Shutdown -- Shutdown waits for handlers to return, and an SSE
+// handler blocks on client.Done() until its connection drops, so without this
+// Shutdown stalls for the entire shutdown-timeout whenever a dashboard is open.
+// The client is removed from b.clients by its own Subscribe goroutine on return.
+func (b *Broker) CloseAllClients() {
+	b.mu.Lock()
+	clients := make([]*Client, 0, len(b.clients))
+	for c := range b.clients {
+		clients = append(clients, c)
+	}
+	b.mu.Unlock()
+	for _, c := range clients {
+		c.Close()
+	}
 }
 
 // Broadcast sends an event to all matching clients.

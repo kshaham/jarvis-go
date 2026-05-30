@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -70,7 +71,14 @@ type Server struct {
 	port                int
 	isHTTPS             bool
 	dataDir             string
+	// srvMu guards the fields assigned inside Start()/setupRouter()
+	// (httpServer, httpsServer, schedulerRunner, notificationsRouter) against
+	// the concurrent reads in Stop(). main.go runs Start() in a goroutine and
+	// Stop() on the main goroutine, so without this they race (and a SIGINT
+	// before httpServer is assigned would nil-deref in Stop).
+	srvMu               sync.Mutex
 	httpServer          *http.Server
+	httpsServer         *http.Server
 	sessionManager      *pty.SessionManager
 	sseBroker           *sse.Broker
 	csrfStore           *mw.CSRFStore
@@ -417,8 +425,13 @@ func (a *sessionStoreAdapter) StopSession(sessionID string) error {
 //
 // This keeps backwards compatibility while enabling browser voice.
 func (s *Server) Start() error {
+	// Build the router (which assigns schedulerRunner, notificationsRouter,
+	// handlerCtx, peers) and the http.Server while holding srvMu so a
+	// concurrent Stop() either waits for construction to finish then snapshots
+	// the real values, or runs entirely before and sees nils -- never a torn
+	// read or a nil-deref.
+	s.srvMu.Lock()
 	router := s.setupRouter()
-
 	s.httpServer = &http.Server{
 		Addr:           fmt.Sprintf(":%d", s.port),
 		Handler:        router,
@@ -427,21 +440,25 @@ func (s *Server) Start() error {
 		IdleTimeout:    120 * time.Second,
 		MaxHeaderBytes: 2 << 20, // 2 MB; defends against header-bomb DoS
 	}
+	httpSrv := s.httpServer
+	schedRunner := s.schedulerRunner
+	notifRouter := s.notificationsRouter
+	s.srvMu.Unlock()
 
 	// Start Telegram handler (polling/webhook)
 	s.telegramHandler.Start()
 
 	// Start the scheduler runner: loads persisted jobs, schedules them, and
 	// fires any that were due while the server was offline.
-	if s.schedulerRunner != nil {
-		s.schedulerRunner.Start(context.Background())
+	if schedRunner != nil {
+		schedRunner.Start(context.Background())
 	}
 
 	// Start the notifications router worker pool. Pre-hook registration in
 	// setupRouter has already wired it into the SSE broker, so once workers
 	// start they immediately begin draining any queued work.
-	if s.notificationsRouter != nil {
-		s.notificationsRouter.Start(context.Background())
+	if notifRouter != nil {
+		notifRouter.Start(context.Background())
 	}
 
 	slog.Info("Starting Jarvis Go server", "port", s.port, "https", s.isHTTPS)
@@ -462,6 +479,12 @@ func (s *Server) Start() error {
 			IdleTimeout:    120 * time.Second,
 			MaxHeaderBytes: 2 << 20,
 		}
+		// Store on the struct (under srvMu) so Stop() can drain it too;
+		// previously it was a local and the HTTPS listener was never gracefully
+		// shut down (in-flight TLS/voice requests killed at process exit).
+		s.srvMu.Lock()
+		s.httpsServer = tlsServer
+		s.srvMu.Unlock()
 		slog.Info("Starting HTTPS listener", "port", httpsPort, "tls_dir", filepath.Join(s.dataDir, "tls"))
 		go func() {
 			if err := tlsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
@@ -470,17 +493,34 @@ func (s *Server) Start() error {
 		}()
 	}
 
-	return s.httpServer.ListenAndServe()
+	return httpSrv.ListenAndServe()
 }
 
 // Stop gracefully shuts down the server.
 func (s *Server) Stop(ctx context.Context) error {
 	slog.Info("Shutting down server...")
-	if s.schedulerRunner != nil {
-		s.schedulerRunner.Stop()
+
+	// Snapshot the Start()-assigned fields under srvMu (paired with the write
+	// side in Start) so this read can't race construction or nil-deref.
+	s.srvMu.Lock()
+	httpSrv := s.httpServer
+	httpsSrv := s.httpsServer
+	schedRunner := s.schedulerRunner
+	notifRouter := s.notificationsRouter
+	s.srvMu.Unlock()
+
+	// Close SSE clients FIRST so their in-flight /events handlers return; an
+	// http.Server.Shutdown otherwise blocks for the entire ctx budget waiting
+	// on never-returning SSE handlers whenever a dashboard tab is open.
+	if s.sseBroker != nil {
+		s.sseBroker.CloseAllClients()
 	}
-	if s.notificationsRouter != nil {
-		s.notificationsRouter.Stop()
+
+	if schedRunner != nil {
+		schedRunner.Stop()
+	}
+	if notifRouter != nil {
+		notifRouter.Stop()
 	}
 	s.telegramHandler.Stop()
 	// Stop the office's idle-monitoring ticker so the goroutine winds
@@ -492,6 +532,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.officeManager != nil {
 		s.officeManager.StopIdleMonitoring()
 	}
+	// Stop the subagent watcher: this closes its events channel, which is the
+	// only thing that lets the NewServer forwarder goroutine (`for range
+	// Events()`) return instead of leaking until process exit.
+	if s.subagentWatcher != nil {
+		s.subagentWatcher.Stop()
+	}
 	// AppState.save() debounces writes through a 500ms timer. Without
 	// an explicit Flush on shutdown, any setting / token-stats update
 	// from the last half-second is lost on a clean SIGTERM. Flush is
@@ -499,7 +545,16 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.stateStore != nil {
 		s.stateStore.Flush()
 	}
-	return s.httpServer.Shutdown(ctx)
+
+	// Drain both listeners (HTTP + the optional HTTPS one) so in-flight
+	// requests on each finish symmetrically.
+	if httpsSrv != nil {
+		_ = httpsSrv.Shutdown(ctx)
+	}
+	if httpSrv != nil {
+		return httpSrv.Shutdown(ctx)
+	}
+	return nil
 }
 
 // SSEBroker returns the SSE broker for external event broadcasting.

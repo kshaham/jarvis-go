@@ -73,6 +73,12 @@ func (cm *CaseManager) List() []CaseInfo {
 
 // Get returns information about a single case by name.
 func (cm *CaseManager) Get(name string) (*CaseInfo, error) {
+	// Validate BEFORE joining: Get's CaseInfo.Path is reused downstream as a
+	// read root (ralph-wizard), so an unvalidated ".." here would let the
+	// join escape baseDir. Create/Delete/Link already validate; Get must too.
+	if !IsValidCaseName(name) {
+		return nil, fmt.Errorf("invalid case name: %q", name)
+	}
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 	casePath := filepath.Join(cm.baseDir, name)

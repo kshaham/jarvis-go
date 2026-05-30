@@ -135,10 +135,17 @@ func maybeRestoreSymlink(credPath, symlinkTarget string) error {
 	if err := copyFile(credPath, symlinkTarget); err != nil {
 		return err
 	}
-	if err := os.Remove(credPath); err != nil {
+	// Atomically replace credPath with the symlink: create it at a temp name
+	// and rename it over credPath. The previous Remove-then-Symlink left a
+	// window where, if Symlink failed, credPath was gone and no symlink existed
+	// (the canonical credentials file silently missing until the next restore).
+	tmpLink := credPath + ".symlink.tmp"
+	_ = os.Remove(tmpLink) // clear any stale temp from a prior crash
+	if err := os.Symlink(symlinkTarget, tmpLink); err != nil {
 		return err
 	}
-	if err := os.Symlink(symlinkTarget, credPath); err != nil {
+	if err := os.Rename(tmpLink, credPath); err != nil {
+		_ = os.Remove(tmpLink)
 		return err
 	}
 	slog.Info("Persisted Claude credentials to volume and restored symlink")

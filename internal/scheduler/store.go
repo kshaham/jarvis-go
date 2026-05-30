@@ -194,20 +194,25 @@ func (s *Store) save() {
 		slog.Error("scheduler: marshal failed", "error", err)
 		return
 	}
-	// Rotate current file to .backup before overwriting so corruption
-	// recovery has a last-known-good copy.
-	if _, err := os.Stat(s.path); err == nil {
-		if rerr := os.Rename(s.path, s.path+".backup"); rerr != nil {
-			slog.Warn("scheduler: backup rotation failed", "error", rerr)
-		}
-	}
+	// Stage the new data in tmp FIRST, then rotate the live primary to .backup
+	// (last-known-good copy) only once the write succeeded -- rotating before
+	// the write destroyed the live file if WriteFile failed.
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		slog.Error("scheduler: write failed", "error", err)
 		return
 	}
+	if _, err := os.Stat(s.path); err == nil {
+		if rerr := os.Rename(s.path, s.path+".backup"); rerr != nil {
+			slog.Warn("scheduler: backup rotation failed", "error", rerr)
+		}
+	}
 	if err := os.Rename(tmp, s.path); err != nil {
 		slog.Error("scheduler: rename failed", "error", err)
 		os.Remove(tmp)
+		// Restore the rotated backup so the primary isn't left missing.
+		if _, berr := os.Stat(s.path + ".backup"); berr == nil {
+			_ = os.Rename(s.path+".backup", s.path)
+		}
 	}
 }

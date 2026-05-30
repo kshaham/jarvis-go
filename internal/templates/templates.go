@@ -37,28 +37,43 @@ func NewStore(dir string) *Store {
 	return s
 }
 
-// List returns all templates sorted by name.
+// copyTemplate returns a value copy of t (Template has no reference-type fields
+// beyond strings, so a struct copy fully isolates it). Returns nil for nil.
+func copyTemplate(t *Template) *Template {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	return &cp
+}
+
+// List returns all templates sorted by name. The returned pointers are
+// immutable snapshots -- safe to JSON-encode in a handler after the lock is
+// released, even while another request mutates the store.
 func (s *Store) List() []*Template {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.listLocked()
 }
 
-// listLocked returns all templates sorted by name. Caller must hold at least an RLock.
+// listLocked returns COPIES of all templates sorted by name. Caller must hold
+// at least an RLock. Copies (not live pointers) so handlers encoding the result
+// after releasing the lock can't race an in-place Update.
 func (s *Store) listLocked() []*Template {
 	result := make([]*Template, 0, len(s.templates))
 	for _, t := range s.templates {
-		result = append(result, t)
+		result = append(result, copyTemplate(t))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 
-// Get returns a template by ID, or nil if not found.
+// Get returns a COPY of the template by ID, or nil if not found. A copy so the
+// caller can encode it outside the lock without racing a concurrent Update.
 func (s *Store) Get(id string) *Template {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.templates[id]
+	return copyTemplate(s.templates[id])
 }
 
 // Create adds a new template and persists it.
@@ -75,17 +90,21 @@ func (s *Store) Create(name, description, content string) *Template {
 	}
 	s.templates[t.ID] = t
 	s.save()
-	return t
+	return copyTemplate(t)
 }
 
-// Update applies the given field updates to a template. Returns nil if not found.
+// Update applies the given field updates to a template. Returns nil if not
+// found. Replaces the map entry with a FRESH allocation rather than mutating
+// the existing struct in place, so any pointer previously handed out by
+// Get/List (and being JSON-encoded in another goroutine) is never written to.
 func (s *Store) Update(id string, updates map[string]string) *Template {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t := s.templates[id]
-	if t == nil {
+	existing := s.templates[id]
+	if existing == nil {
 		return nil
 	}
+	t := copyTemplate(existing)
 	if v, ok := updates["name"]; ok {
 		t.Name = v
 	}
@@ -96,8 +115,9 @@ func (s *Store) Update(id string, updates map[string]string) *Template {
 		t.Content = v
 	}
 	t.UpdatedAt = time.Now()
+	s.templates[id] = t
 	s.save()
-	return t
+	return copyTemplate(t)
 }
 
 // Delete removes a template by ID. Returns false if not found.
