@@ -693,6 +693,19 @@ func (a *AgentState) GetVoice() string {
 	return a.Config.Voice
 }
 
+// SnapshotConfig returns a value copy of the member's Config taken under the
+// mutex. Use this instead of dereferencing *a.Config directly from another
+// goroutine: SetVoice mutates a.Config.Voice under a.mu, so an unguarded
+// struct copy races that write. Returns a zero Config when none is set.
+func (a *AgentState) SnapshotConfig() TeamMemberConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.Config == nil {
+		return TeamMemberConfig{}
+	}
+	return *a.Config
+}
+
 // RemoveTask removes a task by ID and returns it, or nil if not found.
 func (a *AgentState) RemoveTask(taskID string) *Task {
 	a.mu.Lock()

@@ -226,7 +226,7 @@ func (m *Manager) SnapshotRosterAsTemplateMembers() []teamtemplates.TeamTemplate
 			m.SystemPrompt = cfg.SystemPrompt
 		}
 		m.Skills = cfg.Skills
-		m.Voice = cfg.Voice
+		m.Voice = agent.GetVoice() // locked read: Voice is mutated by SetVoice
 		members = append(members, m)
 	}
 	return members
@@ -660,7 +660,7 @@ func BuildRestartTemplateMember(agent *AgentState) (teamtemplates.TeamTemplateMe
 		Tier:         cfg.Tier,
 		Color:        cfg.Color,
 		Personality:  cfg.Personality,
-		Voice:        cfg.Voice,
+		Voice:        agent.GetVoice(), // locked read: Voice is mutated by SetVoice
 		SystemPrompt: cfg.SystemPrompt,
 		Skills:       cfg.Skills,
 	}, nil
