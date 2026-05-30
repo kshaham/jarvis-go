@@ -67,6 +67,9 @@ type Context struct {
 	// ActivePlanOrchestrators tracks active plan generation session IDs.
 	ActivePlanOrchestrators   map[string]string // orchestratorID -> sessionID
 	ActivePlanOrchestratorsMu sync.RWMutex
+
+	// AudioJobs manages async standup audio generation.
+	AudioJobs *AudioJobManager
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,

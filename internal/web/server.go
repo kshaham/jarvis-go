@@ -31,6 +31,7 @@ import (
 	"github.com/kshaham/jarvis/internal/teamtemplates"
 	"github.com/kshaham/jarvis/internal/telegram"
 	"github.com/kshaham/jarvis/internal/templates"
+	"github.com/kshaham/jarvis/internal/tts"
 	"github.com/kshaham/jarvis/internal/web/auth"
 	"github.com/kshaham/jarvis/internal/web/handler"
 	mw "github.com/kshaham/jarvis/internal/web/middleware"
@@ -620,6 +621,30 @@ func (s *Server) setupRouter() chi.Router {
 	})
 	h.Notifications = s.notificationsStore
 	h.NotificationsRouter = s.notificationsRouter
+
+	// Standup audio job manager: resolves the OpenAI key from settings on
+	// each job start so key changes take effect without a restart, and
+	// delegates voice selection to the office manager's per-agent config.
+	voiceFor := func(sid string, i int) string {
+		if a := s.officeManager.GetAgent(sid); a != nil && a.Config != nil && tts.IsValidVoice(a.Config.Voice) {
+			return a.Config.Voice
+		}
+		return tts.DefaultVoiceForIndex(i)
+	}
+	newSynth := func() (handler.Synthesizer, error) {
+		settings := s.stateStore.GetSettings()
+		key, _ := settings["openaiApiKey"].(string)
+		if key == "" {
+			key = os.Getenv("OPENAI_API_KEY")
+		}
+		if key == "" {
+			return nil, tts.ErrNoAPIKey
+		}
+		baseURL, _ := settings["openaiBaseUrl"].(string)
+		return tts.NewClient(key, baseURL), nil
+	}
+	h.AudioJobs = handler.NewAudioJobManager(s.sseBroker.Broadcast, newSynth, voiceFor)
+
 	s.handlerCtx = h
 
 	// Inter-team relay infrastructure. Identity is generated on first
@@ -1111,6 +1136,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/standup", h.OfficeGetStandup)
 				r.Get("/standup/history", h.OfficeGetStandupHistory)
 				r.Get("/standup/{standupId}", h.OfficeGetStandupByID)
+				r.Get("/standup/{standupId}/audio", h.OfficeGetStandupAudio)
 				r.Get("/memory/{sessionId}", h.OfficeGetMemberMemory)
 				r.Get("/member/{sessionId}/personality", h.OfficeGetMemberPersonality)
 				r.Get("/telegram-config", h.OfficeGetTelegramConfig)
@@ -1189,6 +1215,7 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/snapshots/{name}/restore", h.OfficeRestoreSnapshot)
 					r.Post("/standup", h.OfficePostStandup)
 					r.Post("/standup/user-message", h.OfficePostStandupUserMessage)
+					r.Post("/standup/{standupId}/audio", h.OfficePostStandupAudio)
 					r.Put("/member/{sessionId}/personality", h.OfficePutMemberPersonality)
 					r.Put("/member/{sessionId}/voice", h.OfficePutMemberVoice)
 					r.Post("/brainstorm", h.OfficeBrainstorm)
