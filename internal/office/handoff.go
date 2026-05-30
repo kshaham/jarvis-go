@@ -238,7 +238,7 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 	if receiver == nil {
 		return nil, fmt.Errorf("receiver not in roster")
 	}
-	if receiver.SessionID == fromSessionID {
+	if receiver.SessionID() == fromSessionID {
 		return nil, fmt.Errorf("cannot hand off to self")
 	}
 
@@ -293,7 +293,7 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 		FromSessionID: fromSessionID,
 		FromConfigID:  sender.ConfigID,
 		FromName:      fromName,
-		ToSessionID:   receiver.SessionID,
+		ToSessionID:   receiver.SessionID(),
 		ToConfigID:    receiver.ConfigID,
 		ToName:        toName,
 		Context:       context,
@@ -312,7 +312,7 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 	sender.mu.Unlock()
 
 	m.auditLog("office:handoffInitiated", fromSessionID, fromName, map[string]interface{}{
-		"taskId": taskID, "to": receiver.SessionID, "toName": toName,
+		"taskId": taskID, "to": receiver.SessionID(), "toName": toName,
 	})
 	m.broadcast(EventHandoffInitiated, map[string]interface{}{
 		"handoff": h,
@@ -388,8 +388,8 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 	if sender.Config != nil {
 		senderName = sender.Config.Name
 	}
-	m.auditLog("office:handoffAccepted", receiver.SessionID, receiver.Config.Name, map[string]interface{}{
-		"taskId": taskID, "from": sender.SessionID, "fromName": senderName,
+	m.auditLog("office:handoffAccepted", receiver.SessionID(), receiver.Config.Name, map[string]interface{}{
+		"taskId": taskID, "from": sender.SessionID(), "fromName": senderName,
 	})
 	m.broadcast(EventHandoffAccepted, map[string]interface{}{
 		"handoff": h,
@@ -445,7 +445,7 @@ func (m *Manager) CancelHandoff(senderSessionID, taskID string) (*HandoffRequest
 	h.RejectReason = "cancelled by sender"
 	m.ensureHandoffStore().append(*h)
 
-	m.auditLog("office:handoffCancelled", sender.SessionID, senderName, map[string]interface{}{
+	m.auditLog("office:handoffCancelled", sender.SessionID(), senderName, map[string]interface{}{
 		"taskId": h.TaskID, "to": h.ToSessionID, "toName": h.ToName,
 	})
 	m.broadcast(EventHandoffCancelled, map[string]interface{}{"handoff": h})
@@ -460,7 +460,7 @@ func (m *Manager) ForceAcceptHandoff(taskID string) (*HandoffRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return m.AcceptHandoff(receiver.SessionID, h.TaskID)
+	return m.AcceptHandoff(receiver.SessionID(), h.TaskID)
 }
 
 // ForceRejectHandoff is the operator-auth counterpart. Same behaviour
@@ -502,10 +502,10 @@ func (m *Manager) finishReject(h *HandoffRequest, task *Task, sender, receiver *
 		receiverName = receiver.Config.Name
 	}
 	msg := fmt.Sprintf("%s declined your handoff of task %q: %s", receiverName, h.TaskTitle, reason)
-	m.SendMessage(receiver.SessionID, sender.SessionID, msg)
+	m.SendMessage(receiver.SessionID(), sender.SessionID(), msg)
 
-	m.auditLog("office:handoffRejected", receiver.SessionID, receiverName, map[string]interface{}{
-		"taskId": h.TaskID, "reason": reason, "to": sender.SessionID, "toName": senderName,
+	m.auditLog("office:handoffRejected", receiver.SessionID(), receiverName, map[string]interface{}{
+		"taskId": h.TaskID, "reason": reason, "to": sender.SessionID(), "toName": senderName,
 	})
 	m.broadcast(EventHandoffRejected, map[string]interface{}{
 		"handoff": h,
@@ -654,7 +654,7 @@ func (m *Manager) SweepStaleHandoffs(threshold time.Duration) int {
 		if sender.Config != nil {
 			senderName = sender.Config.Name
 		}
-		m.auditLog("office:handoffExpired", sender.SessionID, senderName, map[string]interface{}{
+		m.auditLog("office:handoffExpired", sender.SessionID(), senderName, map[string]interface{}{
 			"taskId": h.TaskID, "receiverConfigID": h.ToConfigID,
 		})
 		m.broadcast(EventHandoffExpired, map[string]interface{}{"handoff": &expired})

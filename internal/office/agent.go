@@ -3,6 +3,7 @@ package office
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -126,7 +127,15 @@ type FileLock struct {
 type AgentState struct {
 	mu sync.Mutex
 
-	SessionID    string
+	// sessionID is the agent's live session ID. It is mutated by
+	// ReassignSessionID (the R25 in-place restart) concurrently with reads from
+	// the idle monitor, telegram poll, payload marshalers, etc. Stored as an
+	// atomic.Pointer so EVERY read is lock-free and race-free regardless of the
+	// caller's lock context (an a.mu-guarded accessor would deadlock at the many
+	// call sites that already hold a.mu). Read via SessionID(); write via
+	// setSessionID(). The field is unexported so a direct racy read is a compile
+	// error -- this is the structural guarantee that the whole class stays fixed.
+	sessionID    atomic.Pointer[string]
 	ConfigID     string
 	Config       *TeamMemberConfig
 	WorktreePath string
@@ -305,14 +314,30 @@ const recentTurnCostsCap = 20
 
 // NewAgentState creates a new agent state.
 func NewAgentState(sessionID, configID string, config *TeamMemberConfig) *AgentState {
-	return &AgentState{
-		SessionID:      sessionID,
+	a := &AgentState{
 		ConfigID:       configID,
 		Config:         config,
 		taskQueue:      &TaskQueue{Tasks: make([]*Task, 0)},
 		AckNudges:      make(map[string]*AckNudgeState),
 		ProgressChecks: make(map[string]time.Time),
 	}
+	a.setSessionID(sessionID)
+	return a
+}
+
+// SessionID returns the agent's current session ID (lock-free atomic read; safe
+// to call from any goroutine in any lock context).
+func (a *AgentState) SessionID() string {
+	if p := a.sessionID.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// setSessionID atomically updates the agent's session ID. Called at construction
+// and by ReassignSessionID during an in-place restart.
+func (a *AgentState) setSessionID(s string) {
+	a.sessionID.Store(&s)
 }
 
 // TouchAgentAPI records that we just received a call from this agent.

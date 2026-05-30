@@ -125,7 +125,7 @@ func (ctx *Context) collectTimelineEntries() []TimelineEntry {
 	nameByID := make(map[string]string, len(roster))
 	for _, a := range roster {
 		if a != nil && a.Config != nil {
-			nameByID[a.SessionID] = a.Config.Name
+			nameByID[a.SessionID()] = a.Config.Name
 		}
 	}
 
@@ -159,7 +159,7 @@ func (ctx *Context) collectTimelineEntries() []TimelineEntry {
 				out = append(out, TimelineEntry{
 					Timestamp: t.AssignedAt,
 					Kind:      "task",
-					AgentID:   a.SessionID,
+					AgentID:   a.SessionID(),
 					AgentName: a.Config.Name,
 					Title:     "Task assigned: " + t.Title,
 					Summary:   string(t.Status),
@@ -170,7 +170,7 @@ func (ctx *Context) collectTimelineEntries() []TimelineEntry {
 				out = append(out, TimelineEntry{
 					Timestamp: t.StartedAt,
 					Kind:      "task",
-					AgentID:   a.SessionID,
+					AgentID:   a.SessionID(),
 					AgentName: a.Config.Name,
 					Title:     "Task started: " + t.Title,
 					Data:      map[string]interface{}{"taskId": t.ID, "transition": "started"},
@@ -180,7 +180,7 @@ func (ctx *Context) collectTimelineEntries() []TimelineEntry {
 				out = append(out, TimelineEntry{
 					Timestamp: t.CompletedAt,
 					Kind:      "task",
-					AgentID:   a.SessionID,
+					AgentID:   a.SessionID(),
 					AgentName: a.Config.Name,
 					Title:     "Task " + string(t.Status) + ": " + t.Title,
 					Data:      map[string]interface{}{"taskId": t.ID, "status": t.Status, "transition": "completed"},

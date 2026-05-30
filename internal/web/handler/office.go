@@ -825,7 +825,7 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 					return
 				}
 
-				s, ok := ctx.SessionManager.GetSession(a.SessionID)
+				s, ok := ctx.SessionManager.GetSession(a.SessionID())
 				if !ok {
 					return
 				}
@@ -861,7 +861,7 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 				maxRetries := 3
 				for attempt := 0; attempt < maxRetries; attempt++ {
 					s.WriteInkPrompt(prompt)
-					slog.Info("Kickstart attempt", "name", a.Config.Name, "attempt", attempt+1, "session", a.SessionID)
+					slog.Info("Kickstart attempt", "name", a.Config.Name, "attempt", attempt+1, "session", a.SessionID())
 
 					// Watch for output activity (Claude responding = prompt accepted)
 					activity := make(chan struct{}, 1)
@@ -887,7 +887,7 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 						time.Sleep(5 * time.Second)
 					}
 				}
-				slog.Error("Kickstart failed after all retries", "name", a.Config.Name, "session", a.SessionID)
+				slog.Error("Kickstart failed after all retries", "name", a.Config.Name, "session", a.SessionID())
 			}(agent)
 		}
 	} // end if !useSDK
@@ -1404,7 +1404,7 @@ func (ctx *Context) OfficeGetTaskQueues(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		queues = append(queues, map[string]interface{}{
-			"sessionId": a.SessionID,
+			"sessionId": a.SessionID(),
 			"agentName": a.Config.Name,
 			"tasks":     a.GetTasksCopy(), // deep copy: marshaled outside a.mu
 		})
@@ -1421,7 +1421,7 @@ func (ctx *Context) OfficeGetTaskQueueBySession(w http.ResponseWriter, r *http.R
 		return
 	}
 	ok(w, map[string]interface{}{"queue": map[string]interface{}{
-		"sessionId": agent.SessionID,
+		"sessionId": agent.SessionID(),
 		"agentName": agent.Config.Name,
 		"tasks":     agent.GetTasksCopy(), // deep copy: marshaled outside a.mu
 	}})
@@ -1981,7 +1981,7 @@ func (ctx *Context) OfficeAgentTeamRoster(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		result = append(result, map[string]interface{}{
-			"sessionId": a.SessionID,
+			"sessionId": a.SessionID(),
 			"configId":  a.ConfigID,
 			"name":      a.Config.Name,
 			"role":      a.Config.Role,
@@ -2302,7 +2302,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 		// response). Falls back to idle-monitor if nothing's queued.
 		nextTask := agent.NextPendingTask()
 		if nextTask != nil {
-			sid := agent.SessionID
+			sid := agent.SessionID()
 			title := nextTask.Title
 			taskID := nextTask.ID
 			go func() {

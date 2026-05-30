@@ -173,7 +173,7 @@ func runChaos(t *testing.T, opts chaosOpts) {
 				case 4:
 					// Read-heavy op: snapshot roster + iterate.
 					for _, a := range mgr.GetRoster() {
-						_ = a.SessionID
+						_ = a.SessionID()
 					}
 				case 5:
 					// File-lock cycle: acquire + release. Stresses

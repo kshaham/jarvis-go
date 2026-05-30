@@ -34,7 +34,7 @@ func (ctx *Context) OfficeAgentStatusLine(w http.ResponseWriter, r *http.Request
 	roster := ctx.OfficeManager.GetRoster()
 	var name, status, role, tier, currentTaskTitle string
 	for _, a := range roster {
-		if a.SessionID != sessionID {
+		if a.SessionID() != sessionID {
 			continue
 		}
 		if a.Config != nil {

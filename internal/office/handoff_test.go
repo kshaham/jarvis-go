@@ -32,7 +32,7 @@ func setupTeamForHandoff(t *testing.T) (*Manager, *AgentState, *AgentState, *Tas
 func TestHandoff_HappyAccept(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
 
-	h, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "API contract questions")
+	h, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "API contract questions")
 	if err != nil {
 		t.Fatalf("initiate: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestHandoff_HappyAccept(t *testing.T) {
 	}
 
 	// Receiver accepts.
-	if _, err := m.AcceptHandoff(bolt.SessionID, task.ID); err != nil {
+	if _, err := m.AcceptHandoff(bolt.SessionID(), task.ID); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
 	if len(vex.GetTasks()) != 0 || len(bolt.GetTasks()) != 1 {
@@ -71,11 +71,11 @@ func TestHandoff_HappyAccept(t *testing.T) {
 func TestHandoff_Reject(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
 
-	_, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "API contract questions")
+	_, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "API contract questions")
 	if err != nil {
 		t.Fatalf("initiate: %v", err)
 	}
-	if _, err := m.RejectHandoff(bolt.SessionID, task.ID, "already swamped"); err != nil {
+	if _, err := m.RejectHandoff(bolt.SessionID(), task.ID, "already swamped"); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
 	if task.Status != TaskInProgress {
@@ -91,7 +91,7 @@ func TestHandoff_Reject(t *testing.T) {
 	msgs := m.GetMessages()
 	found := false
 	for _, msg := range msgs {
-		if msg.To == vex.SessionID && strings.Contains(msg.Content, "declined") {
+		if msg.To == vex.SessionID() && strings.Contains(msg.Content, "declined") {
 			found = true
 			break
 		}
@@ -114,7 +114,7 @@ func TestHandoff_SenderNotOwner(t *testing.T) {
 func TestHandoff_ReceiverNotInRoster(t *testing.T) {
 	m, vex, _, task := setupTeamForHandoff(t)
 
-	_, err := m.InitiateHandoff(vex.SessionID, task.ID, "nonexistent-config", "ctx")
+	_, err := m.InitiateHandoff(vex.SessionID(), task.ID, "nonexistent-config", "ctx")
 	if err == nil || !strings.Contains(err.Error(), "not in roster") {
 		t.Fatalf("expected 'not in roster' error, got %v", err)
 	}
@@ -123,7 +123,7 @@ func TestHandoff_ReceiverNotInRoster(t *testing.T) {
 func TestHandoff_SelfHandoff(t *testing.T) {
 	m, vex, _, task := setupTeamForHandoff(t)
 
-	_, err := m.InitiateHandoff(vex.SessionID, task.ID, vex.ConfigID, "ctx")
+	_, err := m.InitiateHandoff(vex.SessionID(), task.ID, vex.ConfigID, "ctx")
 	if err == nil || !strings.Contains(err.Error(), "self") {
 		t.Fatalf("expected self-handoff error, got %v", err)
 	}
@@ -132,10 +132,10 @@ func TestHandoff_SelfHandoff(t *testing.T) {
 func TestHandoff_DoubleInitiate(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
 
-	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx1"); err != nil {
+	if _, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx1"); err != nil {
 		t.Fatalf("first initiate: %v", err)
 	}
-	_, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx2")
+	_, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx2")
 	if err == nil || !strings.Contains(err.Error(), "already has a pending") {
 		t.Fatalf("expected double-initiate error, got %v", err)
 	}
@@ -144,7 +144,7 @@ func TestHandoff_DoubleInitiate(t *testing.T) {
 func TestHandoff_ContextTooLarge(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
 	big := strings.Repeat("x", HandoffContextLimit+1)
-	_, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, big)
+	_, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, big)
 	if err == nil || !strings.Contains(err.Error(), "context too large") {
 		t.Fatalf("expected size-limit error, got %v", err)
 	}
@@ -153,7 +153,7 @@ func TestHandoff_ContextTooLarge(t *testing.T) {
 func TestHandoff_NotInProgress(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
 	vex.UpdateTaskStatus(task.ID, TaskCompleted)
-	_, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx")
+	_, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx")
 	if err == nil || !strings.Contains(err.Error(), "in_progress") {
 		t.Fatalf("expected in_progress error, got %v", err)
 	}
@@ -191,11 +191,11 @@ func TestHandoff_PendingLimit(t *testing.T) {
 
 func TestHandoff_StaleSweepReceiverGone(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
-	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("initiate: %v", err)
 	}
 	// Unregister the receiver -- simulates a despawn / crash.
-	m.UnregisterAgent(bolt.SessionID)
+	m.UnregisterAgent(bolt.SessionID())
 
 	// Backdate the handoff so it's past the threshold.
 	vex.mu.Lock()
@@ -216,7 +216,7 @@ func TestHandoff_StaleSweepReceiverGone(t *testing.T) {
 
 func TestHandoff_StaleSweepReceiverAlive(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
-	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("initiate: %v", err)
 	}
 	// Receiver is still registered; sweep should not touch the handoff.
@@ -237,14 +237,14 @@ func TestHandoff_StaleSweepReceiverAlive(t *testing.T) {
 func TestHandoff_SenderCancels(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
 
-	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "nevermind"); err != nil {
+	if _, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "nevermind"); err != nil {
 		t.Fatalf("initiate: %v", err)
 	}
 	if task.Status != TaskHandoffPending || task.Handoff == nil {
 		t.Fatal("precondition: task should be handoff_pending with non-nil Handoff")
 	}
 
-	h, err := m.CancelHandoff(vex.SessionID, task.ID)
+	h, err := m.CancelHandoff(vex.SessionID(), task.ID)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -278,11 +278,11 @@ func TestHandoff_SenderCancels(t *testing.T) {
 
 func TestHandoff_CancelByNonSender_Forbidden(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
-	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "x"); err != nil {
+	if _, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "x"); err != nil {
 		t.Fatalf("initiate: %v", err)
 	}
 	// Bolt (the receiver, not the sender) tries to cancel.
-	_, err := m.CancelHandoff(bolt.SessionID, task.ID)
+	_, err := m.CancelHandoff(bolt.SessionID(), task.ID)
 	if err == nil {
 		t.Fatal("expected error when non-sender cancels")
 	}
@@ -297,14 +297,14 @@ func TestHandoff_CancelByNonSender_Forbidden(t *testing.T) {
 
 func TestHandoff_IncomingHandoffsFor(t *testing.T) {
 	m, vex, bolt, task := setupTeamForHandoff(t)
-	if _, err := m.InitiateHandoff(vex.SessionID, task.ID, bolt.ConfigID, "ctx"); err != nil {
+	if _, err := m.InitiateHandoff(vex.SessionID(), task.ID, bolt.ConfigID, "ctx"); err != nil {
 		t.Fatalf("initiate: %v", err)
 	}
-	incoming := m.IncomingHandoffsFor(bolt.SessionID)
+	incoming := m.IncomingHandoffsFor(bolt.SessionID())
 	if len(incoming) != 1 || incoming[0].TaskID != task.ID {
 		t.Errorf("expected 1 incoming, got %v", incoming)
 	}
-	if other := m.IncomingHandoffsFor(vex.SessionID); len(other) != 0 {
+	if other := m.IncomingHandoffsFor(vex.SessionID()); len(other) != 0 {
 		t.Errorf("sender should have 0 incoming, got %d", len(other))
 	}
 }

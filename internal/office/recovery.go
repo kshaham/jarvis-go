@@ -1164,7 +1164,7 @@ func (m *Manager) findStrategicAgent(excludeSessionID string) *AgentState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, agent := range m.agents {
-		if agent.SessionID != excludeSessionID && agent.Config != nil && agent.Config.Tier == "strategic" {
+		if agent.SessionID() != excludeSessionID && agent.Config != nil && agent.Config.Tier == "strategic" {
 			return agent
 		}
 	}
@@ -1197,7 +1197,7 @@ func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 		if a.ActiveTask() != nil || a.PendingTaskCount() > 1 {
 			return false
 		}
-		if sessions != nil && sessions.IsSessionWorking(a.SessionID) {
+		if sessions != nil && sessions.IsSessionWorking(a.SessionID()) {
 			return false
 		}
 		return true
@@ -1207,7 +1207,7 @@ func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 	if len(preferredRoles) > 0 {
 		for _, preferredRole := range preferredRoles {
 			for _, agent := range m.agents {
-				if agent.SessionID != excludeSessionID &&
+				if agent.SessionID() != excludeSessionID &&
 					isIdle(agent) &&
 					agent.Config != nil &&
 					agent.Config.Role == preferredRole {
@@ -1219,7 +1219,7 @@ func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 
 	// Fallback: any available agent.
 	for _, agent := range m.agents {
-		if agent.SessionID != excludeSessionID && isIdle(agent) {
+		if agent.SessionID() != excludeSessionID && isIdle(agent) {
 			return agent
 		}
 	}
