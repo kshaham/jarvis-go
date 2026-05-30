@@ -22,6 +22,11 @@ type StandupMessage struct {
 	Content     string `json:"content"`
 	Type        string `json:"type"` // "opening", "status_report", "closing", "takeaway"
 	Timestamp   int64  `json:"timestamp"`
+	// TimedOut marks a status_report that is a timeout/unreachable fallback
+	// (not a real agent response). Set at the source so persistStandup's
+	// responded-vs-timedout tally doesn't have to substring-match the Content
+	// (which miscounts a real update that quotes the timeout phrase).
+	TimedOut bool `json:"timedOut,omitempty"`
 }
 
 // PersistedStandup is the on-disk representation of a completed standup.
@@ -224,7 +229,7 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 		}
 
 		// Wait for response with nudge logic.
-		response := m.waitForStandupResponse(sessionID, speakerName, sessions, cfg)
+		response, timedOut := m.waitForStandupResponse(sessionID, speakerName, sessions, cfg)
 
 		msg := StandupMessage{
 			SessionID:   sessionID,
@@ -232,6 +237,7 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 			Content:     response,
 			Type:        "status_report",
 			Timestamp:   time.Now().UnixMilli(),
+			TimedOut:    timedOut,
 		}
 
 		// Record response AND append to shared transcript so GetOfficeState can
@@ -303,10 +309,13 @@ func (m *Manager) runStandupRoundRobin(standupID string, participants []string, 
 
 // waitForStandupResponse blocks until the agent responds via SubmitStandupResponse
 // or the timeout expires. Nudges are sent at regular intervals.
-func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions SessionStore, cfg *Config) string {
+// waitForStandupResponse returns (content, timedOut). timedOut is true when the
+// content is a fallback (unreachable / aborted / nudges exhausted / timeout)
+// rather than a real agent response.
+func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions SessionStore, cfg *Config) (string, bool) {
 	agent := m.GetAgent(sessionID)
 	if agent == nil {
-		return fmt.Sprintf("%s was unreachable during standup.", speakerName)
+		return fmt.Sprintf("%s was unreachable during standup.", speakerName), true
 	}
 
 	// R19 · Fresh waitSlot so late replies from a prior round can't
@@ -333,15 +342,15 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 			// R19 · Sentinel from abortMeetingsFacilitatedBy means the
 			// standup leader died; return a clear fallback.
 			if response == meetingAbortedSentinel {
-				return fmt.Sprintf("[standup aborted: facilitator unavailable]")
+				return "[standup aborted: facilitator unavailable]", true
 			}
-			return response
+			return response, false
 
 		case <-nudgeInterval.C:
 			nudgeCount++
 			if nudgeCount > cfg.StandupMaxNudges {
 				slog.Warn("Standup: max nudges reached, giving up", "agent", speakerName)
-				return fmt.Sprintf("%s did not respond in time.", speakerName)
+				return fmt.Sprintf("%s did not respond in time.", speakerName), true
 			}
 			slog.Info("Standup: nudging agent", "name", speakerName, "nudge", nudgeCount, "max", cfg.StandupMaxNudges)
 
@@ -361,7 +370,7 @@ func (m *Manager) waitForStandupResponse(sessionID, speakerName string, sessions
 
 		case <-timeout.C:
 			slog.Warn("Standup response timeout", "agent", speakerName)
-			return fmt.Sprintf("%s did not respond in time.", speakerName)
+			return fmt.Sprintf("%s did not respond in time.", speakerName), true
 		}
 	}
 }
@@ -440,8 +449,10 @@ func (m *Manager) persistStandup(standupID string, participants []string, transc
 		if msg.Type != "status_report" {
 			continue
 		}
-		if strings.Contains(msg.Content, "did not respond in time") ||
-			msg.Content == "(offline - skipped)" {
+		// Use the structured flag set at the source, not substring matching the
+		// free-text content (which miscounts a real update quoting the phrase).
+		// Keep the legacy "(offline - skipped)" check for any older persisted data.
+		if msg.TimedOut || msg.Content == "(offline - skipped)" {
 			timedOut++
 		} else {
 			responded++
