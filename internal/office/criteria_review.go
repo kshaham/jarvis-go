@@ -63,13 +63,25 @@ func EvaluateAcceptanceCriteria(ctx context.Context, worktreeDir, summary string
 		if derr := json.Unmarshal([]byte(stripCriteriaFence(envelope.Result)), &v); derr != nil {
 			return CriteriaVerdict{EvaluatorError: "unparseable evaluator result"}, nil
 		}
-		return v, nil
+		return usableVerdict(v), nil
 	}
 	var v CriteriaVerdict
 	if jErr := json.Unmarshal(out, &v); jErr != nil {
 		return CriteriaVerdict{EvaluatorError: "unparseable evaluator output"}, nil
 	}
-	return v, nil
+	return usableVerdict(v), nil
+}
+
+// usableVerdict guards against a well-formed-but-empty verdict: a response that
+// parses cleanly but reports !allPass with NO per-criterion results gives the
+// gate nothing to act on, and would otherwise REJECT/escalate the agent with an
+// empty reason (fail closed). Treat it as an evaluator failure so callers fail
+// OPEN (allow completion) instead.
+func usableVerdict(v CriteriaVerdict) CriteriaVerdict {
+	if !v.AllPass && len(v.Results) == 0 {
+		return CriteriaVerdict{EvaluatorError: "evaluator returned no per-criterion results"}
+	}
+	return v
 }
 
 // stripCriteriaFence removes a leading/trailing ```json ... ``` fence if present.

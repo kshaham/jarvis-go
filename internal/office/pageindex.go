@@ -94,7 +94,7 @@ func truncateProbeOutput(s string) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…(truncated)"
+	return truncRunes(s, max) + "…(truncated)"
 }
 
 // LibraryDir returns the on-disk root of the markdown corpus that

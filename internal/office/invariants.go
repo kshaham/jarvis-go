@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -36,7 +37,13 @@ func sanitizeInvariants(items []string) []string {
 			continue
 		}
 		if len(t) > maxInvariantLen {
-			t = t[:maxInvariantLen]
+			// Back up to a rune boundary so a multibyte rune isn't split into
+			// invalid UTF-8 in the persisted JSON / injected prompt.
+			limit := maxInvariantLen
+			for limit > 0 && !utf8.RuneStart(t[limit]) {
+				limit--
+			}
+			t = t[:limit]
 		}
 		out = append(out, t)
 		if len(out) >= maxInvariants {

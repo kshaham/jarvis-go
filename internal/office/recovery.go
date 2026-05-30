@@ -273,6 +273,7 @@ func (m *Manager) checkUnacknowledgedTasks() {
 	m.mu.RUnlock()
 
 	for _, agent := range agents {
+		sid := m.sessionIDOf(agent) // SessionID read under m.mu (ReassignSessionID writes it under m.mu)
 		if agent.Config == nil {
 			continue
 		}
@@ -289,7 +290,7 @@ func (m *Manager) checkUnacknowledgedTasks() {
 			continue
 		}
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
@@ -301,7 +302,7 @@ func (m *Manager) checkUnacknowledgedTasks() {
 		// nudges during a single 20-minute tool-heavy turn, resulting
 		// in every queued task being auto-failed unfairly. We'll try
 		// again on the next tick.
-		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+		if sessions != nil && sessions.IsSessionWorking(sid) {
 			continue
 		}
 
@@ -336,7 +337,7 @@ func (m *Manager) checkUnacknowledgedTasks() {
 			lines = append(lines, "Acknowledge each task NOW: cm task ack <taskId>")
 			lines = append(lines, "Then start working: cm task start <taskId>")
 			nudgePrompt := strings.Join(lines, "\n")
-			sessions.WriteInkPrompt(agent.SessionID, nudgePrompt)
+			sessions.WriteInkPrompt(sid, nudgePrompt)
 			// Mark a prompt as sent so the stuck-detector knows we've been
 			// actively talking to this agent.
 			agent.mu.Lock()
@@ -357,7 +358,7 @@ func (m *Manager) checkUnacknowledgedTasks() {
 				"nudges", cfg.TaskAckMaxNudges)
 
 			m.broadcast("office:taskUpdated", map[string]interface{}{
-				"sessionId": agent.SessionID,
+				"sessionId": sid,
 				"taskId":    t.ID,
 				"status":    string(TaskFailed),
 				"reason":    "exceeded max ack nudges",
@@ -386,6 +387,7 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 	m.mu.RUnlock()
 
 	for _, agent := range agents {
+		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
@@ -403,7 +405,7 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 		// tasks auto-completed while still mid-turn working on them
 		// ("taskAge=7m+" but the agents were producing task-progress
 		// calls seconds later).
-		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+		if sessions != nil && sessions.IsSessionWorking(sid) {
 			continue
 		}
 
@@ -461,7 +463,7 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 			continue
 		}
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
@@ -475,7 +477,7 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 			"taskAge", taskAge)
 
 		m.broadcast("office:taskUpdated", map[string]interface{}{
-			"sessionId": agent.SessionID,
+			"sessionId": sid,
 			"taskId":    active.ID,
 			"status":    string(TaskCompleted),
 			"reason":    "auto-completed (idle agent)",
@@ -492,7 +494,7 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 			for _, t := range tasks {
 				if t.Status == TaskPending || t.Status == TaskAcknowledged {
 					startPrompt := fmt.Sprintf("[AUTO-START] Your previous task was completed. Starting next task:\ncm task start %s", t.ID)
-					sessions.WriteInkPrompt(agent.SessionID, startPrompt)
+					sessions.WriteInkPrompt(sid, startPrompt)
 					slog.Info("Auto-started next task", "agent", agentName, "taskId", t.ID, "title", t.Title)
 					break
 				}
@@ -517,6 +519,7 @@ func (m *Manager) checkStaleInProgressTasks() {
 	m.mu.RUnlock()
 
 	for _, agent := range agents {
+		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
@@ -533,7 +536,7 @@ func (m *Manager) checkStaleInProgressTasks() {
 		// progress checks at 5-min intervals culminating in 3 urgent
 		// checks (taskAge 15/20/25m) on a single in-progress task,
 		// while actively working the whole time.
-		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+		if sessions != nil && sessions.IsSessionWorking(sid) {
 			continue
 		}
 
@@ -566,7 +569,7 @@ func (m *Manager) checkStaleInProgressTasks() {
 			continue
 		}
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
@@ -581,7 +584,7 @@ func (m *Manager) checkStaleInProgressTasks() {
 			}, "\n")
 
 			if sessions != nil {
-				sessions.WriteInkPrompt(agent.SessionID, urgentPrompt)
+				sessions.WriteInkPrompt(sid, urgentPrompt)
 			}
 
 			agent.mu.Lock()
@@ -602,7 +605,7 @@ func (m *Manager) checkStaleInProgressTasks() {
 			}, "\n")
 
 			if sessions != nil {
-				sessions.WriteInkPrompt(agent.SessionID, gentlePrompt)
+				sessions.WriteInkPrompt(sid, gentlePrompt)
 			}
 
 			agent.mu.Lock()
@@ -670,12 +673,13 @@ func (m *Manager) checkForWedgedWorkingAgents(roster []*AgentState) {
 	}
 
 	for _, agent := range roster {
+		sid := m.sessionIDOf(agent)
 		if agent == nil || agent.Config == nil {
 			continue
 		}
 		// Only act on sessions that self-report as "working". Non-
 		// working agents are already covered by checkForStuckAgents.
-		if !sessions.IsSessionWorking(agent.SessionID) {
+		if !sessions.IsSessionWorking(sid) {
 			continue
 		}
 		agent.mu.Lock()
@@ -709,17 +713,17 @@ func (m *Manager) checkForWedgedWorkingAgents(roster []*AgentState) {
 			continue
 		}
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
 		slog.Warn("SDK session wedged in working state beyond timeout; stopping",
-			"session", agent.SessionID, "name", agentName,
+			"session", sid, "name", agentName,
 			"idle", idle.Round(time.Second).String(),
 			"timeout", cfg.WedgedWorkingTimeout.String())
 
-		if err := sessions.StopSession(agent.SessionID); err != nil {
-			slog.Warn("failed to stop wedged session", "session", agent.SessionID, "err", err)
+		if err := sessions.StopSession(sid); err != nil {
+			slog.Warn("failed to stop wedged session", "session", sid, "err", err)
 			// Fall through — still broadcast so the dashboard flags
 			// the agent even if the stop didn't take.
 		}
@@ -731,7 +735,7 @@ func (m *Manager) checkForWedgedWorkingAgents(roster []*AgentState) {
 		// removes on the subsequent office:memberLeft.
 		if agent.ClaimStopBroadcast() {
 			m.broadcast("office:agentIdleStopped", map[string]interface{}{
-				"sessionId": agent.SessionID,
+				"sessionId": sid,
 				"agentName": agentName,
 				"idleMs":    idle.Milliseconds(),
 				"timeoutMs": cfg.WedgedWorkingTimeout.Milliseconds(),
@@ -740,7 +744,7 @@ func (m *Manager) checkForWedgedWorkingAgents(roster []*AgentState) {
 		// UnregisterAgent triggers the same HandleAgentDeath path used
 		// by R18's operator kill, so task reassignment + dev-instance
 		// cleanup still runs.
-		m.UnregisterAgent(agent.SessionID)
+		m.UnregisterAgent(sid)
 	}
 }
 
@@ -776,6 +780,7 @@ func (m *Manager) checkForStuckAgents() {
 	}
 
 	for _, agent := range agents {
+		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
@@ -787,7 +792,7 @@ func (m *Manager) checkForStuckAgents() {
 		// response, only because he was silently working through a
 		// long multi-step turn between that response and the next
 		// API call.
-		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+		if sessions != nil && sessions.IsSessionWorking(sid) {
 			continue
 		}
 
@@ -845,7 +850,7 @@ func (m *Manager) checkForStuckAgents() {
 		attemptCount := agent.RecoveryAttempts
 		agent.mu.Unlock()
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
@@ -866,7 +871,7 @@ func (m *Manager) checkForStuckAgents() {
 		// any concurrent caller sees the recovery as in-flight before
 		// we even send the prompt.
 		m.mu.Lock()
-		lastRecovery := m.lastRecoveryAt[agent.SessionID]
+		lastRecovery := m.lastRecoveryAt[sid]
 		var backoff time.Duration
 		switch tier {
 		case RecoveryTier2:
@@ -888,7 +893,7 @@ func (m *Manager) checkForStuckAgents() {
 			agent.mu.Unlock()
 			continue
 		}
-		m.lastRecoveryAt[agent.SessionID] = time.Now()
+		m.lastRecoveryAt[sid] = time.Now()
 		m.mu.Unlock()
 
 		slog.Warn("Stuck agent recovery",
@@ -898,18 +903,18 @@ func (m *Manager) checkForStuckAgents() {
 			"agent", agentName,
 			"inactive", inactiveDuration)
 
-		m.executeRecoveryTier(sessions, agent.SessionID, tier)
+		m.executeRecoveryTier(sessions, sid, tier)
 
 		if tier == RecoveryTier3 {
 			m.broadcast("office:agentRestarted", map[string]interface{}{
-				"sessionId": agent.SessionID,
+				"sessionId": sid,
 				"name":      agentName,
 				"tier":      int(tier),
 			})
 		}
 
 		m.broadcast("office:agentRecovery", map[string]interface{}{
-			"sessionId":          agent.SessionID,
+			"sessionId":          sid,
 			"agentName":          agentName,
 			"attempt":            attemptCount,
 			"maxAttempts":        cfg.RecoveryMaxAttempts,
@@ -917,7 +922,7 @@ func (m *Manager) checkForStuckAgents() {
 			"inactiveDurationMs": inactiveDuration.Milliseconds(),
 		})
 		m.emitEvent(AgentRecoveryEvent{
-			SessionID:          agent.SessionID,
+			SessionID:          sid,
 			AgentName:          agentName,
 			Attempt:            attemptCount,
 			MaxAttempts:        cfg.RecoveryMaxAttempts,
@@ -927,7 +932,7 @@ func (m *Manager) checkForStuckAgents() {
 
 		// If all tiers exhausted, broadcast stuck alert and notify.
 		if attemptCount >= cfg.RecoveryMaxAttempts {
-			m.broadcastStuckAlert(agent.SessionID, agentName, inactiveDuration)
+			m.broadcastStuckAlert(sid, agentName, inactiveDuration)
 		}
 	}
 }
@@ -1072,6 +1077,7 @@ func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 	sessions := m.sessions
 	m.mu.RUnlock()
 	for _, agent := range roster {
+		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
@@ -1082,14 +1088,14 @@ func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 		// Captain / Dash / Stack / Shield each got two replenishment
 		// prompts 45s apart without being able to respond to the
 		// first). Same class as the ack-nudge fix in 83c9377.
-		if sessions != nil && sessions.IsSessionWorking(agent.SessionID) {
+		if sessions != nil && sessions.IsSessionWorking(sid) {
 			continue
 		}
 		// Also skip if the agent is already in an active meeting.
 		// Starting a second brainstorm for the same idle agent while
 		// they have one pending in the SDK queue just doubles up and
 		// both time out.
-		if m.IsInActiveMeeting(agent.SessionID) {
+		if m.IsInActiveMeeting(sid) {
 			continue
 		}
 		// Skip if agent still has enough work queued (more than 2 remaining).
@@ -1120,7 +1126,7 @@ func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 		agent.LastReplenishmentAt = time.Now()
 		agent.mu.Unlock()
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
@@ -1133,12 +1139,13 @@ func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 		// without a response. Observed 2026-04-18 04:02:59: Ops +
 		// Stack brainstorm where Stack was working -> Ops ended up
 		// facilitator -> timeout).
-		leader := m.findStrategicAgent(agent.SessionID)
+		leader := m.findStrategicAgent(sid)
+		leaderSid := m.sessionIDOf(leader) // nil-safe; SessionID under m.mu
 		if leader != nil && leader.ActiveTask() == nil && leader.PendingTaskCount() == 0 &&
-			!sessions.IsSessionWorking(leader.SessionID) {
-			meeting := m.StartBrainstorm([]string{agent.SessionID, leader.SessionID})
+			!sessions.IsSessionWorking(leaderSid) {
+			meeting := m.StartBrainstorm([]string{sid, leaderSid})
 			if meeting != nil {
-				leaderName := leader.SessionID
+				leaderName := leaderSid
 				if leader.Config != nil {
 					leaderName = leader.Config.Name
 				}
@@ -1150,11 +1157,12 @@ func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 
 		// Strategy 2: Brainstorm with any available (non-busy) agent.
 		// findAvailableAgent now also filters by IsSessionWorking.
-		partner := m.findAvailableAgent(agent.SessionID)
+		partner := m.findAvailableAgent(sid)
 		if partner != nil {
-			meeting := m.StartBrainstorm([]string{agent.SessionID, partner.SessionID})
+			partnerSid := m.sessionIDOf(partner)
+			meeting := m.StartBrainstorm([]string{sid, partnerSid})
 			if meeting != nil {
-				partnerName := partner.SessionID
+				partnerName := partnerSid
 				if partner.Config != nil {
 					partnerName = partner.Config.Name
 				}
@@ -1240,6 +1248,7 @@ func (m *Manager) findAvailableAgent(excludeSessionID string) *AgentState {
 // sendSelfReplenishmentPrompt sends an idle agent a prompt to find more work
 // on their own when no brainstorm partner is available.
 func (m *Manager) sendSelfReplenishmentPrompt(agent *AgentState) {
+	sid := m.sessionIDOf(agent) // SessionID read under m.mu (ReassignSessionID writes it under m.mu)
 	mission := m.GetTeamMission()
 	missionLine := ""
 	if mission != "" {
@@ -1275,24 +1284,24 @@ DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, roleName)
 	m.mu.RUnlock()
 
 	if sessions != nil {
-		sessions.WriteInkPrompt(agent.SessionID, prompt)
+		sessions.WriteInkPrompt(sid, prompt)
 		agent.mu.Lock()
 		agent.LastPromptSentAt = time.Now()
 		agent.mu.Unlock()
 	}
 
-	agentName := agent.SessionID
+	agentName := sid
 	if agent.Config != nil {
 		agentName = agent.Config.Name
 	}
 
 	m.broadcast("office:agentReplenishment", map[string]interface{}{
-		"sessionId": agent.SessionID,
+		"sessionId": sid,
 		"name":      agentName,
 		"type":      "self-replenishment",
 	})
 	m.emitEvent(AgentReplenishmentEvent{
-		SessionID: agent.SessionID,
+		SessionID: sid,
 		AgentName: agentName,
 		Type:      "self-replenishment",
 	})
@@ -1344,6 +1353,7 @@ func (m *Manager) checkBlockedTasksForLeaderTriage(roster []*AgentState) {
 
 	for _, snap := range snaps {
 		agent := snap.agent
+		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
@@ -1379,19 +1389,20 @@ func (m *Manager) checkBlockedTasksForLeaderTriage(roster []*AgentState) {
 				m.broadcast("office:taskAutoFailed", map[string]interface{}{
 					"taskId":    task.ID,
 					"title":     task.Title,
-					"sessionId": agent.SessionID,
+					"sessionId": sid,
 					"reason":    "max triage attempts exceeded",
 				})
 				continue
 			}
 
 			// Find a strategic-tier agent to triage.
-			leader := m.findStrategicAgent(agent.SessionID)
+			leader := m.findStrategicAgent(sid)
 			if leader == nil {
 				continue
 			}
+			leaderSid := m.sessionIDOf(leader)
 
-			leaderName := leader.SessionID
+			leaderName := leaderSid
 			if leader.Config != nil {
 				leaderName = leader.Config.Name
 			}
@@ -1400,9 +1411,9 @@ func (m *Manager) checkBlockedTasksForLeaderTriage(roster []*AgentState) {
 				"[BLOCKED TASK TRIAGE] %s is blocked on '%s': %s. "+
 					"Reassign: `cm task triage %s %s <reason>`",
 				agentName, task.Title, task.Description,
-				task.ID, agent.SessionID)
+				task.ID, sid)
 
-			sessions.WriteInkPrompt(leader.SessionID, triagePrompt)
+			sessions.WriteInkPrompt(leaderSid, triagePrompt)
 
 			m.mu.Lock()
 			m.triageAttempts[task.ID] = attempts + 1
@@ -1445,6 +1456,7 @@ func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 	}
 
 	for _, agent := range roster {
+		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
@@ -1457,7 +1469,7 @@ func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 		}
 		// Don't poke a session that's actively in a turn -- the
 		// curiosity prompt would just queue behind the current work.
-		if sessions.IsSessionWorking(agent.SessionID) {
+		if sessions.IsSessionWorking(sid) {
 			continue
 		}
 		// Also skip if the agent is already in an active meeting
@@ -1466,7 +1478,7 @@ func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 		// Captain as facilitator) AND immediately queued a curiosity
 		// prompt to Ops, doubling up on an already-pending meeting
 		// prompt in the SDK queue.
-		if m.IsInActiveMeeting(agent.SessionID) {
+		if m.IsInActiveMeeting(sid) {
 			continue
 		}
 
@@ -1479,7 +1491,7 @@ func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 			continue
 		}
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
@@ -1496,7 +1508,7 @@ func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 			`Add tasks for yourself: cm task self-add "<title>" "<description>"`,
 		}, "\n")
 
-		sessions.WriteInkPrompt(agent.SessionID, curiosityPrompt)
+		sessions.WriteInkPrompt(sid, curiosityPrompt)
 
 		agent.mu.Lock()
 		agent.LastCuriosityAt = time.Now()
@@ -1506,11 +1518,11 @@ func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 		m.metrics.TotalCuriosity.Add(1)
 
 		m.broadcast("office:curiosityTriggered", map[string]interface{}{
-			"sessionId": agent.SessionID,
+			"sessionId": sid,
 			"agentName": agentName,
 		})
 		m.emitEvent(CuriosityEvent{
-			SessionID: agent.SessionID,
+			SessionID: sid,
 			AgentName: agentName,
 		})
 
@@ -1570,13 +1582,14 @@ func (m *Manager) maybeTriggerWaterCoolerChat(roster []*AgentState) {
 	// NOT already in a brainstorm or other active meeting).
 	var idle []*AgentState
 	for _, agent := range roster {
+		sid := m.sessionIDOf(agent)
 		if agent.ActiveTask() != nil || agent.PendingTaskCount() != 0 {
 			continue
 		}
-		if sessions.IsSessionWorking(agent.SessionID) {
+		if sessions.IsSessionWorking(sid) {
 			continue
 		}
-		if m.IsInActiveMeeting(agent.SessionID) {
+		if m.IsInActiveMeeting(sid) {
 			continue
 		}
 		idle = append(idle, agent)
@@ -1594,12 +1607,14 @@ func (m *Manager) maybeTriggerWaterCoolerChat(roster []*AgentState) {
 	}
 	agentA := idle[idxA]
 	agentB := idle[idxB]
+	sidA := m.sessionIDOf(agentA)
+	sidB := m.sessionIDOf(agentB)
 
-	nameA := agentA.SessionID
+	nameA := sidA
 	if agentA.Config != nil {
 		nameA = agentA.Config.Name
 	}
-	nameB := agentB.SessionID
+	nameB := sidB
 	if agentB.Config != nil {
 		nameB = agentB.Config.Name
 	}
@@ -1611,8 +1626,8 @@ func (m *Manager) maybeTriggerWaterCoolerChat(roster []*AgentState) {
 		"[WATER COOLER] Quick chat with %s! Share something interesting you've noticed in the codebase or suggest an improvement.",
 		nameA)
 
-	sessions.WriteInkPrompt(agentA.SessionID, promptA)
-	sessions.WriteInkPrompt(agentB.SessionID, promptB)
+	sessions.WriteInkPrompt(sidA, promptA)
+	sessions.WriteInkPrompt(sidB, promptB)
 	agentA.mu.Lock()
 	agentA.LastPromptSentAt = time.Now()
 	agentA.mu.Unlock()
@@ -1629,8 +1644,8 @@ func (m *Manager) maybeTriggerWaterCoolerChat(roster []*AgentState) {
 		"agentB": nameB,
 	})
 	m.emitEvent(WaterCoolerEvent{
-		SessionIDA: agentA.SessionID,
-		SessionIDB: agentB.SessionID,
+		SessionIDA: sidA,
+		SessionIDB: sidB,
 	})
 
 	slog.Info("Water cooler chat triggered", "agentA", nameA, "agentB", nameB)
@@ -1666,6 +1681,7 @@ func (m *Manager) checkForReflectionOpportunity(roster []*AgentState) {
 	}
 
 	for _, agent := range roster {
+		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
@@ -1680,7 +1696,7 @@ func (m *Manager) checkForReflectionOpportunity(roster []*AgentState) {
 		// Skip agents mid-turn: a reflection prompt stacked behind an
 		// in-flight turn just gets consumed as "another message" once
 		// the turn completes, losing the contemplative context.
-		if sessions.IsSessionWorking(agent.SessionID) {
+		if sessions.IsSessionWorking(sid) {
 			continue
 		}
 
@@ -1711,7 +1727,7 @@ func (m *Manager) checkForReflectionOpportunity(roster []*AgentState) {
 			continue
 		}
 
-		agentName := agent.SessionID
+		agentName := sid
 		if agent.Config != nil {
 			agentName = agent.Config.Name
 		}
@@ -1733,18 +1749,18 @@ func (m *Manager) checkForReflectionOpportunity(roster []*AgentState) {
 			`cm memory write "<summary of what you worked on, key decisions, and next steps>"`,
 		}, "\n")
 
-		sessions.WriteInkPrompt(agent.SessionID, reflectionPrompt)
+		sessions.WriteInkPrompt(sid, reflectionPrompt)
 
 		agent.mu.Lock()
 		agent.LastReflectionAt = now
 		agent.mu.Unlock()
 
 		m.broadcast("office:reflectionTriggered", map[string]interface{}{
-			"sessionId": agent.SessionID,
+			"sessionId": sid,
 			"agentName": agentName,
 		})
 		m.emitEvent(ReflectionEvent{
-			SessionID: agent.SessionID,
+			SessionID: sid,
 			AgentName: agentName,
 		})
 

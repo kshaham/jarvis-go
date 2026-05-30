@@ -294,7 +294,7 @@ func truncateForSnippet(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max-1] + "…"
+	return truncRunes(s, max-1) + "…"
 }
 
 // ---------------------------------------------------------------------------

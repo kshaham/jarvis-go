@@ -19,11 +19,17 @@ const (
 
 // Client represents a connected SSE client with its own write goroutine.
 type Client struct {
-	w             http.ResponseWriter
-	flusher       http.Flusher
-	ch            chan EventMessage
-	done          chan struct{}
-	ctx           context.Context
+	w       http.ResponseWriter
+	flusher http.Flusher
+	ch      chan EventMessage
+	done    chan struct{}
+	ctx     context.Context
+	// sendMu serializes the non-blocking channel send in Send against the
+	// close(c.ch) in Close. The closed flag + recover used to mask the
+	// send-on-closed PANIC, but `c.ch <- msg` racing `close(c.ch)` is still a
+	// DATA RACE the detector flags; holding sendMu across both makes them
+	// mutually exclusive. The select stays non-blocking, so the hold is trivial.
+	sendMu        sync.Mutex
 	closeOnce     sync.Once
 	closed        atomic.Bool
 	subscriptions []string // nil = all events
@@ -56,10 +62,13 @@ func NewClient(w http.ResponseWriter, f http.Flusher, ctx context.Context, subs 
 // Send queues an event for delivery. Non-blocking.
 // Uses recover to handle the TOCTOU race between the closed check and the channel send.
 func (c *Client) Send(msg EventMessage) {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
 	if c.closed.Load() {
 		return
 	}
-	defer func() { recover() }() // catch send on closed channel
+	// Under sendMu the channel can't be closed concurrently, so the send can't
+	// panic; the select stays non-blocking for backpressure.
 	select {
 	case c.ch <- msg:
 	default:
@@ -82,6 +91,8 @@ func (c *Client) Done() <-chan struct{} {
 // http.Server.Shutdown doesn't wait on never-returning SSE handlers. Idempotent
 // and safe against a concurrent Send (both go through closeOnce).
 func (c *Client) Close() {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
 	c.closeOnce.Do(func() {
 		c.closed.Store(true)
 		close(c.ch)

@@ -331,13 +331,16 @@ func (a *AgentState) TouchAgentAPI() {
 	a.mu.Unlock()
 }
 
-// ActiveTask returns the first in_progress task, or nil.
+// ActiveTask returns a DEEP COPY of the first in_progress task, or nil. A copy
+// (not the live pointer) so callers that read its fields outside a.mu don't race
+// the in-place task mutators. No caller mutates via the return (mutators act on
+// a.taskQueue.Tasks directly), so copying is behavior-preserving.
 func (a *AgentState) ActiveTask() *Task {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, t := range a.taskQueue.Tasks {
 		if t.Status == TaskInProgress {
-			return t
+			return deepCopyTask(t)
 		}
 	}
 	return nil
@@ -394,6 +397,20 @@ func (a *AgentState) GetTasksCopy() []*Task {
 	return result
 }
 
+// GetTaskLabels returns a copy of the Labels for the task with the given ID,
+// read under a.mu. Use this instead of reading t.Labels off a GetTasks() live
+// pointer from another goroutine -- SetTaskLabels mutates it under a.mu.
+func (a *AgentState) GetTaskLabels(taskID string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.taskQueue.Tasks {
+		if t != nil && t.ID == taskID {
+			return append([]string(nil), t.Labels...)
+		}
+	}
+	return nil
+}
+
 // PendingTaskCount returns the number of pending/acknowledged tasks.
 func (a *AgentState) PendingTaskCount() int {
 	a.mu.Lock()
@@ -413,7 +430,9 @@ func (a *AgentState) NextPendingTask() *Task {
 	defer a.mu.Unlock()
 	for _, t := range a.taskQueue.Tasks {
 		if t.Status == TaskPending || t.Status == TaskAcknowledged {
-			return t
+			// Deep copy: callers read fields outside a.mu and dispatch by ID; no
+			// caller mutates via this pointer.
+			return deepCopyTask(t)
 		}
 	}
 	return nil
@@ -444,11 +463,22 @@ func (a *AgentState) TaskGateInfo(taskID string) (criteria []string, gated bool,
 }
 
 // GetTasks returns a shallow copy of the task list under the mutex.
+// GetTasks returns DEEP COPIES of all tasks under the mutex. It previously
+// returned a shallow copy (live *Task pointers), which made every caller that
+// read a task field outside a.mu (the recovery ticker, telegram poll, payload
+// marshalers, prompt builders, ...) a data race against the in-place task
+// mutators. Deep-copying here closes that whole class structurally -- the ONLY
+// caller that needed the live pointer (InitiateHandoff) was reworked to operate
+// on a.taskQueue.Tasks directly under the lock. Mutators (AddTask,
+// UpdateTaskStatus, SetTaskProgress, ...) all act on a.taskQueue.Tasks directly,
+// so none depend on this returning live pointers.
 func (a *AgentState) GetTasks() []*Task {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	result := make([]*Task, len(a.taskQueue.Tasks))
-	copy(result, a.taskQueue.Tasks)
+	for i, t := range a.taskQueue.Tasks {
+		result[i] = deepCopyTask(t)
+	}
 	return result
 }
 

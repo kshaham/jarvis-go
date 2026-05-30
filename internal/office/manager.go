@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -106,11 +107,12 @@ type Manager struct {
 	lastWaterCoolerAt time.Time
 	triageAttempts    map[string]int       // taskID -> triage attempt count
 	lastTriageAt      map[string]time.Time // taskID -> last triage prompt time
-	// Entries in the maps above are pruned when a task moves out of Blocked
-	// state via pruneTriage (called from AgentState.UpdateTaskStatus through
-	// the Manager), and swept against live-task IDs in
-	// checkBlockedTasksForLeaderTriage so orphaned entries from deleted
-	// agents don't linger forever.
+	// Entries in the maps above are reclaimed by SweepTriageMaps (periodic,
+	// against the live set of Blocked task IDs) and wholesale on
+	// SetTeamSpawned(false), so they don't grow without bound. (PruneTriage is a
+	// per-task helper available for callers that hold a Manager reference; the
+	// AgentState status path can't call it directly since AgentState has no
+	// Manager back-reference -- the sweep is the actual reclamation path.)
 	lastRecoveryAt map[string]time.Time // sessionID -> last recovery prompt time (backoff)
 
 	// Fix 4: cached handoff stale threshold to avoid per-tick file reads.
@@ -553,9 +555,26 @@ func (m *Manager) GetRoster() []*AgentState {
 // it directly off a roster *AgentState (after GetRoster released m.mu) is a data
 // race. Callers must NOT already hold m.mu.
 func (m *Manager) sessionIDOf(a *AgentState) string {
+	if a == nil {
+		return ""
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return a.SessionID
+}
+
+// truncRunes returns s clipped to at most maxBytes bytes, backing up to a rune
+// boundary so a multibyte rune is never split (which json.Marshal would replace
+// with U+FFFD). Used for short audit-log snippets.
+func truncRunes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	limit := maxBytes
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit]
 }
 
 // GetAgentAndTouch returns the agent for sessionID and records that
@@ -700,10 +719,10 @@ func (m *Manager) Events() <-chan OfficeEvent {
 	return m.events
 }
 
-// PruneTriage drops any triage tracking entries for the given taskID. Called
-// from AgentState.UpdateTaskStatus whenever a task transitions out of Blocked
-// (completion, failure, or just back to in-progress) so the triage maps don't
-// grow without bound across long-running teams.
+// PruneTriage drops any triage tracking entries for the given taskID. A helper
+// for callers that hold a Manager reference and want to reclaim a single task's
+// triage state eagerly; the routine reclamation path is SweepTriageMaps (the
+// AgentState status transition can't reach the Manager to call this directly).
 func (m *Manager) PruneTriage(taskID string) {
 	if taskID == "" {
 		return
@@ -856,7 +875,9 @@ func (m *Manager) InjectRelayMessage(fromPeerID, fromDisplayName, content string
 	// SendMessage handles the OfficeMessage append, SSE broadcast, and
 	// WriteViaScreen delivery — reuse it so relay traffic flows through
 	// the same audit log as regular team messages.
-	m.SendMessage(syntheticFrom, target.SessionID, body)
+	// Read SessionID under m.mu (ReassignSessionID mutates it under m.mu) rather
+	// than off the live roster pointer.
+	m.SendMessage(syntheticFrom, m.sessionIDOf(target), body)
 	return true
 }
 
@@ -2397,7 +2418,7 @@ func (m *Manager) SubmitLeaderTasksResponse(sessionID, content string) bool {
 		agentName = agent.Config.Name
 	}
 	m.auditLog("office:leaderTasksResponse", sessionID, agentName, map[string]interface{}{
-		"content": content[:min(len(content), 200)],
+		"content": truncRunes(content, 200),
 	})
 	m.broadcast("office:leaderTasksResponse", map[string]interface{}{
 		"sessionId": sessionID,
@@ -2466,7 +2487,7 @@ func (m *Manager) SubmitReflectionResponse(sessionID, learning, category, taskID
 	}
 
 	m.auditLog("office:reflectionResponse", sessionID, agentName, map[string]interface{}{
-		"learning": learning[:min(len(learning), 200)],
+		"learning": truncRunes(learning, 200),
 		"category": category,
 	})
 	m.broadcast("office:reflectionResponse", map[string]interface{}{
@@ -2486,7 +2507,9 @@ func (m *Manager) SubmitReflectionResponse(sessionID, learning, category, taskID
 			"Since you discovered a reusable technique, consider creating a shared skill so other agents can benefit:",
 			`  cm skill create "<descriptive-name>" "<detailed steps and when to use this>"`,
 		}, "\n")
-		sessions.WriteInkPrompt(agent.SessionID, skillSuggestion)
+		// Use the sessionID parameter (caller-owned value), not the live
+		// agent.SessionID field which ReassignSessionID mutates under m.mu.
+		sessions.WriteInkPrompt(sessionID, skillSuggestion)
 	}
 
 	return true
@@ -2518,7 +2541,7 @@ func (m *Manager) SubmitCuriosityDiscovery(sessionID, summary string) bool {
 		agentName = agent.Config.Name
 	}
 	m.auditLog("office:curiosityDiscovery", sessionID, agentName, map[string]interface{}{
-		"summary": summary[:min(len(summary), 200)],
+		"summary": truncRunes(summary, 200),
 	})
 	m.broadcast("office:curiosityDiscovery", map[string]interface{}{
 		"sessionId": sessionID,

@@ -261,11 +261,26 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 		return nil, fmt.Errorf("cannot hand off to self")
 	}
 
-	// Count sender's existing pending outgoing handoffs.
-	tasks := sender.GetTasks()
+	fromName := ""
+	if sender.Config != nil {
+		fromName = sender.Config.Name
+	}
+	toName := ""
+	if receiver.Config != nil {
+		toName = receiver.Config.Name
+	}
+
+	// Find the target, count pending handoffs, validate, build the request, and
+	// commit -- ALL under sender.mu in one critical section. This makes the
+	// pending-count + existence + status checks atomic with the mutation (two
+	// concurrent initiates can't both pass and clobber each other's Handoff),
+	// AND removes the only place that needed an escaped live *Task pointer from
+	// GetTasks() -- so GetTasks() now returns deep copies for every (read-only)
+	// caller, eliminating that whole live-pointer race class.
+	sender.mu.Lock()
 	pending := 0
 	var targetTask *Task
-	for _, t := range tasks {
+	for _, t := range sender.taskQueue.Tasks {
 		if t.Status == TaskHandoffPending && t.Handoff != nil {
 			pending++
 		}
@@ -274,19 +289,21 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 		}
 	}
 	if targetTask == nil {
+		sender.mu.Unlock()
 		return nil, fmt.Errorf("task not found")
 	}
 	if pending >= HandoffMaxPendingPerSender {
+		sender.mu.Unlock()
 		return nil, fmt.Errorf("too many pending handoffs (limit %d)", HandoffMaxPendingPerSender)
 	}
-
-	fromName := ""
-	if sender.Config != nil {
-		fromName = sender.Config.Name
+	if targetTask.Handoff != nil {
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("task already has a pending handoff")
 	}
-	toName := ""
-	if receiver.Config != nil {
-		toName = receiver.Config.Name
+	if targetTask.Status != TaskInProgress {
+		status := targetTask.Status
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("task must be in_progress to hand off (current: %s)", status)
 	}
 	h := &HandoffRequest{
 		ID:            fmt.Sprintf("ho-%d", time.Now().UnixNano()),
@@ -301,23 +318,6 @@ func (m *Manager) InitiateHandoff(fromSessionID, taskID, toConfigID, context str
 		Context:       context,
 		Status:        HandoffPending,
 		CreatedAt:     time.Now(),
-	}
-
-	// Commit under the sender's mutex with the existence/status checks INSIDE
-	// the critical section, so two concurrent initiates for the same task can't
-	// both pass a nil-check and clobber each other's Handoff pointer (orphaning
-	// the first handoff). The specific "already pending" message beats
-	// "not in_progress" since a handoff_pending task no longer reports
-	// in_progress.
-	sender.mu.Lock()
-	if targetTask.Handoff != nil {
-		sender.mu.Unlock()
-		return nil, fmt.Errorf("task already has a pending handoff")
-	}
-	if targetTask.Status != TaskInProgress {
-		status := targetTask.Status
-		sender.mu.Unlock()
-		return nil, fmt.Errorf("task must be in_progress to hand off (current: %s)", status)
 	}
 	targetTask.Status = TaskHandoffPending
 	targetTask.Handoff = h
