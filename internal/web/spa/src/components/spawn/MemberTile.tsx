@@ -1,10 +1,21 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import { m, useReducedMotion } from 'motion/react';
 
-import { GlowCard } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { spring } from '@/lib/motion';
 import { Avatar } from './Avatar';
 import { TierBadge, type Tier } from './TierBadge';
+
+// Button-reset styles that keep the tile visually identical to the former div.
+// Static and extracted so the object reference is stable across renders.
+const buttonResetStyle: CSSProperties = {
+  appearance: 'none',
+  font: 'inherit',
+  color: 'inherit',
+  textAlign: 'left',
+  width: '100%',
+  minHeight: 88,
+};
 
 const editedBadgeStyle: CSSProperties = {
   display: 'inline-flex',
@@ -21,8 +32,10 @@ const editedBadgeStyle: CSSProperties = {
 
 // MemberTile — a roomy roster card. Shows the agent's avatar plus the
 // FULL name and role (wrapping, never truncated) and a tier pill, so an
-// operator can read who's on the team at a glance. Built on GlowCard for
-// the shared depth/hover/live-glow; selected = accent ring + glow.
+// operator can read who's on the team at a glance. Built on the shared
+// surface-card depth/hover/live-glow styles; selected = accent ring + glow.
+// Rendered as a real <button> (semantic, keyboard-accessible) with a full
+// button-reset so the card appearance is pixel-identical to the old div.
 export function MemberTile({
   id,
   name,
@@ -33,6 +46,7 @@ export function MemberTile({
   selected,
   edited,
   onClick,
+  onKeyDown,
   style,
 }: {
   id?: string;
@@ -44,21 +58,28 @@ export function MemberTile({
   selected?: boolean;
   edited?: boolean;
   onClick?: () => void;
+  onKeyDown?: (e: KeyboardEvent<HTMLButtonElement>) => void;
   style?: CSSProperties;
 }) {
   const reduce = useReducedMotion();
   return (
-    <GlowCard
+    <m.button
+      type="button"
       id={id}
-      role="option"
-      aria-selected={!!selected}
+      aria-pressed={!!selected}
       aria-label={`${name || 'Unnamed'}${role ? `, ${role}` : ''}`}
-      interactive
-      live={selected}
       onClick={onClick}
-      className={cn('flex cursor-pointer items-start gap-3 p-3')}
+      onKeyDown={onKeyDown}
+      whileHover={!reduce ? { y: -2 } : undefined}
+      transition={spring.smooth}
+      className={cn(
+        'surface-card',
+        'transition-shadow duration-200',
+        selected ? 'shadow-lg-live hover:shadow-lg-live-hover' : 'hover:shadow-lg-hover',
+        'flex cursor-pointer items-start gap-3 p-3',
+      )}
       style={{
-        minHeight: 88,
+        ...buttonResetStyle,
         background: selected ? 'var(--lg-fill-accent)' : undefined,
         border: selected ? '1px solid rgb(var(--accent-rgb) / 0.6)' : undefined,
         ...style,
@@ -113,6 +134,6 @@ export function MemberTile({
           ) : null}
         </div>
       </div>
-    </GlowCard>
+    </m.button>
   );
 }

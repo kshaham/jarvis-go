@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import type { TeamTemplate } from '../../api/types';
 import { RevealItem } from '../motion/RevealItem';
 import { SectionCard } from './formPrimitives';
@@ -33,6 +33,17 @@ const emptyEditorStyle: CSSProperties = {
   color: 'var(--text-muted)',
   fontSize: 12,
   textAlign: 'center' as const,
+};
+
+// Grid container for the roster tiles — extracted so the object is stable.
+const rosterGridStyle: CSSProperties = {
+  listStyle: 'none',
+  padding: 2,
+  margin: 0,
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+  gap: 10,
+  marginBottom: 12,
 };
 
 export function MembersSection({
@@ -84,37 +95,28 @@ export function MembersSection({
     updateOne(fresh);
   };
 
+  // Arrow-key handler attached to each tile button so keyboard navigation
+  // works without an event listener on a non-interactive container element.
+  const handleTileKeyDown = (memberId: string) => (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    const idx = members.findIndex((m) => m.id === memberId);
+    if (idx < 0) return;
+    const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
+    const next = members[(idx + delta + members.length) % members.length];
+    if (next) {
+      setSelectedMemberId(next.id);
+      (document.getElementById(`member-tile-${next.id}`) as HTMLButtonElement | null)?.focus();
+    }
+  };
+
   return (
     <SectionCard
       title={`Members (${members.length})`}
       hint="Click a card to edit. Amber pill = overridden from the template."
       trailing={MEMBERS_TRAILING}
     >
-      <div
-        role="listbox"
-        aria-label="Team roster"
-        aria-activedescendant={selectedMemberId ? `member-tile-${selectedMemberId}` : undefined}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-          e.preventDefault();
-          const idx = members.findIndex((m) => m.id === selectedMemberId);
-          if (idx < 0) return;
-          const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
-          const next = members[(idx + delta + members.length) % members.length];
-          if (next) setSelectedMemberId(next.id);
-        }}
-        className="focus-ring"
-        style={{
-          listStyle: 'none',
-          padding: 2,
-          margin: 0,
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-          gap: 10,
-          marginBottom: 12,
-        }}
-      >
+      <div aria-label="Team roster" style={rosterGridStyle}>
         {members.map((m, i) => {
           const base = baseById.get(m.id);
           const edited = base ? isMemberEdited(m, base) : false;
@@ -130,6 +132,7 @@ export function MembersSection({
                 selected={m.id === selectedMemberId}
                 edited={edited}
                 onClick={() => setSelectedMemberId(m.id)}
+                onKeyDown={handleTileKeyDown(m.id)}
                 style={{ width: '100%' }}
               />
             </RevealItem>

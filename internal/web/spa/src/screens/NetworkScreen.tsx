@@ -2,15 +2,17 @@ import '@xyflow/react/dist/style.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import {
+  applyNodeChanges,
+  applyEdgeChanges,
   Background,
   Controls,
   ReactFlow,
   ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
   useReactFlow,
   type Edge,
   type Node,
+  type NodeChange,
+  type EdgeChange,
   type NodeTypes,
 } from '@xyflow/react';
 
@@ -232,6 +234,86 @@ function edgeFrom(e: MsgEdge, maxCount: number): Edge {
   };
 }
 
+// useGraphElements — derives React Flow nodes + edges from props via useMemo.
+// Positions are computed by settleLayout on topology change; user-drag
+// overrides are preserved in a positionOverrides ref. Returns controlled
+// nodes/edges plus change handlers so the caller owns no setState-in-effect.
+function useGraphElements(
+  members: OfficeMember[],
+  edges: MsgEdge[],
+  maxCount: number,
+  relayoutSeed: number,
+) {
+  // positionOverrides: tracks user-dragged positions keyed by node id.
+  // Lazy-init avoids allocating a new Map on every render (useRef has no
+  // lazy-init form, so the pattern is: start null, init on first access).
+  const positionOverrides = useRef<Map<string, { x: number; y: number }> | null>(null);
+  if (positionOverrides.current === null) positionOverrides.current = new Map();
+  // topoKey to detect topology changes (node set or edge topology changes).
+  const prevTopoKey = useRef('');
+
+  // layoutInputs bundles node ids + edge pairs alongside relayoutSeed so
+  // settledPositions can depend solely on this stable object, avoiding the
+  // exhaustive-deps false positive that arises when relayoutSeed is listed
+  // as a dep but not directly referenced inside the layout callback.
+  const layoutInputs = useMemo(() => ({
+    nodeIds: members.map((m) => m.sessionId),
+    edgePairs: edges.map((e) => ({ source: e.source, target: e.target })),
+    seed: relayoutSeed,
+  }), [members, edges, relayoutSeed]);
+
+  const topoKey = `${layoutInputs.nodeIds.toSorted().join(',')}||${layoutInputs.edgePairs.map((e) => `${e.source}-${e.target}`).toSorted().join(',')}||${layoutInputs.seed}`;
+
+  // Settled layout positions — recomputed whenever node ids, edges, or the
+  // manual relayout seed change (all three are captured in layoutInputs).
+  const settledPositions = useMemo(
+    () => settleLayout(layoutInputs.nodeIds, layoutInputs.edgePairs, W, H),
+    [layoutInputs],
+  );
+
+  // When topology changes, clear drag overrides so the new layout takes effect.
+  if (topoKey !== prevTopoKey.current) {
+    prevTopoKey.current = topoKey;
+    positionOverrides.current = new Map();
+  }
+
+  const computedNodes = useMemo<Node[]>(() => {
+    const memberById = new Map(members.map((m) => [m.sessionId, m] as const));
+    return members.map((m) => ({
+      id: m.sessionId,
+      type: 'agent' as const,
+      position:
+        positionOverrides.current!.get(m.sessionId) ??
+        settledPositions.get(m.sessionId) ?? { x: W / 2, y: H / 2 },
+      data: { member: memberById.get(m.sessionId) as OfficeMember },
+    }));
+  }, [members, settledPositions]);
+
+  const computedEdges = useMemo<Edge[]>(
+    () => edges.map((e) => edgeFrom(e, maxCount)),
+    [edges, maxCount],
+  );
+
+  // onNodesChange: apply standard changes (drag, select, remove) and
+  // persist position moves to the overrides ref so they survive re-renders.
+  function onNodesChange(changes: NodeChange<Node>[]) {
+    for (const change of changes) {
+      if (change.type === 'position' && change.position) {
+        positionOverrides.current!.set(change.id, change.position);
+      }
+    }
+    // applyNodeChanges is called for side-effects like select/remove; we
+    // don't store the result because computedNodes is the source of truth.
+    applyNodeChanges(changes, computedNodes);
+  }
+
+  function onEdgesChange(changes: EdgeChange<Edge>[]) {
+    applyEdgeChanges(changes, computedEdges);
+  }
+
+  return { computedNodes, computedEdges, topoKey, onNodesChange, onEdgesChange };
+}
+
 function NetworkGraph({
   members,
   edges,
@@ -246,57 +328,23 @@ function NetworkGraph({
   onSelect: (id: string) => void;
 }) {
   const reduce = useReducedMotion();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const { fitView } = useReactFlow();
-  const topoRef = useRef('');
+  const { computedNodes, computedEdges, topoKey, onNodesChange, onEdgesChange } =
+    useGraphElements(members, edges, maxCount, relayoutSeed);
 
+  // fitView is an imperative viewport action (not data-to-parent), so a
+  // one-liner effect gated on topology change is acceptable here.
+  const prevFitTopoKey = useRef('');
   useEffect(() => {
-    const nodeIds = members.map((m) => m.sessionId);
-    const memberById = new Map(members.map((m) => [m.sessionId, m] as const));
-    const topoKey =
-      nodeIds.toSorted().join(',') +
-      '||' +
-      edges.map((e) => `${e.source}-${e.target}`).toSorted().join(',') +
-      '||' +
-      relayoutSeed;
-
-    if (topoKey !== topoRef.current) {
-      // Topology changed (or manual relayout) — recompute positions.
-      topoRef.current = topoKey;
-      const pos = settleLayout(
-        nodeIds,
-        edges.map((e) => ({ source: e.source, target: e.target })),
-        W,
-        H,
-      );
-      setNodes(
-        nodeIds.map((id) => ({
-          id,
-          type: 'agent',
-          position: pos.get(id) ?? { x: W / 2, y: H / 2 },
-          data: { member: memberById.get(id) as OfficeMember },
-        })),
-      );
-      setRfEdges(edges.map((e) => edgeFrom(e, maxCount)));
-      requestAnimationFrame(() => fitView({ padding: 0.2, duration: reduce ? 0 : 400 }));
-    } else {
-      // Same topology — refresh node data + edge styling in place,
-      // keep positions (and any user drag) stable.
-      setNodes((prev) =>
-        prev.map((n) => {
-          const m = memberById.get(n.id);
-          return m ? { ...n, data: { member: m } } : n;
-        }),
-      );
-      setRfEdges(edges.map((e) => edgeFrom(e, maxCount)));
-    }
-  }, [members, edges, maxCount, relayoutSeed, reduce, setNodes, setRfEdges, fitView]);
+    if (topoKey === prevFitTopoKey.current) return;
+    prevFitTopoKey.current = topoKey;
+    requestAnimationFrame(() => fitView({ padding: 0.2, duration: reduce ? 0 : 400 }));
+  }, [topoKey, fitView, reduce]);
 
   return (
     <ReactFlow
-      nodes={nodes}
-      edges={rfEdges}
+      nodes={computedNodes}
+      edges={computedEdges}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       nodeTypes={nodeTypes}
