@@ -78,6 +78,10 @@ func Dir() string {
 // SetDirForTest overrides the cached library root. Returns a restore
 // function suitable for t.Cleanup. Tests use this to point library
 // writes at a temp dir without touching the operator's real library.
+//
+// Resetting the library root invalidates all result caches (search
+// and anti-pattern) because the underlying corpus changes completely
+// when the root changes.
 func SetDirForTest(path string) (restore func()) {
 	prev := libDir
 	prevOnce := dirOnce
@@ -85,9 +89,16 @@ func SetDirForTest(path string) (restore func()) {
 	fresh := &sync.Once{}
 	fresh.Do(func() {}) // mark as resolved so Dir returns libDir directly
 	dirOnce = fresh
+	// Invalidate result caches so tests that swap the library root
+	// see fresh corpus results rather than a prior test's cached hits.
+	resetLibrarySearchCacheForTest()
+	resetAntiPatternSearchCacheForTest()
 	return func() {
 		libDir = prev
 		dirOnce = prevOnce
+		// Also invalidate on restore so the next test starts clean.
+		resetLibrarySearchCacheForTest()
+		resetAntiPatternSearchCacheForTest()
 	}
 }
 
@@ -189,16 +200,16 @@ type StandupMessage struct {
 // rendering. The jsonl file in office-memory/ stays as the source
 // of truth; this is a markdown projection for PageIndex.
 type ExperimentRecord struct {
-	ID             string
-	TeamTemplate   string
-	Mission        string
-	TaskCount      int
-	CompletedCount int
-	AvgScore       float64
-	DurationMS     int64
-	TopPerformer   string
+	ID              string
+	TeamTemplate    string
+	Mission         string
+	TaskCount       int
+	CompletedCount  int
+	AvgScore        float64
+	DurationMS      int64
+	TopPerformer    string
 	BottomPerformer string
-	Timestamp      time.Time
+	Timestamp       time.Time
 }
 
 // AntiPattern is the parallel-to-Workflow shape for failure
@@ -211,18 +222,18 @@ type ExperimentRecord struct {
 // up "auth" via the MCP gets BOTH "what worked" and "what to
 // avoid" in the same tree branch.
 type AntiPattern struct {
-	Slug                 string
-	Title                string
-	DerivedFromTaskIDs   []string
-	AvgOutcome           float64 // expect < lowOutcomeThreshold
-	ObservationCount     int     // size of the low-outcome cluster
-	AgentRole            string
-	TaskLabels           []string
-	WorkingDirHints      []string
-	WhatWentWrong        []string // observations from the cluster
-	WhatToAvoid          []string // actionable guidance
-	WhyItFails           string   // root-cause explanation
-	CreatedAt            time.Time
+	Slug               string
+	Title              string
+	DerivedFromTaskIDs []string
+	AvgOutcome         float64 // expect < lowOutcomeThreshold
+	ObservationCount   int     // size of the low-outcome cluster
+	AgentRole          string
+	TaskLabels         []string
+	WorkingDirHints    []string
+	WhatWentWrong      []string // observations from the cluster
+	WhatToAvoid        []string // actionable guidance
+	WhyItFails         string   // root-cause explanation
+	CreatedAt          time.Time
 }
 
 // experiencePath returns the absolute path for the given (configID,

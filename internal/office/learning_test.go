@@ -606,3 +606,54 @@ func TestBuildCrossAgentContext(t *testing.T) {
 		t.Error("cross-agent context should not include the excluded agent's learnings")
 	}
 }
+
+// TestBuildCrossAgentContextUsesCache verifies that BuildCrossAgentContextCompact
+// uses the learning cache: after seeding 2 peers, calling the function once
+// populates the cache; deleting one peer's file and calling again within the
+// TTL still includes that peer's content (served from cache, not disk).
+func TestBuildCrossAgentContextUsesCache(t *testing.T) {
+	learningsPath, cleanup := withTempLearningsDir(t)
+	defer cleanup()
+	clearLearningCacheForTest()
+
+	peer1 := &AgentLearningData{
+		ConfigID: "peer-alpha",
+		Name:     "Alpha",
+		Learnings: []AgentLearning{
+			{Category: "technique", Content: "use context cancellation everywhere", CreatedAt: time.Now()},
+		},
+		Skills:            make([]AgentSkillEntry, 0),
+		DistilledInsights: make([]string, 0),
+	}
+	peer2 := &AgentLearningData{
+		ConfigID: "peer-beta",
+		Name:     "Beta",
+		Learnings: []AgentLearning{
+			{Category: "pitfall", Content: "never hold locks across IO calls", CreatedAt: time.Now()},
+		},
+		Skills:            make([]AgentSkillEntry, 0),
+		DistilledInsights: make([]string, 0),
+	}
+	writeLearningFile(t, learningsPath, peer1)
+	writeLearningFile(t, learningsPath, peer2)
+
+	// First call: cold cache, must include both peers.
+	first := BuildCrossAgentContextCompact("self-agent")
+	if !strings.Contains(first, "context cancellation") {
+		t.Errorf("first call missing peer-alpha learning; got:\n%s", first)
+	}
+	if !strings.Contains(first, "locks across IO") {
+		t.Errorf("first call missing peer-beta learning; got:\n%s", first)
+	}
+
+	// Delete peer-beta's file from disk. Within the TTL, the cache
+	// must still serve peer-beta's data.
+	if err := os.Remove(filepath.Join(learningsPath, "peer-beta.json")); err != nil {
+		t.Fatalf("remove peer-beta file: %v", err)
+	}
+
+	second := BuildCrossAgentContextCompact("self-agent")
+	if !strings.Contains(second, "locks across IO") {
+		t.Errorf("within-TTL second call should serve peer-beta from cache but got:\n%s", second)
+	}
+}

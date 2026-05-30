@@ -1,6 +1,8 @@
 package library
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -227,8 +229,8 @@ func TestPrefixMatch(t *testing.T) {
 		want float64
 	}{
 		{"/repo/internal/auth", "/repo/internal/auth", 1.0},
-		{"/repo/internal", "/repo/internal/auth", 0.75}, // descendant
-		{"/repo/internal/auth", "/repo/internal", 0.75}, // ancestor
+		{"/repo/internal", "/repo/internal/auth", 0.75},    // descendant
+		{"/repo/internal/auth", "/repo/internal", 0.75},    // ancestor
 		{"/repo/internal/auth", "/repo/internal/api", 0.5}, // shared prefix
 		{"/elsewhere", "/repo/internal", 0.0},
 		{"", "/anything", 0.5},
@@ -330,4 +332,125 @@ func sliceEq(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestSearchCachesWithinTTL verifies that a second Search call within the TTL
+// returns the cached result even when the on-disk files have been altered.
+// After resetLibrarySearchCacheForTest() the walk is repeated and picks up
+// the new (altered) state.
+func TestSearchCachesWithinTTL(t *testing.T) {
+	root := withTempLibrary(t)
+	resetLibrarySearchCacheForTest()
+
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	q := Query{
+		AgentRole:  "backend",
+		TaskLabels: []string{"auth"},
+		WorkingDir: "/repo/internal/auth",
+		K:          3,
+	}
+
+	// Seed one experience and do the first search (cold cache).
+	seedExperience(t, "vex", "task-cache-1", "Cache test task",
+		[]string{"auth"}, "/repo/internal/auth", "backend",
+		0.90, now.Add(-time.Hour))
+
+	first, err := searchAt(q, now)
+	if err != nil {
+		t.Fatalf("first search: %v", err)
+	}
+	if len(first) == 0 {
+		t.Fatal("expected at least one hit on first search")
+	}
+
+	// Delete the experience files so a fresh disk walk would return nothing.
+	expDir := filepath.Join(root, "experiences")
+	if err := os.RemoveAll(expDir); err != nil {
+		t.Fatalf("remove experiences dir: %v", err)
+	}
+	if err := os.MkdirAll(expDir, 0o755); err != nil {
+		t.Fatalf("recreate experiences dir: %v", err)
+	}
+
+	// Second search within TTL (same now) must return cached result.
+	second, err := searchAt(q, now)
+	if err != nil {
+		t.Fatalf("second search: %v", err)
+	}
+	if len(second) != len(first) {
+		t.Errorf("within-TTL cache miss: got %d hits, want %d (cached)", len(second), len(first))
+	}
+	if len(second) > 0 && second[0].TaskID != first[0].TaskID {
+		t.Errorf("within-TTL: different hit returned; got %q want %q", second[0].TaskID, first[0].TaskID)
+	}
+
+	// After resetting the cache, the walk re-reads from disk (now empty)
+	// and returns no hits.
+	resetLibrarySearchCacheForTest()
+	third, err := searchAt(q, now)
+	if err != nil {
+		t.Fatalf("third search: %v", err)
+	}
+	if len(third) != 0 {
+		t.Errorf("after cache reset: expected 0 hits (empty dir), got %d", len(third))
+	}
+}
+
+// TestSearchAntiPatternsCachesWithinTTL is the parallel test for
+// SearchAntiPatterns — verifies cache hit within TTL and reset seam.
+func TestSearchAntiPatternsCachesWithinTTL(t *testing.T) {
+	root := withTempLibrary(t)
+	// withTempLibrary only creates experiences/workflows/standups/experiments;
+	// ensure anti-patterns/ exists too.
+	if err := os.MkdirAll(filepath.Join(root, "anti-patterns"), 0o755); err != nil {
+		t.Fatalf("mkdir anti-patterns: %v", err)
+	}
+	resetAntiPatternSearchCacheForTest()
+
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	q := Query{
+		AgentRole:  "backend",
+		TaskLabels: []string{"auth"},
+		WorkingDir: "/repo/auth",
+		K:          3,
+	}
+
+	seedAntiPatternForSearch(t, "ap-cache", "backend", []string{"auth"},
+		[]string{"/repo/auth"}, 0.10, now)
+
+	first, err := searchAntiPatternsAt(q, now)
+	if err != nil {
+		t.Fatalf("first search: %v", err)
+	}
+	if len(first) == 0 {
+		t.Fatal("expected at least one hit on first search")
+	}
+
+	// Remove all anti-pattern files.
+	apDir := filepath.Join(root, "anti-patterns")
+	if err := os.RemoveAll(apDir); err != nil {
+		t.Fatalf("remove anti-patterns dir: %v", err)
+	}
+	if err := os.MkdirAll(apDir, 0o755); err != nil {
+		t.Fatalf("recreate anti-patterns dir: %v", err)
+	}
+
+	// Within-TTL: must still return cached result.
+	second, err := searchAntiPatternsAt(q, now)
+	if err != nil {
+		t.Fatalf("second search: %v", err)
+	}
+	if len(second) != len(first) {
+		t.Errorf("within-TTL cache miss: got %d hits, want %d", len(second), len(first))
+	}
+
+	// After reset: empty dir → no hits.
+	resetAntiPatternSearchCacheForTest()
+	third, err := searchAntiPatternsAt(q, now)
+	if err != nil {
+		t.Fatalf("third search: %v", err)
+	}
+	if len(third) != 0 {
+		t.Errorf("after reset: expected 0 hits, got %d", len(third))
+	}
 }

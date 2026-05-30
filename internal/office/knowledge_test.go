@@ -2,6 +2,7 @@ package office
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -246,5 +247,78 @@ func TestWhiteboardStore_PersistsAndRoundTrips(t *testing.T) {
 	}
 	if _, ok := stack.Sections[defaultWhiteboardSection]; !ok {
 		t.Errorf("empty section should default to %q, got sections %v", defaultWhiteboardSection, stack.Sections)
+	}
+}
+
+// TestScanStandupHitsMtimeCap verifies that scanStandupHits reads only the
+// most-recent maxStandupScanFiles files when there are more than the cap.
+// An "old" file (mtime far in the past) with unique content must NOT appear
+// in results while files with recent mtimes DO appear.
+func TestScanStandupHitsMtimeCap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	standupDir := filepath.Join(home, ".jarvis", "office-memory", "standups")
+	if err := os.MkdirAll(standupDir, 0o755); err != nil {
+		t.Fatalf("mkdir standupDir: %v", err)
+	}
+
+	// Write maxStandupScanFiles + 5 standup files. The last 5 are marked
+	// with a very old mtime so they sort after the cap.
+	total := maxStandupScanFiles + 5
+	oldContentMarker := "UNIQUEOLD_CONTENT_SHOULD_NOT_APPEAR"
+	recentContentMarker := "RECENTCONTENT_SHOULD_APPEAR"
+
+	for i := 0; i < total; i++ {
+		unique := recentContentMarker
+		if i >= maxStandupScanFiles {
+			unique = oldContentMarker
+		}
+		s := PersistedStandup{
+			ID:        fmt.Sprintf("standup-%03d", i),
+			StartedAt: time.Now().Add(-time.Duration(i) * time.Minute).UnixMilli(),
+			Transcript: []StandupMessage{
+				{
+					Type:        "agent_response",
+					SpeakerName: fmt.Sprintf("agent-%d", i),
+					Content:     unique + fmt.Sprintf(" entry-%d", i),
+					Timestamp:   time.Now().Add(-time.Duration(i) * time.Minute).UnixMilli(),
+				},
+			},
+		}
+		data, _ := json.Marshal(s)
+		fname := filepath.Join(standupDir, fmt.Sprintf("standup-%03d.json", i))
+		if err := os.WriteFile(fname, data, 0o644); err != nil {
+			t.Fatalf("write standup %d: %v", i, err)
+		}
+		// Force old mtime on the files beyond the cap.
+		if i >= maxStandupScanFiles {
+			old := time.Now().Add(-365 * 24 * time.Hour)
+			if err := os.Chtimes(fname, old, old); err != nil {
+				t.Fatalf("chtimes %d: %v", i, err)
+			}
+		}
+	}
+
+	opts := KnowledgeSearchOptions{} // needle="" → tail mode, all content included
+	hits := scanStandupHits("", opts)
+
+	// The old-content marker must not appear in any hit.
+	for _, h := range hits {
+		if strings.Contains(h.Excerpt, oldContentMarker) {
+			t.Errorf("old standup content leaked past mtime cap: %q", h.Excerpt)
+		}
+	}
+
+	// At least one recent hit must be present.
+	foundRecent := false
+	for _, h := range hits {
+		if strings.Contains(h.Excerpt, recentContentMarker) {
+			foundRecent = true
+			break
+		}
+	}
+	if !foundRecent {
+		t.Error("expected at least one recent standup hit, got none")
 	}
 }

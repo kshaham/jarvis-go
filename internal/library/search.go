@@ -41,9 +41,61 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
+
+// searchCacheTTL is how long a Search result is reused before the
+// experience corpus is re-walked. The corpus changes only when an
+// agent completes a task and writes a new experience file — on typical
+// teams that happens every few minutes, far less often than the ~1/s
+// call rate during concurrent spawns. 60 s staleness is safe.
+const searchCacheTTL = 60 * time.Second
+
+// searchCacheKey is the composite lookup key. It includes every Query
+// field that participates in the scoring logic so two different queries
+// never alias each other in the cache.
+type searchCacheKey struct {
+	role       string
+	title      string
+	labels     string // sorted joined for comparability
+	workingDir string
+	k          int
+}
+
+type searchCacheEntry struct {
+	hits     []Hit
+	loadedAt time.Time
+}
+
+var (
+	searchCacheMu sync.Mutex
+	searchCache   = map[searchCacheKey]searchCacheEntry{}
+)
+
+// resetLibrarySearchCacheForTest empties the search result cache.
+// Only for use in tests — not part of the public API.
+func resetLibrarySearchCacheForTest() {
+	searchCacheMu.Lock()
+	searchCache = map[searchCacheKey]searchCacheEntry{}
+	searchCacheMu.Unlock()
+}
+
+// makeSearchCacheKey builds the cache key from q. Labels are sorted
+// and joined so [auth, jwt] and [jwt, auth] produce the same key.
+func makeSearchCacheKey(q Query, k int) searchCacheKey {
+	labels := make([]string, len(q.TaskLabels))
+	copy(labels, q.TaskLabels)
+	sort.Strings(labels)
+	return searchCacheKey{
+		role:       q.AgentRole,
+		title:      q.TaskTitle,
+		labels:     strings.Join(labels, ","),
+		workingDir: q.WorkingDir,
+		k:          k,
+	}
+}
 
 // Query is the input to a library search. Empty fields are treated
 // as wildcards (a query with only AgentRole set matches all tasks
@@ -99,6 +151,10 @@ func Search(q Query) ([]Hit, error) {
 
 // searchAt is the time-injectable form of Search used by tests so
 // the recency decay is deterministic regardless of wall clock drift.
+// Results are cached by (role, title, labels, workingDir, K) for
+// searchCacheTTL. The experience corpus changes only on task completion
+// (infrequent relative to the read rate at spawn time); 60 s staleness
+// is safe, and cold-cache results are identical to the uncached path.
 func searchAt(q Query, now time.Time) ([]Hit, error) {
 	root := Dir()
 	if root == "" {
@@ -108,6 +164,17 @@ func searchAt(q Query, now time.Time) ([]Hit, error) {
 	if k <= 0 {
 		k = 3
 	}
+
+	key := makeSearchCacheKey(q, k)
+	searchCacheMu.Lock()
+	if entry, ok := searchCache[key]; ok && now.Sub(entry.loadedAt) < searchCacheTTL {
+		// Return a copy so callers cannot mutate the cached slice.
+		cached := make([]Hit, len(entry.hits))
+		copy(cached, entry.hits)
+		searchCacheMu.Unlock()
+		return cached, nil
+	}
+	searchCacheMu.Unlock()
 
 	expDir := filepath.Join(root, "experiences")
 	entries, err := os.ReadDir(expDir)
@@ -162,6 +229,15 @@ func searchAt(q Query, now time.Time) ([]Hit, error) {
 	if len(hits) > k {
 		hits = hits[:k]
 	}
+
+	// Populate cache. Store a copy so subsequent mutations by the
+	// caller do not corrupt the cached slice.
+	stored := make([]Hit, len(hits))
+	copy(stored, hits)
+	searchCacheMu.Lock()
+	searchCache[key] = searchCacheEntry{hits: stored, loadedAt: now}
+	searchCacheMu.Unlock()
+
 	return hits, nil
 }
 
@@ -330,10 +406,11 @@ func ellipsisIfTrunc(s string, max int) string {
 // other's experience.
 //
 // Weights:
-//   0.50 * label_jaccard
-//   0.25 * title_token_overlap
-//   0.15 * workdir_prefix_match
-//   0.10 * role_match
+//
+//	0.50 * label_jaccard
+//	0.25 * title_token_overlap
+//	0.15 * workdir_prefix_match
+//	0.10 * role_match
 //
 // Empty-on-both-sides yields 1.0 for that component (a query that
 // omits labels matches anything; a hit with no labels matches a

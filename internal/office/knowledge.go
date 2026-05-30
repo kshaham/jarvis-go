@@ -36,6 +36,14 @@ import (
 	"unicode/utf8"
 )
 
+// maxStandupScanFiles caps the number of standup JSON files read per
+// knowledge search / tail call. Files are sorted by mtime descending
+// before the cap is applied, so only the most-recent ones are read.
+// Standups accumulate unboundedly on long-running teams; knowledge
+// search is recency-weighted anyway, so older standups contribute
+// negligibly to the ranked results.
+const maxStandupScanFiles = 200
+
 // KnowledgeSource categorizes where a hit came from. Exposed so callers
 // can filter or group results; values are stable for UI code.
 type KnowledgeSource string
@@ -307,9 +315,14 @@ func scanLearningHits(needle string, opts KnowledgeSearchOptions) []KnowledgeHit
 	return hits
 }
 
-// scanStandupHits walks every ~/.jarvis/office-memory/standups/*.json.
+// scanStandupHits walks ~/.jarvis/office-memory/standups/*.json.
 // Each transcript entry becomes a candidate hit; only agent_response
 // and user_input lines are emitted to keep the signal high.
+//
+// To keep scan time bounded as standups accumulate, entries are sorted
+// by file mtime descending and only the most-recent maxStandupScanFiles
+// are read. Knowledge search is recency-weighted, so older standups
+// contribute negligibly to the ranked results.
 func scanStandupHits(needle string, opts KnowledgeSearchOptions) []KnowledgeHit {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -320,12 +333,35 @@ func scanStandupHits(needle string, opts KnowledgeSearchOptions) []KnowledgeHit 
 	if err != nil {
 		return nil
 	}
-	var hits []KnowledgeHit
+
+	// Filter to .json files first, then sort by mtime descending and
+	// cap at maxStandupScanFiles so unbounded accumulation can't make
+	// every search linearly slower over time.
+	type standupEntry struct {
+		name  string
+		mtime time.Time
+	}
+	var candidates []standupEntry
 	for _, f := range entries {
 		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
 			continue
 		}
-		data, readErr := os.ReadFile(filepath.Join(dir, f.Name()))
+		info, infoErr := f.Info()
+		if infoErr != nil {
+			continue
+		}
+		candidates = append(candidates, standupEntry{name: f.Name(), mtime: info.ModTime()})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].mtime.After(candidates[j].mtime)
+	})
+	if len(candidates) > maxStandupScanFiles {
+		candidates = candidates[:maxStandupScanFiles]
+	}
+
+	var hits []KnowledgeHit
+	for _, c := range candidates {
+		data, readErr := os.ReadFile(filepath.Join(dir, c.name))
 		if readErr != nil {
 			continue
 		}

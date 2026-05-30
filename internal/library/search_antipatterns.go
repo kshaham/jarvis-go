@@ -19,8 +19,53 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// antiPatternCacheTTL mirrors searchCacheTTL: anti-pattern files are
+// written even less frequently than experience files (only when memify
+// consolidates a low-outcome cluster), so 60 s staleness is safe.
+const antiPatternCacheTTL = 60 * time.Second
+
+type antiPatternCacheKey struct {
+	role       string
+	title      string
+	labels     string
+	workingDir string
+	k          int
+}
+
+type antiPatternCacheEntry struct {
+	hits     []AntiPatternHit
+	loadedAt time.Time
+}
+
+var (
+	antiPatternCacheMu sync.Mutex
+	antiPatternCache   = map[antiPatternCacheKey]antiPatternCacheEntry{}
+)
+
+// resetAntiPatternSearchCacheForTest empties the anti-pattern result
+// cache. Only for use in tests.
+func resetAntiPatternSearchCacheForTest() {
+	antiPatternCacheMu.Lock()
+	antiPatternCache = map[antiPatternCacheKey]antiPatternCacheEntry{}
+	antiPatternCacheMu.Unlock()
+}
+
+func makeAntiPatternCacheKey(q Query, k int) antiPatternCacheKey {
+	labels := make([]string, len(q.TaskLabels))
+	copy(labels, q.TaskLabels)
+	sort.Strings(labels)
+	return antiPatternCacheKey{
+		role:       q.AgentRole,
+		title:      q.TaskTitle,
+		labels:     strings.Join(labels, ","),
+		workingDir: q.WorkingDir,
+		k:          k,
+	}
+}
 
 // AntiPatternHit is one ranked anti-pattern result. Path is
 // relative to Dir() for stable citations.
@@ -67,6 +112,16 @@ func searchAntiPatternsAt(q Query, now time.Time) ([]AntiPatternHit, error) {
 	if k <= 0 {
 		k = 3
 	}
+
+	key := makeAntiPatternCacheKey(q, k)
+	antiPatternCacheMu.Lock()
+	if entry, ok := antiPatternCache[key]; ok && now.Sub(entry.loadedAt) < antiPatternCacheTTL {
+		cached := make([]AntiPatternHit, len(entry.hits))
+		copy(cached, entry.hits)
+		antiPatternCacheMu.Unlock()
+		return cached, nil
+	}
+	antiPatternCacheMu.Unlock()
 
 	apDir := filepath.Join(root, "anti-patterns")
 	files, err := os.ReadDir(apDir)
@@ -116,6 +171,14 @@ func searchAntiPatternsAt(q Query, now time.Time) ([]AntiPatternHit, error) {
 	if len(hits) > k {
 		hits = hits[:k]
 	}
+
+	// Populate cache.
+	stored := make([]AntiPatternHit, len(hits))
+	copy(stored, hits)
+	antiPatternCacheMu.Lock()
+	antiPatternCache[key] = antiPatternCacheEntry{hits: stored, loadedAt: now}
+	antiPatternCacheMu.Unlock()
+
 	return hits, nil
 }
 
