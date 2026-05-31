@@ -521,6 +521,15 @@ func (s *CodexSession) buildEnv() []string {
 	return env
 }
 
+// Tokens returns input, output, and total token counts accumulated across
+// this Codex session's turns. Mirrors Session.Tokens() so the token-stats
+// handler can aggregate Codex sessions alongside PTY and SDK sessions.
+func (s *CodexSession) Tokens() (input, output, total int64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.totalInputTokens, s.totalOutputTokens, s.totalInputTokens + s.totalOutputTokens
+}
+
 func (s *CodexSession) setWorking() {
 	s.mu.Lock()
 	if !s.isWorking {

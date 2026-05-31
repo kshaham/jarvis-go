@@ -47,6 +47,28 @@
     font-feature-settings: 'tnum' 1;
   }
 
+  /* ── Side-rail nav tile ────────────────────────────────────────────
+     Unselected nav rows are faint liquid-glass tiles so they separate from
+     the tinted chrome rail (the active row uses the accent pill instead).
+     Rest = outline + faint fill; hover lifts to a brighter glass. Token-
+     driven, so it adapts to both themes. */
+  .nav-tile {
+    border-color: var(--lg-rim);
+    background: rgb(var(--surface-tint-rgb) / 0.05);
+    box-shadow: var(--elev-1);
+    transition:
+      background var(--duration-short) var(--ease-out-expo),
+      border-color var(--duration-short) var(--ease-out-expo),
+      box-shadow var(--duration-short) var(--ease-out-expo),
+      color var(--duration-short) var(--ease-out-expo);
+  }
+  .nav-tile:hover {
+    background: var(--lg-fill-hover);
+    border-color: var(--lg-rim-strong);
+    box-shadow: var(--lg-shadow-rest);
+    color: var(--text-primary);
+  }
+
   /* ── Liquid Glass surfaces ─────────────────────────────────────────
      The default "card" chrome is now translucent liquid glass: a faint
      tinted fill over a blurred+saturated backdrop, a top-lit rim, a

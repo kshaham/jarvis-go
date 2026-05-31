@@ -3,6 +3,27 @@ import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import {
+  Activity,
+  ArrowLeftRight,
+  BarChart3,
+  BookOpen,
+  CalendarDays,
+  FileText,
+  ListTodo,
+  Lock,
+  Megaphone,
+  MessageSquare,
+  Network,
+  Presentation,
+  Send,
+  Server,
+  Settings,
+  Sparkles,
+  Users,
+  UsersRound,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import { TeamHeader } from './TeamHeader';
 import { CommandBar } from './motion/CommandBar';
@@ -25,9 +46,13 @@ const navLinkBaseStyle: React.CSSProperties = {
   gap: 10,
   padding: '8px 10px',
   borderRadius: 'var(--radius-md)',
+  border: '1px solid transparent',
   fontSize: 14,
   fontWeight: 600,
   position: 'relative',
+  // Kill the browser's default (blue) focus outline; .focus-ring supplies a
+  // themed keyboard-focus ring via :focus-visible instead.
+  outline: 'none',
 };
 
 const navActivePillStyle: React.CSSProperties = {
@@ -36,10 +61,15 @@ const navActivePillStyle: React.CSSProperties = {
   borderRadius: 'var(--radius-md)',
   background: 'var(--lg-fill-accent)',
   border: '1px solid rgb(var(--accent-rgb) / 0.35)',
-  boxShadow: 'inset 2px 0 0 var(--accent), var(--lg-specular-convex), var(--glow-violet-sm)',
+  // No --glow-violet-sm bloom — it read as a stray light-green halo behind
+  // the active item. Clean accent pill: fill + inset accent bar + specular.
+  boxShadow: 'inset 2px 0 0 var(--accent), var(--lg-specular-convex)',
   zIndex: 0,
 };
 
+// 24x24 icon badge. A Lucide icon (geometric SVG) sits inside, centered by
+// the flex box and its own viewBox — deterministic in every browser, unlike
+// the old text-glyph baseline metrics.
 const railGlyphStyle: React.CSSProperties = {
   width: 24,
   height: 24,
@@ -49,15 +79,6 @@ const railGlyphStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  // line-height:1 collapses the inherited 1.5em line box; the 2px top
-  // padding optically centers the glyph — caps sit on the baseline with
-  // empty descender space below, so the ink renders ~2px high without it
-  // (verified empirically against a box-center reference for both letters
-  // and the symbol glyphs). box-sizing keeps the badge a fixed 24x24.
-  lineHeight: 1,
-  paddingTop: 2,
-  fontSize: 12,
-  fontWeight: 700,
   flexShrink: 0,
 };
 
@@ -126,7 +147,7 @@ const ROUTE_TITLES: Record<string, string> = {
 type NavItem = {
   to: string;
   label: string;
-  glyph: string;
+  icon: LucideIcon;
   // Optional badge count (e.g. unread relay messages).
   badge?: number;
 };
@@ -188,26 +209,26 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // Operations (the bigger dashboards / panels), Multi-team (peer relay).
   const items: (NavItem & { divider?: boolean })[] = [
     // Office
-    { to: '/', label: 'Agents', glyph: 'A' },
-    { to: '/tasks', label: 'Tasks', glyph: 'K' },
-    { to: '/standup', label: 'Standup', glyph: 'S' },
-    { to: '/chat', label: 'Chat', glyph: 'C' },
-    { to: '/activity', label: 'Activity', glyph: 'L' },
-    { to: '/whiteboard', label: 'Whiteboard', glyph: '▤' },
-    { to: '/knowledge', label: 'Knowledge', glyph: '◇' },
-    { to: '/reports', label: 'Reports', glyph: '⊟' },
+    { to: '/', label: 'Agents', icon: Users },
+    { to: '/tasks', label: 'Tasks', icon: ListTodo },
+    { to: '/standup', label: 'Standup', icon: Megaphone },
+    { to: '/chat', label: 'Chat', icon: MessageSquare },
+    { to: '/activity', label: 'Activity', icon: Activity },
+    { to: '/whiteboard', label: 'Whiteboard', icon: Presentation },
+    { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
+    { to: '/reports', label: 'Reports', icon: FileText },
     // Operations
-    { to: '/insights', label: 'Insights', glyph: 'I', divider: true },
-    { to: '/metrics', label: 'Metrics', glyph: 'M' },
-    { to: '/meetings', label: 'Meetings', glyph: '∷' },
-    { to: '/network', label: 'Network', glyph: '⌬' },
-    { to: '/handoffs', label: 'Handoffs', glyph: 'H' },
-    { to: '/dev-instances', label: 'Dev instances', glyph: 'D' },
-    { to: '/locks', label: 'File locks', glyph: '⊞' },
-    { to: '/settings', label: 'Settings', glyph: 'G' },
+    { to: '/insights', label: 'Insights', icon: Sparkles, divider: true },
+    { to: '/metrics', label: 'Metrics', icon: BarChart3 },
+    { to: '/meetings', label: 'Meetings', icon: CalendarDays },
+    { to: '/network', label: 'Network', icon: Network },
+    { to: '/handoffs', label: 'Handoffs', icon: ArrowLeftRight },
+    { to: '/dev-instances', label: 'Dev instances', icon: Server },
+    { to: '/locks', label: 'File locks', icon: Lock },
+    { to: '/settings', label: 'Settings', icon: Settings },
     // Multi-team
-    { to: '/teams', label: 'Teams', glyph: 'T', divider: true },
-    { to: '/relay', label: 'Relay', glyph: 'R', badge: totalUnread || undefined },
+    { to: '/teams', label: 'Teams', icon: UsersRound, divider: true },
+    { to: '/relay', label: 'Relay', icon: Send, badge: totalUnread || undefined },
   ];
 
   return (
@@ -243,17 +264,24 @@ export function AppShell({ children }: { children?: ReactNode }) {
           >
             + Spawn team
           </Button>
-          {items.map((item) => (
+          {items.map((item) => {
+            const Icon = item.icon;
+            return (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === '/'}
-              className="transition-colors hover:bg-[var(--bg-elevated)]"
+              // Unselected rows are liquid-glass tiles (.nav-tile: outline +
+              // faint fill, brighter on hover) so they separate from the rail;
+              // the active row uses the accent pill below instead. focus-ring
+              // gives keyboard focus the themed ring.
+              className={({ isActive }) => 'focus-ring' + (isActive ? '' : ' nav-tile')}
               style={({ isActive }) => ({
                 ...navLinkBaseStyle,
-                marginTop: item.divider ? 12 : 0,
-                borderTop: item.divider ? '1px solid var(--border-subtle)' : 'none',
-                paddingTop: item.divider ? 12 : undefined,
+                // Extra gap before a group's first item (Office / Operations /
+                // Multi-team) — the spacing separates groups now that each row
+                // is its own tile.
+                marginTop: item.divider ? 18 : 0,
                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                 // Active background is the sliding layoutId pill below
                 // (or a static fill under reduced motion).
@@ -288,7 +316,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                         color: isActive ? 'var(--accent-on)' : 'var(--text-secondary)',
                       }}
                     >
-                      {item.glyph}
+                      <Icon size={15} strokeWidth={2} aria-hidden />
                     </span>
                     <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
                     {item.badge ? (
@@ -300,7 +328,8 @@ export function AppShell({ children }: { children?: ReactNode }) {
                 </>
               )}
             </NavLink>
-          ))}
+            );
+          })}
           <div style={{ flex: 1 }} />
           <button
             type="button"
