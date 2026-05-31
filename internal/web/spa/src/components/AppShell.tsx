@@ -43,11 +43,18 @@ const navActivePillStyle: React.CSSProperties = {
 const railGlyphStyle: React.CSSProperties = {
   width: 24,
   height: 24,
+  boxSizing: 'border-box',
   borderRadius: 6,
   boxShadow: 'inset 0 1px 0 rgba(120,240,180,0.12)',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
+  // line-height:1 collapses the inherited 1.5em line box that pushed the
+  // glyph high; the 1px top padding optically centers uppercase caps,
+  // whose empty descender space otherwise reads as a high-sitting letter.
+  // box-sizing keeps the badge a fixed 24x24 despite the padding.
+  lineHeight: 1,
+  paddingTop: 1,
   fontSize: 12,
   fontWeight: 700,
   flexShrink: 0,
