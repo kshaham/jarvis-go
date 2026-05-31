@@ -149,6 +149,7 @@ func TestHandoffInitiate_BadJSON(t *testing.T) {
 }
 
 func TestStatusForHandoffError_Mapping(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		msg  string
 		want int

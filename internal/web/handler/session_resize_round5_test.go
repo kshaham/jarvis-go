@@ -14,6 +14,7 @@ import (
 )
 
 func TestSessionResize_ResizeErrorReturns500(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 

@@ -74,6 +74,7 @@ func TestOfficeClaudeLogs_BadSessionID400(t *testing.T) {
 }
 
 func TestResolveClaudeSessionID_LiveSDKWithoutClaudeID(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{SessionManager: pty.NewSessionManager(10)}
 	// A never-started SDK session has no captured Claude session ID yet.
 	sdk := pty.NewSDKSession(pty.SessionConfig{ID: "sdk-no-cid-123456", Mode: pty.ModeClaudeSDK})

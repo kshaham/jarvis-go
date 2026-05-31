@@ -19,6 +19,7 @@ import (
 )
 
 func TestVerifyHookSignature_RejectArms(t *testing.T) {
+	t.Parallel()
 	am, err := auth.NewManager(t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("auth manager: %v", err)
@@ -42,6 +43,7 @@ func TestVerifyHookSignature_RejectArms(t *testing.T) {
 }
 
 func TestLinkCase_LinkError(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		CaseManager: cases.NewCaseManager(t.TempDir()),
 		SSEBroker:   sse.NewBroker(100, 10),
@@ -57,6 +59,7 @@ func TestLinkCase_LinkError(t *testing.T) {
 }
 
 func TestCreateCase_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{CaseManager: cases.NewCaseManager(t.TempDir())}
 	req := httptest.NewRequest("POST", "/api/cases", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -68,6 +71,7 @@ func TestCreateCase_BadJSON400(t *testing.T) {
 }
 
 func TestGetCaseFixPlan_NoPlanFile(t *testing.T) {
+	t.Parallel()
 	cm := cases.NewCaseManager(t.TempDir())
 	info, err := cm.Create("plan-case")
 	if err != nil {

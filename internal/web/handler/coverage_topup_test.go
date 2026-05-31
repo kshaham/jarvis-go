@@ -16,6 +16,7 @@ import (
 )
 
 func TestCancelPlanGeneration_SpecificStopsLiveSession(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	ctx.ActivePlanOrchestrators = map[string]string{"orch-1": id}
@@ -42,6 +43,7 @@ func TestCancelPlanGeneration_SpecificStopsLiveSession(t *testing.T) {
 }
 
 func TestCancelPlanGeneration_CancelAllWithLiveSession(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	ctx.ActivePlanOrchestrators = map[string]string{"orch-a": id}

@@ -31,6 +31,7 @@ func newAuthCtx(t *testing.T) *Context {
 // --- Auth lifecycle ---
 
 func TestGetAuthStatus_UnconfiguredThenConfigured(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 
 	// Fresh manager: no password set.
@@ -53,6 +54,7 @@ func TestGetAuthStatus_UnconfiguredThenConfigured(t *testing.T) {
 }
 
 func TestAuthSetup_HappyAndAlreadyConfigured(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 
 	// Weak password -> 400.
@@ -78,6 +80,7 @@ func TestAuthSetup_HappyAndAlreadyConfigured(t *testing.T) {
 }
 
 func TestAuthSetup_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	req := httptest.NewRequest("POST", "/api/auth/setup", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -89,6 +92,7 @@ func TestAuthSetup_BadJSON(t *testing.T) {
 }
 
 func TestAuthLogin_WrongAndRight(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	if err := ctx.AuthManager.SetPassword("correcthorse"); err != nil {
 		t.Fatalf("set password: %v", err)
@@ -117,6 +121,7 @@ func TestAuthLogin_WrongAndRight(t *testing.T) {
 }
 
 func TestAuthLogin_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	if err := ctx.AuthManager.SetPassword("correcthorse"); err != nil {
 		t.Fatalf("set password: %v", err)
@@ -131,6 +136,7 @@ func TestAuthLogin_BadJSON(t *testing.T) {
 }
 
 func TestAuthLogout_ClearsCookie(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	rec := postJSON(t, ctx.AuthLogout, "/api/auth/logout", map[string]interface{}{})
 	if rec.Code != http.StatusOK {
@@ -144,6 +150,7 @@ func TestAuthLogout_ClearsCookie(t *testing.T) {
 }
 
 func TestAuthChangePassword_Flow(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	if err := ctx.AuthManager.SetPassword("originalpass1"); err != nil {
 		t.Fatalf("set password: %v", err)
@@ -188,6 +195,7 @@ func TestAuthChangePassword_Flow(t *testing.T) {
 }
 
 func TestAuthChangePassword_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	req := httptest.NewRequest("POST", "/api/auth/change-password", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -199,6 +207,7 @@ func TestAuthChangePassword_BadJSON(t *testing.T) {
 }
 
 func TestGetClaudeAuthStatus_AlwaysOK(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := httptest.NewRequest("GET", "/api/claude/auth-status", nil)
 	rec := httptest.NewRecorder()
@@ -211,6 +220,7 @@ func TestGetClaudeAuthStatus_AlwaysOK(t *testing.T) {
 // --- Screens (nil manager branches) ---
 
 func TestGetScreens_NilManager(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	resp := getJSON(t, ctx.GetScreens, "/api/screens")
 	if resp["success"] != true {
@@ -223,6 +233,7 @@ func TestGetScreens_NilManager(t *testing.T) {
 }
 
 func TestDeleteScreen_NilManager503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/screens/s1", nil), "sessionId", "s1")
 	rec := httptest.NewRecorder()
@@ -233,6 +244,7 @@ func TestDeleteScreen_NilManager503(t *testing.T) {
 }
 
 func TestReconcileScreens_NilManager(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	resp := getJSON(t, ctx.ReconcileScreens, "/api/screens/reconcile")
 	if resp["success"] != true {
@@ -241,6 +253,7 @@ func TestReconcileScreens_NilManager(t *testing.T) {
 }
 
 func TestStartStopScreenStats_PersistsFlag(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 	recStart := postJSON(t, ctx.StartScreenStats, "/api/screens/stats/start", map[string]interface{}{})
 	if recStart.Code != http.StatusOK {
@@ -262,6 +275,7 @@ func TestStartStopScreenStats_PersistsFlag(t *testing.T) {
 // --- Subagents (nil watcher branches) ---
 
 func TestGetSubagents_NilWatcher(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	resp := getJSON(t, ctx.GetSubagents, "/api/subagents")
 	agents, _ := resp["agents"].([]interface{})
@@ -271,6 +285,7 @@ func TestGetSubagents_NilWatcher(t *testing.T) {
 }
 
 func TestGetSubagent_NilWatcher404(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := withURLParam(httptest.NewRequest("GET", "/api/subagents/a1", nil), "agentId", "a1")
 	rec := httptest.NewRecorder()
@@ -281,6 +296,7 @@ func TestGetSubagent_NilWatcher404(t *testing.T) {
 }
 
 func TestDeleteSubagent_NilWatcher503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/subagents/a1", nil), "agentId", "a1")
 	rec := httptest.NewRecorder()
@@ -291,6 +307,7 @@ func TestDeleteSubagent_NilWatcher503(t *testing.T) {
 }
 
 func TestGetSubagentTranscript_NilWatcher404(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := withURLParam(httptest.NewRequest("GET", "/api/subagents/a1/transcript", nil), "agentId", "a1")
 	rec := httptest.NewRecorder()
@@ -301,6 +318,7 @@ func TestGetSubagentTranscript_NilWatcher404(t *testing.T) {
 }
 
 func TestCleanupSubagents_NilWatcher(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	resp := getJSON(t, ctx.CleanupSubagents, "/api/subagents/cleanup")
 	if resp["cleaned"] != float64(0) {
@@ -309,6 +327,7 @@ func TestCleanupSubagents_NilWatcher(t *testing.T) {
 }
 
 func TestClearAllSubagents_NilWatcher(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	resp := getJSON(t, ctx.ClearAllSubagents, "/api/subagents")
 	if resp["success"] != true {
@@ -317,6 +336,7 @@ func TestClearAllSubagents_NilWatcher(t *testing.T) {
 }
 
 func TestGetSessionSubagents_SessionNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := withURLParam(httptest.NewRequest("GET", "/api/sessions/ghost/subagents", nil), "id", "ghost")
 	rec := httptest.NewRecorder()
@@ -329,6 +349,7 @@ func TestGetSessionSubagents_SessionNotFound(t *testing.T) {
 // --- Subagent window-states + parents (StateStore CRUD) ---
 
 func TestSubagentWindowStates_GetUpdate(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 
 	// Default empty.
@@ -351,6 +372,7 @@ func TestSubagentWindowStates_GetUpdate(t *testing.T) {
 }
 
 func TestUpdateSubagentWindowStates_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 	req := httptest.NewRequest("PUT", "/api/subagent-window-states", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -362,6 +384,7 @@ func TestUpdateSubagentWindowStates_BadJSON(t *testing.T) {
 }
 
 func TestSubagentParents_GetUpdate(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 
 	resp := getJSON(t, ctx.GetSubagentParents, "/api/subagent-parents")
@@ -382,6 +405,7 @@ func TestSubagentParents_GetUpdate(t *testing.T) {
 }
 
 func TestUpdateSubagentParents_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 	req := httptest.NewRequest("PUT", "/api/subagent-parents", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")

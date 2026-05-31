@@ -15,6 +15,7 @@ import (
 )
 
 func TestSessionResize_SDKSessionNoop(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	sdk := pty.NewSDKSession(pty.SessionConfig{ID: "resize-sdk", Mode: pty.ModeClaudeSDK, WorkingDir: t.TempDir()})
 	ctx.SessionManager.RegisterSDKSessionForTest(sdk)
@@ -31,6 +32,7 @@ func TestSessionResize_SDKSessionNoop(t *testing.T) {
 }
 
 func TestSessionResize_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -41,6 +43,7 @@ func TestSessionResize_BadJSON(t *testing.T) {
 }
 
 func TestSessionResize_NonPositiveDims(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -51,6 +54,7 @@ func TestSessionResize_NonPositiveDims(t *testing.T) {
 }
 
 func TestGetSessionGitStatus_HappyPath(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	ctx.IntegrationMonitor = integrations.NewMonitor()
 	id, _ := liveSession(t, ctx)

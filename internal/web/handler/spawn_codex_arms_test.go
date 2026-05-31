@@ -189,6 +189,7 @@ func TestSpawnCodexAgentSession_CreateFailsMaxSessions(t *testing.T) {
 // TestStageCodexAuth_WriteFails drives stageCodexAuth's WriteFile error arm
 // (462-464): a readable source auth.json but an unwritable destination dir.
 func TestStageCodexAuth_WriteFails(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only dir semantics differ on Windows")
 	}

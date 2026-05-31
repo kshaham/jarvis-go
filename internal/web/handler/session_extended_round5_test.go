@@ -44,6 +44,7 @@ func liveSessionNoTrackers(t *testing.T, ctx *Context) string {
 }
 
 func TestGetSessionRalphState_NoTrackerDefault(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id := liveSessionNoTrackers(t, ctx)
 
@@ -63,6 +64,7 @@ func TestGetSessionRalphState_NoTrackerDefault(t *testing.T) {
 }
 
 func TestGetSessionRunSummary_NoTrackerDefault(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id := liveSessionNoTrackers(t, ctx)
 
@@ -108,6 +110,7 @@ func liveSessionWithTokens(t *testing.T, ctx *Context, want int64) string {
 }
 
 func TestSessionAutoClear_ThresholdMetFiresClear(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id := liveSessionWithTokens(t, ctx, 5000)
 
@@ -124,6 +127,7 @@ func TestSessionAutoClear_ThresholdMetFiresClear(t *testing.T) {
 }
 
 func TestSessionAutoCompact_ThresholdMetFiresCompact(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id := liveSessionWithTokens(t, ctx, 5000)
 
@@ -136,6 +140,7 @@ func TestSessionAutoCompact_ThresholdMetFiresCompact(t *testing.T) {
 }
 
 func TestSessionAutoTrim_ThresholdMetFiresTrim(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id := liveSessionWithTokens(t, ctx, 5000)
 
@@ -150,6 +155,7 @@ func TestSessionAutoTrim_ThresholdMetFiresTrim(t *testing.T) {
 // --- DecodeAndValidate failure arms (110/150/190) ---
 
 func TestBulkSessions_DecodeFailureReturns400(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	cases := []struct {
 		name string
@@ -178,6 +184,7 @@ func TestBulkSessions_DecodeFailureReturns400(t *testing.T) {
 // --- GetSessionRalphStatus default (1109) ---
 
 func TestGetSessionRalphStatus_DefaultWhenNoConfig(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx) // no ralph-config setting written
 
@@ -196,6 +203,7 @@ func TestGetSessionRalphStatus_DefaultWhenNoConfig(t *testing.T) {
 // --- GetSessionPlanHistory ReadDir error (1479) ---
 
 func TestGetSessionPlanHistory_ReadDirErrorEmptyVersions(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	sess, _ := ctx.SessionManager.GetSession(id)
@@ -218,6 +226,7 @@ func TestGetSessionPlanHistory_ReadDirErrorEmptyVersions(t *testing.T) {
 // --- PatchSessionPlanTask tracker-hit path (1867) ---
 
 func TestPatchSessionPlanTask_TrackerUpdateSucceeds(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 

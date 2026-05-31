@@ -16,6 +16,7 @@ import (
 )
 
 func TestQuerySessions_FilterSortPaginate_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 
 	// Create three named live sessions.
@@ -82,6 +83,7 @@ func TestQuerySessions_FilterSortPaginate_Live(t *testing.T) {
 // --- spawn_remote error wrapper helpers (pure) ---
 
 func TestSpawnRemoteCLIError_ErrorAndUnwrap(t *testing.T) {
+	t.Parallel()
 	base := errors.New("boom")
 
 	// With stderr.
@@ -104,6 +106,7 @@ func TestSpawnRemoteCLIError_ErrorAndUnwrap(t *testing.T) {
 }
 
 func TestTruncateLog(t *testing.T) {
+	t.Parallel()
 	short := "short log"
 	if got := truncateLog(short); got != short {
 		t.Errorf("short log should pass through, got %q", got)

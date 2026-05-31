@@ -16,6 +16,7 @@ import (
 )
 
 func TestRun_HappyEchoCommand(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	rec := postJSON(t, ctx.Run, "/api/run", map[string]interface{}{
 		"command": "echo hello-from-run",
@@ -34,6 +35,7 @@ func TestRun_HappyEchoCommand(t *testing.T) {
 }
 
 func TestRun_NonZeroExitCaptured(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	// `ls` of a non-existent path exits non-zero; the handler still 200s and
 	// reports the exit code rather than erroring.
@@ -61,6 +63,7 @@ func subagentCtx(t *testing.T) *Context {
 }
 
 func TestGetSubagents_RealWatcherEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := subagentCtx(t)
 	resp := getJSON(t, ctx.GetSubagents, "/api/subagents")
 	agents, _ := resp["agents"].([]interface{})
@@ -70,6 +73,7 @@ func TestGetSubagents_RealWatcherEmpty(t *testing.T) {
 }
 
 func TestGetSubagent_RealWatcherNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := subagentCtx(t)
 	req := withURLParam(httptest.NewRequest("GET", "/api/subagents/a1", nil), "agentId", "a1")
 	rec := httptest.NewRecorder()
@@ -80,6 +84,7 @@ func TestGetSubagent_RealWatcherNotFound(t *testing.T) {
 }
 
 func TestDeleteSubagent_RealWatcher(t *testing.T) {
+	t.Parallel()
 	ctx := subagentCtx(t)
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/subagents/a1", nil), "agentId", "a1")
 	rec := httptest.NewRecorder()
@@ -95,6 +100,7 @@ func TestDeleteSubagent_RealWatcher(t *testing.T) {
 }
 
 func TestGetSubagentTranscript_RealWatcherNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := subagentCtx(t)
 	req := withURLParam(httptest.NewRequest("GET", "/api/subagents/a1/transcript", nil), "agentId", "a1")
 	rec := httptest.NewRecorder()
@@ -105,6 +111,7 @@ func TestGetSubagentTranscript_RealWatcherNotFound(t *testing.T) {
 }
 
 func TestCleanupAndClearSubagents_RealWatcher(t *testing.T) {
+	t.Parallel()
 	ctx := subagentCtx(t)
 	resp := getJSON(t, ctx.CleanupSubagents, "/api/subagents/cleanup")
 	if resp["cleaned"] != float64(0) {
@@ -118,6 +125,7 @@ func TestCleanupAndClearSubagents_RealWatcher(t *testing.T) {
 }
 
 func TestGetSessionSubagents_NoWatcher_EmptyButOK(t *testing.T) {
+	t.Parallel()
 	// SubagentWatcher present, session found, no matching agents -> empty list.
 	ctx := newSessionExtCtx(t)
 	ctx.SubagentWatcher = subagent.NewWatcher(context.Background(), t.TempDir())

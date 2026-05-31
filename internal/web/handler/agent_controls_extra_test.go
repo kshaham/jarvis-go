@@ -103,6 +103,7 @@ func TestOfficeAgentInjectPrompt_Validation(t *testing.T) {
 
 // writeSessionPrompt: nil manager -> false; live PTY session -> true.
 func TestWriteSessionPrompt(t *testing.T) {
+	t.Parallel()
 	// Nil session manager returns false.
 	bare := &Context{}
 	if bare.writeSessionPrompt("x", "p") {
@@ -130,6 +131,7 @@ func TestWriteSessionPrompt(t *testing.T) {
 
 // stopAgentSessionByID no-ops gracefully on an unknown/nil session.
 func TestStopAgentSessionByID_Graceful(t *testing.T) {
+	t.Parallel()
 	bare := &Context{}
 	bare.stopAgentSessionByID("x") // nil manager -> no panic
 

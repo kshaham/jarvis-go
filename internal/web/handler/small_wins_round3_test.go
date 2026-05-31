@@ -23,6 +23,7 @@ import (
 )
 
 func TestGetSubagentTranscript_EmptyFilePath(t *testing.T) {
+	t.Parallel()
 	w := subagent.NewWatcher(context.Background(), t.TempDir())
 	// OnHookStart registers an agent with NO FilePath -> the empty-FilePath arm.
 	w.OnHookStart("sessX", "explorer", "nofile")
@@ -41,6 +42,7 @@ func TestGetSubagentTranscript_EmptyFilePath(t *testing.T) {
 }
 
 func TestGetSubagentTranscript_ReadError(t *testing.T) {
+	t.Parallel()
 	jsonl := `{"type":"user","content":"hi"}` + "\n"
 	w := watcherWithTranscript(t, "readerr", jsonl)
 	a := w.GetAgent("readerr")
@@ -61,6 +63,7 @@ func TestGetSubagentTranscript_ReadError(t *testing.T) {
 }
 
 func TestAuthLogout_DestroysSession(t *testing.T) {
+	t.Parallel()
 	am, err := auth.NewManager(t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("auth manager: %v", err)

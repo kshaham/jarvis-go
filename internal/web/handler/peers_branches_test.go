@@ -13,6 +13,7 @@ import (
 )
 
 func TestRelayList_WithPeerIDFilter(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-f", "tok-f")
 	resp := getJSON(t, p.RelayList, "/api/relay/messages?peerId=peer-f")
@@ -24,6 +25,7 @@ func TestRelayList_WithPeerIDFilter(t *testing.T) {
 }
 
 func TestPeersPing_UnreachablePeer(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	// Seeded peer points at a non-resolvable URL, so Ping fails -> the handler
 	// returns 200 with an error + an updated (unreachable) status.
@@ -41,6 +43,7 @@ func TestPeersPing_UnreachablePeer(t *testing.T) {
 }
 
 func TestPeersDelete_HappySeeded(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-del", "tok-del")
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/peers/peer-del", nil), "peerID", "peer-del")

@@ -31,6 +31,7 @@ func newSessionCtx(t *testing.T) *Context {
 }
 
 func TestListSessions_EmptyIsArray(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := httptest.NewRequest("GET", "/api/sessions", nil)
 	rec := httptest.NewRecorder()
@@ -49,6 +50,7 @@ func TestListSessions_EmptyIsArray(t *testing.T) {
 }
 
 func TestQuerySessions_EmptyEnvelope(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := httptest.NewRequest("GET", "/api/sessions/query?limit=10&offset=0&status=idle&search=foo&sort=name&order=asc", nil)
 	rec := httptest.NewRecorder()
@@ -72,6 +74,7 @@ func TestQuerySessions_EmptyEnvelope(t *testing.T) {
 }
 
 func TestQuerySessions_DefaultsAndBadParams(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	// Invalid limit/offset fall back to defaults (limit=50, offset=0).
 	req := httptest.NewRequest("GET", "/api/sessions/query?limit=abc&offset=-5", nil)
@@ -91,6 +94,7 @@ func TestQuerySessions_DefaultsAndBadParams(t *testing.T) {
 }
 
 func TestGetSession_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := withURLParam(httptest.NewRequest("GET", "/api/sessions/ghost", nil), "id", "ghost")
 	rec := httptest.NewRecorder()
@@ -101,6 +105,7 @@ func TestGetSession_NotFound(t *testing.T) {
 }
 
 func TestSessionInput_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := withURLParam(httptest.NewRequest("POST", "/api/sessions/ghost/input", strings.NewReader(`{"input":"x"}`)), "id", "ghost")
 	req.Header.Set("Content-Type", "application/json")
@@ -112,6 +117,7 @@ func TestSessionInput_NotFound(t *testing.T) {
 }
 
 func TestGetSessionTerminal_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := withURLParam(httptest.NewRequest("GET", "/api/sessions/ghost/terminal", nil), "id", "ghost")
 	rec := httptest.NewRecorder()
@@ -122,6 +128,7 @@ func TestGetSessionTerminal_NotFound(t *testing.T) {
 }
 
 func TestDeleteSession_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/sessions/ghost", nil), "id", "ghost")
 	rec := httptest.NewRecorder()
@@ -132,6 +139,7 @@ func TestDeleteSession_NotFound(t *testing.T) {
 }
 
 func TestCreateSession_MissingWorkingDir400(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	rec := postJSON(t, ctx.CreateSession, "/api/sessions", map[string]interface{}{"name": "x", "mode": "shell"})
 	if rec.Code != http.StatusBadRequest {
@@ -143,6 +151,7 @@ func TestCreateSession_MissingWorkingDir400(t *testing.T) {
 }
 
 func TestCreateSession_InvalidWorkingDir400(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	// A path that fails the allowlist/symlink resolver -> 400 before spawn.
 	rec := postJSON(t, ctx.CreateSession, "/api/sessions", map[string]interface{}{
@@ -155,6 +164,7 @@ func TestCreateSession_InvalidWorkingDir400(t *testing.T) {
 }
 
 func TestCreateSession_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	req := httptest.NewRequest("POST", "/api/sessions", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -168,6 +178,7 @@ func TestCreateSession_BadJSON(t *testing.T) {
 // stopAnySession on an empty manager returns a not-found error from every
 // backend, surfacing as the aggregate not-found.
 func TestStopAnySession_AllBackendsNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionCtx(t)
 	err := ctx.stopAnySession(context.Background(), "nope")
 	if err == nil || !strings.Contains(err.Error(), "not found") {

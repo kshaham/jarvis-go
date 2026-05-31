@@ -18,6 +18,7 @@ import (
 )
 
 func TestCloneSession_EmptyNameAndCreateFailure(t *testing.T) {
+	t.Parallel()
 	skipIfNoStubShell(t)
 	ctx := newSessionLiveCtx(t)
 	// Replace the manager with a capacity-1 one so the source fills the only
@@ -63,6 +64,7 @@ func TestCloneSession_EmptyNameAndCreateFailure(t *testing.T) {
 // (70-72): a successful clone with a (disconnected) TelegramHandler wired calls
 // NotifySessionStart, which no-ops safely when the bot isn't connected.
 func TestCloneSession_NotifiesTelegram(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	settingsStore, err := telegram.NewSettingsStore(t.TempDir(), nil)
 	if err != nil {

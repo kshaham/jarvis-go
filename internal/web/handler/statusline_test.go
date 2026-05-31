@@ -29,6 +29,7 @@ func TestOfficeAgentStatusLine_NoSessionIDReturnsPlaceholder(t *testing.T) {
 }
 
 func TestOfficeAgentStatusLine_NoManagerReturnsPlaceholder(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := statuslineGet(t, ctx, "sessionId=sess-0001")
 	if rec.Code != http.StatusOK {
@@ -84,6 +85,7 @@ func TestOfficeAgentStatusLine_ContentTypePlainText(t *testing.T) {
 }
 
 func TestTruncateRune(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		n    int

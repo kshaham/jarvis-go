@@ -19,6 +19,7 @@ import (
 )
 
 func TestReady_AllHealthy(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		StateStore:     state.NewStore(filepath.Join(t.TempDir(), "state.json")),
 		SSEBroker:      sse.NewBroker(100, 10),
@@ -43,6 +44,7 @@ func TestReady_AllHealthy(t *testing.T) {
 }
 
 func TestReady_SSEBrokerNil(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		StateStore:     state.NewStore(filepath.Join(t.TempDir(), "state.json")),
 		SessionManager: pty.NewSessionManager(10),
@@ -62,6 +64,7 @@ func TestReady_SSEBrokerNil(t *testing.T) {
 }
 
 func TestReady_SessionManagerNil(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		StateStore: state.NewStore(filepath.Join(t.TempDir(), "state.json")),
 		SSEBroker:  sse.NewBroker(100, 10),
@@ -81,6 +84,7 @@ func TestReady_SessionManagerNil(t *testing.T) {
 }
 
 func TestHealth_Shape(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := httptest.NewRequest("GET", "/api/health", nil)
 	rec := httptest.NewRecorder()
@@ -99,6 +103,7 @@ func TestHealth_Shape(t *testing.T) {
 }
 
 func TestStatus_VersionAndGoVersion(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	rec := httptest.NewRecorder()

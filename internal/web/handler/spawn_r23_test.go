@@ -15,6 +15,7 @@ import (
 )
 
 func TestMemberOverride_DecodesR23Fields(t *testing.T) {
+	t.Parallel()
 	body := `{
 		"id": "lead-1",
 		"provider": "claude-api",
@@ -35,6 +36,7 @@ func TestMemberOverride_DecodesR23Fields(t *testing.T) {
 }
 
 func TestMemberOverride_OmittedR23FieldsZero(t *testing.T) {
+	t.Parallel()
 	body := `{"id":"worker-1","provider":"claude-subscription","model":"sonnet"}`
 	var ov memberOverride
 	if err := json.Unmarshal([]byte(body), &ov); err != nil {
@@ -53,6 +55,7 @@ func TestMemberOverride_OmittedR23FieldsZero(t *testing.T) {
 // structs, json.Unmarshal should silently ignore them (DisallowUnknown
 // is not set on the decoder). Verify the request decodes cleanly.
 func TestR24_LegacyCostFieldsIgnored(t *testing.T) {
+	t.Parallel()
 	body := `{
 		"id": "lead-1",
 		"provider": "claude-api",
@@ -70,6 +73,7 @@ func TestR24_LegacyCostFieldsIgnored(t *testing.T) {
 }
 
 func TestR24_LegacyDailyCapIgnored(t *testing.T) {
+	t.Parallel()
 	body := `{"workingDir":"/tmp","dailyCapUSD":25.5,"mission":"hi"}`
 	var req spawnTeamRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
@@ -84,6 +88,7 @@ func TestR24_LegacyDailyCapIgnored(t *testing.T) {
 }
 
 func TestFirstNonEmpty(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   []string

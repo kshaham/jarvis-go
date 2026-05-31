@@ -57,6 +57,7 @@ func seedPeer(t *testing.T, p *Peers, peerID, token string) {
 // --- Identity ---
 
 func TestIdentityShow_ReturnsPublicFields(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	resp := getJSON(t, p.IdentityShow, "/api/identity")
 	if _, ok := resp["peerId"].(string); !ok || resp["peerId"] == "" {
@@ -69,6 +70,7 @@ func TestIdentityShow_ReturnsPublicFields(t *testing.T) {
 }
 
 func TestIdentityShowDetailed_IncludesCreatedAt(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	resp := getJSON(t, p.IdentityShowDetailed, "/api/identity/me")
 	if _, ok := resp["peerId"]; !ok {
@@ -77,6 +79,7 @@ func TestIdentityShowDetailed_IncludesCreatedAt(t *testing.T) {
 }
 
 func TestIdentityUpdate_HappyAndValidation(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	// Happy: set displayName + publicUrl.
 	rec := postJSON(t, p.IdentityUpdate, "/api/identity/me", map[string]interface{}{
@@ -101,6 +104,7 @@ func TestIdentityUpdate_HappyAndValidation(t *testing.T) {
 }
 
 func TestIdentityUpdate_BadJSON(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	req := httptest.NewRequest("PUT", "/api/identity/me", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -112,6 +116,7 @@ func TestIdentityUpdate_BadJSON(t *testing.T) {
 }
 
 func TestIdentityToken_GeneratesToken(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	resp := getJSON(t, p.IdentityToken, "/api/identity/token")
 	tok, _ := resp["token"].(string)
@@ -128,6 +133,7 @@ func TestIdentityToken_GeneratesToken(t *testing.T) {
 // --- Registry ---
 
 func TestPeersList_IncludesUnreadCounts(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-a", "tok-a")
 	resp := getJSON(t, p.PeersList, "/api/peers")
@@ -145,6 +151,7 @@ func TestPeersList_IncludesUnreadCounts(t *testing.T) {
 }
 
 func TestPeersAdd_Validation(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 
 	// Missing fields.
@@ -172,6 +179,7 @@ func TestPeersAdd_Validation(t *testing.T) {
 }
 
 func TestPeersAdd_UnreachablePeer502(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	// A syntactically valid but unroutable URL -> GetIdentity fails -> 502.
 	rec := postJSON(t, p.PeersAdd, "/api/peers", map[string]interface{}{
@@ -183,6 +191,7 @@ func TestPeersAdd_UnreachablePeer502(t *testing.T) {
 }
 
 func TestPeersDelete_Idempotent(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-del", "tok")
 
@@ -203,6 +212,7 @@ func TestPeersDelete_Idempotent(t *testing.T) {
 }
 
 func TestPeersDelete_MissingID400(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/peers/", nil), "peerID", "")
 	rec := httptest.NewRecorder()
@@ -213,6 +223,7 @@ func TestPeersDelete_MissingID400(t *testing.T) {
 }
 
 func TestPeersPing_NotFound(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	req := withURLParam(httptest.NewRequest("POST", "/api/peers/ghost/ping", nil), "peerID", "ghost")
 	rec := httptest.NewRecorder()
@@ -223,6 +234,7 @@ func TestPeersPing_NotFound(t *testing.T) {
 }
 
 func TestPeersPing_UnreachableMarksStatus(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	// PublicURL is unroutable so Ping fails; handler should still 200 with
 	// an error field and mark the peer status.
@@ -255,6 +267,7 @@ func TestPeersPing_UnreachableMarksStatus(t *testing.T) {
 // --- Relay inbox (inbound) ---
 
 func TestRelayInboxIn_MissingBearer401(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	req := httptest.NewRequest("POST", "/api/relay/inbox", strings.NewReader(`{"content":"hi"}`))
 	rec := httptest.NewRecorder()
@@ -265,6 +278,7 @@ func TestRelayInboxIn_MissingBearer401(t *testing.T) {
 }
 
 func TestRelayInboxIn_UnknownToken401(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	req := httptest.NewRequest("POST", "/api/relay/inbox", strings.NewReader(`{"content":"hi"}`))
 	req.Header.Set("Authorization", "Bearer not-a-real-token")
@@ -276,6 +290,7 @@ func TestRelayInboxIn_UnknownToken401(t *testing.T) {
 }
 
 func TestRelayInboxIn_ImpersonationForbidden(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-x", "tok-x")
 	// Body claims to be from peer-y but the token belongs to peer-x.
@@ -290,6 +305,7 @@ func TestRelayInboxIn_ImpersonationForbidden(t *testing.T) {
 }
 
 func TestRelayInboxIn_HappyDelivery(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-x", "tok-x")
 	body := `{"fromPeerId":"peer-x","content":"hello team"}`
@@ -315,6 +331,7 @@ func TestRelayInboxIn_HappyDelivery(t *testing.T) {
 }
 
 func TestRelayInboxIn_BadJSON(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-x", "tok-x")
 	req := httptest.NewRequest("POST", "/api/relay/inbox", strings.NewReader("{bad"))
@@ -329,6 +346,7 @@ func TestRelayInboxIn_BadJSON(t *testing.T) {
 // --- Relay send (outbound) ---
 
 func TestRelaySend_Validation(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 
 	// Missing toPeerId.
@@ -356,6 +374,7 @@ func TestRelaySend_Validation(t *testing.T) {
 }
 
 func TestRelaySend_UnknownPeerQueuesWithError(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	// No such peer registered -> SendOutbound errors -> 202 Accepted with
 	// the persisted (pending) record + error.
@@ -372,6 +391,7 @@ func TestRelaySend_UnknownPeerQueuesWithError(t *testing.T) {
 }
 
 func TestRelaySend_BadAttachmentRef400(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-z", "tok-z")
 	rec := postJSON(t, p.RelaySend, "/api/relay/send", map[string]interface{}{
@@ -389,6 +409,7 @@ func TestRelaySend_BadAttachmentRef400(t *testing.T) {
 // --- Relay list + mark-read ---
 
 func TestRelayList_ReturnsMessages(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-x", "tok-x")
 	// Inject one inbound message via the inbox endpoint.
@@ -405,6 +426,7 @@ func TestRelayList_ReturnsMessages(t *testing.T) {
 }
 
 func TestRelayMarkRead_MissingIDAndNotFound(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 
 	// Missing id.
@@ -425,6 +447,7 @@ func TestRelayMarkRead_MissingIDAndNotFound(t *testing.T) {
 }
 
 func TestRelayMarkRead_Happy(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	seedPeer(t, p, "peer-x", "tok-x")
 	body := `{"fromPeerId":"peer-x","content":"unread"}`
@@ -462,6 +485,7 @@ func TestRelayMarkRead_Happy(t *testing.T) {
 // --- resolveAttachment / titleFromMarkdown (pure helpers) ---
 
 func TestResolveAttachment_MissionExcerptAndUnknown(t *testing.T) {
+	t.Parallel()
 	// missionExcerpt: ref carries the body directly, no file lookup.
 	att, err := resolveAttachment("missionExcerpt", "the mission text")
 	if err != nil {
@@ -478,6 +502,7 @@ func TestResolveAttachment_MissionExcerptAndUnknown(t *testing.T) {
 }
 
 func TestResolveAttachment_TraversalRejected(t *testing.T) {
+	t.Parallel()
 	if _, err := resolveAttachment("experience", "../../etc/passwd"); err == nil {
 		t.Error("expected traversal rejection for experience ref")
 	}
@@ -514,6 +539,7 @@ func TestResolveAttachment_ExperienceFromLibrary(t *testing.T) {
 }
 
 func TestTitleFromMarkdown(t *testing.T) {
+	t.Parallel()
 	if got := titleFromMarkdown("# Hello World\nrest", "fallback"); got != "Hello World" {
 		t.Errorf("got %q, want 'Hello World'", got)
 	}

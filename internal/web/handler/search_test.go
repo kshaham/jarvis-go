@@ -30,6 +30,7 @@ func TestOfficeSearch_RequiresQuery(t *testing.T) {
 }
 
 func TestOfficeSearch_NoManager(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := searchReq(t, ctx, map[string]interface{}{"query": "x"})
 	if rec.Code != http.StatusServiceUnavailable {
@@ -134,6 +135,7 @@ func TestOfficeSearch_LimitClamp(t *testing.T) {
 }
 
 func TestScoreSubstring_Basics(t *testing.T) {
+	t.Parallel()
 	if s, _ := scoreSubstring("foo", ""); s != 0 {
 		t.Error("empty text should score 0")
 	}

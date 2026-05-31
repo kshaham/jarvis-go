@@ -21,6 +21,7 @@ import (
 // --- AuthChangePassword edge arms ---
 
 func TestAuthChangePassword_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtxAt(t, t.TempDir())
 	_ = ctx.AuthManager.SetPassword("currentpass123")
 	req := httptest.NewRequest("POST", "/api/auth/change-password", strings.NewReader("{bad"))
@@ -33,6 +34,7 @@ func TestAuthChangePassword_BadJSON400(t *testing.T) {
 }
 
 func TestAuthChangePassword_OversizeCurrentPassword400(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtxAt(t, t.TempDir())
 	_ = ctx.AuthManager.SetPassword("currentpass123")
 	rec := postJSON(t, ctx.AuthChangePassword, "/api/auth/change-password", map[string]interface{}{
@@ -45,6 +47,7 @@ func TestAuthChangePassword_OversizeCurrentPassword400(t *testing.T) {
 }
 
 func TestAuthChangePassword_RateLimited429(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtxAt(t, t.TempDir())
 	_ = ctx.AuthManager.SetPassword("currentpass123")
 	// Prime the rate limiter for the test's client IP (httptest default).
@@ -64,6 +67,7 @@ func TestAuthChangePassword_RateLimited429(t *testing.T) {
 }
 
 func TestAuthChangePassword_VerifyError500(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	ctx := newAuthCtxAt(t, dir)
 	_ = ctx.AuthManager.SetPassword("currentpass123")
@@ -83,6 +87,7 @@ func TestAuthChangePassword_VerifyError500(t *testing.T) {
 // --- UpdateTemplate / OfficeAgentAskAnswer / OfficeAgentPostMemorySection bad JSON ---
 
 func TestUpdateTemplate_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{TemplateStore: nil}
 	req := withURLParam(httptest.NewRequest("PUT", "/api/templates/t1", strings.NewReader("{bad")), "id", "t1")
 	req.Header.Set("Content-Type", "application/json")
@@ -266,6 +271,7 @@ func TestGetKnowledgeLibrary_TruncatesLargeFile(t *testing.T) {
 // --- PeersList store error ---
 
 func TestPeersList_UnreadCountsError500(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	relayRoot := filepath.Join(dir, "relay")
 	if err := os.MkdirAll(relayRoot, 0o755); err != nil {

@@ -25,6 +25,7 @@ func newMiscCtx(t *testing.T) *Context {
 // --- Templates ---
 
 func TestListTemplates_Empty(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	resp := getJSON(t, ctx.ListTemplates, "/api/templates")
 	if resp["success"] != true {
@@ -33,6 +34,7 @@ func TestListTemplates_Empty(t *testing.T) {
 }
 
 func TestCreateTemplate_Happy(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	rec := postJSON(t, ctx.CreateTemplate, "/api/templates", map[string]interface{}{
 		"name":        "review",
@@ -48,6 +50,7 @@ func TestCreateTemplate_Happy(t *testing.T) {
 }
 
 func TestCreateTemplate_MissingName(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	rec := postJSON(t, ctx.CreateTemplate, "/api/templates", map[string]interface{}{
 		"description": "no name",
@@ -58,6 +61,7 @@ func TestCreateTemplate_MissingName(t *testing.T) {
 }
 
 func TestGetTemplate_FoundAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	created := ctx.TemplateStore.Create("t1", "d", "c")
 
@@ -77,6 +81,7 @@ func TestGetTemplate_FoundAndNotFound(t *testing.T) {
 }
 
 func TestUpdateTemplate_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	created := ctx.TemplateStore.Create("t1", "d", "c")
 
@@ -98,6 +103,7 @@ func TestUpdateTemplate_HappyAndNotFound(t *testing.T) {
 }
 
 func TestDeleteTemplate_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	created := ctx.TemplateStore.Create("t1", "d", "c")
 
@@ -117,6 +123,7 @@ func TestDeleteTemplate_HappyAndNotFound(t *testing.T) {
 }
 
 func TestDuplicateTemplate_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	created := ctx.TemplateStore.Create("t1", "d", "c")
 
@@ -139,6 +146,7 @@ func TestDuplicateTemplate_HappyAndNotFound(t *testing.T) {
 }
 
 func TestExportTemplate_FoundAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	created := ctx.TemplateStore.Create("t1", "d", "c")
 
@@ -161,6 +169,7 @@ func TestExportTemplate_FoundAndNotFound(t *testing.T) {
 }
 
 func TestImportTemplate_HappyAndMissingName(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	rec := postJSON(t, ctx.ImportTemplate, "/api/templates/import", map[string]interface{}{
 		"name": "imported", "content": "x",
@@ -180,6 +189,7 @@ func TestImportTemplate_HappyAndMissingName(t *testing.T) {
 // --- Cases ---
 
 func TestListCases_Empty(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	resp := getJSON(t, ctx.ListCases, "/api/cases")
 	if resp["success"] != true {
@@ -188,6 +198,7 @@ func TestListCases_Empty(t *testing.T) {
 }
 
 func TestCreateCase_HappyAndListGet(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	rec := postJSON(t, ctx.CreateCase, "/api/cases", map[string]interface{}{
 		"name": "bug-123",
@@ -213,6 +224,7 @@ func TestCreateCase_HappyAndListGet(t *testing.T) {
 }
 
 func TestCreateCase_MissingName(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	rec := postJSON(t, ctx.CreateCase, "/api/cases", map[string]interface{}{})
 	if rec.Code != http.StatusBadRequest {
@@ -221,6 +233,7 @@ func TestCreateCase_MissingName(t *testing.T) {
 }
 
 func TestGetCase_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	req := withURLParam(httptest.NewRequest("GET", "/api/cases/ghost", nil), "name", "ghost")
 	rec := httptest.NewRecorder()
@@ -231,6 +244,7 @@ func TestGetCase_NotFound(t *testing.T) {
 }
 
 func TestUpdateCase_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	req := withURLParam(httptest.NewRequest("PUT", "/api/cases/ghost", jsonBody(t, map[string]interface{}{"x": 1})), "name", "ghost")
 	req.Header.Set("Content-Type", "application/json")
@@ -242,6 +256,7 @@ func TestUpdateCase_NotFound(t *testing.T) {
 }
 
 func TestUpdateCase_Happy(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	if _, err := ctx.CaseManager.Create("bug-9"); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -256,6 +271,7 @@ func TestUpdateCase_Happy(t *testing.T) {
 }
 
 func TestDeleteCase_Happy(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	if _, err := ctx.CaseManager.Create("bug-del"); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -274,6 +290,7 @@ func TestDeleteCase_Happy(t *testing.T) {
 }
 
 func TestCreateTemplate_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newMiscCtx(t)
 	req := httptest.NewRequest("POST", "/api/templates", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")

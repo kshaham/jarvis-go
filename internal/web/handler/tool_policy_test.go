@@ -25,6 +25,7 @@ func newToolPolicyCtx(t *testing.T) *Context {
 }
 
 func TestGetToolPolicy_ReturnsDefaultWhenNoStoreConfigured(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // ToolPolicy nil
 	req := httptest.NewRequest(http.MethodGet, "/api/office/tool-policy", nil)
 	rec := httptest.NewRecorder()
@@ -42,6 +43,7 @@ func TestGetToolPolicy_ReturnsDefaultWhenNoStoreConfigured(t *testing.T) {
 }
 
 func TestGetToolPolicy_ReturnsActivePolicy(t *testing.T) {
+	t.Parallel()
 	ctx := newToolPolicyCtx(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/office/tool-policy", nil)
 	rec := httptest.NewRecorder()
@@ -60,6 +62,7 @@ func TestGetToolPolicy_ReturnsActivePolicy(t *testing.T) {
 }
 
 func TestPutToolPolicy_NoStore503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	body := `{"denyPatterns":[],"allowOutsideWorktree":false}`
 	req := httptest.NewRequest(http.MethodPut, "/api/office/tool-policy", bytes.NewReader([]byte(body)))
@@ -71,6 +74,7 @@ func TestPutToolPolicy_NoStore503(t *testing.T) {
 }
 
 func TestPutToolPolicy_InvalidJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newToolPolicyCtx(t)
 	req := httptest.NewRequest(http.MethodPut, "/api/office/tool-policy",
 		bytes.NewReader([]byte("not json {")))
@@ -82,6 +86,7 @@ func TestPutToolPolicy_InvalidJSON400(t *testing.T) {
 }
 
 func TestPutToolPolicy_HappyPathRoundTrips(t *testing.T) {
+	t.Parallel()
 	ctx := newToolPolicyCtx(t)
 	custom := claudehooks.ToolPolicy{
 		DenyRules: []claudehooks.ToolPolicyRule{
@@ -133,6 +138,7 @@ func TestPutToolPolicy_HappyPathRoundTrips(t *testing.T) {
 }
 
 func TestPutToolPolicy_InvalidRegex400(t *testing.T) {
+	t.Parallel()
 	ctx := newToolPolicyCtx(t)
 	bad := claudehooks.ToolPolicy{
 		DenyRules: []claudehooks.ToolPolicyRule{

@@ -13,6 +13,7 @@ import (
 )
 
 func TestPreviewSmartKickstart_SourcesFromInputsAndSettings(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	// Seed a kickstart template + learning data so all four source branches fire.
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
@@ -43,6 +44,7 @@ func TestPreviewSmartKickstart_SourcesFromInputsAndSettings(t *testing.T) {
 }
 
 func TestPreviewSmartKickstart_EmptyBodyNoSources(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	rec := postJSON(t, ctx.PreviewSmartKickstart, "/api/respawn/smart-kickstart/preview", map[string]interface{}{})
 	if rec.Code != http.StatusOK {
@@ -60,6 +62,7 @@ func TestPreviewSmartKickstart_EmptyBodyNoSources(t *testing.T) {
 }
 
 func TestPreviewSmartKickstart_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("POST", "/api/respawn/smart-kickstart/preview", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -71,6 +74,7 @@ func TestPreviewSmartKickstart_BadJSON(t *testing.T) {
 }
 
 func TestPreviewSmartUpdate_Sources(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"respawnLearning": []interface{}{map[string]interface{}{"note": "y"}},
@@ -95,6 +99,7 @@ func TestPreviewSmartUpdate_Sources(t *testing.T) {
 }
 
 func TestPreviewSmartUpdate_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("POST", "/api/respawn/smart-update/preview", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -106,6 +111,7 @@ func TestPreviewSmartUpdate_BadJSON(t *testing.T) {
 }
 
 func TestGetRespawnSmartKickstart_RoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	// Empty default.
 	resp := getJSON(t, ctx.GetRespawnSmartKickstart, "/api/respawn/smart-kickstart")
@@ -128,6 +134,7 @@ func TestGetRespawnSmartKickstart_RoundTrip(t *testing.T) {
 }
 
 func TestUpdateRespawnSmartKickstart_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("PUT", "/api/respawn/smart-kickstart", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -139,6 +146,7 @@ func TestUpdateRespawnSmartKickstart_BadJSON(t *testing.T) {
 }
 
 func TestGetRespawnSmartKickstartStats_DefaultsToEmptyMap(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetRespawnSmartKickstartStats, "/api/respawn/smart-kickstart/stats")
 	stats, ok := resp["stats"].(map[string]interface{})
@@ -151,6 +159,7 @@ func TestGetRespawnSmartKickstartStats_DefaultsToEmptyMap(t *testing.T) {
 }
 
 func TestGetRespawnSmartKickstartStats_SeededValue(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"smartKickstartStats": map[string]interface{}{"runs": float64(3)},
@@ -163,6 +172,7 @@ func TestGetRespawnSmartKickstartStats_SeededValue(t *testing.T) {
 }
 
 func TestUpdatePromptProcessorContextInjector_NestsUnderPromptProcessor(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	// Seed an existing promptProcessor map so the merge-copy branch runs.
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
@@ -194,6 +204,7 @@ func TestUpdatePromptProcessorContextInjector_NestsUnderPromptProcessor(t *testi
 }
 
 func TestUpdatePromptProcessorContextInjector_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("PUT", "/api/prompt-processor/context-injector", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -205,6 +216,7 @@ func TestUpdatePromptProcessorContextInjector_BadJSON(t *testing.T) {
 }
 
 func TestResetPromptProcessorStats_ClearsToEmptyMap(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"promptProcessorStats": map[string]interface{}{"applied": float64(9)},
@@ -220,6 +232,7 @@ func TestResetPromptProcessorStats_ClearsToEmptyMap(t *testing.T) {
 }
 
 func TestPreviewPromptProcessor_PassthroughCountsRules(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"promptProcessorRules": []interface{}{
@@ -244,6 +257,7 @@ func TestPreviewPromptProcessor_PassthroughCountsRules(t *testing.T) {
 }
 
 func TestPreviewPromptProcessor_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("POST", "/api/prompt-processor/preview", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -255,6 +269,7 @@ func TestPreviewPromptProcessor_BadJSON(t *testing.T) {
 }
 
 func TestGetRespawnLearningCategories_CountsAndGeneralFallback(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"respawnLearning": []interface{}{

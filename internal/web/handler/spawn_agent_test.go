@@ -14,6 +14,7 @@ import (
 )
 
 func TestBuildOfficeMCPServers_AlwaysIncludesCoreServers(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		OfficeManager: office.NewManager(stubSessions{}, func(string, interface{}) {}, nil),
 	}
@@ -38,6 +39,7 @@ func TestBuildOfficeMCPServers_AlwaysIncludesCoreServers(t *testing.T) {
 }
 
 func TestBuildOfficeMCPServers_OmitsAgentTokenWhenEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		OfficeManager: office.NewManager(stubSessions{}, func(string, interface{}) {}, nil),
 	}
@@ -51,6 +53,7 @@ func TestBuildOfficeMCPServers_OmitsAgentTokenWhenEmpty(t *testing.T) {
 }
 
 func TestLeanCodexMCPServers_FiltersToAllowlist(t *testing.T) {
+	t.Parallel()
 	full := map[string]any{
 		"jarvis":              map[string]any{"command": "jarvis-mcp"},
 		"codegraph":           map[string]any{"command": "codegraph"},
@@ -77,6 +80,7 @@ func TestLeanCodexMCPServers_FiltersToAllowlist(t *testing.T) {
 }
 
 func TestCodexMCPFromMap_TranslatesStdioOnly(t *testing.T) {
+	t.Parallel()
 	in := map[string]any{
 		"jarvis": map[string]any{
 			"command": "jarvis-mcp",
@@ -106,6 +110,7 @@ func TestCodexMCPFromMap_TranslatesStdioOnly(t *testing.T) {
 }
 
 func TestCodexSubscriptionAuthDir(t *testing.T) {
+	t.Parallel()
 	got := codexSubscriptionAuthDir("/home/op")
 	want := filepath.Join("/home/op", ".jarvis", "codex-auth")
 	if got != want {
@@ -114,6 +119,7 @@ func TestCodexSubscriptionAuthDir(t *testing.T) {
 }
 
 func TestStageCodexAuth_FromPersistedDir(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	codexHome := t.TempDir()
 
@@ -145,6 +151,7 @@ func TestStageCodexAuth_FromPersistedDir(t *testing.T) {
 }
 
 func TestStageCodexAuth_NoCredentialsErrors(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	codexHome := t.TempDir()
 	// Neither ~/.jarvis/codex-auth/auth.json nor ~/.codex/auth.json exists.

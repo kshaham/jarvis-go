@@ -14,6 +14,7 @@ import (
 )
 
 func TestRun_EmptyCommand400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.Run, "/api/run", map[string]interface{}{"command": ""})
 	if rec.Code != http.StatusBadRequest {
@@ -22,6 +23,7 @@ func TestRun_EmptyCommand400(t *testing.T) {
 }
 
 func TestRun_InvalidWorkingDir400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 	rec := postJSON(t, ctx.Run, "/api/run", map[string]interface{}{
 		"command":    "echo hi",

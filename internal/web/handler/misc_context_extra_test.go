@@ -21,6 +21,7 @@ import (
 // --- context.go: getProviderEnvVarsFor ---
 
 func TestGetProviderEnvVarsFor_ClaudeAPIAndZAI(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 
 	// claude-api with a key.
@@ -93,6 +94,7 @@ func TestReadClaudeOAuthToken(t *testing.T) {
 // --- office.go: resolveOfficeSessionMode ---
 
 func TestResolveOfficeSessionMode(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 
 	// Default when unset -> "sdk".
@@ -118,6 +120,7 @@ func TestResolveOfficeSessionMode(t *testing.T) {
 // --- misc.go: CancelPlanGeneration ---
 
 func TestCancelPlanGeneration_SpecificNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		ActivePlanOrchestrators: map[string]string{},
 		SessionManager:          pty.NewSessionManager(10),
@@ -131,6 +134,7 @@ func TestCancelPlanGeneration_SpecificNotFound(t *testing.T) {
 }
 
 func TestCancelPlanGeneration_CancelAllEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		ActivePlanOrchestrators: map[string]string{},
 		SessionManager:          pty.NewSessionManager(10),
@@ -151,6 +155,7 @@ func TestCancelPlanGeneration_CancelAllEmpty(t *testing.T) {
 // --- misc.go: GetRalphWizardFiles / GetRalphWizardFile ---
 
 func TestGetRalphWizardFiles_CaseNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{CaseManager: cases.NewCaseManager(t.TempDir())}
 	req := withURLParam(httptest.NewRequest("GET", "/api/cases/ghost/ralph-wizard/files", nil), "caseName", "ghost")
 	rec := httptest.NewRecorder()
@@ -161,6 +166,7 @@ func TestGetRalphWizardFiles_CaseNotFound(t *testing.T) {
 }
 
 func TestGetRalphWizardFiles_NoWizardDir404(t *testing.T) {
+	t.Parallel()
 	cm := cases.NewCaseManager(t.TempDir())
 	if _, err := cm.Create("rw"); err != nil {
 		t.Fatalf("create case: %v", err)
@@ -177,6 +183,7 @@ func TestGetRalphWizardFiles_NoWizardDir404(t *testing.T) {
 }
 
 func TestGetRalphWizardFile_Validation(t *testing.T) {
+	t.Parallel()
 	cm := cases.NewCaseManager(t.TempDir())
 	if _, err := cm.Create("rw2"); err != nil {
 		t.Fatalf("create case: %v", err)
@@ -211,6 +218,7 @@ func TestGetRalphWizardFile_Validation(t *testing.T) {
 // --- session.go: respawnSessionWriter.WriteToSession ---
 
 func TestRespawnSessionWriter_WriteToSession_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	sess, _ := ctx.SessionManager.GetSession(id)

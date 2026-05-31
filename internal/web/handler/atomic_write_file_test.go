@@ -15,6 +15,7 @@ import (
 )
 
 func TestAtomicWriteFile_HappyRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "plan.md")
 	if err := atomicWriteFile(path, []byte("hello plan"), 0o644); err != nil {
@@ -32,6 +33,7 @@ func TestAtomicWriteFile_HappyRoundTrip(t *testing.T) {
 }
 
 func TestAtomicWriteFile_CreateTempFailsMissingDir(t *testing.T) {
+	t.Parallel()
 	// Parent directory does not exist -> os.CreateTemp(dir, ...) fails.
 	missing := filepath.Join(t.TempDir(), "does", "not", "exist", "plan.md")
 	err := atomicWriteFile(missing, []byte("x"), 0o644)
@@ -45,6 +47,7 @@ func TestAtomicWriteFile_CreateTempFailsMissingDir(t *testing.T) {
 }
 
 func TestAtomicWriteFile_CreateTempFailsReadOnlyDir(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("unix file-mode semantics")
 	}

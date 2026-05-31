@@ -25,6 +25,7 @@ import (
 // --- maskToken (pure) ---
 
 func TestMaskToken_Boundaries(t *testing.T) {
+	t.Parallel()
 	if got := maskToken("abc"); got != "***" {
 		t.Errorf("maskToken(short)=%q, want ***", got)
 	}
@@ -40,6 +41,7 @@ func TestMaskToken_Boundaries(t *testing.T) {
 // --- Telegram: nil-bot short circuits ---
 
 func TestGetTelegramStatus_NilBot(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	resp := getJSON(t, ctx.GetTelegramStatus, "/api/settings/telegram")
 	if resp["connected"] != false {
@@ -52,6 +54,7 @@ func TestGetTelegramStatus_NilBot(t *testing.T) {
 }
 
 func TestGetTelegramStatus_ConfiguredMasksToken(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{TelegramBot: telegram.New()}
 	ctx.TelegramBot.Configure("123456789:bot-secret-token", "chat-99")
 	resp := getJSON(t, ctx.GetTelegramStatus, "/api/settings/telegram")
@@ -71,6 +74,7 @@ func TestGetTelegramStatus_ConfiguredMasksToken(t *testing.T) {
 }
 
 func TestUpdateTelegramConfig_NilBot503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.UpdateTelegramConfig, "/api/settings/telegram", map[string]interface{}{"token": "t", "chatId": "c"})
 	if rec.Code != http.StatusServiceUnavailable {
@@ -79,6 +83,7 @@ func TestUpdateTelegramConfig_NilBot503(t *testing.T) {
 }
 
 func TestUpdateTelegramConfig_PersistsNonSecretOnly(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		TelegramBot: telegram.New(),
 		StateStore:  state.NewStore(t.TempDir() + "/state.json"),
@@ -107,6 +112,7 @@ func TestUpdateTelegramConfig_PersistsNonSecretOnly(t *testing.T) {
 }
 
 func TestUpdateTelegramConfig_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{TelegramBot: telegram.New(), StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	req := httptest.NewRequest("POST", "/api/settings/telegram", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -118,6 +124,7 @@ func TestUpdateTelegramConfig_BadJSON(t *testing.T) {
 }
 
 func TestSendTelegramTest_NotConfigured400(t *testing.T) {
+	t.Parallel()
 	// Nil bot.
 	ctx := &Context{}
 	rec := postJSON(t, ctx.SendTelegramTest, "/api/telegram/test", map[string]interface{}{})
@@ -133,6 +140,7 @@ func TestSendTelegramTest_NotConfigured400(t *testing.T) {
 }
 
 func TestConnectTelegram_NilBot503AndConfigure(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.ConnectTelegram, "/api/telegram/send-test", map[string]interface{}{"token": "t", "chatId": "c"})
 	if rec.Code != http.StatusServiceUnavailable {
@@ -156,6 +164,7 @@ func TestConnectTelegram_NilBot503AndConfigure(t *testing.T) {
 }
 
 func TestConnectTelegram_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{TelegramBot: telegram.New(), StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	req := httptest.NewRequest("POST", "/api/telegram/send-test", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -167,6 +176,7 @@ func TestConnectTelegram_BadJSON(t *testing.T) {
 }
 
 func TestDisconnectTelegram_NilAndHappy(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.DisconnectTelegram, "/api/telegram/disconnect", map[string]interface{}{})
 	if rec.Code != http.StatusServiceUnavailable {
@@ -191,6 +201,7 @@ func TestDisconnectTelegram_NilAndHappy(t *testing.T) {
 // --- GetHookConfig ---
 
 func TestGetHookConfig_DefaultEmptyAndSeeded(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	resp := getJSON(t, ctx.GetHookConfig, "/api/hook-config")
 	hc, ok := resp["hookConfig"].(map[string]interface{})
@@ -354,6 +365,7 @@ func TestHandleHookEvent_SubagentEventBroadcastOnly(t *testing.T) {
 // --- GetTaskGate ---
 
 func TestGetTaskGate_EmptyAndSeeded(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	// Unknown session -> gate nil.
 	req := withURLParam(httptest.NewRequest("GET", "/api/task-gate/none", nil), "sessionId", "none")
@@ -382,6 +394,7 @@ func TestGetTaskGate_EmptyAndSeeded(t *testing.T) {
 // --- Run: validation branches (no subprocess) ---
 
 func TestRun_MissingCommand400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.Run, "/api/run", map[string]interface{}{"command": ""})
 	if rec.Code != http.StatusBadRequest {
@@ -390,6 +403,7 @@ func TestRun_MissingCommand400(t *testing.T) {
 }
 
 func TestRun_ShellMetachars400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.Run, "/api/run", map[string]interface{}{"command": "ls; rm -rf /"})
 	if rec.Code != http.StatusBadRequest {
@@ -398,6 +412,7 @@ func TestRun_ShellMetachars400(t *testing.T) {
 }
 
 func TestRun_DisallowedBinary400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.Run, "/api/run", map[string]interface{}{"command": "rm -rf foo"})
 	if rec.Code != http.StatusBadRequest {
@@ -406,6 +421,7 @@ func TestRun_DisallowedBinary400(t *testing.T) {
 }
 
 func TestRun_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := httptest.NewRequest("POST", "/api/run", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -419,6 +435,7 @@ func TestRun_BadJSON(t *testing.T) {
 // --- GeneratePlan: pure markdown generation ---
 
 func TestGeneratePlan_RendersMarkdown(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.GeneratePlan, "/api/generate-plan", map[string]interface{}{
 		"description": "Refactor the auth flow",
@@ -437,6 +454,7 @@ func TestGeneratePlan_RendersMarkdown(t *testing.T) {
 }
 
 func TestGeneratePlan_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := httptest.NewRequest("POST", "/api/generate-plan", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -450,6 +468,7 @@ func TestGeneratePlan_BadJSON(t *testing.T) {
 // --- QuickStart: validation branches (no subprocess) ---
 
 func TestQuickStart_MissingCaseName400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	rec := postJSON(t, ctx.QuickStart, "/api/quick-start", map[string]interface{}{})
 	if rec.Code != http.StatusBadRequest {
@@ -458,6 +477,7 @@ func TestQuickStart_MissingCaseName400(t *testing.T) {
 }
 
 func TestQuickStart_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(t.TempDir() + "/s.json")}
 	req := httptest.NewRequest("POST", "/api/quick-start", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")

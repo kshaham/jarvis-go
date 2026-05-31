@@ -12,6 +12,7 @@ import (
 )
 
 func TestCloneSession_HappyMultiple(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	srcID, _ := liveSession(t, ctx)
 
@@ -48,6 +49,7 @@ func TestCloneSession_HappyMultiple(t *testing.T) {
 }
 
 func TestCloneSession_DefaultCountOne(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	srcID, _ := liveSession(t, ctx)
 

@@ -53,6 +53,7 @@ func newPeersBundleAt(t *testing.T, dir string) *Peers {
 }
 
 func TestPeersAdd_HappyPathRegistersPeer(t *testing.T) {
+	t.Parallel()
 	srv := identityServer(t, "peer-xyz", "Remote Team", false)
 	p := newPeersBundleAt(t, t.TempDir())
 
@@ -84,6 +85,7 @@ func TestPeersAdd_HappyPathRegistersPeer(t *testing.T) {
 }
 
 func TestPeersAdd_DisplayNameOverride(t *testing.T) {
+	t.Parallel()
 	srv := identityServer(t, "peer-ovr", "Server Name", false)
 	p := newPeersBundleAt(t, t.TempDir())
 
@@ -106,6 +108,7 @@ func TestPeersAdd_DisplayNameOverride(t *testing.T) {
 }
 
 func TestPeersPing_SuccessMarksOK(t *testing.T) {
+	t.Parallel()
 	srv := identityServer(t, "peer-ping", "Pinged", false)
 	dir := t.TempDir()
 	p := newPeersBundleAt(t, dir)
@@ -129,6 +132,7 @@ func TestPeersPing_SuccessMarksOK(t *testing.T) {
 }
 
 func TestPeersPing_UnauthorizedMarksUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv := identityServer(t, "peer-401", "Locked", true)
 	dir := t.TempDir()
 	p := newPeersBundleAt(t, dir)

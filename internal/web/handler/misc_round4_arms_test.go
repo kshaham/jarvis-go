@@ -10,6 +10,7 @@ import (
 )
 
 func TestUpdateScheduledTask_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	req := withURLParam(httptest.NewRequest("PUT", "/api/scheduled/some-id", strings.NewReader("{not json")), "id", "some-id")
 	req.Header.Set("Content-Type", "application/json")

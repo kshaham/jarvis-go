@@ -20,6 +20,7 @@ func newScheduledCtx() *Context {
 }
 
 func TestListScheduledTasks_Empty(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	resp := getJSON(t, ctx.ListScheduledTasks, "/api/scheduled")
 	tasks, _ := resp["tasks"].([]interface{})
@@ -29,6 +30,7 @@ func TestListScheduledTasks_Empty(t *testing.T) {
 }
 
 func TestCreateScheduledTask_AssignsID(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	rec := postJSON(t, ctx.CreateScheduledTask, "/api/scheduled", map[string]interface{}{
 		"name": "nightly", "cron": "0 0 * * *",
@@ -48,6 +50,7 @@ func TestCreateScheduledTask_AssignsID(t *testing.T) {
 }
 
 func TestCreateScheduledTask_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	req := httptest.NewRequest("POST", "/api/scheduled", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -59,6 +62,7 @@ func TestCreateScheduledTask_InvalidJSON(t *testing.T) {
 }
 
 func TestGetScheduledTask_FoundAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	rec := postJSON(t, ctx.CreateScheduledTask, "/api/scheduled", map[string]interface{}{"name": "x"})
 	var created map[string]interface{}
@@ -81,6 +85,7 @@ func TestGetScheduledTask_FoundAndNotFound(t *testing.T) {
 }
 
 func TestUpdateScheduledTask_MergesAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	rec := postJSON(t, ctx.CreateScheduledTask, "/api/scheduled", map[string]interface{}{"name": "x", "cron": "old"})
 	var created map[string]interface{}
@@ -116,6 +121,7 @@ func TestUpdateScheduledTask_MergesAndNotFound(t *testing.T) {
 }
 
 func TestDeleteScheduledTask_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	rec := postJSON(t, ctx.CreateScheduledTask, "/api/scheduled", map[string]interface{}{"name": "x"})
 	var created map[string]interface{}
@@ -141,6 +147,7 @@ func TestDeleteScheduledTask_HappyAndNotFound(t *testing.T) {
 // many goroutines create tasks while others list, so a missing lock would
 // trip the race detector or the "concurrent map" runtime panic.
 func TestScheduledTasks_ConcurrentCreateList(t *testing.T) {
+	t.Parallel()
 	ctx := newScheduledCtx()
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {

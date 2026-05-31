@@ -18,6 +18,7 @@ import (
 )
 
 func TestBuildStandupHistory_ReadDirErrorReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	// A path that does not exist -> os.ReadDir errors -> empty result.
 	got := buildStandupHistory(filepath.Join(t.TempDir(), "does-not-exist"))
 	if got == nil {

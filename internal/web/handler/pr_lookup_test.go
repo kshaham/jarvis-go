@@ -103,6 +103,7 @@ func TestOfficeLookupPR_HappyPathReturnsRosterAndMission(t *testing.T) {
 }
 
 func TestOfficeLookupPR_503WhenOfficeManagerNil(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // no OfficeManager
 	rec := prLookupReq(t, ctx, "1")
 	if rec.Code != http.StatusServiceUnavailable {

@@ -35,6 +35,7 @@ func newForwardCtx(t *testing.T) *Context {
 }
 
 func TestGetSessionTailFile_StreamsAndCancels(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 
@@ -102,6 +103,7 @@ func TestGetSessionTailFile_StreamsAndCancels(t *testing.T) {
 // TestGetSessionTailFile_MissingPath asserts the 400 branch (no path query
 // param) against a real session, distinct from the 404 (unknown session).
 func TestGetSessionTailFile_MissingPath(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -114,6 +116,7 @@ func TestGetSessionTailFile_MissingPath(t *testing.T) {
 // TestGetSessionTailFile_FileNotFound asserts the os.Open error branch: a
 // relative path under the working dir that doesn't exist -> 404.
 func TestGetSessionTailFile_FileNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -126,6 +129,7 @@ func TestGetSessionTailFile_FileNotFound(t *testing.T) {
 // TestGetSessionTailFile_AbsolutePathRejected drives resolveSessionFilePath's
 // ErrPathAbsolute branch -> 400.
 func TestGetSessionTailFile_AbsolutePathRejected(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()

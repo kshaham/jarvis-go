@@ -325,6 +325,7 @@ func TestOfficeAgentGetDevInstance_DefaultSlot(t *testing.T) {
 }
 
 func TestSlotFromQuery(t *testing.T) {
+	t.Parallel()
 	// Empty -> "app".
 	req := httptest.NewRequest("GET", "/x", nil)
 	if got := slotFromQuery(req); got != "app" {

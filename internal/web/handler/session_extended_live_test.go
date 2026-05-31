@@ -55,6 +55,7 @@ func idReq(method, path, body, id string) *http.Request {
 }
 
 func TestRenameSession_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -77,6 +78,7 @@ func TestRenameSession_Live(t *testing.T) {
 }
 
 func TestUpdateSessionColor_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -94,6 +96,7 @@ func TestUpdateSessionColor_Live(t *testing.T) {
 }
 
 func TestSessionResize_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -113,6 +116,7 @@ func TestSessionResize_Live(t *testing.T) {
 }
 
 func TestSessionToggles_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -145,6 +149,7 @@ func TestSessionToggles_Live(t *testing.T) {
 }
 
 func TestSessionCPULimit_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -169,6 +174,7 @@ func TestSessionCPULimit_Live(t *testing.T) {
 }
 
 func TestSessionRalphConfigStatus_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -192,6 +198,7 @@ func TestSessionRalphConfigStatus_Live(t *testing.T) {
 }
 
 func TestSessionRalphState_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	// initSessionTrackers registered a Ralph tracker, so the populated branch runs.
@@ -209,6 +216,7 @@ func TestSessionRalphState_Live(t *testing.T) {
 }
 
 func TestSessionRunSummary_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -219,6 +227,7 @@ func TestSessionRunSummary_Live(t *testing.T) {
 }
 
 func TestSessionFiles_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 	// Seed a couple of files so the listing has content.
@@ -239,6 +248,7 @@ func TestSessionFiles_Live(t *testing.T) {
 }
 
 func TestSessionFixPlanRoundTrip_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 
@@ -274,6 +284,7 @@ func TestSessionFixPlanRoundTrip_Live(t *testing.T) {
 }
 
 func TestSessionPlanCheckpointHistoryRollback_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 
@@ -358,6 +369,7 @@ func twoParamReq(method, path, body, k1, v1, k2, v2 string) *http.Request {
 }
 
 func TestSessionFileContentAndRaw_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 	if err := os.WriteFile(filepath.Join(wd, "note.md"), []byte("# Title\nbody"), 0o644); err != nil {
@@ -404,6 +416,7 @@ func TestSessionFileContentAndRaw_Live(t *testing.T) {
 }
 
 func TestSessionOutputAndContext_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -433,6 +446,7 @@ func TestSessionOutputAndContext_Live(t *testing.T) {
 }
 
 func TestWriteSessionRalphPrompt_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -447,6 +461,7 @@ func TestWriteSessionRalphPrompt_Live(t *testing.T) {
 }
 
 func TestImportReadSessionFixPlan_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 
@@ -475,6 +490,7 @@ func TestImportReadSessionFixPlan_Live(t *testing.T) {
 }
 
 func TestReadSessionFixPlan_MissingFileReturnsNil_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -490,6 +506,7 @@ func TestReadSessionFixPlan_MissingFileReturnsNil_Live(t *testing.T) {
 }
 
 func TestSessionInteractiveRespawn_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -509,6 +526,7 @@ func TestSessionInteractiveRespawn_Live(t *testing.T) {
 }
 
 func TestPatchSessionPlanTask_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 	// Seed a plan so the patch has a task to update.
@@ -525,6 +543,7 @@ func TestPatchSessionPlanTask_Live(t *testing.T) {
 }
 
 func TestDeleteSessionTailFile_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -542,6 +561,7 @@ func TestDeleteSessionTailFile_Live(t *testing.T) {
 }
 
 func TestImportSession_HappyThroughHandler_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	dir := t.TempDir()
 	rec := postJSON(t, ctx.ImportSession, "/api/sessions/import", map[string]interface{}{

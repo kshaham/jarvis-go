@@ -51,6 +51,7 @@ func TestRun_StdoutTruncatedOver1MB(t *testing.T) {
 }
 
 func TestQuickStart_UsesDefaultWorkingDir(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	ctx.CaseManager = cases.NewCaseManager(t.TempDir())
 	if _, err := ctx.CaseManager.Create("dw-case"); err != nil {
@@ -126,6 +127,7 @@ func TestLinkCase_HomeDirErrorReturns500(t *testing.T) {
 }
 
 func TestGetCaseFixPlan_NoCheckboxesEmptyTodos(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	cm := cases.NewCaseManager(t.TempDir())
 	ctx.CaseManager = cm
@@ -157,6 +159,7 @@ func TestGetCaseFixPlan_NoCheckboxesEmptyTodos(t *testing.T) {
 }
 
 func TestGetRalphWizardFile_TraversalForbidden(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	cm := cases.NewCaseManager(t.TempDir())
 	ctx.CaseManager = cm
@@ -185,6 +188,7 @@ func TestGetRalphWizardFile_TraversalForbidden(t *testing.T) {
 }
 
 func TestVerifyHookSignature_EmptySigningKey(t *testing.T) {
+	t.Parallel()
 	// A zero-value Manager has no signing secret, so both HookSigningKey and
 	// SigningKey return empty -> the check closure short-circuits to false.
 	ctx := &Context{AuthManager: &auth.Manager{}}

@@ -25,6 +25,7 @@ import (
 // against the exact shape the handler hands in. Extends the coverage
 // already in internal/office/ultrareview_test.go.
 func TestTaskHasNeedsReviewLabel_OnRealTaskShape(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		labels []string

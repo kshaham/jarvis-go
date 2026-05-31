@@ -47,6 +47,7 @@ func TestGeneratePlanDetailed_CreateSessionFails500(t *testing.T) {
 // (ActivePlanOrchestrators == nil) and the no-case home-dir fallback through a
 // real spawned shell-less Claude session.
 func TestGeneratePlanDetailed_NilOrchestratorMapInit(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	ctx.ActivePlanOrchestrators = nil // force the lazy make()
 	ctx.StateStore = state.NewStore(filepath.Join(t.TempDir(), "s.json"))
@@ -81,6 +82,7 @@ func TestGeneratePlanDetailed_NilOrchestratorMapInit(t *testing.T) {
 // ClearRalphWizardDir error arm: the wizard dir exists but its parent (the case
 // path) is read-only so RemoveAll fails. The handler logs and proceeds to a 200.
 func TestGeneratePlanDetailed_ClearWizardDirErrorLoggedNot500(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only dir semantics differ on Windows")
 	}

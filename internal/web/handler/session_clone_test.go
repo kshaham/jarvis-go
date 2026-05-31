@@ -16,6 +16,7 @@ import (
 )
 
 func TestCloneSession_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := withURLParam(httptest.NewRequest("POST", "/api/sessions/ghost/clone", nil), "id", "ghost")
 	rec := httptest.NewRecorder()
@@ -26,6 +27,7 @@ func TestCloneSession_NotFound(t *testing.T) {
 }
 
 func TestCloneSession_NotFoundWithCountParam(t *testing.T) {
+	t.Parallel()
 	// The count query param is parsed only after the source lookup, so an
 	// unknown session still 404s even with a count override present.
 	ctx := newTestContext()
@@ -41,6 +43,7 @@ func TestCloneSession_NotFoundWithCountParam(t *testing.T) {
 // precondition the handler relies on. Keeps the 404 contract honest if the
 // manager's lookup semantics ever change.
 func TestCloneSession_ManagerLookupContract(t *testing.T) {
+	t.Parallel()
 	mgr := pty.NewSessionManager(10)
 	if _, ok := mgr.GetSession("missing"); ok {
 		t.Fatal("expected GetSession(missing)=false on empty manager")

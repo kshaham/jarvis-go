@@ -23,6 +23,7 @@ import (
 )
 
 func TestStatus_IncludesRegisteredSession(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	// Status's GetAllSessions covers PTY sessions; register one via a live shell
 	// so the serialization loop runs over a real entry.
@@ -49,6 +50,7 @@ func TestStatus_IncludesRegisteredSession(t *testing.T) {
 }
 
 func TestSessionWorkingDir_SDKSession(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{SessionManager: pty.NewSessionManager(10)}
 	sdk := pty.NewSDKSession(pty.SessionConfig{ID: "wd-sdk", WorkingDir: "/work/sdk", Mode: pty.ModeClaudeSDK})
 	ctx.SessionManager.RegisterSDKSessionForTest(sdk)

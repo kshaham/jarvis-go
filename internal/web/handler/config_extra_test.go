@@ -11,6 +11,7 @@ import (
 )
 
 func TestPromptProcessor_GetUpdate(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 
 	// Empty get.
@@ -32,6 +33,7 @@ func TestPromptProcessor_GetUpdate(t *testing.T) {
 }
 
 func TestUpdatePromptProcessor_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("PUT", "/api/prompt-processor", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -43,6 +45,7 @@ func TestUpdatePromptProcessor_BadJSON(t *testing.T) {
 }
 
 func TestPromptProcessorRules_GetUpdate(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 
 	// Empty -> [].
@@ -67,6 +70,7 @@ func TestPromptProcessorRules_GetUpdate(t *testing.T) {
 }
 
 func TestUpdatePromptProcessorRules_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("PUT", "/api/prompt-processor/rules", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -78,6 +82,7 @@ func TestUpdatePromptProcessorRules_BadJSON(t *testing.T) {
 }
 
 func TestGetRespawnLearning_Empty(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetRespawnLearning, "/api/respawn/learning")
 	if resp["success"] != true {
@@ -86,6 +91,7 @@ func TestGetRespawnLearning_Empty(t *testing.T) {
 }
 
 func TestGetRespawnLearningStats_DefaultsToEmptyMap(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetRespawnLearningStats, "/api/respawn/learning/stats")
 	stats, ok := resp["stats"].(map[string]interface{})
@@ -98,6 +104,7 @@ func TestGetRespawnLearningStats_DefaultsToEmptyMap(t *testing.T) {
 }
 
 func TestGetRespawnLearningRecommendations_FiltersByWorkingDir(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	// Seed two learning entries with different workingDirs.
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
@@ -132,6 +139,7 @@ func TestGetRespawnLearningRecommendations_FiltersByWorkingDir(t *testing.T) {
 }
 
 func TestGetRespawnLearningCategories_CountsByCategory(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetRespawnLearningCategories, "/api/respawn/learning/categories")
 	if resp["success"] != true {

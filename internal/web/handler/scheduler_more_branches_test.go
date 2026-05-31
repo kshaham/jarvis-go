@@ -21,6 +21,7 @@ import (
 // an existing enabled job updated to an empty cron passes the (skipped) cron
 // validation but fails inside SchedulerRunner.Reschedule -> schedule().
 func TestUpdateSchedulerJob_RescheduleFails(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	id := createJob(t, ctx, "j", "0 0 * * *", scheduler.ActionWebhook)
 
@@ -41,6 +42,7 @@ func TestUpdateSchedulerJob_RescheduleFails(t *testing.T) {
 // TestExecuteWebhookJob_HeadersAndTransportError drives the headers loop plus
 // the client.Do transport-error arm (an unroutable host).
 func TestExecuteWebhookJob_HeadersAndTransportError(t *testing.T) {
+	t.Parallel()
 	cfg, _ := json.Marshal(map[string]interface{}{
 		"url":     "http://127.0.0.1:1/never-listens", // port 1: connection refused
 		"method":  "POST",
@@ -58,6 +60,7 @@ func TestExecuteWebhookJob_HeadersAndTransportError(t *testing.T) {
 // TestExecuteWebhookJob_NewRequestError drives the http.NewRequestWithContext
 // build-error arm via an invalid HTTP method token.
 func TestExecuteWebhookJob_NewRequestError(t *testing.T) {
+	t.Parallel()
 	cfg, _ := json.Marshal(map[string]interface{}{
 		"url":    "http://example.com",
 		"method": "BAD METHOD WITH SPACES", // invalid method -> NewRequest errors
@@ -74,6 +77,7 @@ func TestExecuteWebhookJob_NewRequestError(t *testing.T) {
 // TestExecuteWebhookJob_HappyWithHeaders confirms a 200 response path with
 // headers set returns a nil error and a summary (covers the success tail).
 func TestExecuteWebhookJob_HappyWithHeaders(t *testing.T) {
+	t.Parallel()
 	var gotHeader string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeader = r.Header.Get("X-Custom")
@@ -104,6 +108,7 @@ func TestExecuteWebhookJob_HappyWithHeaders(t *testing.T) {
 // TestBuildSchedulerExecutor_DispatchesWebhook confirms the ActionWebhook arm of
 // the executor switch routes to executeWebhookJob.
 func TestBuildSchedulerExecutor_DispatchesWebhook(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	exec := BuildSchedulerExecutor(ctx)
 	// Missing url -> executeWebhookJob's "url is required" error proves dispatch.

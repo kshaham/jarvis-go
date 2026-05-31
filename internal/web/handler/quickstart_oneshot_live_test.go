@@ -15,6 +15,7 @@ import (
 )
 
 func TestQuickStart_HappyShell(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	// QuickStart resolves the working dir from the case directory.
 	cm := cases.NewCaseManager(t.TempDir())
@@ -46,6 +47,7 @@ func TestQuickStart_HappyShell(t *testing.T) {
 }
 
 func TestQuickStart_CaseNotFound404(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	ctx.CaseManager = cases.NewCaseManager(t.TempDir())
 	// No defaultWorkingDir set + unknown case -> 404.
@@ -58,6 +60,7 @@ func TestQuickStart_CaseNotFound404(t *testing.T) {
 }
 
 func TestOneShotSession_HappyShell(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	dir := t.TempDir()
 	// Allow the working dir so ResolveWorkingDir accepts it.

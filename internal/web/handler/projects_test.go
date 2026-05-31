@@ -20,6 +20,7 @@ func newProjectsCtx(t *testing.T) *Context {
 }
 
 func TestListProjectsEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := newProjectsCtx(t)
 	req := httptest.NewRequest("GET", "/api/projects", nil)
 	rec := httptest.NewRecorder()
@@ -30,6 +31,7 @@ func TestListProjectsEmpty(t *testing.T) {
 }
 
 func TestDeleteProject(t *testing.T) {
+	t.Parallel()
 	ctx := newProjectsCtx(t)
 	p := ctx.Projects.Upsert(projects.Project{Kind: projects.KindLocal, Path: "/p/a", LastUsedAt: "2026-05-31T10:00:00Z"})
 	req := httptest.NewRequest("DELETE", "/api/projects/"+p.ID, nil)
@@ -44,6 +46,7 @@ func TestDeleteProject(t *testing.T) {
 }
 
 func TestResolveGithubRepoDir_InvalidRepo(t *testing.T) {
+	t.Parallel()
 	ctx := newProjectsCtx(t) // only StateStore + Projects are set
 	_, err := ctx.resolveGithubRepoDir(spawnpayload.SpawnTeamRequest{GithubRepo: "../evil"})
 	if !errors.Is(err, office.ErrInvalidRepo) {

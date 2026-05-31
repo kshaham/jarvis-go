@@ -123,6 +123,7 @@ func TestOfficeRestoreSnapshot_MalformedForkQueryReturns400(t *testing.T) {
 }
 
 func TestForkApplied_TableDriven(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		requested bool
@@ -192,6 +193,7 @@ func TestOfficeCreateSnapshot_HarvestsClaudeSessionIDs(t *testing.T) {
 }
 
 func TestBuildRestoreOverrides_NoForkLeavesResumeEmpty(t *testing.T) {
+	t.Parallel()
 	snap := &office.TeamSnapshot{
 		Members: []office.SnapshotMemberEntry{
 			{ConfigID: "cfg-1", Config: office.TeamMemberConfig{Name: "Ada"}, ClaudeSessionID: "claude-sid-1"},
@@ -213,6 +215,7 @@ func TestBuildRestoreOverrides_NoForkLeavesResumeEmpty(t *testing.T) {
 }
 
 func TestBuildRestoreOverrides_ForkPopulatesEveryMemberWithCSID(t *testing.T) {
+	t.Parallel()
 	snap := &office.TeamSnapshot{
 		Members: []office.SnapshotMemberEntry{
 			{ConfigID: "cfg-1", Config: office.TeamMemberConfig{Name: "Ada"}, ClaudeSessionID: "claude-sid-1"},
@@ -234,6 +237,7 @@ func TestBuildRestoreOverrides_ForkPopulatesEveryMemberWithCSID(t *testing.T) {
 }
 
 func TestBuildRestoreOverrides_MixedSnapshotOnlyForksMembersWithCSID(t *testing.T) {
+	t.Parallel()
 	// A snapshot from before R3.5 may have some members without
 	// ClaudeSessionID. Fork mode should fork the ones it can and
 	// leave the rest as fresh-session overrides.
@@ -263,6 +267,7 @@ func TestBuildRestoreOverrides_MixedSnapshotOnlyForksMembersWithCSID(t *testing.
 }
 
 func TestBuildRestoreOverrides_CopiesConfigFields(t *testing.T) {
+	t.Parallel()
 	snap := &office.TeamSnapshot{
 		Members: []office.SnapshotMemberEntry{
 			{
@@ -296,6 +301,7 @@ func TestBuildRestoreOverrides_CopiesConfigFields(t *testing.T) {
 }
 
 func TestSnapshotMemberEntry_RoundTripsClaudeSessionID(t *testing.T) {
+	t.Parallel()
 	// Confirms the new ClaudeSessionID field survives JSON round-trip.
 	// Regression guard for the fork-restore happy path — if json tag
 	// drift drops the field, fork restore silently falls back to fresh.

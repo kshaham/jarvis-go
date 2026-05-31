@@ -49,6 +49,7 @@ func createJob(t *testing.T, ctx *Context, name, cron, action string) string {
 }
 
 func TestListSchedulerJobs_NilScheduler503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := httptest.NewRequest("GET", "/api/scheduler/jobs", nil)
 	rec := httptest.NewRecorder()
@@ -59,6 +60,7 @@ func TestListSchedulerJobs_NilScheduler503(t *testing.T) {
 }
 
 func TestSchedulerJobs_FullCRUDCycle(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 
 	// Empty list.
@@ -115,6 +117,7 @@ func TestSchedulerJobs_FullCRUDCycle(t *testing.T) {
 }
 
 func TestGetSchedulerJob_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	req := withURLParam(httptest.NewRequest("GET", "/api/scheduler/jobs/ghost", nil), "id", "ghost")
 	rec := httptest.NewRecorder()
@@ -125,6 +128,7 @@ func TestGetSchedulerJob_NotFound(t *testing.T) {
 }
 
 func TestCreateSchedulerJob_Validation(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 
 	cases := []struct {
@@ -147,6 +151,7 @@ func TestCreateSchedulerJob_Validation(t *testing.T) {
 }
 
 func TestUpdateSchedulerJob_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	req := withURLParam(
 		httptest.NewRequest("PUT", "/api/scheduler/jobs/ghost", jsonBody(t, map[string]interface{}{"name": "x"})),
@@ -161,6 +166,7 @@ func TestUpdateSchedulerJob_NotFound(t *testing.T) {
 }
 
 func TestUpdateSchedulerJob_BadCronAndAction(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	id := createJob(t, ctx, "j", "0 0 * * *", scheduler.ActionWebhook)
 
@@ -184,6 +190,7 @@ func TestUpdateSchedulerJob_BadCronAndAction(t *testing.T) {
 }
 
 func TestDeleteSchedulerJob_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/scheduler/jobs/ghost", nil), "id", "ghost")
 	rec := httptest.NewRecorder()
@@ -194,6 +201,7 @@ func TestDeleteSchedulerJob_NotFound(t *testing.T) {
 }
 
 func TestRunSchedulerJobNow_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	id := createJob(t, ctx, "manual", "0 0 * * *", scheduler.ActionWebhook)
 
@@ -217,6 +225,7 @@ func TestRunSchedulerJobNow_HappyAndNotFound(t *testing.T) {
 }
 
 func TestRunSchedulerJobNow_NilRunner503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := withURLParam(httptest.NewRequest("POST", "/api/scheduler/jobs/x/run-now", nil), "id", "x")
 	rec := httptest.NewRecorder()
@@ -227,6 +236,7 @@ func TestRunSchedulerJobNow_NilRunner503(t *testing.T) {
 }
 
 func TestGetSchedulerJobHistory_RecordsRun(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	id := createJob(t, ctx, "hist", "0 0 * * *", scheduler.ActionWebhook)
 
@@ -252,6 +262,7 @@ func TestGetSchedulerJobHistory_RecordsRun(t *testing.T) {
 }
 
 func TestGetSchedulerJobHistory_NilRunner503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := withURLParam(httptest.NewRequest("GET", "/api/scheduler/jobs/x/history", nil), "id", "x")
 	rec := httptest.NewRecorder()
@@ -264,6 +275,7 @@ func TestGetSchedulerJobHistory_NilRunner503(t *testing.T) {
 // --- validAction (pure) ---
 
 func TestValidAction(t *testing.T) {
+	t.Parallel()
 	for _, a := range []string{scheduler.ActionSpawnTeam, scheduler.ActionOneShot, scheduler.ActionWebhook} {
 		if !validAction(a) {
 			t.Errorf("validAction(%q) should be true", a)
@@ -279,6 +291,7 @@ func TestValidAction(t *testing.T) {
 // --- Executor dispatch ---
 
 func TestBuildSchedulerExecutor_UnknownAction(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	exec := BuildSchedulerExecutor(ctx)
 	_, err := exec(context.Background(), &scheduler.Job{Action: "mystery"})
@@ -288,6 +301,7 @@ func TestBuildSchedulerExecutor_UnknownAction(t *testing.T) {
 }
 
 func TestExecuteWebhookJob_SuccessAnd4xx(t *testing.T) {
+	t.Parallel()
 	// 200 server.
 	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
@@ -321,6 +335,7 @@ func TestExecuteWebhookJob_SuccessAnd4xx(t *testing.T) {
 }
 
 func TestExecuteWebhookJob_MissingURLAndBadConfig(t *testing.T) {
+	t.Parallel()
 	// Missing URL.
 	cfg, _ := json.Marshal(map[string]interface{}{})
 	if _, err := executeWebhookJob(context.Background(), &scheduler.Job{Config: cfg}); err == nil {
@@ -333,6 +348,7 @@ func TestExecuteWebhookJob_MissingURLAndBadConfig(t *testing.T) {
 }
 
 func TestExecuteOneShotJob_NotSupported(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	cfg, _ := json.Marshal(map[string]interface{}{"prompt": "hi", "workingDir": "/tmp"})
 	_, err := executeOneShotJob(context.Background(), ctx, &scheduler.Job{Config: cfg})
@@ -342,6 +358,7 @@ func TestExecuteOneShotJob_NotSupported(t *testing.T) {
 }
 
 func TestExecuteSpawnTeamJob_MissingWorkingDir(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	cfg, _ := json.Marshal(map[string]interface{}{"templateId": "t1"})
 	_, err := executeSpawnTeamJob(context.Background(), ctx, &scheduler.Job{Config: cfg})
@@ -351,6 +368,7 @@ func TestExecuteSpawnTeamJob_MissingWorkingDir(t *testing.T) {
 }
 
 func TestExecuteSpawnTeamJob_BadConfig(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	_, err := executeSpawnTeamJob(context.Background(), ctx, &scheduler.Job{Config: json.RawMessage("{bad")})
 	if err == nil || !strings.Contains(err.Error(), "invalid spawn_team config") {
@@ -361,6 +379,7 @@ func TestExecuteSpawnTeamJob_BadConfig(t *testing.T) {
 // --- scheduledResponseWriter ---
 
 func TestScheduledResponseWriter_CapturesStatusAndBody(t *testing.T) {
+	t.Parallel()
 	w := &scheduledResponseWriter{}
 	w.Header().Set("X-Test", "1")
 	w.WriteHeader(http.StatusTeapot)

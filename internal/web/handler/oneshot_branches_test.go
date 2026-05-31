@@ -18,6 +18,7 @@ import (
 // resolution arm (oneshot.go:51) by omitting workingDir and putting a
 // defaultWorkingDir in settings.
 func TestOneShotSession_DefaultWorkingDirFromSettings(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	dir := t.TempDir()
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
@@ -45,6 +46,7 @@ func TestOneShotSession_DefaultWorkingDirFromSettings(t *testing.T) {
 // mode-selection statements which run before the spawn; the spawn itself
 // fails fast on a missing claude binary, which exercises the create-error 500.
 func TestOneShotSession_TimeoutCapClaudeMode(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	dir := t.TempDir()
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
@@ -68,6 +70,7 @@ func TestOneShotSession_TimeoutCapClaudeMode(t *testing.T) {
 // stays busy past a 1s timeout returns 504 with a "timeout" flag and partial
 // output.
 func TestOneShotSession_DeadlineTimeout(t *testing.T) {
+	t.Parallel()
 	skipIfNoStubShell(t)
 	ctx := newSessionLiveCtx(t)
 	dir := t.TempDir()

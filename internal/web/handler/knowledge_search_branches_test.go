@@ -93,6 +93,7 @@ func TestOfficeAgentKnowledgeSearch_TeamScoped(t *testing.T) {
 }
 
 func TestGeneratePlanDetailed_NoCaseHomeFallback(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	ctx.ActivePlanOrchestrators = map[string]string{}
 	// No caseName -> the handler falls back to the home directory for the

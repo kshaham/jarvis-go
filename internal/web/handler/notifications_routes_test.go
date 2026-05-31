@@ -55,6 +55,7 @@ func validRoute(name string) notifications.Route {
 }
 
 func TestListNotificationRoutes_Empty(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	req := httptest.NewRequest("GET", "/api/notifications/routes", nil)
 	rec := httptest.NewRecorder()
@@ -74,6 +75,7 @@ func TestListNotificationRoutes_Empty(t *testing.T) {
 }
 
 func TestListNotificationRoutes_NilStore503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := httptest.NewRequest("GET", "/api/notifications/routes", nil)
 	rec := httptest.NewRecorder()
@@ -84,6 +86,7 @@ func TestListNotificationRoutes_NilStore503(t *testing.T) {
 }
 
 func TestCreateNotificationRoute_Happy(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	rec := postJSON(t, ctx.CreateNotificationRoute, "/api/notifications/routes", validRoute("alpha"))
 	if rec.Code != http.StatusCreated {
@@ -106,6 +109,7 @@ func TestCreateNotificationRoute_Happy(t *testing.T) {
 }
 
 func TestCreateNotificationRoute_MissingName(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	r := validRoute("")
 	rec := postJSON(t, ctx.CreateNotificationRoute, "/api/notifications/routes", r)
@@ -115,6 +119,7 @@ func TestCreateNotificationRoute_MissingName(t *testing.T) {
 }
 
 func TestCreateNotificationRoute_MissingEventPattern(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	r := validRoute("beta")
 	r.Match.EventPattern = ""
@@ -125,6 +130,7 @@ func TestCreateNotificationRoute_MissingEventPattern(t *testing.T) {
 }
 
 func TestCreateNotificationRoute_NoChannels(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	r := validRoute("gamma")
 	r.Channels = nil
@@ -135,6 +141,7 @@ func TestCreateNotificationRoute_NoChannels(t *testing.T) {
 }
 
 func TestCreateNotificationRoute_BadChannelType(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	r := validRoute("delta")
 	r.Channels = []notifications.ChannelSpec{{Type: "carrier-pigeon", Target: "x"}}
@@ -145,6 +152,7 @@ func TestCreateNotificationRoute_BadChannelType(t *testing.T) {
 }
 
 func TestCreateNotificationRoute_MissingChannelTarget(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	r := validRoute("eps")
 	r.Channels = []notifications.ChannelSpec{{Type: notifications.ChannelWebhook, Target: ""}}
@@ -155,6 +163,7 @@ func TestCreateNotificationRoute_MissingChannelTarget(t *testing.T) {
 }
 
 func TestGetNotificationRoute_FoundAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	created := ctx.Notifications.Create(validRoute("zeta"))
 
@@ -181,6 +190,7 @@ func TestGetNotificationRoute_FoundAndNotFound(t *testing.T) {
 }
 
 func TestUpdateNotificationRoute_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	created := ctx.Notifications.Create(validRoute("eta"))
 
@@ -212,6 +222,7 @@ func TestUpdateNotificationRoute_HappyAndNotFound(t *testing.T) {
 }
 
 func TestDeleteNotificationRoute_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	created := ctx.Notifications.Create(validRoute("theta"))
 
@@ -235,6 +246,7 @@ func TestDeleteNotificationRoute_HappyAndNotFound(t *testing.T) {
 }
 
 func TestTestNotificationRoute_HappyAndNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	created := ctx.Notifications.Create(validRoute("iota"))
 
@@ -260,6 +272,7 @@ func TestTestNotificationRoute_HappyAndNotFound(t *testing.T) {
 }
 
 func TestTestNotificationRoute_NilRouter503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // no NotificationsRouter
 	req := withURLParam(httptest.NewRequest("POST", "/api/notifications/routes/x/test", nil), "id", "x")
 	rec := httptest.NewRecorder()
@@ -270,6 +283,7 @@ func TestTestNotificationRoute_NilRouter503(t *testing.T) {
 }
 
 func TestValidChannelType(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		notifications.ChannelTelegram: true,
 		notifications.ChannelWebhook:  true,

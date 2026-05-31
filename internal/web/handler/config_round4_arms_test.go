@@ -13,6 +13,7 @@ import (
 )
 
 func TestMaskSensitiveSettings_AllProviderKeys(t *testing.T) {
+	t.Parallel()
 	out := MaskSensitiveSettings(map[string]interface{}{
 		"claudeApiKey": "sk-ant-claudekeyvalue1234",
 		"openaiApiKey": "sk-openaikeyvalue567890ab",

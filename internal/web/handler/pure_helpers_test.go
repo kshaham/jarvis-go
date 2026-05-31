@@ -10,6 +10,7 @@ import (
 )
 
 func TestFromOr(t *testing.T) {
+	t.Parallel()
 	if got := fromOr("primary", "fb"); got != "primary" {
 		t.Errorf("non-empty primary should win, got %q", got)
 	}
@@ -22,6 +23,7 @@ func TestFromOr(t *testing.T) {
 }
 
 func TestHasSuffix(t *testing.T) {
+	t.Parallel()
 	if !hasSuffix("image.png", ".png") {
 		t.Error("expected true for matching suffix")
 	}
@@ -37,6 +39,7 @@ func TestHasSuffix(t *testing.T) {
 // TestResolveSessionFilePath_Traversal drives the default (ErrPathTraversal ->
 // 403 Forbidden) branch of resolveSessionFilePath via a "../" escape.
 func TestResolveSessionFilePath_Traversal(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -54,6 +57,7 @@ func TestResolveSessionFilePath_Traversal(t *testing.T) {
 // TestResolveSessionFilePath_InvalidPath drives the ErrInvalidPath -> 400 arm
 // via a NUL byte, which filepath rejects on resolution.
 func TestResolveSessionFilePath_InvalidPath(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()

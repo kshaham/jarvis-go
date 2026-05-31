@@ -154,6 +154,7 @@ func TestOfficeGetTaskScreenshot_MimeTypes(t *testing.T) {
 
 // ImportTemplate: malformed JSON -> 400.
 func TestImportTemplate_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{TemplateStore: templates.NewStore(t.TempDir())}
 	req := httptest.NewRequest("POST", "/api/templates/import", strings.NewReader("{not json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -167,6 +168,7 @@ func TestImportTemplate_BadJSON400(t *testing.T) {
 // PeersDelete: Registry.Remove persist failure -> 500. Parent dir of the
 // registry file is read-only so saveLocked's MkdirAll fails.
 func TestPeersDelete_RegistryRemoveError500(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory write permissions")
 	}

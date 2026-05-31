@@ -40,6 +40,7 @@ func allowDir(ctx *Context, dir string) {
 }
 
 func TestCreateSession_HappyThroughHandler(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	dir := t.TempDir()
 	allowDir(ctx, dir)
@@ -143,6 +144,7 @@ func TestCreateSession_HappyThroughHandler(t *testing.T) {
 }
 
 func TestSessionInputAndShell_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -167,6 +169,7 @@ func TestSessionInputAndShell_Live(t *testing.T) {
 }
 
 func TestGetSessionActiveTools_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -177,6 +180,7 @@ func TestGetSessionActiveTools_Live(t *testing.T) {
 }
 
 func TestGetSessionIntegrations_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	ctx.IntegrationMonitor = integrations.NewMonitor()
 	id, _ := liveSession(t, ctx)
@@ -188,6 +192,7 @@ func TestGetSessionIntegrations_Live(t *testing.T) {
 }
 
 func TestSessionStatusEndpoints_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	// build/test/hmr status read from settings; they only need a valid session.
@@ -208,6 +213,7 @@ func TestSessionStatusEndpoints_Live(t *testing.T) {
 }
 
 func TestBulkOps_LiveHappy(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id1, _ := liveSession(t, ctx)
 	id2, _ := liveSession(t, ctx)
@@ -254,6 +260,7 @@ func TestBulkOps_LiveHappy(t *testing.T) {
 
 // sessionToJSON should reflect a live session's fields.
 func TestSessionToJSON_Live(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 	sess, _ := ctx.SessionManager.GetSession(id)

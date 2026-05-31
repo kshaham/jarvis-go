@@ -31,6 +31,7 @@ func withURLParams(req *http.Request, params map[string]string) *http.Request {
 }
 
 func TestRenameSession_BadJSONAndEmptyName(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -77,6 +78,7 @@ func TestImportSession_ClaudeModeAndCreateError(t *testing.T) {
 }
 
 func TestGetSessionFileContent_ReadError(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 	// A subdirectory: ReadFile on a directory returns a non-IsNotExist error -> 500.
@@ -92,6 +94,7 @@ func TestGetSessionFileContent_ReadError(t *testing.T) {
 }
 
 func TestImportSessionFixPlan_WriteError(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 	// Remove the workingDir so atomicWriteFile's CreateTemp fails -> 500.
@@ -104,6 +107,7 @@ func TestImportSessionFixPlan_WriteError(t *testing.T) {
 }
 
 func TestWriteSessionRalphPrompt_BadJSONAndWriteError(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 
@@ -123,6 +127,7 @@ func TestWriteSessionRalphPrompt_BadJSONAndWriteError(t *testing.T) {
 }
 
 func TestDeleteSessionTailFile_CancelsRegisteredStream(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 

@@ -7,6 +7,7 @@ import "testing"
 // gate; misses pass through silently. "UI token rotation" is an accepted
 // false-positive per the plan (we chose precision over recall).
 func TestUIKeywordRe(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		title string
 		match bool
@@ -46,6 +47,7 @@ func TestUIKeywordRe(t *testing.T) {
 // TestVerificationEvidenceRe pins what summary text the gate accepts as
 // "I ran the browser-check." Matching here suppresses the warning.
 func TestVerificationEvidenceRe(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		summary string
 		match   bool

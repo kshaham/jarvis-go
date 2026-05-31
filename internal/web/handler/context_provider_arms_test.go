@@ -40,6 +40,7 @@ func TestGetProviderEnvVars_AgentTokenAndCodexEnvKey(t *testing.T) {
 }
 
 func TestGetProviderEnvVarsFor_OpenAISubscriptionDropsOpus(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 	env := ctx.getProviderEnvVarsFor("openai-subscription", "", "")
 	if _, present := env["ANTHROPIC_DEFAULT_OPUS_MODEL"]; present {
@@ -52,6 +53,7 @@ func TestGetProviderEnvVarsFor_OpenAISubscriptionDropsOpus(t *testing.T) {
 }
 
 func TestGetProviderEnvVarsFor_ZaiSonnetFallbackDefault(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 	// zai key set but NO zaiSonnetModel and an empty sonnetOverride -> the
 	// default "glm-4.7" fallback chain fires.

@@ -9,6 +9,7 @@ import "testing"
 // meaningless.
 
 func TestResolveSessionTuning_Defaults(t *testing.T) {
+	t.Parallel()
 	got := resolveSessionTuning(spawnTeamRequest{}, "worker", nil)
 	if got.Effort != defaultEffortWorker {
 		t.Errorf("worker default Effort=%q, want %q", got.Effort, defaultEffortWorker)
@@ -25,6 +26,7 @@ func TestResolveSessionTuning_Defaults(t *testing.T) {
 }
 
 func TestResolveSessionTuning_StrategicTierHighEffort(t *testing.T) {
+	t.Parallel()
 	got := resolveSessionTuning(spawnTeamRequest{}, "strategic", nil)
 	if got.Effort != defaultEffortStrategic {
 		t.Errorf("strategic default Effort=%q, want %q", got.Effort, defaultEffortStrategic)
@@ -32,6 +34,7 @@ func TestResolveSessionTuning_StrategicTierHighEffort(t *testing.T) {
 }
 
 func TestResolveSessionTuning_TeamWideOverridesDefaults(t *testing.T) {
+	t.Parallel()
 	excl := false
 	strict := false
 	req := spawnTeamRequest{
@@ -50,6 +53,7 @@ func TestResolveSessionTuning_TeamWideOverridesDefaults(t *testing.T) {
 }
 
 func TestResolveSessionTuning_MemberOverrideWinsOverTeam(t *testing.T) {
+	t.Parallel()
 	req := spawnTeamRequest{
 		DefaultEffort:        "low",
 		DefaultFallbackModel: "sonnet",
@@ -68,6 +72,7 @@ func TestResolveSessionTuning_MemberOverrideWinsOverTeam(t *testing.T) {
 }
 
 func TestResolveSessionTuning_MemberPartialOverrideKeepsRest(t *testing.T) {
+	t.Parallel()
 	req := spawnTeamRequest{
 		DefaultEffort:        "low",
 		DefaultFallbackModel: "sonnet",
@@ -86,6 +91,7 @@ func TestResolveSessionTuning_MemberPartialOverrideKeepsRest(t *testing.T) {
 // has no analogue (no DefaultResumeClaudeSessionID), so the resolver
 // just passes the override through verbatim.
 func TestResolveSessionTuning_ResumeForkPlumbing(t *testing.T) {
+	t.Parallel()
 	ov := &memberOverride{
 		ResumeClaudeSessionID: "claude-sess-42",
 		ForkResumedSession:    true,
@@ -100,6 +106,7 @@ func TestResolveSessionTuning_ResumeForkPlumbing(t *testing.T) {
 }
 
 func TestResolveSessionTuning_NoOverrideMeansNoResume(t *testing.T) {
+	t.Parallel()
 	// Routine spawn (no fork) should leave both resume fields at zero.
 	got := resolveSessionTuning(spawnTeamRequest{}, "worker", nil)
 	if got.ResumeClaudeSessionID != "" {
@@ -111,6 +118,7 @@ func TestResolveSessionTuning_NoOverrideMeansNoResume(t *testing.T) {
 }
 
 func TestResolveSessionTuning_EmptyOverrideDoesNotZeroResume(t *testing.T) {
+	t.Parallel()
 	// A member override with NO resume fields shouldn't accidentally
 	// scrub a future team-wide default. Today there is no team-wide
 	// default for resume, so this is mostly a pin against regression

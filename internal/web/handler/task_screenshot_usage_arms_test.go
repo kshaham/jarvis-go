@@ -35,6 +35,7 @@ func TestTaskScreenshot_UnsupportedMimeReturns400(t *testing.T) {
 }
 
 func TestOfficeAgentUsageSeries_NilManager503(t *testing.T) {
+	t.Parallel()
 	// A Context with a nil OfficeManager triggers the office-offline 503 arm
 	// (after the sessionId guard passes).
 	ctx := &Context{}

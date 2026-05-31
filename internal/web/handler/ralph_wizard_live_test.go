@@ -29,6 +29,7 @@ func seedWizard(t *testing.T, casePath string) {
 }
 
 func TestGetRalphWizardFiles_Happy(t *testing.T) {
+	t.Parallel()
 	cm := cases.NewCaseManager(t.TempDir())
 	info, err := cm.Create("wiz")
 	if err != nil {
@@ -52,6 +53,7 @@ func TestGetRalphWizardFiles_Happy(t *testing.T) {
 }
 
 func TestGetRalphWizardFile_TextAndJSON(t *testing.T) {
+	t.Parallel()
 	cm := cases.NewCaseManager(t.TempDir())
 	info, err := cm.Create("wiz2")
 	if err != nil {

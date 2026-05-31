@@ -44,6 +44,7 @@ func TestOfficeAgentDeleteSkill_RemoveAllError500(t *testing.T) {
 }
 
 func TestRelayList_StoreListError500(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	relayRoot := filepath.Join(dir, "relay")
 	// The relay store's inbox dir is <root>/inbox. Plant a regular FILE there so
@@ -76,6 +77,7 @@ func TestRelayList_StoreListError500(t *testing.T) {
 }
 
 func TestAtomicWriteFile_RenameError(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// Destination is itself a non-empty DIRECTORY -> os.Rename(tmp, dest) fails.
 	dest := filepath.Join(dir, "dest")

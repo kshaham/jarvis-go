@@ -46,6 +46,7 @@ func TestOfficePostStandupAudio_TooManyJobs429(t *testing.T) {
 // TestGetSessionSubagents_WatcherNil drives the SubagentWatcher == nil arm: a
 // found session but no watcher returns an empty subagents list with 200.
 func TestGetSessionSubagents_WatcherNil(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	ctx.SubagentWatcher = nil // force the nil-watcher early return
 	id, _ := liveSession(t, ctx)

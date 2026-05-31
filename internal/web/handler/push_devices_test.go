@@ -33,6 +33,7 @@ func newPushContext(t *testing.T) *Context {
 }
 
 func TestRegisterPushDevice_FirstRegistration(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	rec := postJSON(t, ctx.RegisterPushDevice, "/api/notifications/devices", map[string]interface{}{
 		"token":      validExpoToken,
@@ -68,6 +69,7 @@ func TestRegisterPushDevice_FirstRegistration(t *testing.T) {
 }
 
 func TestRegisterPushDevice_Idempotent(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	// First registration creates N routes.
 	postJSON(t, ctx.RegisterPushDevice, "/api/notifications/devices", map[string]interface{}{
@@ -107,6 +109,7 @@ func TestRegisterPushDevice_Idempotent(t *testing.T) {
 }
 
 func TestRegisterPushDevice_CustomEvents(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	rec := postJSON(t, ctx.RegisterPushDevice, "/api/notifications/devices", map[string]interface{}{
 		"token":    validExpoToken,
@@ -124,6 +127,7 @@ func TestRegisterPushDevice_CustomEvents(t *testing.T) {
 }
 
 func TestRegisterPushDevice_InvalidToken(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	rec := postJSON(t, ctx.RegisterPushDevice, "/api/notifications/devices", map[string]interface{}{
 		"token":    "not-an-expo-token",
@@ -135,6 +139,7 @@ func TestRegisterPushDevice_InvalidToken(t *testing.T) {
 }
 
 func TestRegisterPushDevice_MissingDeviceID(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	rec := postJSON(t, ctx.RegisterPushDevice, "/api/notifications/devices", map[string]interface{}{
 		"token": validExpoToken,
@@ -145,6 +150,7 @@ func TestRegisterPushDevice_MissingDeviceID(t *testing.T) {
 }
 
 func TestRegisterPushDevice_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	req := httptest.NewRequest("POST", "/api/notifications/devices", strings.NewReader("{not json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -156,6 +162,7 @@ func TestRegisterPushDevice_InvalidJSON(t *testing.T) {
 }
 
 func TestRegisterPushDevice_NilStore503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.RegisterPushDevice, "/api/notifications/devices", map[string]interface{}{
 		"token":    validExpoToken,
@@ -167,6 +174,7 @@ func TestRegisterPushDevice_NilStore503(t *testing.T) {
 }
 
 func TestUnregisterPushDevice_RemovesRoutes(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	// Register, then unregister, and confirm all its routes are gone.
 	postJSON(t, ctx.RegisterPushDevice, "/api/notifications/devices", map[string]interface{}{
@@ -195,6 +203,7 @@ func TestUnregisterPushDevice_RemovesRoutes(t *testing.T) {
 }
 
 func TestUnregisterPushDevice_MissingID(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/notifications/devices/", nil), "deviceId", "")
 	rec := httptest.NewRecorder()
@@ -205,6 +214,7 @@ func TestUnregisterPushDevice_MissingID(t *testing.T) {
 }
 
 func TestUnregisterPushDevice_NilStore503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/notifications/devices/x", nil), "deviceId", "x")
 	rec := httptest.NewRecorder()
@@ -215,6 +225,7 @@ func TestUnregisterPushDevice_NilStore503(t *testing.T) {
 }
 
 func TestMobileNameFor(t *testing.T) {
+	t.Parallel()
 	got := mobileNameFor("dev-9", "My Phone")
 	want := "mobile:dev-9 (My Phone)"
 	if got != want {

@@ -14,6 +14,7 @@ import (
 )
 
 func TestCreateCase_ManagerError500(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		CaseManager: cases.NewCaseManager(t.TempDir()),
 		SSEBroker:   sse.NewBroker(100, 10),
@@ -27,6 +28,7 @@ func TestCreateCase_ManagerError500(t *testing.T) {
 }
 
 func TestDeleteCase_ManagerError500(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		CaseManager: cases.NewCaseManager(t.TempDir()),
 		SSEBroker:   sse.NewBroker(100, 10),

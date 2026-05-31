@@ -7,6 +7,7 @@ import "testing"
 // we just pin the helper contract that gates everything.
 
 func TestEccOptOut_TableDriven(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		set  *bool
@@ -28,6 +29,7 @@ func TestEccOptOut_TableDriven(t *testing.T) {
 }
 
 func TestEccOptOut_IndependentOfCodegraph(t *testing.T) {
+	t.Parallel()
 	// Regression guard: gating helpers must not cross-contaminate.
 	// Setting DisableCodegraph must not affect ECC, and vice versa.
 	codegraphOff := boolPtr(true)

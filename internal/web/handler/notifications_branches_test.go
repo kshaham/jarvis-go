@@ -12,6 +12,7 @@ import (
 )
 
 func TestCreateNotificationRoute_NilStore503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // Notifications is nil
 	req := httptest.NewRequest("POST", "/api/notifications/routes", strings.NewReader(`{"name":"x"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -23,6 +24,7 @@ func TestCreateNotificationRoute_NilStore503(t *testing.T) {
 }
 
 func TestCreateNotificationRoute_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	req := httptest.NewRequest("POST", "/api/notifications/routes", strings.NewReader("{bad json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -34,6 +36,7 @@ func TestCreateNotificationRoute_BadJSON400(t *testing.T) {
 }
 
 func TestUpdateNotificationRoute_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newNotifContext(t)
 	req := httptest.NewRequest("PUT", "/api/notifications/routes/r1", strings.NewReader("{bad json"))
 	req.Header.Set("Content-Type", "application/json")

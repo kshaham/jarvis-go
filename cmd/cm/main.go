@@ -28,6 +28,11 @@ var (
 	client    = &http.Client{Timeout: 15 * time.Second}
 )
 
+// osExit is the process-exit hook. Production code exits via os.Exit; tests
+// override it (panic + recover) so they can exercise fatal/exit branches
+// without terminating the test binary.
+var osExit = os.Exit
+
 func init() {
 	apiURL = os.Getenv("JARVIS_API_URL")
 	sessionID = os.Getenv("JARVIS_SESSION_ID")
@@ -36,7 +41,8 @@ func init() {
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(0)
+		osExit(0)
+		return
 	}
 
 	cmd := os.Args[1]
@@ -138,7 +144,7 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
@@ -1040,11 +1046,11 @@ func handleAsk(args []string) {
 	case "timeout":
 		fmt.Printf("status: timeout (qid: %s, asked: %s)\nNo one answered in time. Run `cm task blocked <taskId>` to escalate.\n",
 			out.QuestionID, strings.Join(out.Tried, ", "))
-		os.Exit(2)
+		osExit(2)
 	case "no-recipient":
 		fmt.Printf("status: no-recipient (qid: %s)\nNobody on the team is available right now. Run `cm task blocked <taskId>` to escalate.\n",
 			out.QuestionID)
-		os.Exit(2)
+		osExit(2)
 	default:
 		fmt.Printf("status: %s (qid: %s)\n", out.Status, out.QuestionID)
 	}
@@ -1368,7 +1374,7 @@ func requireArgs(args []string, n int, usage string) {
 
 func fatal(msg string) {
 	fmt.Fprintln(os.Stderr, "Error:", msg)
-	os.Exit(1)
+	osExit(1)
 }
 
 func parseArgsAndFlags(args []string) (string, map[string]string) {

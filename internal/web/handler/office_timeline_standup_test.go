@@ -67,6 +67,7 @@ func TestOfficeTimeline_StandupEntry(t *testing.T) {
 }
 
 func TestFmtStandupSummary(t *testing.T) {
+	t.Parallel()
 	// Zero participants -> empty string.
 	if got := fmtStandupSummary(office.PersistedStandup{ParticipantCount: 0}); got != "" {
 		t.Errorf("expected empty summary for 0 participants, got %q", got)
@@ -88,6 +89,7 @@ func TestListPersistedStandups_EmptyDir(t *testing.T) {
 }
 
 func TestOfficeTimeline_NilManager503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // no OfficeManager
 	req := httptest.NewRequest("GET", "/api/office/timeline", nil)
 	rec := httptest.NewRecorder()

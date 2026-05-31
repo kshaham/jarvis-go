@@ -21,12 +21,14 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestCurrentSpeakerID_NilState(t *testing.T) {
+	t.Parallel()
 	if got := currentSpeakerID(nil); got != "" {
 		t.Errorf("currentSpeakerID(nil) = %q, want empty", got)
 	}
 }
 
 func TestCurrentSpeakerID_InactiveStandup(t *testing.T) {
+	t.Parallel()
 	su := &office.StandupState{
 		Active:       false,
 		Participants: []string{"alice", "bob"},
@@ -38,6 +40,7 @@ func TestCurrentSpeakerID_InactiveStandup(t *testing.T) {
 }
 
 func TestCurrentSpeakerID_InRange(t *testing.T) {
+	t.Parallel()
 	su := &office.StandupState{
 		Active:       true,
 		Participants: []string{"alice", "bob"},
@@ -49,6 +52,7 @@ func TestCurrentSpeakerID_InRange(t *testing.T) {
 }
 
 func TestCurrentSpeakerID_OutOfRange(t *testing.T) {
+	t.Parallel()
 	su := &office.StandupState{
 		Active:       true,
 		Participants: []string{"alice", "bob"},
@@ -60,6 +64,7 @@ func TestCurrentSpeakerID_OutOfRange(t *testing.T) {
 }
 
 func TestCurrentSpeakerID_NegativeIndex(t *testing.T) {
+	t.Parallel()
 	su := &office.StandupState{
 		Active:       true,
 		Participants: []string{"alice"},

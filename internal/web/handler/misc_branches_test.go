@@ -13,6 +13,7 @@ import (
 )
 
 func TestUpdateCase_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{CaseManager: cases.NewCaseManager(t.TempDir())}
 	if _, err := ctx.CaseManager.Create("upd"); err != nil {
 		t.Fatalf("seed case: %v", err)
@@ -27,6 +28,7 @@ func TestUpdateCase_BadJSON(t *testing.T) {
 }
 
 func TestCodePrinterPreview_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := httptest.NewRequest("POST", "/api/code-printer/preview", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")

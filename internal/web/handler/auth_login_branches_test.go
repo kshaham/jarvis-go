@@ -11,6 +11,7 @@ import (
 )
 
 func TestAuthLogin_PasswordTooLong(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	if err := ctx.AuthManager.SetPassword("correcthorse"); err != nil {
 		t.Fatalf("set password: %v", err)
@@ -23,6 +24,7 @@ func TestAuthLogin_PasswordTooLong(t *testing.T) {
 }
 
 func TestAuthLogin_RateLimitedAfterRepeatedFailures(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtx(t)
 	if err := ctx.AuthManager.SetPassword("correcthorse"); err != nil {
 		t.Fatalf("set password: %v", err)

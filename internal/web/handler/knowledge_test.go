@@ -278,6 +278,7 @@ func TestPostKnowledgeRevoke_DefaultsReason(t *testing.T) {
 }
 
 func TestIsWorkflowPathLedger(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want bool
@@ -296,6 +297,7 @@ func TestIsWorkflowPathLedger(t *testing.T) {
 }
 
 func TestWorkflowSlugFromLedgerPath(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in, want string
 	}{

@@ -69,6 +69,7 @@ func TestOfficeHandoffForce_BadJSON(t *testing.T) {
 }
 
 func TestStatusForHandoffError_TooManyPending(t *testing.T) {
+	t.Parallel()
 	msg := fmt.Sprintf("too many pending handoffs (limit %d)", office.HandoffMaxPendingPerSender)
 	if got := statusForHandoffError(errors.New(msg)); got != http.StatusTooManyRequests {
 		t.Errorf("too-many-pending should map to 429, got %d", got)

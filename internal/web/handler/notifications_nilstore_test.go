@@ -11,6 +11,7 @@ import (
 )
 
 func TestNotificationRoutes_NilStore503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // Notifications is nil
 
 	cases := []struct {

@@ -54,6 +54,7 @@ func mobilePostJSONReq(path string, body interface{}) *http.Request {
 }
 
 func TestAuthMobileLogin_HappyPath(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 
 	req := mobilePostJSONReq("/api/auth/mobile/login", map[string]string{
@@ -88,6 +89,7 @@ func TestAuthMobileLogin_HappyPath(t *testing.T) {
 }
 
 func TestAuthMobileLogin_WrongPassword(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	req := mobilePostJSONReq("/api/auth/mobile/login", map[string]string{
 		"password":   "wrong-password",
@@ -109,6 +111,7 @@ func TestAuthMobileLogin_WrongPassword(t *testing.T) {
 }
 
 func TestAuthMobileLogin_BlankPassword(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	req := mobilePostJSONReq("/api/auth/mobile/login", map[string]string{"deviceName": "x"})
 	rec := httptest.NewRecorder()
@@ -119,6 +122,7 @@ func TestAuthMobileLogin_BlankPassword(t *testing.T) {
 }
 
 func TestAuthMobileLogin_TooLongPassword(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	long := make([]byte, 200)
 	for i := range long {
@@ -133,6 +137,7 @@ func TestAuthMobileLogin_TooLongPassword(t *testing.T) {
 }
 
 func TestAuthMobileLogout_RevokesPresentedToken(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	issued, err := ctx.MobileTokenMgr.Issue("Device", 0)
 	if err != nil {
@@ -157,6 +162,7 @@ func TestAuthMobileLogout_RevokesPresentedToken(t *testing.T) {
 }
 
 func TestAuthMobileLogout_MissingBearer(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/mobile/logout", nil)
 	rec := httptest.NewRecorder()
@@ -167,6 +173,7 @@ func TestAuthMobileLogout_MissingBearer(t *testing.T) {
 }
 
 func TestAuthMobileListTokens_OmitsSecrets(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	ctx.MobileTokenMgr.Issue("Alpha", 0)
 	ctx.MobileTokenMgr.Issue("Beta", 0)
@@ -201,6 +208,7 @@ func TestAuthMobileListTokens_OmitsSecrets(t *testing.T) {
 }
 
 func TestAuthMobileRevokeToken_ByDeviceID(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	issued, _ := ctx.MobileTokenMgr.Issue("To Revoke", 0)
 
@@ -225,6 +233,7 @@ func TestAuthMobileRevokeToken_ByDeviceID(t *testing.T) {
 }
 
 func TestAuthMobileRevokeToken_UnknownDeviceID(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	req := httptest.NewRequest(http.MethodDelete, "/api/auth/mobile/tokens/does-not-exist", nil)
 	rctx := chi.NewRouteContext()
@@ -243,6 +252,7 @@ func TestAuthMobileRevokeToken_UnknownDeviceID(t *testing.T) {
 }
 
 func TestAuthMobileRevokeToken_BlankDeviceID(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	req := httptest.NewRequest(http.MethodDelete, "/api/auth/mobile/tokens/", nil)
 	rctx := chi.NewRouteContext()
@@ -257,6 +267,7 @@ func TestAuthMobileRevokeToken_BlankDeviceID(t *testing.T) {
 }
 
 func TestAuthMobileLogin_RateLimited(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	// Six failed attempts trigger tier-1 (>= 5).
 	for i := 0; i < 6; i++ {

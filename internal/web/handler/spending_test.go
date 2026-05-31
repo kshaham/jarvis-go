@@ -15,12 +15,14 @@ import (
 )
 
 func TestTodayCost_NoStats(t *testing.T) {
+	t.Parallel()
 	if c := todayCost(nil); c != 0 {
 		t.Errorf("expected 0 for nil stats, got %v", c)
 	}
 }
 
 func TestTodayCost_MatchesToday(t *testing.T) {
+	t.Parallel()
 	store := state.NewStore(filepath.Join(t.TempDir(), "state.json"))
 	// claude-opus has a non-zero per-token cost, so this produces a positive total.
 	store.RecordDailyStats(1000, 1000, "claude-opus-4-8")
@@ -32,6 +34,7 @@ func TestTodayCost_MatchesToday(t *testing.T) {
 }
 
 func TestTodayCost_IgnoresOtherDays(t *testing.T) {
+	t.Parallel()
 	// A stats slice containing only a different date should return 0.
 	stats := []state.DailyTokenStats{
 		{Date: "1999-01-01", Cost: 9.99},
@@ -42,6 +45,7 @@ func TestTodayCost_IgnoresOtherDays(t *testing.T) {
 }
 
 func TestGetSpendingStatus_Empty(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	ctx.StateStore = state.NewStore(filepath.Join(t.TempDir(), "state.json"))
 
@@ -66,6 +70,7 @@ func TestGetSpendingStatus_Empty(t *testing.T) {
 }
 
 func TestGetSpendingStatus_WithStats(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	store := state.NewStore(filepath.Join(t.TempDir(), "state.json"))
 	store.RecordDailyStats(500, 500, "claude-opus-4-8")

@@ -15,6 +15,7 @@ import (
 func boolPtrT(b bool) *bool { return &b }
 
 func TestBuildOfficeMCPServers_OptOutOmitsGatedServers(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		OfficeManager: office.NewManager(stubSessions{}, func(string, interface{}) {}, nil),
 	}

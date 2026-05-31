@@ -14,6 +14,7 @@ import (
 )
 
 func TestGetSessionFileContent_NotExist404(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	req := withURLParam(httptest.NewRequest("GET", "/api/sessions/"+id+"/file-content?path=missing.md", nil), "id", id)
@@ -25,6 +26,7 @@ func TestGetSessionFileContent_NotExist404(t *testing.T) {
 }
 
 func TestGetSessionFileRaw_DirectoryReadError500(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 	// Reading a directory yields a non-IsNotExist error -> 500.
@@ -40,6 +42,7 @@ func TestGetSessionFileRaw_DirectoryReadError500(t *testing.T) {
 }
 
 func TestSessionPlanTask_WriteError500(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 	// Remove the workingDir so atomicWriteFile's CreateTemp (in the now-missing

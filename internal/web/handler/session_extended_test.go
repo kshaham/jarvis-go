@@ -45,6 +45,7 @@ func newSessionExtCtx(t *testing.T) *Context {
 // up the session by ID returns 404 for an unknown session. The handlers are
 // invoked with a minimal request carrying an `id` chi param of "ghost".
 func TestSessionScoped404Sweep(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 
 	type entry struct {
@@ -125,6 +126,7 @@ func TestSessionScoped404Sweep(t *testing.T) {
 // --- Respawn handlers (operate on a lazily-created controller, no session) ---
 
 func TestSessionRespawn_StateAndConfig(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 
 	// GetSessionRespawn auto-creates a controller and reports its state.
@@ -144,6 +146,7 @@ func TestSessionRespawn_StateAndConfig(t *testing.T) {
 }
 
 func TestSessionRespawn_StartStop(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 
 	// Start.
@@ -172,6 +175,7 @@ func TestSessionRespawn_StartStop(t *testing.T) {
 }
 
 func TestUpdateSessionRespawnConfig_HappyAndBadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 
 	rec := httptest.NewRecorder()
@@ -192,6 +196,7 @@ func TestUpdateSessionRespawnConfig_HappyAndBadJSON(t *testing.T) {
 }
 
 func TestEnableSessionRespawn_StartsController(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	rec := httptest.NewRecorder()
 	req := withURLParam(httptest.NewRequest("POST", "/api/sessions/sess-e/respawn/enable", nil), "id", "sess-e")
@@ -211,6 +216,7 @@ func TestEnableSessionRespawn_StartsController(t *testing.T) {
 // --- Ralph state / run-summary fallback (no tracker registered) ---
 
 func TestGetSessionRalphState_FallbackWhenNoTracker(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	// Register a fake session so the lookup passes, but no Ralph tracker.
 	// We can't spawn a real PTY session, so assert the unknown-session 404
@@ -227,6 +233,7 @@ func TestGetSessionRalphState_FallbackWhenNoTracker(t *testing.T) {
 // --- Bulk operations validation ---
 
 func TestBulkDeleteSessions_Validation(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 
 	// Empty list -> 400.
@@ -258,6 +265,7 @@ func TestBulkDeleteSessions_Validation(t *testing.T) {
 }
 
 func TestBulkRenameSessions_Validation(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 
 	// Empty -> 400.
@@ -281,6 +289,7 @@ func TestBulkRenameSessions_Validation(t *testing.T) {
 }
 
 func TestBulkUpdateSessionColors_Validation(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 
 	// Empty -> 400.
@@ -304,6 +313,7 @@ func TestBulkUpdateSessionColors_Validation(t *testing.T) {
 }
 
 func TestDeleteAllSessions_EmptyManager(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("DELETE", "/api/sessions", nil)
@@ -320,6 +330,7 @@ func TestDeleteAllSessions_EmptyManager(t *testing.T) {
 // --- ImportSession validation ---
 
 func TestImportSession_MissingWorkingDir400(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	rec := postJSON(t, ctx.ImportSession, "/api/sessions/import", map[string]interface{}{"name": "x"})
 	if rec.Code != http.StatusBadRequest {
@@ -328,6 +339,7 @@ func TestImportSession_MissingWorkingDir400(t *testing.T) {
 }
 
 func TestImportSession_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	req := httptest.NewRequest("POST", "/api/sessions/import", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -349,6 +361,7 @@ func withIDHandler(h func(http.ResponseWriter, *http.Request), id string) func(h
 // --- atomicWriteFile (pure helper) ---
 
 func TestAtomicWriteFile_WritesAndChmods(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "@fix_plan.md")
 	if err := atomicWriteFile(path, []byte("content"), 0o644); err != nil {
@@ -373,6 +386,7 @@ func TestAtomicWriteFile_WritesAndChmods(t *testing.T) {
 }
 
 func TestAtomicWriteFile_BadDirErrors(t *testing.T) {
+	t.Parallel()
 	// A path whose parent directory does not exist -> CreateTemp fails.
 	err := atomicWriteFile(filepath.Join(t.TempDir(), "missing-subdir", "f.md"), []byte("x"), 0o644)
 	if err == nil {
@@ -383,6 +397,7 @@ func TestAtomicWriteFile_BadDirErrors(t *testing.T) {
 // --- sessionWorkingDir (unknown session) ---
 
 func TestSessionWorkingDir_UnknownSession(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	if _, ok := ctx.sessionWorkingDir("ghost"); ok {
 		t.Error("expected ok=false for unknown session")

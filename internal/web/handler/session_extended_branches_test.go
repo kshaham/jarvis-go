@@ -18,6 +18,7 @@ import (
 )
 
 func TestPatchSessionPlanTask_AllStatusTransitions(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 	planPath := filepath.Join(wd, "@fix_plan.md")
@@ -65,6 +66,7 @@ func TestPatchSessionPlanTask_AllStatusTransitions(t *testing.T) {
 }
 
 func TestPatchSessionPlanTask_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	req := twoParamReq("PATCH", "/api/sessions/"+id+"/plan/task/0", "{bad", "id", id, "taskId", "0")
@@ -76,6 +78,7 @@ func TestPatchSessionPlanTask_BadJSON(t *testing.T) {
 }
 
 func TestPatchSessionPlanTask_NoPlanFile(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	req := twoParamReq("PATCH", "/api/sessions/"+id+"/plan/task/0", `{"status":"completed"}`, "id", id, "taskId", "0")
@@ -87,6 +90,7 @@ func TestPatchSessionPlanTask_NoPlanFile(t *testing.T) {
 }
 
 func TestPatchSessionPlanTask_NonNumericTaskID(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 	_ = os.WriteFile(filepath.Join(wd, "@fix_plan.md"), []byte("- [ ] task\n"), 0o644)
@@ -99,6 +103,7 @@ func TestPatchSessionPlanTask_NonNumericTaskID(t *testing.T) {
 }
 
 func TestPatchSessionPlanTask_TaskIndexOutOfRange(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, wd := liveSession(t, ctx)
 	_ = os.WriteFile(filepath.Join(wd, "@fix_plan.md"), []byte("- [ ] only one task\n"), 0o644)
@@ -111,6 +116,7 @@ func TestPatchSessionPlanTask_TaskIndexOutOfRange(t *testing.T) {
 }
 
 func TestWriteSessionFixPlan_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -121,6 +127,7 @@ func TestWriteSessionFixPlan_BadJSON(t *testing.T) {
 }
 
 func TestImportSessionFixPlan_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -131,6 +138,7 @@ func TestImportSessionFixPlan_BadJSON(t *testing.T) {
 }
 
 func TestWriteSessionRalphPrompt_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -143,6 +151,7 @@ func TestWriteSessionRalphPrompt_BadJSON(t *testing.T) {
 // TestWriteSessionFixPlan_WriteError drives the atomicWriteFile 500 path by
 // making the session's working dir read-only so the temp-file create fails.
 func TestWriteSessionFixPlan_WriteError(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("unix file-mode semantics")
 	}

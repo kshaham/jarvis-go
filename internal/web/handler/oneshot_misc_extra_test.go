@@ -33,6 +33,7 @@ func newOneShotCtx(t *testing.T) *Context {
 // --- OneShotSession validation (no subprocess) ---
 
 func TestOneShotSession_MissingPrompt400(t *testing.T) {
+	t.Parallel()
 	ctx := newOneShotCtx(t)
 	rec := postJSON(t, ctx.OneShotSession, "/api/sessions/one-shot", map[string]interface{}{
 		"workingDir": "/tmp",
@@ -43,6 +44,7 @@ func TestOneShotSession_MissingPrompt400(t *testing.T) {
 }
 
 func TestOneShotSession_MissingWorkingDir400(t *testing.T) {
+	t.Parallel()
 	ctx := newOneShotCtx(t)
 	// No workingDir on the request and none in settings -> 400.
 	rec := postJSON(t, ctx.OneShotSession, "/api/sessions/one-shot", map[string]interface{}{
@@ -54,6 +56,7 @@ func TestOneShotSession_MissingWorkingDir400(t *testing.T) {
 }
 
 func TestOneShotSession_InvalidWorkingDir400(t *testing.T) {
+	t.Parallel()
 	ctx := newOneShotCtx(t)
 	rec := postJSON(t, ctx.OneShotSession, "/api/sessions/one-shot", map[string]interface{}{
 		"prompt":     "ls",
@@ -65,6 +68,7 @@ func TestOneShotSession_InvalidWorkingDir400(t *testing.T) {
 }
 
 func TestOneShotSession_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newOneShotCtx(t)
 	req := httptest.NewRequest("POST", "/api/sessions/one-shot", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -78,6 +82,7 @@ func TestOneShotSession_BadJSON(t *testing.T) {
 // --- CodePrinter ---
 
 func TestCodePrinterPrint_CountsLines(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.CodePrinterPrint, "/api/code-printer/print", map[string]interface{}{
 		"code": "line1\nline2\nline3", "language": "go",
@@ -95,6 +100,7 @@ func TestCodePrinterPrint_CountsLines(t *testing.T) {
 }
 
 func TestCodePrinterPrint_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	req := httptest.NewRequest("POST", "/api/code-printer/print", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -106,6 +112,7 @@ func TestCodePrinterPrint_BadJSON(t *testing.T) {
 }
 
 func TestCodePrinterPreview_CountsLines(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{}
 	rec := postJSON(t, ctx.CodePrinterPreview, "/api/code-printer/preview", map[string]interface{}{
 		"code": "only one line", "language": "python",
@@ -120,6 +127,7 @@ func TestCodePrinterPreview_CountsLines(t *testing.T) {
 }
 
 func TestCodePrinterConfig_DefaultsAndOverride(t *testing.T) {
+	t.Parallel()
 	// Defaults when no codePrinter setting.
 	ctx := &Context{StateStore: state.NewStore(filepath.Join(t.TempDir(), "s.json"))}
 	resp := getJSON(t, ctx.CodePrinterConfig, "/api/code-printer/config")
@@ -153,6 +161,7 @@ func TestCodePrinterConfig_DefaultsAndOverride(t *testing.T) {
 // --- GetCaseFixPlan ---
 
 func TestGetCaseFixPlan_CaseNotFound(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{CaseManager: cases.NewCaseManager(t.TempDir())}
 	req := withURLParam(httptest.NewRequest("GET", "/api/cases/ghost/fix-plan", nil), "name", "ghost")
 	rec := httptest.NewRecorder()
@@ -167,6 +176,7 @@ func TestGetCaseFixPlan_CaseNotFound(t *testing.T) {
 }
 
 func TestGetCaseFixPlan_ParsesTodos(t *testing.T) {
+	t.Parallel()
 	cm := cases.NewCaseManager(t.TempDir())
 	info, err := cm.Create("fixme")
 	if err != nil {
@@ -208,6 +218,7 @@ func TestGetCaseFixPlan_ParsesTodos(t *testing.T) {
 // --- LinkCase ---
 
 func TestLinkCase_Validation(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		CaseManager: cases.NewCaseManager(t.TempDir()),
 		SSEBroker:   sse.NewBroker(100, 10),
@@ -242,6 +253,7 @@ func TestLinkCase_Validation(t *testing.T) {
 }
 
 func TestLinkCase_HappyLinksExistingDir(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		CaseManager: cases.NewCaseManager(t.TempDir()),
 		SSEBroker:   sse.NewBroker(100, 10),
@@ -263,6 +275,7 @@ func TestLinkCase_HappyLinksExistingDir(t *testing.T) {
 // --- GeneratePlanDetailed validation (no subprocess) ---
 
 func TestGeneratePlanDetailed_MissingDescription400(t *testing.T) {
+	t.Parallel()
 	ctx := newOneShotCtx(t)
 	rec := postJSON(t, ctx.GeneratePlanDetailed, "/api/generate-plan-detailed", map[string]interface{}{
 		"taskDescription": "   ",
@@ -273,6 +286,7 @@ func TestGeneratePlanDetailed_MissingDescription400(t *testing.T) {
 }
 
 func TestGeneratePlanDetailed_TooLong400(t *testing.T) {
+	t.Parallel()
 	ctx := newOneShotCtx(t)
 	rec := postJSON(t, ctx.GeneratePlanDetailed, "/api/generate-plan-detailed", map[string]interface{}{
 		"taskDescription": strings.Repeat("a", 10001),
@@ -283,6 +297,7 @@ func TestGeneratePlanDetailed_TooLong400(t *testing.T) {
 }
 
 func TestGeneratePlanDetailed_BadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newOneShotCtx(t)
 	req := httptest.NewRequest("POST", "/api/generate-plan-detailed", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")

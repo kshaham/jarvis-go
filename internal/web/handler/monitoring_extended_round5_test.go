@@ -56,6 +56,7 @@ func TestAuthSetup_ConfiguredBetweenChecks400(t *testing.T) {
 }
 
 func TestAuthLogin_VerifyPasswordError500(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mgr, err := auth.NewManager(dir, false)
 	if err != nil {
@@ -79,6 +80,7 @@ func TestAuthLogin_VerifyPasswordError500(t *testing.T) {
 }
 
 func TestAuthLogin_HappyPathSetsCookie(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mgr, err := auth.NewManager(dir, false)
 	if err != nil {
@@ -101,6 +103,7 @@ func TestAuthLogin_HappyPathSetsCookie(t *testing.T) {
 }
 
 func TestDeleteScreen_SuccessKillsRegistered(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// Seed a screens.json with a PID-0 entry so purgeOrphans keeps it
 	// (only PID>0 dead processes are pruned) and KillScreen finds it.
@@ -140,6 +143,7 @@ func TestDeleteScreen_SuccessKillsRegistered(t *testing.T) {
 }
 
 func TestGetSubagentTranscript_BlankLineSkipped(t *testing.T) {
+	t.Parallel()
 	// An embedded blank line between two JSON records must be skipped, not
 	// emitted as an entry.
 	jsonl := "{\"type\":\"user\",\"content\":\"a\"}\n\n{\"type\":\"assistant\",\"content\":\"b\"}\n"

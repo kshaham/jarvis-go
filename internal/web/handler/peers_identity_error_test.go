@@ -36,6 +36,7 @@ func corruptIdentityPeers(t *testing.T) *Peers {
 }
 
 func TestIdentityShow_GetError500(t *testing.T) {
+	t.Parallel()
 	p := corruptIdentityPeers(t)
 	rec := httptest.NewRecorder()
 	p.IdentityShow(rec, httptest.NewRequest("GET", "/api/identity", nil))
@@ -48,6 +49,7 @@ func TestIdentityShow_GetError500(t *testing.T) {
 }
 
 func TestIdentityShowDetailed_GetError500(t *testing.T) {
+	t.Parallel()
 	p := corruptIdentityPeers(t)
 	rec := httptest.NewRecorder()
 	p.IdentityShowDetailed(rec, httptest.NewRequest("GET", "/api/identity/me", nil))
@@ -57,6 +59,7 @@ func TestIdentityShowDetailed_GetError500(t *testing.T) {
 }
 
 func TestIdentityUpdate_GetError500(t *testing.T) {
+	t.Parallel()
 	p := corruptIdentityPeers(t)
 	// Valid body so we pass validation and reach Identity.Update -> Get() error.
 	req := httptest.NewRequest("PUT", "/api/identity/me", strings.NewReader(`{"displayName":"x"}`))

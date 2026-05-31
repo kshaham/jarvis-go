@@ -20,6 +20,7 @@ import (
 )
 
 func TestGetSubagent_Found(t *testing.T) {
+	t.Parallel()
 	w := watcherWithTranscript(t, "found-1", `{"type":"user"}`+"\n")
 	ctx := &Context{SubagentWatcher: w, StateStore: state.NewStore(t.TempDir() + "/s.json")}
 

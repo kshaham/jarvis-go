@@ -31,6 +31,7 @@ func newConfigCtx(t *testing.T) *Context {
 }
 
 func TestGetStats_Shape(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetStats, "/api/stats")
 	if resp["success"] != true {
@@ -42,6 +43,7 @@ func TestGetStats_Shape(t *testing.T) {
 }
 
 func TestGetTokenStats_Empty(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetTokenStats, "/api/token-stats")
 	stats, _ := resp["stats"].(map[string]interface{})
@@ -54,6 +56,7 @@ func TestGetTokenStats_Empty(t *testing.T) {
 }
 
 func TestGetConfig_Shape(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetConfig, "/api/config")
 	if resp["success"] != true {
@@ -65,6 +68,7 @@ func TestGetConfig_Shape(t *testing.T) {
 }
 
 func TestUpdateConfig_PersistsAndBadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	rec := postJSON(t, ctx.UpdateConfig, "/api/config", map[string]interface{}{"theme": "dark"})
 	if rec.Code != http.StatusOK {
@@ -85,6 +89,7 @@ func TestUpdateConfig_PersistsAndBadJSON(t *testing.T) {
 }
 
 func TestGetSettings_MasksSecrets(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"claudeApiKey": "sk-ant-1234567890abcdef",
@@ -106,6 +111,7 @@ func TestGetSettings_MasksSecrets(t *testing.T) {
 }
 
 func TestMaskSensitiveSettings_NilAndNested(t *testing.T) {
+	t.Parallel()
 	if MaskSensitiveSettings(nil) != nil {
 		t.Error("nil input should return nil")
 	}
@@ -130,6 +136,7 @@ func TestMaskSensitiveSettings_NilAndNested(t *testing.T) {
 }
 
 func TestMaskSecret_Boundaries(t *testing.T) {
+	t.Parallel()
 	// Empty -> empty.
 	if got := maskSecret(""); got != "" {
 		t.Errorf("maskSecret(empty)=%q, want empty", got)
@@ -150,6 +157,7 @@ func TestMaskSecret_Boundaries(t *testing.T) {
 }
 
 func TestUpdateSettings_PersistsAndBadJSON(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	rec := postJSON(t, ctx.UpdateSettings, "/api/settings", map[string]interface{}{"defaultWorkingDir": "/srv/x"})
 	if rec.Code != http.StatusOK {
@@ -169,6 +177,7 @@ func TestUpdateSettings_PersistsAndBadJSON(t *testing.T) {
 }
 
 func TestGetSettingsAccounts_MasksKeys(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	ctx.StateStore.UpdateSettings(map[string]interface{}{
 		"provider":     "zai-glm",
@@ -189,6 +198,7 @@ func TestGetSettingsAccounts_MasksKeys(t *testing.T) {
 }
 
 func TestCreateSettingsAccount_DropsMaskedKeys(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	// Seed a real key, then re-submit with the masked placeholder. The
 	// handler must NOT overwrite the stored key with the mask.
@@ -210,6 +220,7 @@ func TestCreateSettingsAccount_DropsMaskedKeys(t *testing.T) {
 }
 
 func TestCreateSettingsAccount_SavesNewKey(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	rec := postJSON(t, ctx.CreateSettingsAccount, "/api/settings/accounts", map[string]interface{}{
 		"claudeApiKey": "sk-ant-brand-new-key",
@@ -223,6 +234,7 @@ func TestCreateSettingsAccount_SavesNewKey(t *testing.T) {
 }
 
 func TestGetDebugMemory_Shape(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	// GetDebugMemory dereferences OfficeManager.AgentCount(), so wire one up.
 	ctx.OfficeManager = office.NewManager(stubSessions{}, func(string, interface{}) {}, nil)
@@ -241,6 +253,7 @@ func TestGetDebugMemory_Shape(t *testing.T) {
 }
 
 func TestGetSystemStats_Shape(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	req := httptest.NewRequest("GET", "/api/system/stats", nil)
 	rec := httptest.NewRecorder()
@@ -256,6 +269,7 @@ func TestGetSystemStats_Shape(t *testing.T) {
 }
 
 func TestCleanupState_OK(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 	rec := postJSON(t, ctx.CleanupState, "/api/cleanup-state", map[string]interface{}{})
 	if rec.Code != http.StatusOK {

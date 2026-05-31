@@ -9,6 +9,7 @@ import (
 )
 
 func TestAuthMobileListTokens_NilManagerReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // MobileTokenMgr is nil
 	req := httptest.NewRequest("GET", "/api/auth/mobile/tokens", nil)
 	rec := httptest.NewRecorder()

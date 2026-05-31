@@ -61,6 +61,7 @@ func transcriptReq(agentID, query string) *http.Request {
 }
 
 func TestGetSubagentTranscript_StructuredParse(t *testing.T) {
+	t.Parallel()
 	jsonl := `{"type":"user","content":"hello"}
 {"type":"assistant","content":"hi there"}
 not-valid-json-line
@@ -92,6 +93,7 @@ not-valid-json-line
 }
 
 func TestGetSubagentTranscript_FormatRaw(t *testing.T) {
+	t.Parallel()
 	jsonl := `{"type":"user","content":"hello"}
 `
 	w := watcherWithTranscript(t, "rawid", jsonl)

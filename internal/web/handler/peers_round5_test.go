@@ -29,6 +29,7 @@ func TestIdentityToken_GenerateError500(t *testing.T) {
 }
 
 func TestPeersAdd_RegistryRejectsDuplicate400(t *testing.T) {
+	t.Parallel()
 	p := newPeersBundle(t)
 	// A live identity server that returns peerId "dup". GetIdentity succeeds,
 	// but the peer is already registered, so Registry.Add returns

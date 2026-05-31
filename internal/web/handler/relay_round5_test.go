@@ -47,6 +47,7 @@ func newDeliverablePeer(t *testing.T) (*Peers, *httptest.Server) {
 }
 
 func TestRelaySend_SuccessfulDelivery200(t *testing.T) {
+	t.Parallel()
 	p, _ := newDeliverablePeer(t)
 	rec := postJSON(t, p.RelaySend, "/api/relay/send", map[string]interface{}{
 		"toPeerId": "peer-live",
@@ -74,6 +75,7 @@ func TestRelaySend_SuccessfulDelivery200(t *testing.T) {
 }
 
 func TestRelaySend_AttachmentRefAppendedAndDelivered(t *testing.T) {
+	t.Parallel()
 	p, _ := newDeliverablePeer(t)
 	// Populate the library so a missionExcerpt ref resolves to a real
 	// attachment and gets appended to body.Attachments (line 115).
@@ -135,6 +137,7 @@ func TestRelaySend_ExperienceRefFromLibraryDelivered(t *testing.T) {
 }
 
 func TestRelayInboxIn_ReceivePersistFailure500(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod read-only semantics differ on Windows")
 	}
@@ -189,6 +192,7 @@ func TestResolveAttachment_HomeDirError(t *testing.T) {
 }
 
 func TestTitleFromMarkdown_H2HeadingStripped(t *testing.T) {
+	t.Parallel()
 	// A "## " heading has its marker stripped and is returned as the title.
 	if got := titleFromMarkdown("## Section Two\nbody", "fb"); got != "Section Two" {
 		t.Errorf("got %q, want 'Section Two'", got)

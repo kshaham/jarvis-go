@@ -25,6 +25,7 @@ func screenCtx(t *testing.T) *Context {
 }
 
 func TestGetScreens_RealManagerEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := screenCtx(t)
 	resp := getJSON(t, ctx.GetScreens, "/api/screens")
 	scr, _ := resp["screens"].([]interface{})
@@ -34,6 +35,7 @@ func TestGetScreens_RealManagerEmpty(t *testing.T) {
 }
 
 func TestReconcileScreens_RealManagerEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := screenCtx(t)
 	resp := getJSON(t, ctx.ReconcileScreens, "/api/screens/reconcile")
 	if resp["success"] != true {
@@ -42,6 +44,7 @@ func TestReconcileScreens_RealManagerEmpty(t *testing.T) {
 }
 
 func TestDeleteScreen_RealManagerUnknown404(t *testing.T) {
+	t.Parallel()
 	ctx := screenCtx(t)
 	req := withURLParam(httptest.NewRequest("DELETE", "/api/screens/ghost", nil), "sessionId", "ghost")
 	rec := httptest.NewRecorder()
@@ -56,6 +59,7 @@ func TestDeleteScreen_RealManagerUnknown404(t *testing.T) {
 // for the broker to see terminal traffic — proving the EventTerminal/Output
 // branches run without panicking.
 func TestForwardSessionEvents_DrivesShell(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionExtCtx(t)
 	ctx.OfficeManager = office.NewManager(stubSessions{}, func(string, interface{}) {}, nil)
 

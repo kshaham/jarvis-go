@@ -35,6 +35,7 @@ func TestOfficeAgentHandoffReject_NoHandoffError(t *testing.T) {
 }
 
 func TestDeleteSubagent_RemovedTrue(t *testing.T) {
+	t.Parallel()
 	w := subagent.NewWatcher(context.Background(), t.TempDir())
 	ctx := &Context{SubagentWatcher: w}
 	// Register an agent so RemoveAgent returns true (the removed==true arm).

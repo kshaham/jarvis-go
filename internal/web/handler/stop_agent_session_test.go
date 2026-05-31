@@ -13,12 +13,14 @@ import (
 )
 
 func TestStopAgentSessionByID_NilManager(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // SessionManager nil
 	// Must not panic; just returns.
 	ctx.stopAgentSessionByID("anything")
 }
 
 func TestStopAgentSessionByID_SDK(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{SessionManager: pty.NewSessionManager(10)}
 	sdk := pty.NewSDKSession(pty.SessionConfig{ID: "stop-sdk", Mode: pty.ModeClaudeSDK, WorkingDir: t.TempDir()})
 	ctx.SessionManager.RegisterSDKSessionForTest(sdk)
@@ -30,6 +32,7 @@ func TestStopAgentSessionByID_SDK(t *testing.T) {
 }
 
 func TestStopAgentSessionByID_PTY(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{SessionManager: pty.NewSessionManager(10)}
 	sess, err := ctx.SessionManager.CreateSession(context.Background(), pty.SessionConfig{
 		WorkingDir: t.TempDir(), Mode: pty.ModeShell, Name: "stop-pty",

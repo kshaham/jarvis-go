@@ -24,10 +24,10 @@ build-all:
 	done
 
 test:
-	go test ./... -count=1 -timeout=60s
+	go test ./... -count=1 -timeout=300s
 
 test-race:
-	go test ./... -race -count=1 -timeout=60s
+	go test ./... -race -count=1 -timeout=300s
 
 bench:
 	go test ./... -bench=. -benchmem -count=1

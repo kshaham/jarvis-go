@@ -22,6 +22,7 @@ import (
 // --- Scheduler ---
 
 func TestCreateSchedulerJob_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	req := httptest.NewRequest("POST", "/api/scheduler/jobs", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -33,6 +34,7 @@ func TestCreateSchedulerJob_BadJSON400(t *testing.T) {
 }
 
 func TestUpdateSchedulerJob_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	req := withURLParam(httptest.NewRequest("PUT", "/api/scheduler/jobs/x", strings.NewReader("{bad")), "id", "x")
 	req.Header.Set("Content-Type", "application/json")
@@ -44,6 +46,7 @@ func TestUpdateSchedulerJob_BadJSON400(t *testing.T) {
 }
 
 func TestCreateSchedulerJob_DuplicateID500(t *testing.T) {
+	t.Parallel()
 	ctx := newSchedulerCtx(t)
 	// Pre-create a job with a fixed ID directly in the store.
 	if _, err := ctx.Scheduler.Create(scheduler.Job{

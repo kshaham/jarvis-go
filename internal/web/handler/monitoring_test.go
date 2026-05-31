@@ -23,6 +23,7 @@ func newTestContext() *Context {
 }
 
 func TestHealth(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := httptest.NewRequest("GET", "/api/health", nil)
 	rec := httptest.NewRecorder()
@@ -41,6 +42,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	rec := httptest.NewRecorder()
@@ -63,6 +65,7 @@ func TestStatus(t *testing.T) {
 }
 
 func TestReady_Ok(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	// Provide a StateStore so all nil checks pass.
 	ctx.StateStore = nil // explicit: will cause 503
@@ -87,6 +90,7 @@ func TestReady_Ok(t *testing.T) {
 }
 
 func TestReady_Degraded_GoroutineCount(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	// Test that goroutine count appears in the response.
 	req := httptest.NewRequest("GET", "/api/ready", nil)
@@ -102,6 +106,7 @@ func TestReady_Degraded_GoroutineCount(t *testing.T) {
 }
 
 func TestCSRFToken(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := httptest.NewRequest("GET", "/api/csrf-token", nil)
 	rec := httptest.NewRecorder()
@@ -130,6 +135,7 @@ func TestCSRFToken(t *testing.T) {
 }
 
 func TestQuerySessions_EmptyReturnsZero(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := httptest.NewRequest("GET", "/api/sessions/query", nil)
 	rec := httptest.NewRecorder()
@@ -150,6 +156,7 @@ func TestQuerySessions_EmptyReturnsZero(t *testing.T) {
 }
 
 func TestQuerySessions_HonorsLimit(t *testing.T) {
+	t.Parallel()
 	ctx := newTestContext()
 	req := httptest.NewRequest("GET", "/api/sessions/query?limit=5&offset=0", nil)
 	rec := httptest.NewRecorder()

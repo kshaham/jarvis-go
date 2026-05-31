@@ -19,6 +19,7 @@ import (
 )
 
 func TestAuthMobileLogin_NilManager503(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{} // MobileTokenMgr is nil
 	req := mobilePostJSONReq("/api/auth/mobile/login", map[string]string{
 		"password": "whatever", "deviceName": "x",
@@ -31,6 +32,7 @@ func TestAuthMobileLogin_NilManager503(t *testing.T) {
 }
 
 func TestAuthMobileLogin_MalformedJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/mobile/login", strings.NewReader("{not valid"))
 	req.Header.Set("Content-Type", "application/json")
@@ -45,6 +47,7 @@ func TestAuthMobileLogin_MalformedJSON400(t *testing.T) {
 // truncation arm. We give a deviceName longer than maxMobileDeviceNameLen and
 // then assert the persisted device row carries the truncated name.
 func TestAuthMobileLogin_LongDeviceNameTruncated(t *testing.T) {
+	t.Parallel()
 	ctx := newMobileAuthContext(t)
 	longName := strings.Repeat("z", maxMobileDeviceNameLen+40)
 	req := mobilePostJSONReq("/api/auth/mobile/login", map[string]string{
@@ -76,6 +79,7 @@ func TestAuthMobileLogin_LongDeviceNameTruncated(t *testing.T) {
 // TestAuthMobileLogin_VerifyPasswordError500 corrupts the auth.json on disk so
 // VerifyPassword's json.Unmarshal fails, returning a non-nil error -> 500.
 func TestAuthMobileLogin_VerifyPasswordError500(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mgr, err := auth.NewManager(dir, false)
 	if err != nil {

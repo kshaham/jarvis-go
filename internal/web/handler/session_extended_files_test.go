@@ -26,6 +26,7 @@ func sessionJSONReq(t *testing.T, id, body string) *http.Request {
 }
 
 func TestGetSessionFiles_ReadDirErrorAndTruncation(t *testing.T) {
+	t.Parallel()
 	// >100 files -> truncation arm.
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
@@ -61,6 +62,7 @@ func TestGetSessionFiles_ReadDirErrorAndTruncation(t *testing.T) {
 }
 
 func TestGetSessionPlanHistory_VersionsAndBadName(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 	// A valid versioned plan + a malformed one (non-numeric version -> skipped).
@@ -94,6 +96,7 @@ func TestGetSessionPlanHistory_VersionsAndBadName(t *testing.T) {
 }
 
 func TestSessionToggleHandlers_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	for name, h := range map[string]func(http.ResponseWriter, *http.Request){

@@ -19,6 +19,7 @@ import (
 )
 
 func TestGetTokenStats_WithLiveSession(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 
@@ -54,6 +55,7 @@ func TestOfficeGetMemberMemory_AgentFound(t *testing.T) {
 }
 
 func TestCreateAndDeleteCase_BroadcastBranch(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{
 		CaseManager: cases.NewCaseManager(t.TempDir()),
 		SSEBroker:   sse.NewBroker(100, 10),
@@ -73,6 +75,7 @@ func TestCreateAndDeleteCase_BroadcastBranch(t *testing.T) {
 }
 
 func TestGeneratePlanDetailed_HappySpawn(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	// Attach a case so the working dir resolves to the case path.
 	cm := cases.NewCaseManager(t.TempDir())

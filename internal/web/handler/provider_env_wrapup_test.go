@@ -9,6 +9,7 @@ import (
 )
 
 func TestGetProviderEnvVars_AllProviders(t *testing.T) {
+	t.Parallel()
 	ctx := newConfigCtx(t)
 
 	// Subscription (default): no auth vars, but the Opus pin is present.

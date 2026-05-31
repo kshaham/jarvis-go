@@ -26,6 +26,7 @@ func rawFileReq(t *testing.T, id, query string) *http.Request {
 }
 
 func TestGetSessionFileRaw_MissingPath400(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -36,6 +37,7 @@ func TestGetSessionFileRaw_MissingPath400(t *testing.T) {
 }
 
 func TestGetSessionFileRaw_PathTraversalRejected(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -47,6 +49,7 @@ func TestGetSessionFileRaw_PathTraversalRejected(t *testing.T) {
 }
 
 func TestGetSessionFileRaw_FileNotFound404(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	rec := httptest.NewRecorder()
@@ -57,6 +60,7 @@ func TestGetSessionFileRaw_FileNotFound404(t *testing.T) {
 }
 
 func TestGetSessionFileRaw_TextAndBinary(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, wd := liveSession(t, ctx)
 
@@ -111,6 +115,7 @@ func sessionInputBadJSON(t *testing.T, h func(http.ResponseWriter, *http.Request
 }
 
 func TestSessionInputHandlers_BadJSON400(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	id, _ := liveSession(t, ctx)
 	for name, h := range map[string]func(http.ResponseWriter, *http.Request){
@@ -125,6 +130,7 @@ func TestSessionInputHandlers_BadJSON400(t *testing.T) {
 }
 
 func TestSessionInputHandlers_NotFound404(t *testing.T) {
+	t.Parallel()
 	ctx := newSessionLiveCtx(t)
 	for name, h := range map[string]func(http.ResponseWriter, *http.Request){
 		"RunSession":        ctx.RunSession,
@@ -142,6 +148,7 @@ func TestSessionInputHandlers_NotFound404(t *testing.T) {
 }
 
 func TestBulkRenameSessions_TooMany(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{SSEBroker: sse.NewBroker(10, 1)}
 	renames := map[string]string{}
 	for i := 0; i < maxBulkItems+1; i++ {
@@ -156,6 +163,7 @@ func TestBulkRenameSessions_TooMany(t *testing.T) {
 }
 
 func TestBulkUpdateSessionColors_TooMany(t *testing.T) {
+	t.Parallel()
 	ctx := &Context{SSEBroker: sse.NewBroker(10, 1)}
 	colors := map[string]string{}
 	for i := 0; i < maxBulkItems+1; i++ {

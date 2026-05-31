@@ -17,6 +17,7 @@ import (
 )
 
 func TestRegisterPushDevice_RepairsEmptyEventPattern(t *testing.T) {
+	t.Parallel()
 	ctx := newPushContext(t)
 	// Pre-seed a mobile route for dev-7 whose Match pattern is empty --
 	// simulating a route the operator cleared through the Routes UI.

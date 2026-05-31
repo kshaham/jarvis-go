@@ -81,6 +81,7 @@ func newAuthCtxAt(t *testing.T, dir string) *Context {
 }
 
 func TestAuthSetup_SetupLockHeld409(t *testing.T) {
+	t.Parallel()
 	ctx := newAuthCtxAt(t, t.TempDir())
 	// Hold the setup lock so AuthSetup's AcquireSetupLock returns false -> 409.
 	if !ctx.AuthManager.AcquireSetupLock() {
@@ -95,6 +96,7 @@ func TestAuthSetup_SetupLockHeld409(t *testing.T) {
 }
 
 func TestAuthSetup_SetPasswordError500(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory write permissions")
 	}
@@ -113,6 +115,7 @@ func TestAuthSetup_SetPasswordError500(t *testing.T) {
 }
 
 func TestUpdateCase_WriteFileError500(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory write permissions")
 	}
