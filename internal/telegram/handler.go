@@ -302,7 +302,7 @@ func (h *Handler) calculateBackoff() time.Duration {
 // getUpdates calls the Telegram Bot API getUpdates endpoint.
 func (h *Handler) getUpdates(ctx context.Context, offset int64, timeout int) ([]Update, error) {
 	token, _ := h.bot.GetConfig()
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", token)
+	url := fmt.Sprintf("%s/bot%s/getUpdates", apiBaseURL(), token)
 
 	payload := map[string]interface{}{
 		"offset":  offset,
@@ -588,7 +588,7 @@ func (h *Handler) WebhookHandler(w http.ResponseWriter, r *http.Request) {
 // This removes the loading spinner from the pressed button.
 func (h *Handler) answerCallbackQuery(queryID, text string) {
 	token, _ := h.bot.GetConfig()
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/answerCallbackQuery", token)
+	url := fmt.Sprintf("%s/bot%s/answerCallbackQuery", apiBaseURL(), token)
 
 	payload := map[string]interface{}{
 		"callback_query_id": queryID,
@@ -616,7 +616,7 @@ func (h *Handler) answerCallbackQuery(queryID, text string) {
 // autocomplete hints. Fire and forget -- errors are logged but not fatal.
 func (h *Handler) registerBotCommands() {
 	token, _ := h.bot.GetConfig()
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/setMyCommands", token)
+	url := fmt.Sprintf("%s/bot%s/setMyCommands", apiBaseURL(), token)
 
 	commands := []map[string]string{
 		{"command": "help", "description": "Show available commands"},

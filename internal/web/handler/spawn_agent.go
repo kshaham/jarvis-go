@@ -28,6 +28,28 @@ type spawnAgentSpec struct {
 	Override *memberOverride
 }
 
+// MCP-availability probes used by buildOfficeMCPServers. Indirected through
+// function variables (defaulting to the office package's PATH/cache-backed
+// checks) so the gated codegraph / ECC / pageindex branches are exercisable in
+// tests without depending on the host's installed toolchain or the office
+// package's process-lifetime sync.Once caches. Behavior-preserving: production
+// keeps the office implementations.
+var (
+	codegraphBinaryAvailable = office.CodegraphBinaryAvailable
+	npxAvailable             = office.NpxAvailable
+	pageIndexAvailable       = office.PageIndexAvailable
+	pageIndexMcpConfig       = office.PageIndexMcpConfig
+)
+
+// newSpawnSessionID generates the fresh session ID for a spawned agent
+// (SDK or Codex backend). Indirected through a variable so tests can
+// force a deterministic ID — e.g. to drive OfficeAgentRestart's
+// "ReassignSessionID collides on the new UUID" 500 arm, which is
+// otherwise unreachable because v4 UUIDs never collide in practice.
+// Production always uses uuid.New().String(); the seam is
+// behavior-preserving.
+var newSpawnSessionID = func() string { return uuid.New().String() }
+
 // spawnAgentSession creates either an SDK or PTY session for a team member.
 // Returns the sessionID and mode used, or empty string on failure.
 // R23 · The optional `ov` carries per-member MaxTurns from the spawn
@@ -71,7 +93,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 			ctx.OfficeManager.GetProjectInvariants(),
 		)
 		// Pre-generate session ID so we can inject it into MCP env and subprocess env.
-		sessionID := uuid.New().String()
+		sessionID := newSpawnSessionID()
 		// Agent token authorizes /api/office/agent/* calls from `cm` and jarvis-mcp.
 		// When per-member env comes from getProviderEnvVarsFor (Z.AI rate-limit
 		// allocation) the token is dropped, so we re-inject it here. Without
@@ -297,7 +319,7 @@ func (ctx *Context) buildOfficeMCPServers(req spawnTeamRequest, sessionID, agent
 	// The actual .codegraph/ index is initialised once per
 	// workingDir by spawnTeamFromRequest before this loop runs
 	// (background goroutine; doesn't block spawn).
-	if !codegraphOptOut(req) && office.CodegraphBinaryAvailable() {
+	if !codegraphOptOut(req) && codegraphBinaryAvailable() {
 		mcpServers["codegraph"] = map[string]any{
 			"type":    "stdio",
 			"command": "codegraph",
@@ -325,7 +347,7 @@ func (ctx *Context) buildOfficeMCPServers(req spawnTeamRequest, sessionID, agent
 		sequentialThinkingVersion = "2025.12.18"
 		shadcnUIVersion           = "2.0.0" // P13.1
 	)
-	if !eccOptOut(req) && office.NpxAvailable() {
+	if !eccOptOut(req) && npxAvailable() {
 		mcpServers["context7"] = map[string]any{
 			"type":    "stdio",
 			"command": "npx",
@@ -359,8 +381,8 @@ func (ctx *Context) buildOfficeMCPServers(req spawnTeamRequest, sessionID, agent
 	// NpxAvailable + a one-shot @pageindex/mcp warm-cache probe).
 	// Library dir comes from office.LibraryDir() which sets up
 	// ~/.jarvis/office-memory/library/ on first call.
-	if office.PageIndexAvailable() {
-		if cfg := office.PageIndexMcpConfig(office.LibraryDir()); cfg != nil {
+	if pageIndexAvailable() {
+		if cfg := pageIndexMcpConfig(office.LibraryDir()); cfg != nil {
 			mcpServers["pageindex"] = cfg
 		}
 	}
@@ -459,7 +481,7 @@ func stageCodexAuth(home, codexHome string) error {
 // builds the Codex-flavored system prompt, starts a CodexSession, and wires its
 // events to SSE. Returns (sessionID, "codex") or ("", "") on failure.
 func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMember, req spawnTeamRequest, envVars map[string]string, teamConfigs []*office.TeamMemberConfig, perpetual bool, ov *memberOverride, provider, model string) (string, string) {
-	sessionID := uuid.New().String()
+	sessionID := newSpawnSessionID()
 	agentToken := ""
 	if ctx.AgentTokenMgr != nil {
 		agentToken = ctx.AgentTokenMgr.Token()

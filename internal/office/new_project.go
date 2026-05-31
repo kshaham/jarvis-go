@@ -26,12 +26,12 @@ import (
 // slashes so no request can traverse out of NewProjectRoot.
 var ProjectNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
-// NewProjectRoot is the fixed parent directory for freshly-created
-// projects. Already in the workingDirAllowlist for production
-// deploys (docker-compose.yml: /app/workspace is bind-mounted into
-// the jarvis container). Exposed so tests can override via a
-// runtime-injected helper or stub.
-const NewProjectRoot = "/app/workspace"
+// NewProjectRoot is the parent directory for freshly-created projects.
+// Already in the workingDirAllowlist for production deploys
+// (docker-compose.yml: /app/workspace is bind-mounted into the jarvis
+// container). It is a package var (not a const) only so tests can
+// redirect it at a temp dir; production never reassigns it.
+var NewProjectRoot = "/app/workspace"
 
 // ErrInvalidProjectName is returned by PrepareNewProject when the
 // slug fails ProjectNameRe. The handler maps it to 400.

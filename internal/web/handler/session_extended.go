@@ -51,6 +51,17 @@ func resolveSessionFilePath(w http.ResponseWriter, session *pty.Session, filePat
 // accidental DoS of the state store on enormous requests.
 const maxBulkItems = 500
 
+// atomicTempFile is the seam used to create the staging temp file. It is a
+// package var (defaulting to os.CreateTemp) so tests can inject a temp file
+// whose Write/Close fail, exercising atomicWriteFile's mid-write error arms
+// that a real filesystem can't reliably trigger. Behavior is identical to a
+// direct os.CreateTemp call in production.
+var atomicTempFile = os.CreateTemp
+
+// atomicChmod is the seam for the post-write permission set (defaults to
+// os.Chmod) so the chmod-failure arm is reachable under test.
+var atomicChmod = os.Chmod
+
 // atomicWriteFile writes data to path via a temp-file + rename so a
 // crash mid-write can't leave a half-written plan file. The plan-file
 // family below (@fix_plan.md, initprompt.md, @fix_plan.vN.md) all
@@ -63,7 +74,7 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 	// the same per-session @fix_plan.md (agent write + dashboard PATCH), and a
 	// shared temp name lets two concurrent writers interleave into the same
 	// tmp and rename a corrupted/partial file into place.
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	tmp, err := atomicTempFile(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -77,7 +88,7 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Chmod(tmpName, mode); err != nil {
+	if err := atomicChmod(tmpName, mode); err != nil {
 		os.Remove(tmpName)
 		return err
 	}

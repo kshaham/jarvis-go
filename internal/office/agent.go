@@ -468,6 +468,14 @@ func (a *AgentState) AddTask(task *Task) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.taskQueue.Tasks = append(a.taskQueue.Tasks, task)
+	// Maintain the manager's team-wide blocked-task counter for tasks added
+	// already in TaskBlocked state (e.g. restored from persistence). Status
+	// transitions go through applyTaskStatusLocked; a direct add of a blocked
+	// task would otherwise leave the O(1) counter understated. Manager is nil
+	// in unit tests that construct AgentState directly.
+	if task != nil && task.Status == TaskBlocked && a.manager != nil {
+		a.manager.NotifyTaskBlocked()
+	}
 }
 
 // TaskGateInfo captures the completion-gate inputs for a task under the

@@ -94,16 +94,26 @@ func (s *CSRFStore) cleanupLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.mu.Lock()
-			now := time.Now()
-			for h, expiry := range s.tokens {
-				if now.After(expiry) {
-					delete(s.tokens, h)
-				}
-			}
-			s.mu.Unlock()
+			s.sweepExpired()
 		}
 	}
+}
+
+// sweepExpired removes every token whose TTL has elapsed and returns the
+// number deleted. Extracted from cleanupLoop so the expiry logic can be
+// exercised without waiting on the 10-minute ticker.
+func (s *CSRFStore) sweepExpired() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	removed := 0
+	for token, expiry := range s.tokens {
+		if now.After(expiry) {
+			delete(s.tokens, token)
+			removed++
+		}
+	}
+	return removed
 }
 
 // CSRF middleware validates X-CSRF-Token header on mutating requests.

@@ -13,10 +13,16 @@ import (
 )
 
 const (
-	maxTrackedAgents     = 200
+	maxTrackedAgents = 200
+	idleTimeout      = 30 * time.Second
+	staleIdleMaxAge  = 4 * time.Hour
+)
+
+// scanInterval and staleCleanupInterval are vars (not consts) so tests can
+// shrink them to drive the scanLoop/cleanupLoop ticker branches
+// deterministically. Production values are unchanged.
+var (
 	scanInterval         = 10 * time.Second
-	idleTimeout          = 30 * time.Second
-	staleIdleMaxAge      = 4 * time.Hour
 	staleCleanupInterval = 5 * time.Minute
 )
 

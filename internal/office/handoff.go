@@ -31,6 +31,22 @@ import (
 	"time"
 )
 
+// handoffRecheckHook is a test-only seam fired by AcceptHandoff,
+// CancelHandoff, and finishReject AFTER resolveHandoffPair returns but
+// BEFORE the sender-lock re-acquire. Production leaves it nil (a no-op).
+// Tests use it to deterministically simulate a concurrent resolver that
+// flips the live handoff status between the lock-free resolve and the
+// locked re-check, exercising the "handoff no longer pending" guards
+// without an inherently racy goroutine schedule. Behaviour-preserving:
+// when nil the call is skipped entirely.
+var handoffRecheckHook func(taskID string)
+
+func fireHandoffRecheckHook(taskID string) {
+	if handoffRecheckHook != nil {
+		handoffRecheckHook(taskID)
+	}
+}
+
 // HandoffStatus is the lifecycle state of a HandoffRequest.
 type HandoffStatus string
 
@@ -140,25 +156,6 @@ func loadHandoffStaleThreshold() time.Duration {
 		return DefaultHandoffStale
 	}
 	return time.Duration(seconds) * time.Second
-}
-
-// handoffStaleThresholdTTL is how long the Manager caches the handoff stale
-// threshold before re-reading the override file. The file changes rarely
-// (power-user escape hatch) so a 5-minute TTL eliminates per-tick disk reads.
-const handoffStaleThresholdTTL = 5 * time.Minute
-
-// cachedHandoffStaleThreshold returns the handoff stale threshold, re-reading
-// the override file only when the TTL has expired. Guarded by m.mu so it is
-// safe to call from the monitoring goroutine.
-func (m *Manager) cachedHandoffStaleThreshold() time.Duration {
-	m.mu.Lock()
-	if m.handoffStaleThresholdAt.IsZero() || time.Since(m.handoffStaleThresholdAt) >= handoffStaleThresholdTTL {
-		m.handoffStaleThreshold = loadHandoffStaleThreshold()
-		m.handoffStaleThresholdAt = time.Now()
-	}
-	v := m.handoffStaleThreshold
-	m.mu.Unlock()
-	return v
 }
 
 // loadPersistedHandoffs reads the audit log. Missing file = empty
@@ -358,6 +355,7 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 	// the LIVE task's handoff status under sender.mu and flipping it to
 	// HandoffAccepted in the same critical section makes the loser observe the
 	// claimed status (or a missing task) and bail.
+	fireHandoffRecheckHook(taskID)
 	sender.mu.Lock()
 	idx := -1
 	for i, t := range sender.taskQueue.Tasks {
@@ -378,6 +376,12 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 	resolvedAt := time.Now()
 	live.Handoff.Status = HandoffAccepted // claim — blocks a concurrent accept's re-check
 	live.Handoff.ResolvedAt = resolvedAt
+	// Snapshot the resolved handoff record UNDER the lock. The previous code
+	// re-wrote h.Status/h.ResolvedAt after Unlock, which raced a concurrent
+	// finishReject mutating the same live *HandoffRequest. live.Handoff is the
+	// same pointer as h, so stamping + copying it here is the single
+	// synchronised mutation; the append/broadcast/return all use the copy.
+	resolved := *live.Handoff
 	copied := *live
 	// Remove from sender queue while still holding the lock.
 	sender.taskQueue.Tasks = append(sender.taskQueue.Tasks[:idx], sender.taskQueue.Tasks[idx+1:]...)
@@ -399,9 +403,7 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 
 	receiver.AddTask(&copied)
 
-	h.Status = HandoffAccepted
-	h.ResolvedAt = resolvedAt
-	m.ensureHandoffStore().append(*h)
+	m.ensureHandoffStore().append(resolved)
 
 	senderName := ""
 	if sender.Config != nil {
@@ -411,9 +413,9 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 		"taskId": taskID, "from": sender.SessionID(), "fromName": senderName,
 	})
 	m.broadcast(EventHandoffAccepted, map[string]interface{}{
-		"handoff": h,
+		"handoff": &resolved,
 	})
-	return h, nil
+	return &resolved, nil
 }
 
 // RejectHandoff cancels a pending handoff. The task returns to the
@@ -443,15 +445,28 @@ func (m *Manager) CancelHandoff(senderSessionID, taskID string) (*HandoffRequest
 		return nil, err
 	}
 
+	// Claim + stamp the handoff record under sender.mu (same rationale as
+	// finishReject/AcceptHandoff): the live *HandoffRequest must only be
+	// mutated under the lock, and the loser of a concurrent resolve bails.
+	fireHandoffRecheckHook(taskID)
 	sender.mu.Lock()
-	task.Handoff = nil
-	task.Status = TaskInProgress
+	if task.Handoff == nil || task.Handoff.Status != HandoffPending {
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("handoff no longer pending")
+	}
 	senderName := ""
 	if sender.Config != nil {
 		senderName = sender.Config.Name
 	}
+	resolvedAt := time.Now()
+	h.Status = HandoffCancelled
+	h.ResolvedAt = resolvedAt
+	h.RejectReason = "cancelled by sender"
+	snapshot := *h
+	task.Handoff = nil
+	task.Status = TaskInProgress
 	task.ProgressLog = append(task.ProgressLog, TaskProgressEntry{
-		Timestamp: time.Now(),
+		Timestamp: resolvedAt,
 		Note:      fmt.Sprintf("[handoff cancelled by %s]", senderName),
 	})
 	if len(task.ProgressLog) > taskProgressLogCap {
@@ -459,16 +474,13 @@ func (m *Manager) CancelHandoff(senderSessionID, taskID string) (*HandoffRequest
 	}
 	sender.mu.Unlock()
 
-	h.Status = HandoffCancelled
-	h.ResolvedAt = time.Now()
-	h.RejectReason = "cancelled by sender"
-	m.ensureHandoffStore().append(*h)
+	m.ensureHandoffStore().append(snapshot)
 
 	m.auditLog("office:handoffCancelled", sender.SessionID(), senderName, map[string]interface{}{
-		"taskId": h.TaskID, "to": h.ToSessionID, "toName": h.ToName,
+		"taskId": snapshot.TaskID, "to": snapshot.ToSessionID, "toName": snapshot.ToName,
 	})
-	m.broadcast(EventHandoffCancelled, map[string]interface{}{"handoff": h})
-	return h, nil
+	m.broadcast(EventHandoffCancelled, map[string]interface{}{"handoff": &snapshot})
+	return &snapshot, nil
 }
 
 // ForceAcceptHandoff is the operator-auth variant. Bypasses the
@@ -494,22 +506,38 @@ func (m *Manager) ForceRejectHandoff(taskID, reason string) (*HandoffRequest, er
 
 // finishReject shared tail for receiver-reject and operator-force-reject.
 func (m *Manager) finishReject(h *HandoffRequest, task *Task, sender, receiver *AgentState, reason string) (*HandoffRequest, error) {
+	// Claim, mutate the task, and stamp the handoff record ALL under
+	// sender.mu. resolveHandoffPair's pending-check ran lock-free, so a
+	// concurrent accept/reject could share the same live *HandoffRequest.
+	// Re-checking the LIVE handoff's status under the lock (and writing
+	// h.Status/ResolvedAt/RejectReason here, not after Unlock) makes the
+	// loser of an accept/reject race bail and removes the unsynchronised
+	// writes to *h that previously raced with AcceptHandoff. We snapshot
+	// *h under the lock so the audit append / broadcast / return value
+	// never touch the live pointer after release.
+	fireHandoffRecheckHook(task.ID)
 	sender.mu.Lock()
+	if task.Handoff == nil || task.Handoff.Status != HandoffPending {
+		sender.mu.Unlock()
+		return nil, fmt.Errorf("handoff no longer pending")
+	}
+	resolvedAt := time.Now()
+	h.Status = HandoffRejected
+	h.ResolvedAt = resolvedAt
+	h.RejectReason = reason
 	task.Handoff = nil
 	task.Status = TaskInProgress
 	task.ProgressLog = append(task.ProgressLog, TaskProgressEntry{
-		Timestamp: time.Now(),
+		Timestamp: resolvedAt,
 		Note:      fmt.Sprintf("[handoff rejected by %s: %s]", receiver.Config.Name, reason),
 	})
 	if len(task.ProgressLog) > taskProgressLogCap {
 		task.ProgressLog = task.ProgressLog[len(task.ProgressLog)-taskProgressLogCap:]
 	}
+	snapshot := *h
 	sender.mu.Unlock()
 
-	h.Status = HandoffRejected
-	h.ResolvedAt = time.Now()
-	h.RejectReason = reason
-	m.ensureHandoffStore().append(*h)
+	m.ensureHandoffStore().append(snapshot)
 
 	// Targeted chat message so the sender sees the rejection.
 	senderName := ""
@@ -520,16 +548,16 @@ func (m *Manager) finishReject(h *HandoffRequest, task *Task, sender, receiver *
 	if receiver.Config != nil {
 		receiverName = receiver.Config.Name
 	}
-	msg := fmt.Sprintf("%s declined your handoff of task %q: %s", receiverName, h.TaskTitle, reason)
+	msg := fmt.Sprintf("%s declined your handoff of task %q: %s", receiverName, snapshot.TaskTitle, reason)
 	m.SendMessage(receiver.SessionID(), sender.SessionID(), msg)
 
 	m.auditLog("office:handoffRejected", receiver.SessionID(), receiverName, map[string]interface{}{
-		"taskId": h.TaskID, "reason": reason, "to": sender.SessionID(), "toName": senderName,
+		"taskId": snapshot.TaskID, "reason": reason, "to": sender.SessionID(), "toName": senderName,
 	})
 	m.broadcast(EventHandoffRejected, map[string]interface{}{
-		"handoff": h,
+		"handoff": &snapshot,
 	})
-	return h, nil
+	return &snapshot, nil
 }
 
 // resolveHandoffPair looks up the current pending handoff for a task

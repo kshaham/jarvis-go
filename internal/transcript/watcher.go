@@ -13,9 +13,10 @@ import (
 	"github.com/kshaham/jarvis/internal/safego"
 )
 
-const (
-	pollInterval = 5 * time.Second
-)
+// pollInterval is the cadence at which the watch loop checks for the
+// transcript file's existence and for new appended content. It is a var
+// (not a const) so tests can shorten it to drive the loop deterministically.
+var pollInterval = 5 * time.Second
 
 // Watcher monitors a Claude Code transcript JSONL file.
 type Watcher struct {
@@ -28,6 +29,7 @@ type Watcher struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	closeOnce      sync.Once
+	done           chan struct{}
 }
 
 // NewWatcher creates a new transcript watcher.
@@ -38,6 +40,7 @@ func NewWatcher(ctx context.Context, sessionID string) *Watcher {
 		events:    make(chan TranscriptEvent, 32),
 		ctx:       childCtx,
 		cancel:    cancel,
+		done:      make(chan struct{}),
 	}
 }
 
@@ -66,6 +69,8 @@ func (w *Watcher) Events() <-chan TranscriptEvent {
 }
 
 func (w *Watcher) watchLoop() {
+	defer close(w.done)
+
 	// Poll for file existence first
 	for {
 		select {

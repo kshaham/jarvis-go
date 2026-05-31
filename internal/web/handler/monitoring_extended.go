@@ -40,6 +40,14 @@ func resetClaudeAuthCache() {
 	claudeAuthOnce.mu.Unlock()
 }
 
+// afterSetupLockAcquired is a test seam invoked once AuthSetup holds the
+// setup lock, immediately before the post-lock double-check of
+// IsPasswordConfigured. It defaults to a no-op; a test overrides it to
+// configure a password concurrently and thus exercise the otherwise
+// race-only "already configured between checks" arm. Behaviour-preserving
+// in production (the no-op adds nothing).
+var afterSetupLockAcquired = func() {}
+
 // GetAuthStatus returns the current authentication status.
 // GET /api/auth/status
 func (ctx *Context) GetAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +81,8 @@ func (ctx *Context) AuthSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer ctx.AuthManager.ReleaseSetupLock()
+
+	afterSetupLockAcquired()
 
 	// Double-check after acquiring lock
 	if ctx.AuthManager.IsPasswordConfigured() {

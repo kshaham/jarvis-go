@@ -360,7 +360,7 @@ func (mq *MessageQueue) sendTelegram(chatID, text string, keyboard *InlineKeyboa
 	// the URL is built from currentToken() (the live/rotated token) would leave
 	// the live token un-redacted in any *url.Error on the failure path.
 	tok := mq.currentToken()
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", tok)
+	url := fmt.Sprintf("%s/bot%s/sendMessage", apiBaseURL(), tok)
 
 	payload := map[string]interface{}{
 		"chat_id":    chatID,

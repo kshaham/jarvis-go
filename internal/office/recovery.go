@@ -72,84 +72,94 @@ func (m *Manager) StartIdleMonitoring() {
 			}
 
 			tickCount++
-
-			// Recover from panics in any monitoring function so the ticker
-			// goroutine never dies. A crashed monitoring tick is logged and
-			// the next tick runs normally.
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Error("Panic in idle monitoring tick", "panic", r, "tick", tickCount)
-					}
-				}()
-
-				// Fix 5: snapshot the roster once per tick so sub-functions
-				// that each called GetRoster() (RLock + alloc) can share
-				// a single snapshot. Agents are live pointers; they are
-				// not freed mid-tick, so reuse within this tick is safe.
-				roster := m.GetRoster()
-
-				m.checkSessionHealth()
-				m.CleanupExpiredLocks()
-				m.SweepBugTasks()
-				m.SweepMeetings()
-				// R20 · Force-end meetings still Active past 2h +
-				// clear dangling bug assignments. Covers ghost state
-				// from pre-R19 crashes and hard restarts.
-				m.sweepStaleMeetings()
-				m.sweepOrphanedBugs()
-				m.autoCompleteIdleAgentTasks()
-				m.checkUnacknowledgedTasks()
-				m.checkStaleInProgressTasks()
-				m.checkForStuckAgents()
-				m.checkForWedgedWorkingAgents(roster)
-				m.checkForIdleAgents(roster)
-				m.checkForCuriousAgents(roster)
-				m.checkForReflectionOpportunity(roster)
-				m.checkBlockedTasksForLeaderTriage(roster)
-				// R29 · Auto-reject pending handoffs whose receiver has
-				// left the roster. Threshold can be overridden via
-				// ~/.jarvis/office-memory/handoff-stale-seconds.txt.
-				m.SweepStaleHandoffs(m.cachedHandoffStaleThreshold())
-				// Fix 6: persist metrics every 5th tick (~75 s) instead
-				// of every tick to avoid a synchronous disk write on each
-				// idle-ticker iteration. Metrics are advisory; occasional
-				// skips are fine.
-				if tickCount%5 == 0 {
-					m.PersistMetrics()
-				}
-				m.maybeTriggerWaterCoolerChat(roster)
-				// Ping the announced dev URL; after 3 consecutive failures
-				// the health checker auto-clears the slot so teammates
-				// stop being pointed at a dead server.
-				m.CheckDevInstanceHealth()
-				// Knowledge-library self-improvement sweep. Gated by
-				// memifyInterval (~6h) so the disk walk + workflow
-				// writes only fire a few times a day. Auto-promotes
-				// high-reuse workflows to ~/.claude/skills/ via the
-				// existing WriteSharedSkill path.
-				m.maybeRunMemify()
-			}()
-
-			if tickCount%5 == 0 {
-				roster := m.GetRoster()
-				active := 0
-				for _, a := range roster {
-					if a.ActiveTask() != nil {
-						active++
-					}
-				}
-				m.broadcast("office:tickerMessage", map[string]interface{}{
-					"message":   fmt.Sprintf("Team running: %d/%d agents active", active, len(roster)),
-					"timestamp": time.Now().UnixMilli(),
-				})
-			}
+			m.runIdleMonitorTick(tickCount)
 		}
 	}()
 
 	m.startAutoStandup()
 
 	slog.Info("Idle monitoring started", "interval", m.config.IdleCheckInterval)
+}
+
+// runIdleMonitorTick is one iteration of the idle-monitor goroutine's loop
+// body. Extracted so the panic-recovery wrapper and the periodic
+// ticker-message broadcast are unit-testable without racing a live ticker.
+func (m *Manager) runIdleMonitorTick(tickCount int) {
+	// Recover from panics in any monitoring function so the ticker
+	// goroutine never dies. A crashed monitoring tick is logged and
+	// the next tick runs normally.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in idle monitoring tick", "panic", r, "tick", tickCount)
+			}
+		}()
+		m.runMonitorChecks()
+	}()
+
+	if tickCount%5 == 0 {
+		roster := m.GetRoster()
+		active := 0
+		for _, a := range roster {
+			if a.ActiveTask() != nil {
+				active++
+			}
+		}
+		m.broadcast("office:tickerMessage", map[string]interface{}{
+			"message":   fmt.Sprintf("Team running: %d/%d agents active", active, len(roster)),
+			"timestamp": time.Now().UnixMilli(),
+		})
+	}
+}
+
+// runMonitorChecks runs every periodic monitoring sweep in sequence. It is a
+// field-backed seam (monitorChecks) so tests can inject a panicking sweep to
+// exercise the tick's panic-recovery wrapper; the default points at the real
+// implementation below.
+func (m *Manager) runMonitorChecks() {
+	if m.monitorChecks != nil {
+		m.monitorChecks()
+		return
+	}
+	m.defaultMonitorChecks()
+}
+
+// defaultMonitorChecks is the production list of periodic monitoring sweeps.
+func (m *Manager) defaultMonitorChecks() {
+	m.checkSessionHealth()
+	m.CleanupExpiredLocks()
+	m.SweepBugTasks()
+	m.SweepMeetings()
+	// R20 · Force-end meetings still Active past 2h +
+	// clear dangling bug assignments. Covers ghost state
+	// from pre-R19 crashes and hard restarts.
+	m.sweepStaleMeetings()
+	m.sweepOrphanedBugs()
+	m.autoCompleteIdleAgentTasks()
+	m.checkUnacknowledgedTasks()
+	m.checkStaleInProgressTasks()
+	m.checkForStuckAgents()
+	m.checkForWedgedWorkingAgents()
+	m.CheckForIdleAgents()
+	m.checkForCuriousAgents()
+	m.checkForReflectionOpportunity()
+	m.checkBlockedTasksForLeaderTriage()
+	// R29 · Auto-reject pending handoffs whose receiver has
+	// left the roster. Threshold can be overridden via
+	// ~/.jarvis/office-memory/handoff-stale-seconds.txt.
+	m.SweepStaleHandoffs(loadHandoffStaleThreshold())
+	m.PersistMetrics()
+	m.maybeTriggerWaterCoolerChat()
+	// Ping the announced dev URL; after 3 consecutive failures
+	// the health checker auto-clears the slot so teammates
+	// stop being pointed at a dead server.
+	m.CheckDevInstanceHealth()
+	// Knowledge-library self-improvement sweep. Gated by
+	// memifyInterval (~6h) so the disk walk + workflow
+	// writes only fire a few times a day. Auto-promotes
+	// high-reuse workflows to ~/.claude/skills/ via the
+	// existing WriteSharedSkill path.
+	m.maybeRunMemify()
 }
 
 // StopIdleMonitoring stops the idle monitoring goroutine and auto-standup timer.
@@ -199,40 +209,7 @@ func (m *Manager) startAutoStandup() {
 				return
 			case <-ticker.C:
 			}
-			safeRun("auto-standup-tick", m.broadcast, func() {
-				m.mu.RLock()
-				enabled := m.autoStandupEnabled
-				standupActive := m.standup != nil && m.standup.Active
-				paused := m.paused
-				m.mu.RUnlock()
-
-				if !enabled || standupActive {
-					return
-				}
-				// R25 · Auto-standup is gated on pause too.
-				if paused {
-					return
-				}
-
-				// Check for active brainstorm meetings.
-				hasBrainstorm := false
-				m.mu.RLock()
-				for _, mtg := range m.meetings {
-					if mtg.Active && mtg.Type == "brainstorm" {
-						hasBrainstorm = true
-						break
-					}
-				}
-				m.mu.RUnlock()
-
-				if hasBrainstorm {
-					slog.Info("Auto-standup skipped: brainstorm meeting in progress")
-					return
-				}
-
-				slog.Info("Auto-standup triggered")
-				m.StartStandup(nil)
-			})
+			safeRun("auto-standup-tick", m.broadcast, func() { m.runAutoStandupTick() })
 		}
 	})
 
@@ -242,6 +219,46 @@ func (m *Manager) startAutoStandup() {
 	})
 
 	slog.Info("Auto-standup started", "interval", m.config.AutoStandupInterval)
+}
+
+// runAutoStandupTick is one iteration of the auto-standup timer's tick body.
+// Extracted from the timer goroutine so the gating logic (disabled,
+// in-progress standup, paused, active brainstorm) is unit-testable without
+// racing a live ticker. Returns true if it actually started a standup.
+func (m *Manager) runAutoStandupTick() bool {
+	m.mu.RLock()
+	enabled := m.autoStandupEnabled
+	standupActive := m.standup != nil && m.standup.Active
+	paused := m.paused
+	m.mu.RUnlock()
+
+	if !enabled || standupActive {
+		return false
+	}
+	// R25 · Auto-standup is gated on pause too.
+	if paused {
+		return false
+	}
+
+	// Check for active brainstorm meetings.
+	hasBrainstorm := false
+	m.mu.RLock()
+	for _, mtg := range m.meetings {
+		if mtg.Active && mtg.Type == "brainstorm" {
+			hasBrainstorm = true
+			break
+		}
+	}
+	m.mu.RUnlock()
+
+	if hasBrainstorm {
+		slog.Info("Auto-standup skipped: brainstorm meeting in progress")
+		return false
+	}
+
+	slog.Info("Auto-standup triggered")
+	m.StartStandup(nil)
+	return true
 }
 
 // stopAutoStandup stops the auto-standup timer.
@@ -655,7 +672,7 @@ func (m *Manager) checkSessionHealth() {
 // Rarely trips in healthy operation. When it does, the agent gets
 // stopped the same way an operator-initiated kill does, and an
 // office:agentIdleStopped event fires for the dashboard.
-func (m *Manager) checkForWedgedWorkingAgents(roster []*AgentState) {
+func (m *Manager) checkForWedgedWorkingAgents() {
 	m.mu.RLock()
 	cfg := m.config
 	sessions := m.sessions
@@ -672,7 +689,7 @@ func (m *Manager) checkForWedgedWorkingAgents(roster []*AgentState) {
 		return
 	}
 
-	for _, agent := range roster {
+	for _, agent := range m.GetRoster() {
 		sid := m.sessionIDOf(agent)
 		if agent == nil || agent.Config == nil {
 			continue
@@ -1055,15 +1072,7 @@ func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDurat
 
 // CheckForIdleAgents looks for agents with empty task queues and no active work,
 // then attempts to find them new work via brainstorm or self-replenishment.
-// This is the public interface method (implements claudehooks.AgentRegistry);
-// it fetches the roster itself. The tick body calls checkForIdleAgents(roster)
-// with the pre-snapshotted roster to avoid redundant GetRoster() calls.
 func (m *Manager) CheckForIdleAgents() {
-	m.checkForIdleAgents(m.GetRoster())
-}
-
-// checkForIdleAgents is the internal implementation, accepting a pre-snapshotted roster.
-func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 	if m.IsWrappingUp() {
 		return // Don't assign new work during wrap-up
 	}
@@ -1076,6 +1085,7 @@ func (m *Manager) checkForIdleAgents(roster []*AgentState) {
 	m.mu.RLock()
 	sessions := m.sessions
 	m.mu.RUnlock()
+	roster := m.GetRoster()
 	for _, agent := range roster {
 		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
@@ -1316,7 +1326,9 @@ DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, roleName)
 // checkBlockedTasksForLeaderTriage finds blocked tasks and asks a strategic-tier
 // agent (leader) to triage them. After BlockedTriageMaxAttempts failed attempts,
 // the task is auto-failed.
-func (m *Manager) checkBlockedTasksForLeaderTriage(roster []*AgentState) {
+func (m *Manager) checkBlockedTasksForLeaderTriage() {
+	roster := m.GetRoster()
+
 	m.mu.RLock()
 	sessions := m.sessions
 	maxAttempts := m.config.BlockedTriageMaxAttempts
@@ -1326,24 +1338,16 @@ func (m *Manager) checkBlockedTasksForLeaderTriage(roster []*AgentState) {
 		return
 	}
 
-	// Fix 5: call GetTasks() once per agent and reuse for both the sweep
-	// (building liveTaskIDs) and the per-task triage loop, eliminating the
-	// second GetTasks() call that existed in the old two-pass design.
-	type agentTasks struct {
-		agent *AgentState
-		tasks []*Task
-	}
-	snaps := make([]agentTasks, 0, len(roster))
+	// Collect the set of live task IDs across every agent so we can reclaim
+	// triage-map entries for tasks that no longer exist (completed, failed,
+	// or owned by a deleted agent). This is a defense in depth -- the
+	// direct path in UpdateTaskStatus only fires when a known task changes
+	// status, but drifts from agent deletions still happen.
 	liveTaskIDs := make(map[string]struct{}, 32)
 	for _, agent := range roster {
-		tasks := agent.GetTasks()
-		snaps = append(snaps, agentTasks{agent: agent, tasks: tasks})
-		// Collect the set of live blocked task IDs so we can reclaim
-		// triage-map entries for tasks that no longer exist (completed, failed,
-		// or owned by a deleted agent). This is a defense in depth -- the
-		// direct path in UpdateTaskStatus only fires when a known task changes
-		// status, but drifts from agent deletions still happen.
-		for _, t := range tasks {
+		for _, t := range agent.GetTasks() {
+			// Only blocked tasks participate in triage; prune anything that
+			// moved on.
 			if t.Status == TaskBlocked {
 				liveTaskIDs[t.ID] = struct{}{}
 			}
@@ -1351,15 +1355,15 @@ func (m *Manager) checkBlockedTasksForLeaderTriage(roster []*AgentState) {
 	}
 	m.SweepTriageMaps(liveTaskIDs)
 
-	for _, snap := range snaps {
-		agent := snap.agent
+	for _, agent := range roster {
 		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
 			continue
 		}
 		agentName := agent.Config.Name
 
-		for _, task := range snap.tasks {
+		tasks := agent.GetTasks()
+		for _, task := range tasks {
 			if task.Status != TaskBlocked {
 				continue
 			}
@@ -1441,7 +1445,7 @@ type CuriosityEvent struct {
 func (CuriosityEvent) officeEventType() string { return "curiosityTriggered" }
 
 // checkForCuriousAgents sends curiosity prompts to idle agents with no tasks.
-func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
+func (m *Manager) checkForCuriousAgents() {
 	if m.IsWrappingUp() {
 		return
 	}
@@ -1455,6 +1459,7 @@ func (m *Manager) checkForCuriousAgents(roster []*AgentState) {
 		return
 	}
 
+	roster := m.GetRoster()
 	for _, agent := range roster {
 		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
@@ -1544,7 +1549,7 @@ func (WaterCoolerEvent) officeEventType() string { return "waterCoolerChat" }
 
 // maybeTriggerWaterCoolerChat has a 30% chance of pairing two idle agents
 // for an informal chat about the codebase. Respects a cooldown period.
-func (m *Manager) maybeTriggerWaterCoolerChat(roster []*AgentState) {
+func (m *Manager) maybeTriggerWaterCoolerChat() {
 	if m.IsWrappingUp() {
 		return
 	}
@@ -1580,6 +1585,7 @@ func (m *Manager) maybeTriggerWaterCoolerChat(roster []*AgentState) {
 
 	// Find idle agents (no active task, no pending tasks, NOT mid-turn,
 	// NOT already in a brainstorm or other active meeting).
+	roster := m.GetRoster()
 	var idle []*AgentState
 	for _, agent := range roster {
 		sid := m.sessionIDOf(agent)
@@ -1665,7 +1671,7 @@ func (ReflectionEvent) officeEventType() string { return "reflectionTriggered" }
 
 // checkForReflectionOpportunity sends a reflection prompt to agents that
 // just completed all their tasks and haven't reflected recently.
-func (m *Manager) checkForReflectionOpportunity(roster []*AgentState) {
+func (m *Manager) checkForReflectionOpportunity() {
 	if m.IsWrappingUp() {
 		return
 	}
@@ -1680,6 +1686,7 @@ func (m *Manager) checkForReflectionOpportunity(roster []*AgentState) {
 		return
 	}
 
+	roster := m.GetRoster()
 	for _, agent := range roster {
 		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {

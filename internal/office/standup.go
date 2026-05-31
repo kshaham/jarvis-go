@@ -23,6 +23,13 @@ import (
 // large; anything bigger is most likely corruption or a write-gone-wrong.
 const maxStandupFileBytes = 10 << 20
 
+// leaderTaskResponseTimeout bounds how long processLeaderTaskResponse waits
+// for a strategic lead to reply before broadcasting the self-direct
+// fallback. Extracted as a var (not a literal) so tests can shrink it to
+// exercise the timeout path without a 5-minute wall-clock wait. Production
+// keeps the 5-minute default.
+var leaderTaskResponseTimeout = 5 * time.Minute
+
 // StandupMessage represents one entry in the standup transcript.
 type StandupMessage struct {
 	SessionID   string `json:"sessionId"`
@@ -584,8 +591,8 @@ func (m *Manager) processLeaderTaskResponse(slot *waitSlot, leader *AgentState, 
 	// R19 · finish() drops late replies at the sender.
 	defer slot.finish()
 
-	// Wait up to 5 minutes for the leader to respond.
-	timeout := time.NewTimer(5 * time.Minute)
+	// Wait up to leaderTaskResponseTimeout for the leader to respond.
+	timeout := time.NewTimer(leaderTaskResponseTimeout)
 	defer timeout.Stop()
 
 	var response string

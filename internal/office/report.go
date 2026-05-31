@@ -28,6 +28,14 @@ import (
 	"time"
 )
 
+// reportWriteFile / reportRename indirect the atomic-write syscalls in
+// GenerateWrapUpReport so tests can force the (otherwise filesystem-hard)
+// write/rename failure branches. Production uses the real os functions.
+var (
+	reportWriteFile = os.WriteFile
+	reportRename    = os.Rename
+)
+
 // WrapUpReportMeta is the report index entry exposed via
 // GET /api/office/reports. Excludes the Markdown body so list
 // responses stay small.
@@ -110,10 +118,10 @@ func GenerateWrapUpReport(m *Manager, trigger, reason string) (*WrapUpReportMeta
 	}
 	fullPath := filepath.Join(dir, filename)
 	tmp := fullPath + ".tmp"
-	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
+	if err := reportWriteFile(tmp, []byte(body), 0o644); err != nil {
 		return nil, fmt.Errorf("write report tmp: %w", err)
 	}
-	if err := os.Rename(tmp, fullPath); err != nil {
+	if err := reportRename(tmp, fullPath); err != nil {
 		_ = os.Remove(tmp)
 		return nil, fmt.Errorf("rename report: %w", err)
 	}
@@ -184,18 +192,18 @@ func LoadWrapUpReport(filename string) (string, error) {
 	// Resolve symlinks + enforce the file is inside dir (R27 pattern).
 	// Resolve both sides so symlinked parents (macOS /var -> /private/var)
 	// don't trip the prefix check.
-	resolved, err := filepath.EvalSymlinks(full)
+	resolved, err := evalSymlinks(full)
 	if err != nil {
 		return "", err
 	}
-	resolvedDir, err := filepath.EvalSymlinks(dir)
+	resolvedDir, err := evalSymlinks(dir)
 	if err != nil {
 		return "", err
 	}
 	if !strings.HasPrefix(resolved, resolvedDir+string(filepath.Separator)) {
 		return "", fmt.Errorf("report path escaped reports dir")
 	}
-	data, err := os.ReadFile(resolved)
+	data, err := readFile(resolved)
 	if err != nil {
 		return "", err
 	}

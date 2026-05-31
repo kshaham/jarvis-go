@@ -491,7 +491,24 @@ func forwardSessionEvents(session *pty.Session, ctx *Context) {
 	}
 
 	eventCount := 0
-	for event := range session.Events() {
+	events := session.Events()
+	done := session.Done()
+	for {
+		// The PTY session never closes its events channel (untracked
+		// senders make a safe close impossible), so terminate on Done()
+		// instead of ranging to a close. Drain any events that are
+		// already buffered before honouring Done so we don't drop the
+		// final EventExit on a fast teardown.
+		var event pty.SessionEvent
+		select {
+		case event = <-events:
+		case <-done:
+			select {
+			case event = <-events:
+			default:
+				return
+			}
+		}
 		eventCount++
 		func() {
 			defer func() {

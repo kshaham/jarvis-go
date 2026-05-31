@@ -13,6 +13,11 @@ import (
 	"github.com/kshaham/jarvis/internal/web/request"
 )
 
+// generatePairToken is a seam over peers.GeneratePairToken so the rare
+// crypto/rand exhaustion error can be exercised deterministically in tests.
+// Production behaviour is identical.
+var generatePairToken = peers.GeneratePairToken
+
 // Peers is the dedicated handler bundle for the inter-team feature.
 // Kept off the main Context to avoid further inflating its field list —
 // the server constructor builds one Peers and passes it to the router
@@ -86,7 +91,7 @@ func (p *Peers) IdentityUpdate(w http.ResponseWriter, r *http.Request) {
 // token — there's no server-side persistence; the secret only exists
 // once the peer adds us and stores it in their registry.
 func (p *Peers) IdentityToken(w http.ResponseWriter, _ *http.Request) {
-	token, err := peers.GeneratePairToken()
+	token, err := generatePairToken()
 	if err != nil {
 		request.WriteError(w, http.StatusInternalServerError, "generate token: "+err.Error())
 		return

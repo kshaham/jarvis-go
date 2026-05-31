@@ -58,41 +58,6 @@ type LearningMetrics struct {
 
 var learningMu sync.Mutex
 
-// cachedLearning holds a cached copy of an agent's learning data.
-type cachedLearning struct {
-	data     AgentLearningData
-	loadedAt time.Time
-}
-
-// learningCache is the process-wide learning cache, keyed by configID.
-// All access must be guarded by learningMu.
-var learningCache = map[string]cachedLearning{}
-
-const learningCacheTTL = 30 * time.Second
-
-// clearLearningCacheForTest empties the cache under the lock. Only for tests.
-func clearLearningCacheForTest() {
-	learningMu.Lock()
-	learningCache = map[string]cachedLearning{}
-	crossAgentContextCache = map[string]cachedCrossAgentContext{}
-	crossAgentContextCompactCache = map[string]cachedCrossAgentContext{}
-	learningMu.Unlock()
-}
-
-// cachedCrossAgentContext holds a rendered cross-agent context string.
-type cachedCrossAgentContext struct {
-	output   string
-	loadedAt time.Time
-}
-
-// crossAgentContextCache caches the output of BuildCrossAgentContext keyed by
-// excludeConfigID. Guarded by learningMu. TTL matches learningCacheTTL.
-var crossAgentContextCache = map[string]cachedCrossAgentContext{}
-
-// crossAgentContextCompactCache caches the output of BuildCrossAgentContextCompact
-// keyed by excludeConfigID. Guarded by learningMu. TTL matches learningCacheTTL.
-var crossAgentContextCompactCache = map[string]cachedCrossAgentContext{}
-
 // learningsDir returns the directory for learning files.
 func learningsDir() string {
 	homeDir, _ := os.UserHomeDir()
@@ -181,59 +146,12 @@ func LoadLearningsForUI(configID string) (interface{}, error) {
 	return parsed.Learnings, nil
 }
 
-// copyLearningData returns a deep copy of ld, duplicating all slice fields
-// so callers cannot mutate the cache through the returned pointer.
-func copyLearningData(ld AgentLearningData) AgentLearningData {
-	out := ld
-	if ld.Learnings != nil {
-		out.Learnings = make([]AgentLearning, len(ld.Learnings))
-		copy(out.Learnings, ld.Learnings)
-	}
-	if ld.Skills != nil {
-		out.Skills = make([]AgentSkillEntry, len(ld.Skills))
-		copy(out.Skills, ld.Skills)
-	}
-	if ld.DistilledInsights != nil {
-		out.DistilledInsights = make([]string, len(ld.DistilledInsights))
-		copy(out.DistilledInsights, ld.DistilledInsights)
-	}
-	return out
-}
-
 // LoadLearningData reads the full AgentLearningData for a given agent.
 // Returns a zero-value struct with sensible defaults if the file is missing or unparseable.
-// Results are cached in memory for learningCacheTTL to avoid repeated disk reads on
-// hot paths (status polls, SSE fan-out). Every write path calls writeLearningData which
-// invalidates the cache, so callers always see fresh data after a write.
 func LoadLearningData(configID string) *AgentLearningData {
 	learningMu.Lock()
 	defer learningMu.Unlock()
-	if entry, ok := learningCache[configID]; ok && time.Since(entry.loadedAt) < learningCacheTTL {
-		cp := copyLearningData(entry.data)
-		return &cp
-	}
-	ld := loadLearningDataUnsafe(configID)
-	learningCache[configID] = cachedLearning{data: *ld, loadedAt: time.Now()}
-	cp := copyLearningData(*ld)
-	return &cp
-}
-
-// loadLearningDataCachedUnsafe is like loadLearningDataUnsafe but checks the
-// in-process cache first (same TTL as LoadLearningData). Caller must hold
-// learningMu. On a cache miss the underlying disk read is performed and the
-// result is stored in the cache so the next caller within the TTL avoids disk.
-// This is the preferred loader for BuildCrossAgentContext* which iterate all
-// peer configIDs in a single lock hold: N peers → N cache lookups in the common
-// case instead of N disk reads.
-func loadLearningDataCachedUnsafe(configID string) *AgentLearningData {
-	if entry, ok := learningCache[configID]; ok && time.Since(entry.loadedAt) < learningCacheTTL {
-		cp := copyLearningData(entry.data)
-		return &cp
-	}
-	ld := loadLearningDataUnsafe(configID)
-	learningCache[configID] = cachedLearning{data: *ld, loadedAt: time.Now()}
-	cp := copyLearningData(*ld)
-	return &cp
+	return loadLearningDataUnsafe(configID)
 }
 
 // loadLearningDataUnsafe reads without locking (caller must hold learningMu).
@@ -320,14 +238,6 @@ func writeLearningData(ld *AgentLearningData) error {
 		_ = os.Remove(tmpFile)
 		return err
 	}
-
-	// Write-through: update the cache with the just-written value so the next
-	// read is served from memory. This also handles the invalidation case:
-	// any stale entry is replaced with the current authoritative data.
-	// writeLearningData is the single chokepoint for all disk writes
-	// (AddLearningEntry, AddSkillEntry, SaveLearningData all funnel through here),
-	// so this one site covers all write paths.
-	learningCache[ld.ConfigID] = cachedLearning{data: *ld, loadedAt: time.Now()}
 
 	slog.Debug("Saved agent learning data", "configId", ld.ConfigID,
 		"learnings", len(ld.Learnings), "skills", len(ld.Skills))
@@ -535,19 +445,9 @@ func topSkills(skills []AgentSkillEntry, n int) []AgentSkillEntry {
 // BuildCrossAgentContext loads all agents' recent learnings except the given
 // configID and returns a formatted "What your teammates learned" section.
 // Returns "" if there is nothing to show.
-//
-// Results are cached by excludeConfigID for learningCacheTTL. Within the TTL
-// the rendered string is returned without re-reading the learnings directory,
-// turning N disk reads into a single map lookup in the common case. The cache
-// is invalidated (via clearLearningCacheForTest) in tests and naturally expires
-// after the TTL in production (same bound as the per-agent learning cache).
 func BuildCrossAgentContext(excludeConfigID string) string {
 	learningMu.Lock()
 	defer learningMu.Unlock()
-
-	if entry, ok := crossAgentContextCache[excludeConfigID]; ok && time.Since(entry.loadedAt) < learningCacheTTL {
-		return entry.output
-	}
 
 	dir := learningsDir()
 	entries, err := os.ReadDir(dir)
@@ -567,10 +467,7 @@ func BuildCrossAgentContext(excludeConfigID string) string {
 			continue
 		}
 
-		// Use the cache-aware loader: N peers → N cache hits in the
-		// common case rather than N disk reads. learningMu is already
-		// held for the full loop, so this is safe.
-		ld := loadLearningDataCachedUnsafe(configID)
+		ld := loadLearningDataUnsafe(configID)
 		if len(ld.Learnings) == 0 {
 			continue
 		}
@@ -602,24 +499,15 @@ func BuildCrossAgentContext(excludeConfigID string) string {
 		}
 	}
 
-	result := sb.String()
-	crossAgentContextCache[excludeConfigID] = cachedCrossAgentContext{output: result, loadedAt: time.Now()}
-	return result
+	return sb.String()
 }
 
 // BuildCrossAgentContextCompact returns a compact one-line-per-peer
 // summary of teammates' most recent learning. Used by kickstart.go to
 // keep cross-agent context cheap. Returns "" if there's nothing to show.
-//
-// Results are cached by excludeConfigID for learningCacheTTL, turning
-// N disk reads into a single map lookup in the common case.
 func BuildCrossAgentContextCompact(excludeConfigID string) string {
 	learningMu.Lock()
 	defer learningMu.Unlock()
-
-	if entry, ok := crossAgentContextCompactCache[excludeConfigID]; ok && time.Since(entry.loadedAt) < learningCacheTTL {
-		return entry.output
-	}
 
 	dir := learningsDir()
 	entries, err := os.ReadDir(dir)
@@ -638,9 +526,7 @@ func BuildCrossAgentContextCompact(excludeConfigID string) string {
 		if configID == excludeConfigID {
 			continue
 		}
-		// Use the cache-aware loader: turns N disk reads into N cache
-		// hits in the common case. learningMu is already held.
-		ld := loadLearningDataCachedUnsafe(configID)
+		ld := loadLearningDataUnsafe(configID)
 		if len(ld.Learnings) == 0 {
 			continue
 		}
@@ -661,7 +547,6 @@ func BuildCrossAgentContextCompact(excludeConfigID string) string {
 		fmt.Fprintf(&sb, "- %s: %s\n", name, content)
 	}
 
-	result := sb.String()
-	crossAgentContextCompactCache[excludeConfigID] = cachedCrossAgentContext{output: result, loadedAt: time.Now()}
-	return result
+	return sb.String()
 }
+

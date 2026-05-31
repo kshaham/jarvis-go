@@ -55,6 +55,14 @@ func (m *Manager) GetLocks() []*FileLock {
 
 	now := time.Now()
 	for path, lock := range m.fileLocks {
+		// Tolerate a nil entry the same way the copy loop below does;
+		// without this the cleanup loop would nil-deref on lock.ExpiresAt
+		// while the very next loop already guards against it. Drop the
+		// nil so the map doesn't keep an unusable entry.
+		if lock == nil {
+			delete(m.fileLocks, path)
+			continue
+		}
 		if now.After(lock.ExpiresAt) {
 			delete(m.fileLocks, path)
 		}
