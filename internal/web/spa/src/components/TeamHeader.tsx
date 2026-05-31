@@ -12,7 +12,7 @@ export function TeamHeader() {
       className="sticky top-0 z-10 border-b"
       style={{
         borderColor: 'var(--lg-rim)',
-        background: 'rgba(3,20,14,0.55)',
+        background: 'var(--chrome-bg)',
         WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
         backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
         boxShadow: '0 1px 0 0 rgba(78,240,163,0.05)',

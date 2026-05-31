@@ -226,7 +226,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             width: 220,
             padding: 16,
             borderRight: '1px solid var(--lg-rim)',
-            background: 'var(--lg-fill)',
+            background: 'var(--chrome-bg)',
             WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
             backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
           }}
@@ -284,7 +284,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                         ...railGlyphStyle,
                         border: '1px solid ' + (isActive ? 'rgb(var(--accent-rgb) / 0.6)' : 'var(--lg-rim)'),
                         background: isActive ? 'rgb(var(--accent-rgb) / 0.92)' : 'var(--lg-fill)',
-                        color: isActive ? '#04150e' : 'var(--text-secondary)',
+                        color: isActive ? 'var(--accent-on)' : 'var(--text-secondary)',
                       }}
                     >
                       {item.glyph}

@@ -14,6 +14,17 @@
   --bg-elevated: #0a2e24;
   --bg-pressed: #103c30;
 
+  /* Chrome — the app frame (header + left nav rail + footer). Distinct
+     from tile fills so the frame reads as a separate layer from the
+     working area. Dark: matches the deep-green rail glass; light mode
+     (below) swaps to a tinted grey so white tiles pop off the chrome. */
+  --chrome-bg: rgba(8, 46, 36, 0.55);
+
+  /* Text/icon color painted on a SOLID accent fill (active nav glyph,
+     primary CTA). Dark accent is bright (#22c55e) so near-black reads;
+     light accent is dark green (#0a7a52) so white reads. */
+  --accent-on: #04150e;
+
   /* Lines */
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border-default: rgba(255, 255, 255, 0.1);
@@ -247,20 +258,27 @@
 }
 
 [data-theme='light'] {
-  --bg-app: #f4faf7;
+  /* Clean neutral white palette. Three-step surface hierarchy:
+     chrome (#e9ebee tinted frame) < content (#f4f5f7) < tiles (#ffffff).
+     Green is the accent only; everything structural is neutral cool-grey. */
+  --bg-app: #f4f5f7;
   --bg-surface: #ffffff;
-  --bg-elevated: #eef6f1;
-  --bg-pressed: #e3efe9;
-  --border-subtle: rgba(0, 0, 0, 0.04);
-  --border-default: rgba(0, 0, 0, 0.08);
-  --border-strong: rgba(0, 0, 0, 0.16);
+  --bg-elevated: #eceef1;
+  --bg-pressed: #e4e7ea;
+  --border-subtle: rgba(17, 24, 39, 0.06);
+  --border-default: rgba(17, 24, 39, 0.1);
+  --border-strong: rgba(17, 24, 39, 0.16);
   --text-primary: #0a0b0d;
-  --text-secondary: #5a5d63;
-  --text-muted: #9a9da3;
-  --text-faint: #bcbfc4;
+  --text-secondary: #54585f;
+  --text-muted: #80838a;
+  --text-faint: #a3a7ad;
   --accent: #0a7a52;
   --accent-muted: rgba(10, 122, 82, 0.12);
   --accent-strong: #086241;
+
+  /* Chrome frame + on-accent text — light overrides of the new tokens. */
+  --chrome-bg: #e9ebee;
+  --accent-on: #ffffff;
   --status-working: #1e9f6e;
   --status-success: #1e9f6e;
   --status-meeting: #d9892c;
@@ -281,67 +299,74 @@
   --status-info-rgb: 59 130 246; /* #3b82f6 */
   --surface-tint-rgb: 10 11 13; /* dark tint over light bg */
 
-  --aurora-1: rgba(10, 122, 82, 0.1);
-  --aurora-2: rgba(16, 130, 96, 0.08);
-  --aurora-3: rgba(45, 200, 140, 0.06);
-  --aurora-base: #f4faf7;
+  /* Neutral ambient layer — near-invisible cool wash so the clean white
+     theme stays neutral (no green tint bleeding across the page). */
+  --aurora-1: rgba(17, 24, 39, 0.03);
+  --aurora-2: rgba(17, 24, 39, 0.02);
+  --aurora-3: rgba(17, 24, 39, 0.015);
+  --aurora-base: #f4f5f7;
 
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-bg-strong: rgba(255, 255, 255, 0.92);
+  --glass-border: rgba(17, 24, 39, 0.08);
 
   --glow-violet-sm: 0 0 0 1px rgba(10, 122, 82, 0.2), 0 2px 14px rgba(10, 122, 82, 0.12);
   --glow-violet-md: 0 0 0 1px rgba(10, 122, 82, 0.28), 0 4px 22px rgba(10, 122, 82, 0.18);
   --glow-violet-lg: 0 0 0 1px rgba(10, 122, 82, 0.36), 0 8px 40px rgba(10, 122, 82, 0.24);
 
-  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  --elev-3: 0 12px 40px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  /* Soft layered neutral elevation (cool-grey, Stripe/Linear style). */
+  --elev-1: 0 1px 2px rgba(17, 24, 39, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --elev-2: 0 4px 16px -4px rgba(17, 24, 39, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --elev-3: 0 12px 40px -8px rgba(17, 24, 39, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 
   --focus-ring-color: rgba(10, 122, 82, 0.5);
   --spotlight-color: rgba(10, 122, 82, 0.08);
 
-  /* Liquid Glass — light-mode material. Glass over a light surface is a
-     white-heavy translucency with a faint dark rim for definition; the
-     bright top-edge highlight comes from the convex specular. */
-  --lg-fill: rgba(255, 255, 255, 0.55);
-  --lg-fill-hover: rgba(255, 255, 255, 0.72);
-  --lg-fill-active: rgba(255, 255, 255, 0.85);
-  --lg-fill-accent: rgba(10, 122, 82, 0.14);
-  --lg-fill-accent-hover: rgba(10, 122, 82, 0.22);
-  --lg-fill-danger: rgba(214, 59, 64, 0.12);
-  --lg-fill-danger-hover: rgba(214, 59, 64, 0.18);
-  --lg-rim: rgba(0, 0, 0, 0.08);
-  --lg-rim-strong: rgba(0, 0, 0, 0.14);
+  /* Liquid Glass — light-mode material. Clean neutral white tiles: a
+     near-solid white fill that pops off the tinted chrome, a faint cool
+     rim for definition, and soft layered drop shadows for depth (the
+     elevation comes from shadow, not from the fill, so hover lifts the
+     tile rather than brightening it). */
+  --lg-fill: #ffffff;
+  --lg-fill-hover: #ffffff;
+  --lg-fill-active: #f2f4f6;
+  --lg-fill-accent: rgba(10, 122, 82, 0.12);
+  --lg-fill-accent-hover: rgba(10, 122, 82, 0.2);
+  --lg-fill-danger: rgba(214, 59, 64, 0.1);
+  --lg-fill-danger-hover: rgba(214, 59, 64, 0.16);
+  --lg-rim: rgba(17, 24, 39, 0.1);
+  --lg-rim-strong: rgba(17, 24, 39, 0.16);
+  /* Subtle top bevel; the heavy white wash is gone (tiles are already
+     solid white), leaving just a soft inner top-light + faint bottom. */
   --lg-specular-convex:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.4),
-    inset 0 -12px 20px -16px rgba(0, 0, 0, 0.12);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    inset 0 -10px 18px -16px rgba(17, 24, 39, 0.08);
   --lg-specular-concave:
-    inset 0 1.5px 3px 0 rgba(0, 0, 0, 0.08),
-    inset 0 -1px 0 0 rgba(255, 255, 255, 0.8);
+    inset 0 1.5px 3px 0 rgba(17, 24, 39, 0.09),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.7);
   --lg-edge-catch:
-    inset 1px 1px 0 0 rgba(255, 255, 255, 0.95),
-    inset -1px -1px 0 0 rgba(255, 255, 255, 0.55);
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.9),
+    inset -1px -1px 0 0 rgba(17, 24, 39, 0.04);
+  /* Soft, layered, cool-grey float shadows — the core of the light depth. */
   --lg-shadow-rest:
-    0 1px 1px rgba(0, 0, 0, 0.04),
-    0 8px 24px -12px rgba(0, 0, 0, 0.14),
+    0 1px 2px rgba(17, 24, 39, 0.06),
+    0 8px 24px -12px rgba(17, 24, 39, 0.12),
     var(--lg-specular-convex);
   --lg-shadow-hover:
-    0 2px 5px rgba(0, 0, 0, 0.06),
-    0 18px 44px -14px rgba(0, 0, 0, 0.18),
+    0 2px 5px rgba(17, 24, 39, 0.08),
+    0 18px 40px -14px rgba(17, 24, 39, 0.18),
     var(--lg-specular-convex);
   --lg-shadow-press:
-    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 1px 2px rgba(17, 24, 39, 0.08),
     var(--lg-specular-concave);
+  /* No grey top-wash on solid-white tiles — keep the sheen near-flat. */
   --lg-sheen: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.85) 0%,
-    rgba(255, 255, 255, 0.35) 16%,
-    rgba(255, 255, 255, 0) 42%
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0) 38%
   );
-  --lg-panel-bg: rgba(255, 255, 255, 0.82);
-  --lg-panel-footer: rgba(0, 0, 0, 0.025);
+  --lg-panel-bg: rgba(255, 255, 255, 0.92);
+  --lg-panel-footer: rgba(17, 24, 39, 0.025);
 }
 
 /* Respect operator preference. Inside this query Motion will fall back
