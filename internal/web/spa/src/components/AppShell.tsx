@@ -388,7 +388,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             CommandBar) stays mounted; only the routed screen inside
             AnimatedOutlet transitions on navigation. */}
         <main
-          className="flex flex-1 flex-col px-6 py-5"
+          className="flex flex-1 flex-col px-6 pb-6 pt-3"
           style={{
             maxWidth: 'var(--width-content, 1180px)',
             width: '100%',

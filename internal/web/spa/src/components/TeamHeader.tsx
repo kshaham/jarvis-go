@@ -18,11 +18,11 @@ export function TeamHeader() {
         boxShadow: '0 1px 0 0 rgba(78,240,163,0.05)',
       }}
     >
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
-        <div className="flex items-center gap-3">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-2">
+        <div className="flex items-center gap-2.5">
           {/* Brand mark — accent glass chip with a top sheen + bloom. */}
           <div
-            className="size-7 rounded-md"
+            className="size-6 rounded-md"
             style={{
               background:
                 'linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)',
@@ -30,13 +30,15 @@ export function TeamHeader() {
                 'inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 10px rgb(var(--accent-rgb) / 0.4)',
             }}
           />
-          <div>
-            <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+          {/* Single-line brand — title with an inline muted suffix (hidden on
+              mobile) keeps the header chrome to one compact row. */}
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
               Jarvis · Office
-            </div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              React beta /office-v2
-            </div>
+            </span>
+            <span className="hidden text-xs sm:inline" style={{ color: 'var(--text-muted)' }}>
+              React beta · /office-v2
+            </span>
           </div>
         </div>
 
