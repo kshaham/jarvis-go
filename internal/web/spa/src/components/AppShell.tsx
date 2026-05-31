@@ -49,12 +49,13 @@ const railGlyphStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  // line-height:1 collapses the inherited 1.5em line box that pushed the
-  // glyph high; the 1px top padding optically centers uppercase caps,
-  // whose empty descender space otherwise reads as a high-sitting letter.
-  // box-sizing keeps the badge a fixed 24x24 despite the padding.
+  // line-height:1 collapses the inherited 1.5em line box; the 2px top
+  // padding optically centers the glyph — caps sit on the baseline with
+  // empty descender space below, so the ink renders ~2px high without it
+  // (verified empirically against a box-center reference for both letters
+  // and the symbol glyphs). box-sizing keeps the badge a fixed 24x24.
   lineHeight: 1,
-  paddingTop: 1,
+  paddingTop: 2,
   fontSize: 12,
   fontWeight: 700,
   flexShrink: 0,
