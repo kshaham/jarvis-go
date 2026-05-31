@@ -480,3 +480,26 @@ export interface TestProject extends SavedProject {
   vuln: VulnResult;
   react: ReactDoctorResult;
 }
+
+// ── Mockups page ────────────────────────────────────────────────────────
+export interface MockupStatus {
+  status: 'idle' | 'running' | 'done' | 'error';
+  expected: number;
+  received: number;
+  startedAt?: string;
+  updatedAt?: string;
+  error?: string;
+}
+
+export interface MockupImage {
+  index: number;
+  url: string;
+}
+
+// MockupProject — a SavedProject joined with its mockup state.
+export interface MockupProject extends SavedProject {
+  hasUi: boolean;
+  teamActive: boolean; // a team is currently spawned on this project's workdir
+  status: MockupStatus;
+  mockups: MockupImage[];
+}

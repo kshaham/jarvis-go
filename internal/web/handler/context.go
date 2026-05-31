@@ -9,6 +9,7 @@ import (
 	"github.com/kshaham/jarvis/internal/cases"
 	"github.com/kshaham/jarvis/internal/claudehooks"
 	"github.com/kshaham/jarvis/internal/integrations"
+	"github.com/kshaham/jarvis/internal/mockups"
 	"github.com/kshaham/jarvis/internal/notifications"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/projects"
@@ -78,6 +79,9 @@ type Context struct {
 
 	// Quality runs per-project coverage + vulnerability jobs (Tests page).
 	Quality *quality.Manager
+
+	// Mockups tracks per-project AI mockup generation (Mockups page).
+	Mockups *mockups.Manager
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,

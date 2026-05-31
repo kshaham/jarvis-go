@@ -19,6 +19,7 @@ import (
 	"github.com/kshaham/jarvis/internal/claudehooks"
 	"github.com/kshaham/jarvis/internal/integrations"
 	"github.com/kshaham/jarvis/internal/metrics"
+	"github.com/kshaham/jarvis/internal/mockups"
 	"github.com/kshaham/jarvis/internal/notifications"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/peers"
@@ -662,6 +663,7 @@ func (s *Server) setupRouter() chi.Router {
 		StateStore:              s.stateStore,
 		Projects:                projects.New(s.stateStore),
 		Quality:                 quality.NewManager(s.rootCtx, projects.New(s.stateStore), s.stateStore, s.sseBroker),
+		Mockups:                 mockups.NewManager(s.stateStore, s.sseBroker),
 		ScreenManager:           s.screenManager,
 		SubagentWatcher:         s.subagentWatcher,
 		CaseManager:             s.caseManager,
@@ -903,6 +905,8 @@ func (s *Server) setupRouter() chi.Router {
 				// R34 · agent uploads a visual-verification screenshot
 				// that operators see in the task detail modal.
 				r.Post("/task/screenshot", h.OfficeAgentTaskScreenshot)
+				// Agent uploads one generated UI mockup (Mockups page).
+				r.Post("/mockup-upload", h.MockupsUpload)
 				// R36 · agent adds/removes labels on a task.
 				r.Post("/task/labels", h.OfficeAgentTaskLabels)
 				// Edit acceptance criteria on a task (set|add|remove).
@@ -979,6 +983,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/settings/accounts", h.GetSettingsAccounts)
 			r.Get("/projects", h.ListProjects)
 			r.Get("/tests/results", h.TestsGetResults)
+			r.Get("/mockups/results", h.MockupsGetResults)
+			r.Get("/mockups/image/{projectId}/{filename}", h.MockupsServe)
 			r.Get("/debug/memory", h.GetDebugMemory)
 			r.Get("/prompt-processor/config", h.GetPromptProcessor)
 			r.Get("/prompt-processor/stats", h.GetPromptProcessorRules)
@@ -1103,6 +1109,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/tests/coverage", h.TestsRunCoverage)
 				r.Post("/tests/scan", h.TestsRunScan)
 				r.Post("/tests/react", h.TestsRunReact)
+				r.Post("/mockups/generate", h.MockupsGenerate)
 				r.Post("/cleanup-state", h.CleanupState)
 				r.Put("/prompt-processor/config", h.UpdatePromptProcessor)
 				r.Put("/prompt-processor/enhancer", h.UpdatePromptProcessorRules)

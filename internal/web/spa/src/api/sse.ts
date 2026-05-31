@@ -51,7 +51,9 @@ export type SSEEventName =
   | 'tests:scanProgress'
   | 'tests:scanComplete'
   | 'tests:reactProgress'
-  | 'tests:reactComplete';
+  | 'tests:reactComplete'
+  | 'mockups:progress'
+  | 'mockups:ready';
 
 export type SSEHandler = (evt: { name: string; data: unknown }) => void;
 
@@ -106,6 +108,8 @@ const EVENT_NAMES: SSEEventName[] = [
   'tests:scanComplete',
   'tests:reactProgress',
   'tests:reactComplete',
+  'mockups:progress',
+  'mockups:ready',
 ];
 
 // ── Connected state ──────────────────────────────────────────────────
