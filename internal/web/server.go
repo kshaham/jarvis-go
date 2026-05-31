@@ -1102,6 +1102,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Delete("/projects/{id}", h.DeleteProject)
 				r.Post("/tests/coverage", h.TestsRunCoverage)
 				r.Post("/tests/scan", h.TestsRunScan)
+				r.Post("/tests/react", h.TestsRunReact)
 				r.Post("/cleanup-state", h.CleanupState)
 				r.Put("/prompt-processor/config", h.UpdatePromptProcessor)
 				r.Put("/prompt-processor/enhancer", h.UpdatePromptProcessorRules)

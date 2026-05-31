@@ -9,12 +9,13 @@ import (
 	"github.com/kshaham/jarvis/internal/web/request"
 )
 
-// projectTile is one saved project joined with its latest coverage + vuln
-// results — the shape the Tests page renders.
+// projectTile is one saved project joined with its latest coverage, vuln, and
+// react-doctor results — the shape the Tests page renders.
 type projectTile struct {
 	projects.Project
 	Coverage quality.CoverageResult `json:"coverage"`
 	Vuln     quality.VulnResult     `json:"vuln"`
+	React    quality.ReactResult    `json:"react"`
 }
 
 // TestsGetResults returns every saved project with its cached coverage + vuln
@@ -32,7 +33,17 @@ func (ctx *Context) TestsGetResults(w http.ResponseWriter, _ *http.Request) {
 		if pr.Vuln.Status == "" {
 			pr.Vuln.Status = quality.StatusIdle
 		}
-		tiles = append(tiles, projectTile{Project: p, Coverage: pr.Coverage, Vuln: pr.Vuln})
+		// React-doctor only applies to React projects; mark non-React ones
+		// Unsupported (cheap package.json read) so the UI hides the badge,
+		// and default React projects to Idle until first run.
+		if pr.React.Status == "" {
+			if quality.IsReactProject(p.Path) {
+				pr.React.Status = quality.StatusIdle
+			} else {
+				pr.React.Status = quality.StatusUnsupported
+			}
+		}
+		tiles = append(tiles, projectTile{Project: p, Coverage: pr.Coverage, Vuln: pr.Vuln, React: pr.React})
 	}
 	ok(w, map[string]interface{}{"projects": tiles})
 }
@@ -51,6 +62,12 @@ func (ctx *Context) TestsRunCoverage(w http.ResponseWriter, r *http.Request) {
 // POST /api/tests/scan
 func (ctx *Context) TestsRunScan(w http.ResponseWriter, r *http.Request) {
 	ctx.startTestsJob(w, r, ctx.Quality.StartScan)
+}
+
+// TestsRunReact starts an async react-doctor scan for one project.
+// POST /api/tests/react
+func (ctx *Context) TestsRunReact(w http.ResponseWriter, r *http.Request) {
+	ctx.startTestsJob(w, r, ctx.Quality.StartReact)
 }
 
 func (ctx *Context) startTestsJob(w http.ResponseWriter, r *http.Request, start func(string) error) {

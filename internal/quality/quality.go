@@ -46,8 +46,18 @@ type VulnResult struct {
 	LastScanAt string `json:"lastScanAt,omitempty"` // RFC3339
 }
 
-// ProjectResults bundles both outcomes for one project (the cache shape).
+// ReactResult is the per-project react-doctor outcome (React projects only).
+type ReactResult struct {
+	Score     *int   `json:"score"`           // 0..100, nil unless Status == ok
+	Label     string `json:"label,omitempty"` // react-doctor's "Great" / "Needs work" / "Critical"
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	LastRunAt string `json:"lastRunAt,omitempty"` // RFC3339
+}
+
+// ProjectResults bundles the outcomes for one project (the cache shape).
 type ProjectResults struct {
 	Coverage CoverageResult `json:"coverage"`
 	Vuln     VulnResult     `json:"vuln"`
+	React    ReactResult    `json:"react"`
 }

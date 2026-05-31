@@ -42,11 +42,18 @@ export function useTestsResults() {
     onSuccess: () => qc.invalidateQueries({ queryKey: TESTS_KEY }),
   });
 
+  const runReact = useMutation({
+    mutationFn: (projectId: string) =>
+      fetchJSON('/api/tests/react', { method: 'POST', body: { projectId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: TESTS_KEY }),
+  });
+
   return {
     projects: query.data?.projects ?? [],
     isLoading: query.isLoading,
     error: query.error as Error | null,
     runCoverage,
     runScan,
+    runReact,
   };
 }

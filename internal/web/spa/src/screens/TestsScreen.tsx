@@ -21,7 +21,7 @@ const gridStyle: React.CSSProperties = {
 // live from the tests:* SSE events.
 export function TestsScreen() {
   const [tab, setTab] = useState<Tab>('coverage');
-  const { projects, isLoading, runCoverage, runScan } = useTestsResults();
+  const { projects, isLoading, runCoverage, runScan, runReact } = useTestsResults();
   const navigate = useNavigate();
 
   return (
@@ -71,7 +71,12 @@ export function TestsScreen() {
         <div style={gridStyle}>
           {projects.map((p) =>
             tab === 'coverage' ? (
-              <CoverageTile key={p.id} p={p} onRun={() => runCoverage.mutate(p.id)} />
+              <CoverageTile
+                key={p.id}
+                p={p}
+                onRun={() => runCoverage.mutate(p.id)}
+                onRunReact={() => runReact.mutate(p.id)}
+              />
             ) : (
               <VulnTile key={p.id} p={p} onScan={() => runScan.mutate(p.id)} />
             ),
@@ -84,8 +89,16 @@ export function TestsScreen() {
 
 // ── tiles ────────────────────────────────────────────────────────────────
 
-function CoverageTile({ p, onRun }: { p: TestProject; onRun: () => void }) {
-  const { coverage } = p;
+function CoverageTile({
+  p,
+  onRun,
+  onRunReact,
+}: {
+  p: TestProject;
+  onRun: () => void;
+  onRunReact: () => void;
+}) {
+  const { coverage, react } = p;
   const running = coverage.status === 'running';
   const pct = coverage.pct;
   const color =
@@ -96,6 +109,9 @@ function CoverageTile({ p, onRun }: { p: TestProject; onRun: () => void }) {
         : pct >= 50
           ? 'var(--status-warn)'
           : 'var(--status-error)';
+  // react-doctor only applies to React projects (backend marks the rest
+  // 'unsupported' so the badge stays hidden for non-React tiles).
+  const isReact = react.status !== 'unsupported';
   return (
     <GlowCard interactive className="flex flex-col gap-3 p-4">
       <TileHeader name={p.name} sub={langLabel(coverage.language, p.kind)} kind={p.kind} />
@@ -115,7 +131,63 @@ function CoverageTile({ p, onRun }: { p: TestProject; onRun: () => void }) {
         </Button>
       </div>
       <StatusLine status={coverage.status} error={coverage.error} ts={coverage.lastRunAt} verb="Ran" />
+      {isReact ? <ReactDoctorRow react={react} onRun={onRunReact} /> : null}
     </GlowCard>
+  );
+}
+
+// ReactDoctorRow — the react-doctor health score badge inside a Coverage tile.
+function ReactDoctorRow({
+  react,
+  onRun,
+}: {
+  react: TestProject['react'];
+  onRun: () => void;
+}) {
+  const running = react.status === 'running';
+  const score = react.score;
+  const color =
+    score == null
+      ? 'var(--text-faint)'
+      : score >= 75
+        ? 'var(--status-success)'
+        : score >= 50
+          ? 'var(--status-warn)'
+          : 'var(--status-error)';
+  return (
+    <div
+      className="flex items-center justify-between gap-2 pt-2.5"
+      style={{ borderTop: '1px solid var(--lg-rim)' }}
+    >
+      <div className="flex items-baseline gap-2 min-w-0">
+        <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+          react-doctor
+        </span>
+        {react.status === 'ok' && score != null ? (
+          <span className="ds-tabular flex items-baseline gap-1" style={{ color }}>
+            <span style={{ fontSize: 17, fontWeight: 700, lineHeight: 1 }}>{score}</span>
+            {react.label ? (
+              <span style={{ fontSize: 11, fontWeight: 600 }}>{react.label}</span>
+            ) : null}
+          </span>
+        ) : running ? (
+          <span className="text-xs" style={{ color: 'var(--accent)' }}>
+            Scanning…
+          </span>
+        ) : react.status === 'failed' ? (
+          <span className="truncate text-xs" style={{ color: 'var(--status-error)' }} title={react.error}>
+            Failed
+          </span>
+        ) : (
+          <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
+            Not run
+          </span>
+        )}
+      </div>
+      <Button size="sm" variant="ghost" onClick={onRun} disabled={running}>
+        {running ? 'Scanning…' : score == null ? 'Run' : 'Re-run'}
+      </Button>
+    </div>
   );
 }
 

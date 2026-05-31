@@ -21,6 +21,7 @@ const settingsKey = "qualityResults"
 const (
 	coverageTimeout = 8 * time.Minute
 	scanTimeout     = 5 * time.Minute
+	reactTimeout    = 5 * time.Minute
 )
 
 // SSE event names (mirrored in the SPA's sse.ts).
@@ -29,6 +30,8 @@ const (
 	EventScanComplete     = "tests:scanComplete"
 	EventCoverageProgress = "tests:coverageProgress"
 	EventScanProgress     = "tests:scanProgress"
+	EventReactComplete    = "tests:reactComplete"
+	EventReactProgress    = "tests:reactProgress"
 )
 
 // SettingsStore is the minimal settings surface (same shape projects uses);
@@ -86,6 +89,11 @@ func (m *Manager) Snapshot() map[string]ProjectResults {
 			pr := out[id]
 			pr.Vuln.Status = StatusRunning
 			out[id] = pr
+		case strings.HasPrefix(key, "react:"):
+			id := strings.TrimPrefix(key, "react:")
+			pr := out[id]
+			pr.React.Status = StatusRunning
+			out[id] = pr
 		}
 		return true
 	})
@@ -139,6 +147,29 @@ func (m *Manager) StartScan(projectID string) error {
 	return nil
 }
 
+// StartReact kicks off (or no-ops if already running) a react-doctor scan.
+func (m *Manager) StartReact(projectID string) error {
+	proj, ok := m.resolve(projectID)
+	if !ok {
+		return ErrProjectNotFound
+	}
+	key := "react:" + projectID
+	if _, loaded := m.running.LoadOrStore(key, struct{}{}); loaded {
+		return nil
+	}
+	m.bus.Broadcast(EventReactProgress, map[string]any{"projectId": projectID, "status": StatusRunning})
+	safego.Go("quality.react", func() {
+		defer m.running.Delete(key)
+		ctx, cancel := context.WithTimeout(m.root, reactTimeout)
+		defer cancel()
+		res := runReactForProject(ctx, proj)
+		res.LastRunAt = nowRFC3339()
+		m.updateCache(projectID, func(pr *ProjectResults) { pr.React = res })
+		m.bus.Broadcast(EventReactComplete, map[string]any{"projectId": projectID, "react": res})
+	})
+	return nil
+}
+
 // runCoverageForProject guards on a usable path before running.
 func runCoverageForProject(ctx context.Context, p projects.Project) CoverageResult {
 	if p.Path == "" {
@@ -152,6 +183,13 @@ func runScanForProject(ctx context.Context, p projects.Project) VulnResult {
 		return VulnResult{Status: StatusFailed, Error: "project has no local path yet (clone it first)"}
 	}
 	return RunVulnScan(ctx, p.Path)
+}
+
+func runReactForProject(ctx context.Context, p projects.Project) ReactResult {
+	if p.Path == "" {
+		return ReactResult{Status: StatusFailed, Error: "project has no local path yet (clone it first)"}
+	}
+	return RunReactDoctor(ctx, p.Path)
 }
 
 func (m *Manager) resolve(id string) (projects.Project, bool) {

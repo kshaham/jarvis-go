@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,6 +146,51 @@ func TestTrivyReportParsing(t *testing.T) {
 	}
 	if res.Critical != 1 || res.High != 2 || res.Medium != 1 || res.Low != 1 || res.Unknown != 1 || res.Total != 6 {
 		t.Errorf("bucketing wrong: %+v", res)
+	}
+}
+
+func TestReactDoctorReportParsing(t *testing.T) {
+	// The score lives under summary.score / summary.scoreLabel.
+	in := `{"ok":true,"summary":{"errorCount":0,"warningCount":59,"score":89,"scoreLabel":"Great"},"projects":[{"score":89}]}`
+	var rep rdReport
+	if err := json.Unmarshal([]byte(in), &rep); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rep.Summary.Score == nil || *rep.Summary.Score != 89 {
+		t.Errorf("score = %v, want 89", rep.Summary.Score)
+	}
+	if rep.Summary.ScoreLabel != "Great" {
+		t.Errorf("label = %q, want Great", rep.Summary.ScoreLabel)
+	}
+	// With --no-score the score is null -> RunReactDoctor treats it as failed.
+	var rep2 rdReport
+	if err := json.Unmarshal([]byte(`{"ok":true,"summary":{"score":null,"scoreLabel":null}}`), &rep2); err != nil {
+		t.Fatal(err)
+	}
+	if rep2.Summary.Score != nil {
+		t.Errorf("expected nil score, got %v", rep2.Summary.Score)
+	}
+}
+
+func TestIsReactProject(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "package.json"),
+		[]byte(`{"dependencies":{"react":"^19"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !IsReactProject(dir) {
+		t.Error("expected React project")
+	}
+	dir2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir2, "package.json"),
+		[]byte(`{"dependencies":{"express":"^4"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if IsReactProject(dir2) {
+		t.Error("express project should not be React")
+	}
+	if IsReactProject(t.TempDir()) {
+		t.Error("empty dir should not be React")
 	}
 }
 

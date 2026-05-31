@@ -464,8 +464,19 @@ export interface VulnResult {
   lastScanAt?: string;
 }
 
-// TestProject is a SavedProject joined with its latest coverage + vuln results.
+// ReactDoctorResult — react-doctor's 0..100 health score (React projects only).
+export interface ReactDoctorResult {
+  score: number | null; // present only when status === 'ok'
+  label?: string; // react-doctor's "Great" / "Needs work" / "Critical"
+  status: QualityStatus; // 'unsupported' for non-React projects
+  error?: string;
+  lastRunAt?: string;
+}
+
+// TestProject is a SavedProject joined with its latest coverage + vuln + react
+// results.
 export interface TestProject extends SavedProject {
   coverage: CoverageResult;
   vuln: VulnResult;
+  react: ReactDoctorResult;
 }
