@@ -128,6 +128,9 @@ func MaskSensitiveSettings(raw map[string]interface{}) map[string]interface{} {
 	if _, ok := out["geminiApiKey"]; ok {
 		out["geminiApiKey"] = maskSecret(out["geminiApiKey"])
 	}
+	if _, ok := out["githubToken"]; ok {
+		out["githubToken"] = maskSecret(out["githubToken"])
+	}
 	if tg, ok := out["telegram"].(map[string]interface{}); ok {
 		tgCopy := make(map[string]interface{}, len(tg))
 		for k, v := range tg {
@@ -191,6 +194,7 @@ func (ctx *Context) GetSettingsAccounts(w http.ResponseWriter, r *http.Request) 
 		"claudeApiKey":      maskSecret(settings["claudeApiKey"]),
 		"zaiApiKey":         maskSecret(settings["zaiApiKey"]),
 		"openaiApiKey":      maskSecret(settings["openaiApiKey"]),
+		"githubToken":       maskSecret(settings["githubToken"]),
 		"openaiBaseUrl":     settings["openaiBaseUrl"],
 		// openaiKeyConfigured tells the spawn UI to show OpenAI/Codex as
 		// "configured" (prefilled) without leaking the key value. True when an
@@ -239,6 +243,7 @@ func (ctx *Context) CreateSettingsAccount(w http.ResponseWriter, r *http.Request
 		"zaiApiKey":    true,
 		"openaiApiKey": true,
 		"geminiApiKey": true,
+		"githubToken":  true,
 	}
 	updates := make(map[string]interface{})
 	for key, value := range body {

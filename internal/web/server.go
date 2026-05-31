@@ -22,6 +22,7 @@ import (
 	"github.com/kshaham/jarvis/internal/notifications"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/peers"
+	"github.com/kshaham/jarvis/internal/projects"
 	"github.com/kshaham/jarvis/internal/pty"
 	"github.com/kshaham/jarvis/internal/ralph"
 	"github.com/kshaham/jarvis/internal/respawn"
@@ -658,6 +659,7 @@ func (s *Server) setupRouter() chi.Router {
 		AuthManager:             s.authManager,
 		OfficeManager:           s.officeManager,
 		StateStore:              s.stateStore,
+		Projects:                projects.New(s.stateStore),
 		ScreenManager:           s.screenManager,
 		SubagentWatcher:         s.subagentWatcher,
 		CaseManager:             s.caseManager,
@@ -973,6 +975,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/config", h.GetConfig)
 			r.Get("/settings", h.GetSettings)
 			r.Get("/settings/accounts", h.GetSettingsAccounts)
+			r.Get("/projects", h.ListProjects)
 			r.Get("/debug/memory", h.GetDebugMemory)
 			r.Get("/prompt-processor/config", h.GetPromptProcessor)
 			r.Get("/prompt-processor/stats", h.GetPromptProcessorRules)
@@ -1093,6 +1096,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Put("/config", h.UpdateConfig)
 				r.Put("/settings", h.UpdateSettings)
 				r.Post("/settings/accounts", h.CreateSettingsAccount)
+				r.Delete("/projects/{id}", h.DeleteProject)
 				r.Post("/cleanup-state", h.CleanupState)
 				r.Put("/prompt-processor/config", h.UpdatePromptProcessor)
 				r.Put("/prompt-processor/enhancer", h.UpdatePromptProcessorRules)

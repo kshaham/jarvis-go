@@ -21,6 +21,7 @@ import (
 	"github.com/kshaham/jarvis/internal/library"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/office/spawnpayload"
+	"github.com/kshaham/jarvis/internal/projects"
 	"github.com/kshaham/jarvis/internal/safego"
 	"github.com/kshaham/jarvis/internal/strs"
 	"github.com/kshaham/jarvis/internal/teamtemplates"
@@ -557,6 +558,22 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		req.WorkingDir = target
 	}
 
+	// GitHub-repo flow: clone (or refresh) the repo into the workspace and
+	// use the checkout as the working dir. Mutually exclusive with
+	// NewProject; ignored when NewProject already set WorkingDir.
+	if !req.NewProject && req.GithubRepo != "" {
+		dir, err := ctx.resolveGithubRepoDir(req)
+		if err != nil {
+			if errors.Is(err, office.ErrInvalidRepo) {
+				request.WriteError(w, http.StatusBadRequest, err.Error())
+			} else {
+				request.WriteError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+		req.WorkingDir = dir
+	}
+
 	if req.WorkingDir == "" {
 		request.WriteError(w, http.StatusBadRequest, "workingDir is required")
 		return
@@ -902,11 +919,45 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 		ctx.OfficeManager.NotifyOfficeEvent("Team Spawned", fmt.Sprintf("%d members from template %s", len(spawned), templateUsed))
 	}
 
+	// Persist the working dir as a saved project so the spawn page's
+	// dropdown remembers it. Non-fatal: a settings write failure must not
+	// fail an otherwise-successful spawn (matches how SSE-seed writes are
+	// treated). github projects record the repo URL; local/new record the
+	// path.
+	if len(spawned) > 0 && ctx.Projects != nil {
+		now := time.Now().UTC().Format(time.RFC3339)
+		p := projects.Project{Kind: projects.KindLocal, Path: req.WorkingDir, LastUsedAt: now}
+		if req.GithubRepo != "" {
+			if url, _, name, derr := office.NormalizeRepoInputExported(req.GithubRepo); derr == nil {
+				p = projects.Project{Kind: projects.KindGitHub, RepoURL: url, Name: name, Path: req.WorkingDir, LastUsedAt: now}
+			}
+		}
+		ctx.Projects.Upsert(p)
+	}
+
 	ok(w, map[string]interface{}{
 		"spawned":      spawned,
 		"errors":       errors,
 		"templateUsed": templateUsed,
 	})
+}
+
+// resolveGithubRepoDir clones (or refreshes) req.GithubRepo into the
+// workspace and returns the checkout path. Token comes from settings (or
+// the GITHUB_TOKEN env as a deploy-provided fallback). Returns
+// office.ErrInvalidRepo for a bad identifier (caller maps to 400).
+func (ctx *Context) resolveGithubRepoDir(req spawnTeamRequest) (string, error) {
+	settings := ctx.StateStore.GetSettings()
+	token, _ := settings["githubToken"].(string)
+	if token == "" {
+		token = os.Getenv("GITHUB_TOKEN")
+	}
+	var broadcast office.SSEBroadcaster
+	if ctx.SSEBroker != nil {
+		broadcast = ctx.SSEBroker.Broadcast
+	}
+	dir, _, _, err := office.PrepareGitHubProject(req.GithubRepo, token, nil, broadcast)
+	return dir, err
 }
 
 // OfficeShutdownTeam shuts down the team.

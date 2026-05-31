@@ -11,6 +11,7 @@ import (
 	"github.com/kshaham/jarvis/internal/integrations"
 	"github.com/kshaham/jarvis/internal/notifications"
 	"github.com/kshaham/jarvis/internal/office"
+	"github.com/kshaham/jarvis/internal/projects"
 	"github.com/kshaham/jarvis/internal/pty"
 	"github.com/kshaham/jarvis/internal/ralph"
 	"github.com/kshaham/jarvis/internal/respawn"
@@ -70,6 +71,9 @@ type Context struct {
 
 	// AudioJobs manages async standup audio generation.
 	AudioJobs *AudioJobManager
+
+	// Projects owns the operator's saved-project list (spawn page dropdown).
+	Projects *projects.Service
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,

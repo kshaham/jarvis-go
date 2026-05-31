@@ -91,6 +91,13 @@ type SpawnTeamRequest struct {
 	NewProject  bool   `json:"newProject"`
 	ProjectName string `json:"projectName"`
 
+	// GithubRepo, when non-empty, signals the operator wants to spawn
+	// against a GitHub repository. The handler clones it into
+	// /app/workspace/<owner>-<repo> (or pulls if present) and uses that
+	// as WorkingDir. Mutually exclusive with NewProject and a pre-filled
+	// WorkingDir. Accepts "owner/repo" or a github.com URL.
+	GithubRepo string `json:"githubRepo,omitempty"`
+
 	// Team-wide Claude Code defaults. Each member can override
 	// individually via MemberOverride; if both are blank the
 	// DefaultEffortWorker / DefaultEffortStrategic constants apply.
