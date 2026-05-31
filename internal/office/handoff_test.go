@@ -1,15 +1,58 @@
 package office
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
+// drainMessagePersist waits (briefly) for any in-flight
+// office.persistMessages goroutine to finish its atomic write under the
+// given HOME so a t.TempDir RemoveAll can't race the rename. Deterministic:
+// it polls until the .tmp staging file is absent, which means the rename
+// (or its cleanup) has completed.
+func drainMessagePersist(home string) {
+	dir := filepath.Join(home, ".jarvis", "office-memory")
+	target := filepath.Join(dir, "messages.json")
+	tmp := filepath.Join(dir, "messages.json.tmp")
+	// Give the scheduler a moment to actually start the fire-and-forget
+	// persistMessages goroutine before we sample its progress.
+	time.Sleep(20 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		_, targetErr := os.Stat(target)
+		_, tmpErr := os.Stat(tmp)
+		// Drained once the rename has produced messages.json and no staging
+		// .tmp remains. If neither the goroutine nor any message write ever
+		// ran (e.g. an accept-only test), messages.json may legitimately not
+		// exist -- in that case the absence of a .tmp is enough to know
+		// nothing is mid-flight.
+		tmpGone := os.IsNotExist(tmpErr)
+		if tmpGone && (targetErr == nil || os.IsNotExist(targetErr)) {
+			// One more short settle + recheck to catch a goroutine that is
+			// between WriteFile(tmp) and the next loop tick.
+			time.Sleep(10 * time.Millisecond)
+			if _, e := os.Stat(tmp); os.IsNotExist(e) {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func setupTeamForHandoff(t *testing.T) (*Manager, *AgentState, *AgentState, *Task) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	m := newTestManager()
+	// Handoff reject/cancel paths call SendMessage, which persists messages
+	// from a fire-and-forget safego goroutine writing under HOME. Drain that
+	// goroutine before t.TempDir's RemoveAll runs (Cleanup is LIFO, so this
+	// fires before the TempDir removal registered by t.TempDir above) to
+	// avoid a flaky "directory not empty" cleanup race.
+	t.Cleanup(func() { drainMessagePersist(home) })
 	vex := &TeamMemberConfig{ID: "vex", Name: "Vex", Role: "Frontend", Tier: "worker"}
 	bolt := &TeamMemberConfig{ID: "bolt", Name: "Bolt", Role: "Backend", Tier: "worker"}
 	m.RegisterAgent("sess-vex", "vex", vex)

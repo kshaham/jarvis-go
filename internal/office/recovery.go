@@ -72,72 +72,94 @@ func (m *Manager) StartIdleMonitoring() {
 			}
 
 			tickCount++
-
-			// Recover from panics in any monitoring function so the ticker
-			// goroutine never dies. A crashed monitoring tick is logged and
-			// the next tick runs normally.
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Error("Panic in idle monitoring tick", "panic", r, "tick", tickCount)
-					}
-				}()
-
-				m.checkSessionHealth()
-				m.CleanupExpiredLocks()
-				m.SweepBugTasks()
-				m.SweepMeetings()
-				// R20 · Force-end meetings still Active past 2h +
-				// clear dangling bug assignments. Covers ghost state
-				// from pre-R19 crashes and hard restarts.
-				m.sweepStaleMeetings()
-				m.sweepOrphanedBugs()
-				m.autoCompleteIdleAgentTasks()
-				m.checkUnacknowledgedTasks()
-				m.checkStaleInProgressTasks()
-				m.checkForStuckAgents()
-				m.checkForWedgedWorkingAgents()
-				m.CheckForIdleAgents()
-				m.checkForCuriousAgents()
-				m.checkForReflectionOpportunity()
-				m.checkBlockedTasksForLeaderTriage()
-				// R29 · Auto-reject pending handoffs whose receiver has
-				// left the roster. Threshold can be overridden via
-				// ~/.jarvis/office-memory/handoff-stale-seconds.txt.
-				m.SweepStaleHandoffs(loadHandoffStaleThreshold())
-				m.PersistMetrics()
-				m.maybeTriggerWaterCoolerChat()
-				// Ping the announced dev URL; after 3 consecutive failures
-				// the health checker auto-clears the slot so teammates
-				// stop being pointed at a dead server.
-				m.CheckDevInstanceHealth()
-				// Knowledge-library self-improvement sweep. Gated by
-				// memifyInterval (~6h) so the disk walk + workflow
-				// writes only fire a few times a day. Auto-promotes
-				// high-reuse workflows to ~/.claude/skills/ via the
-				// existing WriteSharedSkill path.
-				m.maybeRunMemify()
-			}()
-
-			if tickCount%5 == 0 {
-				roster := m.GetRoster()
-				active := 0
-				for _, a := range roster {
-					if a.ActiveTask() != nil {
-						active++
-					}
-				}
-				m.broadcast("office:tickerMessage", map[string]interface{}{
-					"message":   fmt.Sprintf("Team running: %d/%d agents active", active, len(roster)),
-					"timestamp": time.Now().UnixMilli(),
-				})
-			}
+			m.runIdleMonitorTick(tickCount)
 		}
 	}()
 
 	m.startAutoStandup()
 
 	slog.Info("Idle monitoring started", "interval", m.config.IdleCheckInterval)
+}
+
+// runIdleMonitorTick is one iteration of the idle-monitor goroutine's loop
+// body. Extracted so the panic-recovery wrapper and the periodic
+// ticker-message broadcast are unit-testable without racing a live ticker.
+func (m *Manager) runIdleMonitorTick(tickCount int) {
+	// Recover from panics in any monitoring function so the ticker
+	// goroutine never dies. A crashed monitoring tick is logged and
+	// the next tick runs normally.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in idle monitoring tick", "panic", r, "tick", tickCount)
+			}
+		}()
+		m.runMonitorChecks()
+	}()
+
+	if tickCount%5 == 0 {
+		roster := m.GetRoster()
+		active := 0
+		for _, a := range roster {
+			if a.ActiveTask() != nil {
+				active++
+			}
+		}
+		m.broadcast("office:tickerMessage", map[string]interface{}{
+			"message":   fmt.Sprintf("Team running: %d/%d agents active", active, len(roster)),
+			"timestamp": time.Now().UnixMilli(),
+		})
+	}
+}
+
+// runMonitorChecks runs every periodic monitoring sweep in sequence. It is a
+// field-backed seam (monitorChecks) so tests can inject a panicking sweep to
+// exercise the tick's panic-recovery wrapper; the default points at the real
+// implementation below.
+func (m *Manager) runMonitorChecks() {
+	if m.monitorChecks != nil {
+		m.monitorChecks()
+		return
+	}
+	m.defaultMonitorChecks()
+}
+
+// defaultMonitorChecks is the production list of periodic monitoring sweeps.
+func (m *Manager) defaultMonitorChecks() {
+	m.checkSessionHealth()
+	m.CleanupExpiredLocks()
+	m.SweepBugTasks()
+	m.SweepMeetings()
+	// R20 · Force-end meetings still Active past 2h +
+	// clear dangling bug assignments. Covers ghost state
+	// from pre-R19 crashes and hard restarts.
+	m.sweepStaleMeetings()
+	m.sweepOrphanedBugs()
+	m.autoCompleteIdleAgentTasks()
+	m.checkUnacknowledgedTasks()
+	m.checkStaleInProgressTasks()
+	m.checkForStuckAgents()
+	m.checkForWedgedWorkingAgents()
+	m.CheckForIdleAgents()
+	m.checkForCuriousAgents()
+	m.checkForReflectionOpportunity()
+	m.checkBlockedTasksForLeaderTriage()
+	// R29 · Auto-reject pending handoffs whose receiver has
+	// left the roster. Threshold can be overridden via
+	// ~/.jarvis/office-memory/handoff-stale-seconds.txt.
+	m.SweepStaleHandoffs(loadHandoffStaleThreshold())
+	m.PersistMetrics()
+	m.maybeTriggerWaterCoolerChat()
+	// Ping the announced dev URL; after 3 consecutive failures
+	// the health checker auto-clears the slot so teammates
+	// stop being pointed at a dead server.
+	m.CheckDevInstanceHealth()
+	// Knowledge-library self-improvement sweep. Gated by
+	// memifyInterval (~6h) so the disk walk + workflow
+	// writes only fire a few times a day. Auto-promotes
+	// high-reuse workflows to ~/.claude/skills/ via the
+	// existing WriteSharedSkill path.
+	m.maybeRunMemify()
 }
 
 // StopIdleMonitoring stops the idle monitoring goroutine and auto-standup timer.
@@ -187,40 +209,7 @@ func (m *Manager) startAutoStandup() {
 				return
 			case <-ticker.C:
 			}
-			safeRun("auto-standup-tick", m.broadcast, func() {
-				m.mu.RLock()
-				enabled := m.autoStandupEnabled
-				standupActive := m.standup != nil && m.standup.Active
-				paused := m.paused
-				m.mu.RUnlock()
-
-				if !enabled || standupActive {
-					return
-				}
-				// R25 · Auto-standup is gated on pause too.
-				if paused {
-					return
-				}
-
-				// Check for active brainstorm meetings.
-				hasBrainstorm := false
-				m.mu.RLock()
-				for _, mtg := range m.meetings {
-					if mtg.Active && mtg.Type == "brainstorm" {
-						hasBrainstorm = true
-						break
-					}
-				}
-				m.mu.RUnlock()
-
-				if hasBrainstorm {
-					slog.Info("Auto-standup skipped: brainstorm meeting in progress")
-					return
-				}
-
-				slog.Info("Auto-standup triggered")
-				m.StartStandup(nil)
-			})
+			safeRun("auto-standup-tick", m.broadcast, func() { m.runAutoStandupTick() })
 		}
 	})
 
@@ -230,6 +219,46 @@ func (m *Manager) startAutoStandup() {
 	})
 
 	slog.Info("Auto-standup started", "interval", m.config.AutoStandupInterval)
+}
+
+// runAutoStandupTick is one iteration of the auto-standup timer's tick body.
+// Extracted from the timer goroutine so the gating logic (disabled,
+// in-progress standup, paused, active brainstorm) is unit-testable without
+// racing a live ticker. Returns true if it actually started a standup.
+func (m *Manager) runAutoStandupTick() bool {
+	m.mu.RLock()
+	enabled := m.autoStandupEnabled
+	standupActive := m.standup != nil && m.standup.Active
+	paused := m.paused
+	m.mu.RUnlock()
+
+	if !enabled || standupActive {
+		return false
+	}
+	// R25 · Auto-standup is gated on pause too.
+	if paused {
+		return false
+	}
+
+	// Check for active brainstorm meetings.
+	hasBrainstorm := false
+	m.mu.RLock()
+	for _, mtg := range m.meetings {
+		if mtg.Active && mtg.Type == "brainstorm" {
+			hasBrainstorm = true
+			break
+		}
+	}
+	m.mu.RUnlock()
+
+	if hasBrainstorm {
+		slog.Info("Auto-standup skipped: brainstorm meeting in progress")
+		return false
+	}
+
+	slog.Info("Auto-standup triggered")
+	m.StartStandup(nil)
+	return true
 }
 
 // stopAutoStandup stops the auto-standup timer.

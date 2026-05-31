@@ -5,7 +5,28 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync/atomic"
 )
+
+// apiBaseURLValue holds the base URL for all Telegram Bot API calls. It is an
+// atomic so background goroutines (poll loop, command registration, queue
+// sends) can read it concurrently while tests swap it to a local httptest
+// server without a data race. Production code never reassigns it. Always
+// combined with a "/bot<token>/<method>" suffix at the call sites.
+var apiBaseURLValue atomic.Value
+
+func init() {
+	apiBaseURLValue.Store("https://api.telegram.org")
+}
+
+// apiBaseURL returns the current Telegram API base URL.
+func apiBaseURL() string {
+	v, _ := apiBaseURLValue.Load().(string)
+	if v == "" {
+		return "https://api.telegram.org"
+	}
+	return v
+}
 
 // redactTokenErr returns a copy of err with every occurrence of token
 // replaced by "<REDACTED>". Handles *url.Error specially so the URL

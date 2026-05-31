@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	urlPkg "net/url"
@@ -29,6 +30,10 @@ import (
 var execCommand = exec.Command
 
 type execExitError = exec.ExitError
+
+// sysKill indirects syscall.Kill so process-tree teardown logic can be
+// exercised in tests against fake PIDs without signaling real processes.
+var sysKill = syscall.Kill
 
 // Manager is the central coordinator for the Virtual Office.
 type Manager struct {
@@ -126,6 +131,11 @@ type Manager struct {
 	monitorDone  chan struct{}
 	standupTimer *time.Ticker
 	standupDone  chan struct{}
+
+	// monitorChecks is a test seam for the idle-monitor tick's panic
+	// wrapper: nil in production (defaultMonitorChecks runs), but tests
+	// can inject a panicking sweep to exercise the recover() path.
+	monitorChecks func()
 
 	events chan OfficeEvent
 
@@ -703,7 +713,12 @@ func (m *Manager) SweepTriageMaps(liveTaskIDs map[string]struct{}) {
 // SendMessage adds a message to the office message log and delivers it to the
 // target session via WriteViaScreen so the agent actually sees it.
 func (m *Manager) SendMessage(from, to, content string) {
-	sanitized := sanitizeForTerminal(content)
+	// Strip control chars and cap at the 8 KB message limit (not the
+	// 2048 PTY flood guard). The OfficeAgentMessage handler already
+	// rejects >8000; this cap is the backstop for internal/relay callers
+	// so an accepted message is delivered in full instead of silently
+	// truncated to 2048.
+	sanitized := stripControlCapped(content, MaxMessageContentLen)
 	msg := OfficeMessage{
 		ID:        uuid.New().String(),
 		From:      from,
@@ -1678,6 +1693,15 @@ func (m *Manager) removeDevInstanceFile(name string) {
 	_ = os.Remove(filepath.Join(dir, "team-dev-"+name+".json"))
 }
 
+// killProcessTreeGraceTimeout / killProcessTreePollInterval govern how long
+// killProcessTree waits for a SIGTERM'd tree to exit before escalating to
+// SIGKILL. They are package vars (not consts) only so tests can shorten the
+// wait; production behaviour is the original 3s grace / 150ms poll.
+var (
+	killProcessTreeGraceTimeout = 3 * time.Second
+	killProcessTreePollInterval = 150 * time.Millisecond
+)
+
 // killProcessTree SIGTERMs the process and all descendants, escalating to
 // SIGKILL after 3s. Falls back to single-PID signaling if pgrep isn't on
 // $PATH (e.g. a minimal container image without procps).
@@ -1692,16 +1716,16 @@ func killProcessTree(pid int) {
 	// SIGTERM every process. Leaves first (descendants are collected
 	// breadth-first, so reverse to signal grandchildren before parents).
 	for i := len(allPIDs) - 1; i >= 0; i-- {
-		_ = syscall.Kill(allPIDs[i], syscall.SIGTERM)
+		_ = sysKill(allPIDs[i], syscall.SIGTERM)
 	}
 	slog.Info("dev server tree SIGTERM sent", "parentPID", pid, "descendants", len(descendants))
 
 	// Wait up to 3s for the tree to exit.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(killProcessTreeGraceTimeout)
 	for time.Now().Before(deadline) {
 		anyAlive := false
 		for _, p := range allPIDs {
-			if syscall.Kill(p, 0) == nil {
+			if sysKill(p, 0) == nil {
 				anyAlive = true
 				break
 			}
@@ -1709,15 +1733,15 @@ func killProcessTree(pid int) {
 		if !anyAlive {
 			return
 		}
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(killProcessTreePollInterval)
 	}
 
 	// Escalate.
 	survivors := 0
 	for i := len(allPIDs) - 1; i >= 0; i-- {
 		p := allPIDs[i]
-		if syscall.Kill(p, 0) == nil {
-			if err := syscall.Kill(p, syscall.SIGKILL); err == nil {
+		if sysKill(p, 0) == nil {
+			if err := sysKill(p, syscall.SIGKILL); err == nil {
 				survivors++
 			}
 		}
@@ -2488,6 +2512,16 @@ func SaveAgentMemory(configID, workingDir, content string) error {
 	return os.Rename(tmp, path)
 }
 
+// agentMemoryOpenFile indirects the append-open syscall so tests can
+// inject a writer whose WriteString / Close fail, exercising the
+// disk-full / EIO branches in AppendAgentMemory that can't otherwise be
+// reached through the filesystem (a real *os.File's WriteString/Close
+// won't fail in-process). Mirrors experimentsOpenFile. Production opens
+// the real memory file in append mode.
+var agentMemoryOpenFile = func(path string) (io.WriteCloser, error) {
+	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+}
+
 // AppendAgentMemory appends to an agent's project-scoped memory file.
 // R27 · Serializes with writeMemorySections via the shared
 // memoryFileLock keyed by path. Without this, a concurrent section
@@ -2499,13 +2533,13 @@ func AppendAgentMemory(configID, workingDir, entry string) error {
 	lock.Lock()
 	defer lock.Unlock()
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := agentMemoryOpenFile(path)
 	if err != nil {
 		return err
 	}
 	// Surface close errors: a buffered append that fails to flush at
 	// Close() (disk full / EIO) would otherwise be lost behind defer.
-	if _, err := f.WriteString(entry); err != nil {
+	if _, err := f.Write([]byte(entry)); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -2747,13 +2781,20 @@ func (m *Manager) LoadPersistedMetrics() {
 	slog.Info("Loaded persisted metrics from disk")
 }
 
-// sanitizeForTerminal strips control characters from input using rune-safe iteration.
-func sanitizeForTerminal(s string) string {
+// MaxMessageContentLen is the 8 KB ceiling on inter-agent message,
+// question, and answer text: large enough for a detailed prompt, small
+// enough that a runaway can't flood the recipient's terminal/context.
+// Single source of truth for the handler validation + delivery cap.
+const MaxMessageContentLen = 8000
+
+// stripControlCapped strips control characters (keeping printable runes
+// plus \n and \t) using rune-safe iteration. maxRunes <= 0 means no cap.
+func stripControlCapped(s string, maxRunes int) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	count := 0
 	for _, r := range s {
-		if count >= 2048 {
+		if maxRunes > 0 && count >= maxRunes {
 			break
 		}
 		if r >= 32 || r == '\n' || r == '\t' {
@@ -2763,3 +2804,14 @@ func sanitizeForTerminal(s string) string {
 	}
 	return b.String()
 }
+
+// stripControlChars strips control characters with NO length cap. Use for
+// content already validated against MaxMessageContentLen so the cap isn't
+// silently re-truncated to sanitizeForTerminal's flood guard.
+func stripControlChars(s string) string { return stripControlCapped(s, 0) }
+
+// sanitizeForTerminal strips control characters AND caps at 2048 runes --
+// a flood guard for content written directly to a live PTY. Do not use it
+// for stored/UI content with a larger documented limit; it silently
+// truncates. Use stripControlChars + an explicit length check instead.
+func sanitizeForTerminal(s string) string { return stripControlCapped(s, 2048) }

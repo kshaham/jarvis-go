@@ -28,11 +28,16 @@ const (
 )
 
 const (
-	readBufSize        = 32 * 1024 // 32KB read buffer
-	readDeadline       = 500 * time.Millisecond
-	idleDetectionDelay = 2 * time.Second
-	eventChannelSize   = 256
+	readBufSize      = 32 * 1024 // 32KB read buffer
+	readDeadline     = 500 * time.Millisecond
+	eventChannelSize = 256
 )
+
+// idleDetectionDelay is how long the idle detector waits after the last
+// activity before declaring a session idle. A package var (not a const) so
+// tests can shrink it to provoke the timer stop/drain race in idleDetector
+// deterministically; production never reassigns it.
+var idleDetectionDelay = 2 * time.Second
 
 // workingIndicators is a package-level slice to avoid allocation per call.
 var workingIndicators = []string{
@@ -349,11 +354,17 @@ func (s *Session) Start(ctx context.Context) error {
 	safego.Go("pty.readLoop", func() { s.readLoop(sessionCtx) })
 	safego.Go("pty.idleDetector", func() { s.idleDetector(sessionCtx) })
 
-	// Cleanup goroutine: close channels only after both goroutines finish.
+	// Cleanup goroutine: signal shutdown via s.done after both tracked
+	// goroutines finish. We deliberately do NOT close(s.events): the
+	// debounce AfterFunc and the auto-respond goroutines are UNTRACKED
+	// senders (not in s.wg), so wg.Wait() does not guarantee they have
+	// stopped sending. Closing a channel with untracked concurrent
+	// senders is a data race (flagged by -race even though emitEvent
+	// recover()s the panic). Consumers must terminate on s.done instead
+	// of ranging to completion -- see forwardSessionEvents and Events().
 	safego.Go("pty.session.cleanup", func() {
 		s.wg.Wait()
 		close(s.done)
-		close(s.events)
 	})
 
 	return nil
@@ -376,7 +387,6 @@ func (s *Session) Stop() error {
 	}
 
 	cancelFn := s.cancelFunc
-	ptyF := s.ptyFile
 	cmd := s.cmd
 	s.mu.Unlock()
 
@@ -384,9 +394,23 @@ func (s *Session) Stop() error {
 		cancelFn()
 	}
 
-	if ptyF != nil {
-		_ = ptyF.Close()
+	// Close the PTY fd and nil the pointer while holding the write lock.
+	// Closing the fd triggers internal/poll.(*FD).destroy(), which races
+	// any concurrent reader of the fd -- specifically Resize's pty.Setsize
+	// (which reads ptyFile.Fd()). Resize now takes s.mu.RLock across its
+	// whole Setsize call, so doing the Close under s.mu.Lock here makes the
+	// two mutually exclusive: Resize either runs entirely before this close
+	// (fd still valid) or sees ptyFile == nil afterwards and bails. Close()
+	// on a PTY master is a quick syscall that unblocks in-flight reads via
+	// the runtime poller -- it does not wait on the reader goroutine, so
+	// holding the lock across it cannot deadlock. Ordering (cancel first,
+	// then close) is preserved from the pre-fix code.
+	s.mu.Lock()
+	if s.ptyFile != nil {
+		_ = s.ptyFile.Close()
+		s.ptyFile = nil
 	}
+	s.mu.Unlock()
 
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
@@ -408,6 +432,12 @@ func (s *Session) Stop() error {
 }
 
 // Events returns the read-only event channel.
+//
+// NOTE: this channel is never closed. The session has untracked event
+// senders (debounce AfterFunc, auto-respond goroutines) that cannot be
+// waited on safely, so closing the channel would race those sends.
+// Consumers MUST terminate via Done() rather than ranging to a close --
+// see forwardSessionEvents.
 func (s *Session) Events() <-chan SessionEvent {
 	return s.events
 }
@@ -540,14 +570,25 @@ func (s *Session) WriteToPTY(input string) bool {
 }
 
 // Resize changes the PTY window size.
+//
+// The read lock is held across the entire Setsize ioctl (not just the
+// ptyFile read) so it cannot overlap teardown. Stop() closes the fd and
+// nils ptyFile under s.mu.Lock(); without holding RLock here, Setsize
+// could read a fd that internal/poll.(*FD).destroy() is concurrently
+// tearing down (a data race). With the RLock held, Resize either wins
+// (Setsize completes against a live fd before any close) or loses (sees
+// isStopped / ptyFile == nil after the close and returns an error).
+// Setsize is a quick ioctl, so holding the lock across it cannot deadlock.
 func (s *Session) Resize(cols, rows uint16) error {
 	s.mu.RLock()
-	ptyFile := s.ptyFile
-	s.mu.RUnlock()
-	if ptyFile == nil {
+	defer s.mu.RUnlock()
+	if s.isStopped {
+		return fmt.Errorf("session stopped")
+	}
+	if s.ptyFile == nil {
 		return fmt.Errorf("no PTY file")
 	}
-	return pty.Setsize(ptyFile, &pty.Winsize{Cols: cols, Rows: rows})
+	return pty.Setsize(s.ptyFile, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
 // --- State getters ---
@@ -624,16 +665,44 @@ func (s *Session) GetActiveTools() []string {
 
 // --- Internal ---
 
+// readResult carries one PTY read (data) or the terminating error from the
+// long-lived reader goroutine to readLoop's main select.
+type readResult struct {
+	data []byte
+	err  error
+}
+
+// ptyReader is the body of readLoop's single long-lived reader goroutine,
+// extracted to a method so the teardown races (the non-blocking error send's
+// drop arm and the ctx.Done abort on a successful send) are unit-testable with a
+// caller-controlled file + channel. It loops reading f and forwarding each chunk
+// to readCh, exiting on read error or ctx cancellation.
+func (s *Session) ptyReader(ctx context.Context, f *os.File, readCh chan readResult) {
+	for {
+		buf := make([]byte, readBufSize)
+		n, err := f.Read(buf)
+		if err != nil {
+			// Use non-blocking send so we don't block forever if no one is reading.
+			select {
+			case readCh <- readResult{nil, err}:
+			default:
+			}
+			return
+		}
+		select {
+		case readCh <- readResult{buf[:n], nil}:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 func (s *Session) readLoop(ctx context.Context) {
 	defer s.wg.Done()
 
 	// PTY file descriptors don't support SetReadDeadline. Use a SINGLE long-lived
 	// reader goroutine to avoid spawning N goroutines (one per iteration) which
 	// could leak if Stop() races with a blocking read.
-	type readResult struct {
-		data []byte
-		err  error
-	}
 	readCh := make(chan readResult, 1)
 
 	s.mu.RLock()
@@ -645,25 +714,7 @@ func (s *Session) readLoop(ctx context.Context) {
 	}
 
 	// Single reader goroutine: exits when the PTY file is closed (f.Read returns error).
-	go func(f *os.File) {
-		for {
-			buf := make([]byte, readBufSize)
-			n, err := f.Read(buf)
-			if err != nil {
-				// Use non-blocking send so we don't block forever if no one is reading.
-				select {
-				case readCh <- readResult{nil, err}:
-				default:
-				}
-				return
-			}
-			select {
-			case readCh <- readResult{buf[:n], nil}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}(ptyFile)
+	go s.ptyReader(ctx, ptyFile, readCh)
 
 	for {
 		select {
@@ -875,6 +926,20 @@ func (s *Session) detectAndAutoRespondMenu(cleanData string) {
 
 // sleepCtx blocks for d, or returns false early if ctx is cancelled.
 // True means "the sleep completed normally; proceed."
+// stopAndDrainTimer stops timer and, if it had already fired (Stop reports
+// false), drains the pending tick from timer.C so a subsequent Reset starts
+// clean. Extracted from idleDetector so the "already fired, drain the channel"
+// arm is deterministically unit-testable -- that arm only triggers when Stop
+// races a fire, which a live detector hits unreliably.
+func stopAndDrainTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+}
+
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -945,12 +1010,7 @@ func (s *Session) idleDetector(ctx context.Context) {
 			return
 		case <-s.idleReset:
 			// Safely reset: stop and drain before resetting
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopAndDrainTimer(timer)
 			timer.Reset(idleDetectionDelay)
 		case <-timer.C:
 			s.mu.Lock()

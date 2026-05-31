@@ -82,6 +82,24 @@ func TestManager_SendMessage(t *testing.T) {
 	}
 }
 
+// TestManager_SendMessage_PreservesMidRangeLength verifies a message
+// between the old 2048 PTY flood-guard cap and the 8 KB limit is stored
+// and delivered in full, not silently truncated to 2048 (the bug fixed
+// alongside the question/answer reconcile).
+func TestManager_SendMessage_PreservesMidRangeLength(t *testing.T) {
+	m := newTestManager()
+	body := strings.Repeat("z", 5000)
+	m.SendMessage("vex", "bolt", body)
+
+	msgs := m.GetMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if len(msgs[0].Content) != 5000 {
+		t.Errorf("expected message preserved at 5000 chars (no truncation to 2048), got %d", len(msgs[0].Content))
+	}
+}
+
 func TestManager_SendMessage_Overflow(t *testing.T) {
 	m := newTestManager()
 	for i := 0; i < 60; i++ {

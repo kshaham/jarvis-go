@@ -22,6 +22,14 @@ import (
 
 const maxMobileDeviceNameLen = 80
 
+// issueMobileToken is a seam over MobileTokenManager.Issue so the rare
+// token-generation failure (crypto/rand exhaustion) can be exercised
+// deterministically in tests. In production it forwards straight to the
+// manager.
+var issueMobileToken = func(mgr *auth.MobileTokenManager, deviceName string, ttl time.Duration) (auth.IssuedMobileToken, error) {
+	return mgr.Issue(deviceName, ttl)
+}
+
 // AuthMobileLogin issues a new mobile bearer token for the given device.
 // POST /api/auth/mobile/login
 // Body:   {"password": "...", "deviceName": "My iPhone"}
@@ -98,7 +106,7 @@ func (ctx *Context) AuthMobileLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx.AuthManager.ResetRateLimit(ip)
-	issued, err := ctx.MobileTokenMgr.Issue(deviceName, 0)
+	issued, err := issueMobileToken(ctx.MobileTokenMgr, deviceName, 0)
 	if err != nil {
 		slog.Error("Mobile login: token issue failed", "error", err)
 		request.WriteError(w, http.StatusInternalServerError, "failed to issue token")

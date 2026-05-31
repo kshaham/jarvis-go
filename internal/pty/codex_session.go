@@ -43,6 +43,23 @@ var CodexCostFunc func(model string, inputTokens, outputTokens int64) float64
 // codexPromptQueue bounds the per-session pending-prompt buffer.
 const codexPromptQueue = 64
 
+// codexStopWaitTimeout bounds how long Stop() waits for the worker goroutine to
+// exit before logging a warning and returning anyway. A package var (not a
+// const) so tests can shrink it to force the teardown-timeout branch without a
+// 5-second wall-clock wait. Production never reassigns it.
+var codexStopWaitTimeout = 5 * time.Second
+
+// codexStdoutPipe / codexStderrPipe are seams over (*exec.Cmd).StdoutPipe /
+// StderrPipe. The standard-library calls only fail when the corresponding
+// stream is already set or the process has already started — neither of which
+// runTurn does — so the error branches are otherwise unreachable. Tests
+// override these to return an error and exercise the failTurn paths. Production
+// uses the direct method calls (behavior-preserving).
+var (
+	codexStdoutPipe = func(cmd *exec.Cmd) (io.ReadCloser, error) { return cmd.StdoutPipe() }
+	codexStderrPipe = func(cmd *exec.Cmd) (io.ReadCloser, error) { return cmd.StderrPipe() }
+)
+
 // CodexSession is the ModeCodexExec backend. Field layout mirrors SDKSession
 // where the manager/handlers read it, so both satisfy the same method set.
 type CodexSession struct {
@@ -204,6 +221,19 @@ func (s *CodexSession) worker(ctx context.Context) {
 //
 // Keep aligned with `codex exec --help` / `codex exec resume --help`; the
 // regression test in codex_session_test.go pins both shapes.
+// killProcessGroup is the cmd.Cancel implementation for a codex turn: it
+// SIGKILLs the WHOLE process group (-pid) so the Node launcher AND the platform
+// binary it spawned both die, instead of orphaning the child. Extracted from the
+// inline cmd.Cancel closure so both arms are unit-testable: the runtime only
+// ever invokes Cancel after Start sets cmd.Process, so the nil guard is
+// otherwise unreachable.
+func killProcessGroup(cmd *exec.Cmd) error {
+	if cmd.Process == nil {
+		return nil
+	}
+	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+}
+
 func codexExecArgs(resume, workingDir, prompt string) []string {
 	if resume != "" {
 		// Resume the captured thread (preserves transcript + prompt cache).
@@ -237,19 +267,14 @@ func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
 	// the launcher and orphans that child, which keeps running (and spending)
 	// after Stop()/shutdown-team. Setpgid + kill(-pgid) reaps both.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, err := codexStdoutPipe(cmd)
 	if err != nil {
 		s.failTurn(fmt.Sprintf("codex stdout pipe: %v", err))
 		return
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, err := codexStderrPipe(cmd)
 	if err != nil {
 		s.failTurn(fmt.Sprintf("codex stderr pipe: %v", err))
 		return
@@ -601,7 +626,7 @@ func (s *CodexSession) Stop() {
 	go func() { s.wg.Wait(); close(waitDone) }()
 	select {
 	case <-waitDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(codexStopWaitTimeout):
 		slog.Warn("Codex session worker did not exit within 5s", "session", s.ID)
 	}
 	s.observerMu.Lock()

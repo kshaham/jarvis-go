@@ -34,6 +34,13 @@ import (
 // Claude's slash-command picker.
 const jarvisFileMarker = "<!-- generated-by: jarvis-office -->"
 
+// renameFile is the atomic tmp->final rename seam used by the three
+// claudefiles writers. Defaulting to os.Rename keeps production behaviour
+// identical; tests reassign it to force the otherwise-rare rename failure
+// branch (tmp written successfully, then the rename fails) without relying
+// on platform-specific filesystem states. Production never reassigns it.
+var renameFile = os.Rename
+
 // ClaudeCommand describes one slash-command to write. Name is the
 // file stem (becomes `/name`); Frontmatter is the YAML block Claude
 // reads to pick tools, model, description; Body is the prompt the
@@ -85,7 +92,7 @@ func WriteCommands(cwd string, cmds []ClaudeCommand) (int, error) {
 		if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
 			return wrote, fmt.Errorf("claudefiles: write tmp: %w", err)
 		}
-		if err := os.Rename(tmp, path); err != nil {
+		if err := renameFile(tmp, path); err != nil {
 			os.Remove(tmp)
 			return wrote, fmt.Errorf("claudefiles: rename %s: %w", path, err)
 		}
@@ -117,7 +124,7 @@ func WriteAgents(cwd string, agents []ClaudeAgent) (int, error) {
 		if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
 			return wrote, fmt.Errorf("claudefiles: write tmp: %w", err)
 		}
-		if err := os.Rename(tmp, path); err != nil {
+		if err := renameFile(tmp, path); err != nil {
 			os.Remove(tmp)
 			return wrote, fmt.Errorf("claudefiles: rename %s: %w", path, err)
 		}
@@ -235,7 +242,7 @@ func WriteAppendSystemPromptFile(cwd, variant, content string) (string, error) {
 	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("claudefiles: write tmp: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameFile(tmp, path); err != nil {
 		os.Remove(tmp)
 		return "", fmt.Errorf("claudefiles: rename: %w", err)
 	}

@@ -13,8 +13,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
+
+// saveScreensMarshal is a seam over json.MarshalIndent so a test can force the
+// otherwise-unreachable marshal-error early return in saveScreens (a fixed
+// []*ScreenSession value never fails to marshal in production). Production
+// points at the stdlib function, so behavior is identical.
+var saveScreensMarshal = json.MarshalIndent
 
 // ScreenManager manages GNU Screen sessions that wrap Claude CLI processes.
 type ScreenManager struct {
@@ -158,7 +165,7 @@ func (sm *ScreenManager) SendInput(sessionID, input string) bool {
 			end = len(textPart)
 		}
 		chunk := textPart[i:end]
-		escaped := shellEscape(chunk)
+		escaped := shellEscapeFn(chunk)
 		if escaped == "" {
 			continue
 		}
@@ -285,7 +292,7 @@ func (sm *ScreenManager) saveScreens() {
 	}
 	sm.mu.RUnlock()
 
-	data, err := json.MarshalIndent(screens, "", "  ")
+	data, err := saveScreensMarshal(screens, "", "  ")
 	if err != nil {
 		return
 	}
@@ -306,6 +313,14 @@ func isValidScreenName(name string) bool {
 func isValidPath(path string) bool {
 	return len(path) > 0 && !strings.ContainsAny(path, "\x00\n\r")
 }
+
+// shellEscapeFn is a package-level seam over shellEscape so a test can force the
+// otherwise-unreachable "empty escaped chunk -> continue" branch in SendInput.
+// The real shellEscape only ever performs replacements (never deletions), so a
+// non-empty chunk always escapes to a non-empty string and the guard can't be
+// hit through production. Production points at shellEscape, so behavior is
+// identical.
+var shellEscapeFn = shellEscape
 
 func shellEscape(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
@@ -367,20 +382,29 @@ func wrapWithNice(cmd string, nc NiceConfig) string {
 	return fmt.Sprintf("nice -n %d %s", nc.Priority, cmd)
 }
 
-func runShellCommand(ctx context.Context, command string) error {
+// runShellCommand is a package-level seam so tests can force the
+// screen-creation failure branch in CreateScreen. The default shells out via
+// `bash -c`.
+var runShellCommand = func(ctx context.Context, command string) error {
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run()
 }
 
-func runShellCommandTimeout(command string, timeout time.Duration) error {
+// runShellCommandTimeout is a package-level seam so tests can inject command
+// failures (broken `screen` invocations) without a flaky real binary. The
+// default delegates to runShellCommand under a fresh timeout context.
+var runShellCommandTimeout = func(command string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return runShellCommand(ctx, command)
 }
 
-func getScreenPID(screenName string) (int, error) {
+// getScreenPID is a package-level seam (var, not func) so tests can force the
+// "screen created but PID not found" branch in CreateScreen without racing the
+// real `screen -ls` output. The default parses `screen -ls`.
+var getScreenPID = func(screenName string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// Use CombinedOutput and ignore exit code: screen -ls exits 1 when sessions exist, which is normal
@@ -404,11 +428,23 @@ func getScreenPID(screenName string) (int, error) {
 	return 0, fmt.Errorf("screen %s not found in screen -ls output", screenName)
 }
 
+// findProcess is a package-level seam over os.FindProcess so a test can force
+// the otherwise-unreachable error branch in isProcessAlive. On unix os.FindProcess
+// never returns an error (it just wraps the PID), so the `err != nil` arm can't be
+// exercised any other way. Production points at the stdlib function, so behavior
+// is identical.
+var findProcess = os.FindProcess
+
 func isProcessAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
+	proc, err := findProcess(pid)
 	if err != nil {
 		return false
 	}
-	// Signal 0 checks if process exists without killing it
-	return proc.Signal(nil) == nil
+	// Signal 0 checks whether the process exists without delivering a
+	// signal. os.Process.Signal(nil) does NOT do this — it returns
+	// "unsupported signal type" on darwin/unix, which made isProcessAlive
+	// report every PID as dead and caused purgeOrphans to wipe all
+	// persisted screen sessions on every startup. syscall.Signal(0) is
+	// the correct liveness probe.
+	return proc.Signal(syscall.Signal(0)) == nil
 }

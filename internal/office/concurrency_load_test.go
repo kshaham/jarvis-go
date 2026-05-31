@@ -307,8 +307,13 @@ func TestConcurrentLoad_Handoff(t *testing.T) {
 				driveOne(i)
 				// Also fire lock-free accept/reject attempts that mostly miss
 				// (no pending handoff) to stress resolveHandoffPair's scan.
-				_, _ = m.AcceptHandoff(receiverSess, taskID)
-				_, _ = m.RejectHandoff(receiverSess, taskID, "race")
+				// Use the immutable roster session constants here: senderSess /
+				// receiverSess are mutated under ownerMu by driveOne, so reading
+				// them lock-free would be a (test-side) data race. The constants
+				// always reference valid roster members, which is all these
+				// best-effort stress calls need.
+				_, _ = m.AcceptHandoff("sess-bolt", taskID)
+				_, _ = m.RejectHandoff("sess-vex", taskID, "race")
 			}
 		}()
 	}

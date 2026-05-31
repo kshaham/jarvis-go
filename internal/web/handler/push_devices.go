@@ -43,6 +43,14 @@ var defaultMobileEventPatterns = []string{
 
 const mobileRoutePrefix = "mobile:"
 
+// updateNotificationRoute is a seam over Store.Update so the rare
+// time-of-check/time-of-use failure (the matched route is deleted between
+// List and Update) can be exercised deterministically in tests. In
+// production it forwards straight to the store.
+var updateNotificationRoute = func(store *notifications.Store, id string, route notifications.Route) (*notifications.Route, error) {
+	return store.Update(id, route)
+}
+
 type registerDeviceRequest struct {
 	Token      string   `json:"token"`
 	DeviceID   string   `json:"deviceId"`
@@ -113,7 +121,7 @@ func (ctx *Context) RegisterPushDevice(w http.ResponseWriter, r *http.Request) {
 			if updated.Match.EventPattern == "" {
 				updated.Match.EventPattern = "*"
 			}
-			if _, err := ctx.Notifications.Update(route.ID, updated); err != nil {
+			if _, err := updateNotificationRoute(ctx.Notifications, route.ID, updated); err != nil {
 				slog.Warn("notifications: failed to refresh mobile route", "error", err, "deviceId", body.DeviceID)
 				request.WriteError(w, http.StatusInternalServerError, "failed to update route")
 				return

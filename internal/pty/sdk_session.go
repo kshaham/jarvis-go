@@ -23,6 +23,23 @@ import (
 	"github.com/kshaham/jarvis/internal/safego"
 )
 
+// sdkStopWaitTimeout bounds how long Stop() waits for eventConsumer to exit
+// before logging a warning and returning anyway. Declared as a package var
+// (not a const) so tests can shrink it to force the teardown-timeout branch
+// without a 5-second wall-clock wait. Production never reassigns it.
+var sdkStopWaitTimeout = 5 * time.Second
+
+// sdkSessionSend is the seam used to deliver the kickstart turn to the
+// persistent SDK session. Production points at (*claude.Session).Send; tests
+// override it to force the kickstart-send error branch in Start() without
+// having to provoke a flaky broken-pipe on the subprocess's stdin (small
+// writes are buffered by the kernel even after the child exits, so a real
+// EPIPE is not reliably reproducible). Behavior-preserving: the default is a
+// direct method call.
+var sdkSessionSend = func(session *claude.Session, msg string) error {
+	return session.Send(msg)
+}
+
 // SDKSession wraps the Claude Agent SDK for programmatic agent interaction.
 // Uses a persistent claude.Session for multi-turn conversations.
 type SDKSession struct {
@@ -117,6 +134,12 @@ type SDKSession struct {
 	// R4.3: opt-in channel subscriptions forwarded via --channels.
 	channels []string
 
+	// claudeBinaryPath overrides the `claude` executable the SDK spawns.
+	// Empty resolves via PATH (production default). Tests point this at a
+	// stub binary (cmd/fakeclaude or a stream-json emitter) so Start() and
+	// the event consumer can be exercised without a real Anthropic session.
+	claudeBinaryPath string
+
 	// Output observers
 	outputObservers   map[int]func(string)
 	outputObserverSeq int
@@ -162,9 +185,10 @@ func NewSDKSession(config SessionConfig) *SDKSession {
 		fromPRNumber:                       config.FromPRNumber,
 		chromeEnabled:                      config.ChromeEnabled,
 		channels:                           sanitizeChannels(config.Channels, "sdk:"+id),
-		outputObservers:    make(map[int]func(string)),
-		activeTools:        make(map[string]bool),
-		toolTracker:        newToolEventTracker(),
+		claudeBinaryPath:                   config.ClaudeBinaryPath,
+		outputObservers:                    make(map[int]func(string)),
+		activeTools:                        make(map[string]bool),
+		toolTracker:                        newToolEventTracker(),
 	}
 }
 
@@ -193,6 +217,13 @@ func (s *SDKSession) Start(ctx context.Context) error {
 		claude.WithBypassPermissions(),
 		claude.WithIncludePartialMessages(),
 		claude.WithSettingSources(claude.SettingSourceUser),
+	}
+	// Override the `claude` executable when configured. Empty leaves the
+	// SDK's PATH lookup intact (production default); tests point this at a
+	// stub stream-json emitter so Start()/eventConsumer run without a real
+	// Anthropic session.
+	if s.claudeBinaryPath != "" {
+		opts = append(opts, claude.WithClaudeExecutable(s.claudeBinaryPath))
 	}
 	// R31 · Stable cross-agent prefix goes into the system prompt so
 	// Anthropic's ephemeral cache can discount it on subsequent calls.
@@ -355,7 +386,7 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	// Send kickstart as the first turn.
 	if s.systemPrompt != "" {
 		s.sendMu.Lock()
-		err := session.Send(s.systemPrompt)
+		err := sdkSessionSend(session, s.systemPrompt)
 		s.sendMu.Unlock()
 		if err != nil {
 			slog.Error("Failed to send kickstart", "session", s.ID, "error", err)
@@ -397,193 +428,203 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 	}()
 
 	for event := range s.persistentSession.Events() {
-		s.mu.Lock()
-		s.lastActivityAt = time.Now()
-		s.mu.Unlock()
+		s.processEvent(event)
+	}
+}
 
-		switch event.Type {
-		case claude.TypeSystem:
-			if event.System != nil {
-				switch event.System.Subtype {
-				case claude.SubtypeInit:
-					s.mu.Lock()
-					s.claudeSessionID = event.System.SessionID
-					s.mu.Unlock()
-					s.appendOutput(fmt.Sprintf("[Session %s] Model: %s\n", event.System.SessionID, event.System.Model))
-					slog.Info("SDK session initialized", "session", s.ID, "claudeSession", event.System.SessionID, "model", event.System.Model)
-				case "error":
-					s.appendOutput(fmt.Sprintf("[Error] %s\n", event.System.Message))
-					slog.Error("SDK session error", "session", s.ID, "message", event.System.Message)
-				}
-			}
+// processEvent handles a single SDK event from the persistent session's
+// stream. Extracted from eventConsumer's range body so the per-event
+// switch (token accounting, status transitions, event emission, tool
+// pairing) is testable with synthetic claude.Event values without a
+// live subprocess. Behavior-preserving: eventConsumer calls this once
+// per ranged event.
+func (s *SDKSession) processEvent(event claude.Event) {
+	s.mu.Lock()
+	s.lastActivityAt = time.Now()
+	s.mu.Unlock()
 
-		case claude.TypeStreamEvent:
-			if event.StreamEvent != nil && event.StreamEvent.Event.Delta != nil {
-				delta := event.StreamEvent.Event.Delta
-				switch delta.Type {
-				case "text_delta":
-					s.appendOutput(delta.Text)
-				case "thinking_delta":
-					s.mu.Lock()
-					if !s.isWorking {
-						s.isWorking = true
-						s.status = StatusBusy
-						s.mu.Unlock()
-						s.emitEvent(EventWorking{})
-					} else {
-						s.mu.Unlock()
-					}
-				}
-			}
-
-		case claude.TypeAssistant:
-			if event.Assistant != nil {
-				if text := event.Assistant.Text(); text != "" {
-					s.appendOutput(text)
-				}
-			}
-			// R21 · Stash any tool_use content blocks from Raw for
-			// pairing with their tool_result arrivals (which come
-			// as user-shaped messages the SDK doesn't type).
-			if len(event.Raw) > 0 {
-				s.toolTracker.observeAssistant(event.Raw)
-			}
-
-		case claude.TypeRateLimitEvent:
-			slog.Warn("SDK session rate limited", "session", s.ID)
-			s.appendOutput("[Rate Limited] Waiting for API quota...\n")
-
-		case claude.TypeResult:
-			// Turn complete. Session stays alive for the next Send().
-			if event.Result != nil {
+	switch event.Type {
+	case claude.TypeSystem:
+		if event.System != nil {
+			switch event.System.Subtype {
+			case claude.SubtypeInit:
 				s.mu.Lock()
-				s.totalInputTokens += int64(event.Result.Usage.InputTokens)
-				s.totalOutputTokens += int64(event.Result.Usage.OutputTokens)
-				s.totalCostUSD += event.Result.TotalCostUSD
-				s.claudeSessionID = event.Result.SessionID
-				s.isWorking = false
-				s.status = StatusIdle
-				s.activeTools = make(map[string]bool)
-				currentCost := s.totalCostUSD
-				// Best-effort model name: pick the key with the largest usage
-				// out of ModelUsages. Multi-model turns are rare; in the common
-				// single-model case this returns the only entry.
-				var model string
-				var bestTokens int64
-				for m, u := range event.Result.ModelUsages {
-					total := int64(u.InputTokens) + int64(u.OutputTokens)
-					if total >= bestTokens {
-						bestTokens = total
-						model = m
-					}
-				}
-				turnCap := s.maxTurnsPerSession
-				turnCapAlreadyFired := s.turnCapFired
+				s.claudeSessionID = event.System.SessionID
 				s.mu.Unlock()
+				s.appendOutput(fmt.Sprintf("[Session %s] Model: %s\n", event.System.SessionID, event.System.Model))
+				slog.Info("SDK session initialized", "session", s.ID, "claudeSession", event.System.SessionID, "model", event.System.Model)
+			case "error":
+				s.appendOutput(fmt.Sprintf("[Error] %s\n", event.System.Message))
+				slog.Error("SDK session error", "session", s.ID, "message", event.System.Message)
+			}
+		}
 
-				s.appendOutput(fmt.Sprintf("\n[Turn Complete] Turns: %d | Cost: $%.4f | Tokens: in=%d out=%d\n",
-					event.Result.NumTurns, event.Result.TotalCostUSD,
-					event.Result.Usage.InputTokens, event.Result.Usage.OutputTokens))
-
-				s.emitEvent(EventTokens{
-					Input:  int64(event.Result.Usage.InputTokens),
-					Output: int64(event.Result.Usage.OutputTokens),
-					Total:  int64(event.Result.Usage.InputTokens) + int64(event.Result.Usage.OutputTokens),
-					Cost:   event.Result.TotalCostUSD,
-					Model:  model,
-				})
-				s.emitEvent(EventIdle{})
-
-				// R24 · Per-session cost cap removed. Operator uses
-				// subscription plans (Z.AI Coding, Claude sub) where
-				// dollar-reported cost is always $0 and irrelevant.
-				// Turn cap below remains as the primary runaway
-				// defense — it's quota-agnostic and fires on usage,
-				// not billing.
-				//
-				// Per-session turn-count cap enforcement. Guards with
-				// turnCapFired so we emit exactly once even if the
-				// goroutine Stop() takes a moment to wind the session
-				// down.
-				if turnCap > 0 && !turnCapAlreadyFired && event.Result.NumTurns >= turnCap {
-					s.mu.Lock()
-					s.turnCapFired = true
+	case claude.TypeStreamEvent:
+		if event.StreamEvent != nil && event.StreamEvent.Event.Delta != nil {
+			delta := event.StreamEvent.Event.Delta
+			switch delta.Type {
+			case "text_delta":
+				s.appendOutput(delta.Text)
+			case "thinking_delta":
+				s.mu.Lock()
+				if !s.isWorking {
+					s.isWorking = true
+					s.status = StatusBusy
 					s.mu.Unlock()
-					s.emitEvent(EventTurnCapReached{
-						Turns: event.Result.NumTurns,
-						Cap:   turnCap,
-						Cost:  currentCost,
-					})
-					slog.Warn("SDK session hit turn cap; stopping",
-						"session", s.ID, "turns", event.Result.NumTurns, "cap", turnCap, "cost", currentCost)
-					// Emit EventExit so the death flows through the forwarder's
-					// normal EventExit path (HandleAgentDeath + cleanup). The
-					// subsequent go s.Stop() sets isStopped, so the worker's defer
-					// won't emit a second EventExit. Without this the events
-					// channel would close with no EventExit and the office agent
-					// would leak (zombie counting against maxSessions).
-					s.emitEvent(EventExit{ExitCode: 0})
-					go s.Stop()
-				}
-
-				if event.Result.IsError {
-					// Include errors slice + result text so rate-limit /
-					// quota / 529 / credit failures are diagnosable from
-					// the log alone. Subtype can be misleading ("success"
-					// despite IsError=true) on some provider errors.
-					stopReason := ""
-					if event.Result.StopReason != nil {
-						stopReason = *event.Result.StopReason
-					}
-					resultText := event.Result.Result
-					if len(resultText) > 500 {
-						resultText = resultText[:500] + "..."
-					}
-					slog.Error("SDK session turn error",
-						"session", s.ID,
-						"subtype", event.Result.Subtype,
-						"stopReason", stopReason,
-						"errors", event.Result.Errors,
-						"numTurns", event.Result.NumTurns,
-						"durationMS", event.Result.DurationMS,
-						"result", resultText)
-					// Surface to the web layer so the operator sees the
-					// failure in the dashboard instead of the agent
-					// silently falling idle after an expensive botched run.
-					s.emitEvent(EventTurnError{
-						Subtype:    event.Result.Subtype,
-						StopReason: stopReason,
-						Result:     resultText,
-						NumTurns:   event.Result.NumTurns,
-					})
+					s.emitEvent(EventWorking{})
 				} else {
-					slog.Info("SDK session turn complete", "session", s.ID,
-						"turns", event.Result.NumTurns,
-						"cost", event.Result.TotalCostUSD)
+					s.mu.Unlock()
 				}
-				// R21 · Tool pairings that didn't match within this
-				// turn are stale — clear them so next turn starts
-				// with a clean map.
-				s.toolTracker.reset()
+			}
+		}
+
+	case claude.TypeAssistant:
+		if event.Assistant != nil {
+			if text := event.Assistant.Text(); text != "" {
+				s.appendOutput(text)
+			}
+		}
+		// R21 · Stash any tool_use content blocks from Raw for
+		// pairing with their tool_result arrivals (which come
+		// as user-shaped messages the SDK doesn't type).
+		if len(event.Raw) > 0 {
+			s.toolTracker.observeAssistant(event.Raw)
+		}
+
+	case claude.TypeRateLimitEvent:
+		slog.Warn("SDK session rate limited", "session", s.ID)
+		s.appendOutput("[Rate Limited] Waiting for API quota...\n")
+
+	case claude.TypeResult:
+		// Turn complete. Session stays alive for the next Send().
+		if event.Result != nil {
+			s.mu.Lock()
+			s.totalInputTokens += int64(event.Result.Usage.InputTokens)
+			s.totalOutputTokens += int64(event.Result.Usage.OutputTokens)
+			s.totalCostUSD += event.Result.TotalCostUSD
+			s.claudeSessionID = event.Result.SessionID
+			s.isWorking = false
+			s.status = StatusIdle
+			s.activeTools = make(map[string]bool)
+			currentCost := s.totalCostUSD
+			// Best-effort model name: pick the key with the largest usage
+			// out of ModelUsages. Multi-model turns are rare; in the common
+			// single-model case this returns the only entry.
+			var model string
+			var bestTokens int64
+			for m, u := range event.Result.ModelUsages {
+				total := int64(u.InputTokens) + int64(u.OutputTokens)
+				if total >= bestTokens {
+					bestTokens = total
+					model = m
+				}
+			}
+			turnCap := s.maxTurnsPerSession
+			turnCapAlreadyFired := s.turnCapFired
+			s.mu.Unlock()
+
+			s.appendOutput(fmt.Sprintf("\n[Turn Complete] Turns: %d | Cost: $%.4f | Tokens: in=%d out=%d\n",
+				event.Result.NumTurns, event.Result.TotalCostUSD,
+				event.Result.Usage.InputTokens, event.Result.Usage.OutputTokens))
+
+			s.emitEvent(EventTokens{
+				Input:  int64(event.Result.Usage.InputTokens),
+				Output: int64(event.Result.Usage.OutputTokens),
+				Total:  int64(event.Result.Usage.InputTokens) + int64(event.Result.Usage.OutputTokens),
+				Cost:   event.Result.TotalCostUSD,
+				Model:  model,
+			})
+			s.emitEvent(EventIdle{})
+
+			// R24 · Per-session cost cap removed. Operator uses
+			// subscription plans (Z.AI Coding, Claude sub) where
+			// dollar-reported cost is always $0 and irrelevant.
+			// Turn cap below remains as the primary runaway
+			// defense — it's quota-agnostic and fires on usage,
+			// not billing.
+			//
+			// Per-session turn-count cap enforcement. Guards with
+			// turnCapFired so we emit exactly once even if the
+			// goroutine Stop() takes a moment to wind the session
+			// down.
+			if turnCap > 0 && !turnCapAlreadyFired && event.Result.NumTurns >= turnCap {
+				s.mu.Lock()
+				s.turnCapFired = true
+				s.mu.Unlock()
+				s.emitEvent(EventTurnCapReached{
+					Turns: event.Result.NumTurns,
+					Cap:   turnCap,
+					Cost:  currentCost,
+				})
+				slog.Warn("SDK session hit turn cap; stopping",
+					"session", s.ID, "turns", event.Result.NumTurns, "cap", turnCap, "cost", currentCost)
+				// Emit EventExit so the death flows through the forwarder's
+				// normal EventExit path (HandleAgentDeath + cleanup). The
+				// subsequent go s.Stop() sets isStopped, so the worker's defer
+				// won't emit a second EventExit. Without this the events
+				// channel would close with no EventExit and the office agent
+				// would leak (zombie counting against maxSessions).
+				s.emitEvent(EventExit{ExitCode: 0})
+				go s.Stop()
 			}
 
-		default:
-			// R21 · User-shaped messages carrying tool_result content
-			// blocks arrive with an unknown MessageType in v0.3.1
-			// (the SDK only types assistant/result/system/stream).
-			// Peek at the Raw envelope's role field — if it's "user",
-			// pair tool_result blocks against pending tool_use entries
-			// and emit one EventToolInvocation per matched pair.
-			if len(event.Raw) > 0 && looksLikeUserMessage(event.Raw) {
-				for _, inv := range s.toolTracker.observeUser(event.Raw) {
-					s.emitEvent(EventToolInvocation{
-						Name:       inv.Name,
-						ToolUseID:  inv.ToolUseID,
-						InputHash:  inv.InputHash,
-						ResultHash: inv.ResultHash,
-						IsError:    inv.IsError,
-					})
+			if event.Result.IsError {
+				// Include errors slice + result text so rate-limit /
+				// quota / 529 / credit failures are diagnosable from
+				// the log alone. Subtype can be misleading ("success"
+				// despite IsError=true) on some provider errors.
+				stopReason := ""
+				if event.Result.StopReason != nil {
+					stopReason = *event.Result.StopReason
 				}
+				resultText := event.Result.Result
+				if len(resultText) > 500 {
+					resultText = resultText[:500] + "..."
+				}
+				slog.Error("SDK session turn error",
+					"session", s.ID,
+					"subtype", event.Result.Subtype,
+					"stopReason", stopReason,
+					"errors", event.Result.Errors,
+					"numTurns", event.Result.NumTurns,
+					"durationMS", event.Result.DurationMS,
+					"result", resultText)
+				// Surface to the web layer so the operator sees the
+				// failure in the dashboard instead of the agent
+				// silently falling idle after an expensive botched run.
+				s.emitEvent(EventTurnError{
+					Subtype:    event.Result.Subtype,
+					StopReason: stopReason,
+					Result:     resultText,
+					NumTurns:   event.Result.NumTurns,
+				})
+			} else {
+				slog.Info("SDK session turn complete", "session", s.ID,
+					"turns", event.Result.NumTurns,
+					"cost", event.Result.TotalCostUSD)
+			}
+			// R21 · Tool pairings that didn't match within this
+			// turn are stale — clear them so next turn starts
+			// with a clean map.
+			s.toolTracker.reset()
+		}
+
+	default:
+		// R21 · User-shaped messages carrying tool_result content
+		// blocks arrive with an unknown MessageType in v0.3.1
+		// (the SDK only types assistant/result/system/stream).
+		// Peek at the Raw envelope's role field — if it's "user",
+		// pair tool_result blocks against pending tool_use entries
+		// and emit one EventToolInvocation per matched pair.
+		if len(event.Raw) > 0 && looksLikeUserMessage(event.Raw) {
+			for _, inv := range s.toolTracker.observeUser(event.Raw) {
+				s.emitEvent(EventToolInvocation{
+					Name:       inv.Name,
+					ToolUseID:  inv.ToolUseID,
+					InputHash:  inv.InputHash,
+					ResultHash: inv.ResultHash,
+					IsError:    inv.IsError,
+				})
 			}
 		}
 	}
@@ -720,7 +761,7 @@ func (s *SDKSession) Stop() {
 	go func() { s.wg.Wait(); close(waitDone) }()
 	select {
 	case <-waitDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(sdkStopWaitTimeout):
 		slog.Warn("SDK session eventConsumer did not exit within 5s", "session", s.ID)
 	}
 

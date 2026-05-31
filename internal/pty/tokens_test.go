@@ -1,6 +1,9 @@
 package pty
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseTokenCount(t *testing.T) {
 	tests := []struct {
@@ -27,6 +30,23 @@ func TestParseTokenCount(t *testing.T) {
 		if ok && count != tc.expected {
 			t.Errorf("ParseTokenCount(%q) = %d, want %d", tc.input, count, tc.expected)
 		}
+	}
+}
+
+// TestParseTokenCount_ParseFloatOverflow covers the ParseFloat error branch
+// (tokens.go:23-25): the regex matches an arbitrarily long run of digits, and a
+// number with hundreds of digits overflows float64 so strconv.ParseFloat
+// returns ErrRange. ParseTokenCount must report (0, false) without panicking.
+func TestParseTokenCount_ParseFloatOverflow(t *testing.T) {
+	// 400-digit integer followed by " tokens" -> regex matches, ParseFloat
+	// returns "value out of range".
+	input := strings.Repeat("9", 400) + " tokens"
+	count, ok := ParseTokenCount(input)
+	if ok {
+		t.Errorf("ParseTokenCount(<400 nines> tokens) = (%d, %v), want (0, false) on ParseFloat overflow", count, ok)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0 when ParseFloat errors", count)
 	}
 }
 

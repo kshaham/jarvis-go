@@ -157,14 +157,23 @@ func (w *Watcher) eventLoop() {
 			if !ok {
 				return
 			}
-			if isWatchLimitError(err) {
-				w.mu.Lock()
-				w.switchToFallback()
-				w.mu.Unlock()
-			}
-			slog.Debug("fsnotify error", "error", err)
+			w.handleWatchError(err)
 		}
 	}
+}
+
+// handleWatchError processes an error surfaced on the fsnotify Errors
+// channel. A watch-limit error flips the watcher into fallback polling
+// mode; all errors are logged at debug level. Extracted from eventLoop so
+// the fallback-on-error path can be exercised without racing fsnotify's
+// internally-owned Errors channel.
+func (w *Watcher) handleWatchError(err error) {
+	if isWatchLimitError(err) {
+		w.mu.Lock()
+		w.switchToFallback()
+		w.mu.Unlock()
+	}
+	slog.Debug("fsnotify error", "error", err)
 }
 
 func (w *Watcher) dispatch(path string, op Op) {

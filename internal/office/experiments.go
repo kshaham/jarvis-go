@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,14 @@ import (
 	"github.com/kshaham/jarvis/internal/library"
 	"github.com/kshaham/jarvis/internal/safego"
 )
+
+// experimentsOpenFile indirects the append-open syscall so tests can inject
+// a writer whose Write / Close fail, exercising the disk-full / EIO branches
+// that can't otherwise be reached through the filesystem. Production opens
+// the real JSONL file in append mode.
+var experimentsOpenFile = func(path string) (io.WriteCloser, error) {
+	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+}
 
 // ExperimentRecord captures the outcome of one team session (spawn to shutdown).
 type ExperimentRecord struct {
@@ -43,7 +52,7 @@ func RecordExperiment(record ExperimentRecord) error {
 		return err
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := experimentsOpenFile(path)
 	if err != nil {
 		return err
 	}

@@ -2001,7 +2001,7 @@ func (ctx *Context) OfficeAgentMessage(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "fromSessionId, toSessionId, and content are required")
 		return
 	}
-	if len(req.Content) > 8000 {
+	if len(req.Content) > office.MaxMessageContentLen {
 		request.WriteError(w, http.StatusBadRequest, "Message too long (max 8000 chars)")
 		return
 	}

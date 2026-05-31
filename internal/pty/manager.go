@@ -9,6 +9,25 @@ import (
 	"github.com/google/uuid"
 )
 
+// newCodexSession is a seam over NewCodexSession so a test can inject a session
+// whose Start() fails (the only failure mode is "already started", which a
+// freshly-constructed session can never hit). Production points at the real
+// constructor, so behavior is identical.
+var newCodexSession = NewCodexSession
+
+// stopAllAfterCollect is a test-only hook invoked by StopAllSessions after it
+// snapshots the live session ids but before it stops them. Production leaves it
+// nil. Tests use it to delete sessions out from under the stop loops, forcing
+// the "not found" warn branches that model the real concurrent-shutdown race.
+var stopAllAfterCollect func(*SessionManager)
+
+// stopSession is a seam over (*Session).Stop so a test can force the otherwise
+// unreachable error-propagation branch in StopSession. The production
+// (*Session).Stop only ever returns nil (it logs/swallows teardown failures
+// internally), so the `err != nil` arm can't be exercised through the real
+// method. Production points at the real method, so behavior is identical.
+var stopSession = func(s *Session) error { return s.Stop() }
+
 // SessionManager coordinates multiple Session instances (both PTY and SDK).
 type SessionManager struct {
 	mu            sync.RWMutex
@@ -79,7 +98,7 @@ func (m *SessionManager) StopSession(_ context.Context, id string) error {
 		return fmt.Errorf("session not found: %s", id)
 	}
 
-	if err := session.Stop(); err != nil {
+	if err := stopSession(session); err != nil {
 		return err
 	}
 
@@ -105,6 +124,14 @@ func (m *SessionManager) StopAllSessions(ctx context.Context) error {
 		codexIDs = append(codexIDs, id)
 	}
 	m.mu.RUnlock()
+
+	// Test seam: lets a test simulate the real shutdown race where a session
+	// is removed from its map (e.g. by a concurrent Stop*Session) between the
+	// snapshot above and the stop loops below, so the per-id "not found" warn
+	// branches are exercised deterministically. nil in production.
+	if hook := stopAllAfterCollect; hook != nil {
+		hook(m)
+	}
 
 	for _, id := range ptyIDs {
 		if err := m.StopSession(ctx, id); err != nil {
@@ -273,7 +300,7 @@ func (m *SessionManager) CreateCodexSession(ctx context.Context, config SessionC
 	if config.ID == "" {
 		config.ID = uuid.New().String()
 	}
-	session := NewCodexSession(config)
+	session := newCodexSession(config)
 	if err := session.Start(ctx); err != nil {
 		return nil, fmt.Errorf("failed to start Codex session: %w", err)
 	}

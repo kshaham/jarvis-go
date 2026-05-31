@@ -27,6 +27,19 @@ const (
 	TaskScreenshotMaxKeep  = 500
 )
 
+// evalSymlinks is the symlink resolver used by the path-containment
+// checks in LoadTaskScreenshot and LoadWrapUpReport. It is a seam (not
+// an inline call to filepath.EvalSymlinks) so a test can force the
+// second resolve — EvalSymlinks(dir) — to fail even after the first
+// resolve of the file path succeeds, exercising the otherwise-TOCTOU
+// error branch deterministically. Production never reassigns it.
+var evalSymlinks = filepath.EvalSymlinks
+
+// readFile is the seam used by LoadWrapUpReport's final read so a test
+// can force a read error on an already-resolved, in-bounds path without
+// a real unreadable file. Production never reassigns it.
+var readFile = os.ReadFile
+
 // screenshotFilenameRE enforces <taskID>-<unix>.<ext> where taskID
 // is [a-zA-Z0-9_-]+ and ext ∈ {png, jpg, jpeg, webp}.
 var screenshotFilenameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}-\d{10,19}\.(png|jpg|jpeg|webp)$`)
@@ -88,7 +101,7 @@ func SaveTaskScreenshot(taskID, mimeType string, data []byte, nowUnix int64) (st
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return "", fmt.Errorf("write tmp: %w", err)
 	}
-	if err := os.Rename(tmp, full); err != nil {
+	if err := renameFile(tmp, full); err != nil {
 		_ = os.Remove(tmp)
 		return "", fmt.Errorf("rename: %w", err)
 	}
@@ -113,11 +126,11 @@ func LoadTaskScreenshot(filename string) ([]byte, error) {
 	full := filepath.Join(dir, filename)
 	// Resolve symlinks on both sides so macOS /var -> /private/var
 	// doesn't trip the containment check.
-	resolved, err := filepath.EvalSymlinks(full)
+	resolved, err := evalSymlinks(full)
 	if err != nil {
 		return nil, err
 	}
-	resolvedDir, err := filepath.EvalSymlinks(dir)
+	resolvedDir, err := evalSymlinks(dir)
 	if err != nil {
 		return nil, err
 	}

@@ -62,7 +62,7 @@ func (b *Bot) SendMessage(text string) error {
 		return fmt.Errorf("telegram not configured")
 	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
+	url := fmt.Sprintf("%s/bot%s/sendMessage", apiBaseURL(), token)
 	body, _ := json.Marshal(map[string]interface{}{
 		"chat_id":    chatID,
 		"text":       text,

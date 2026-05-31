@@ -238,12 +238,29 @@ func (ctx *Context) UpdateTelegramConfig(w http.ResponseWriter, r *http.Request)
 
 // SendTelegramTest sends a test message via Telegram.
 // POST /api/telegram/test
+// telegramSender is the minimal surface SendTelegramTest needs from the
+// configured *telegram.Bot. Declaring it as an interface lets the
+// telegramTestSend seam below be overridden in tests so the send-success and
+// send-failure branches are reachable without a real Telegram API round-trip
+// (the Bot's base URL + http client are unexported and can't be redirected
+// from this package).
+type telegramSender interface {
+	SendMessage(text string) error
+}
+
+// telegramTestSend is a behavior-preserving seam: production wiring leaves it
+// at the default, which simply forwards to the bot's SendMessage. Tests swap it
+// to drive the error branch deterministically.
+var telegramTestSend = func(bot telegramSender, text string) error {
+	return bot.SendMessage(text)
+}
+
 func (ctx *Context) SendTelegramTest(w http.ResponseWriter, r *http.Request) {
 	if ctx.TelegramBot == nil || !ctx.TelegramBot.IsConnected() {
 		request.WriteError(w, http.StatusBadRequest, "telegram not configured")
 		return
 	}
-	if err := ctx.TelegramBot.SendMessage("Test from Jarvis"); err != nil {
+	if err := telegramTestSend(ctx.TelegramBot, "Test from Jarvis"); err != nil {
 		// R28 · Never echo the underlying error to the client: a transport
 		// failure surfaces as *url.Error whose URL field embeds the bot
 		// token. The error is already token-redacted by the telegram

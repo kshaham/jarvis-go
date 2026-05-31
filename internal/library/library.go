@@ -32,13 +32,18 @@ import (
 	"time"
 )
 
-// dirOnce + libDir cache the resolved library root. Tests override
-// via SetDirForTest below. dirOnce is a pointer so SetDirForTest can
-// swap in a fresh Once without copying lock state (vet flagged the
-// previous by-value snapshot).
+// libDir caches the resolved library root; resolved marks whether the
+// one-time resolution (or a test override) has run. Both are guarded by
+// dirMu: the office idle-monitor goroutine calls Dir() (a read)
+// concurrently with tests that repoint the root via SetDirForTest (a
+// write), so unsynchronized access here is a real data race. The mutex
+// makes that read/write pair race-free under -race. (Replaces an
+// earlier sync.Once + pointer-swap scheme whose dirOnce/libDir reads
+// and writes were unsynchronized.)
 var (
-	dirOnce = &sync.Once{}
-	libDir  string
+	dirMu    sync.RWMutex
+	libDir   string
+	resolved bool
 )
 
 // Dir returns the library root path (creating it + standard
@@ -57,21 +62,38 @@ var (
 // matches the "graceful degradation" pattern jarvis uses for every
 // optional subsystem (telegram, codegraph, ECC, etc.).
 func Dir() string {
-	dirOnce.Do(func() {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return
+	// Fast path: already resolved (or test-overridden).
+	dirMu.RLock()
+	if resolved {
+		d := libDir
+		dirMu.RUnlock()
+		return d
+	}
+	dirMu.RUnlock()
+
+	// Slow path: resolve exactly once under the write lock. Success or
+	// failure is cached (resolved=true), matching the previous
+	// sync.Once semantics — on a filesystem failure Dir() degrades to
+	// "" permanently rather than retrying every call.
+	dirMu.Lock()
+	defer dirMu.Unlock()
+	if resolved {
+		return libDir // another goroutine resolved while we waited
+	}
+	resolved = true
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return libDir // ""
+	}
+	root := filepath.Join(home, ".jarvis", "office-memory", "library")
+	for _, sub := range []string{
+		"experiences", "workflows", "standups", "experiments", "anti-patterns",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
+			return libDir // "" — cached, no retry
 		}
-		root := filepath.Join(home, ".jarvis", "office-memory", "library")
-		for _, sub := range []string{
-			"experiences", "workflows", "standups", "experiments", "anti-patterns",
-		} {
-			if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
-				return
-			}
-		}
-		libDir = root
-	})
+	}
+	libDir = root
 	return libDir
 }
 
@@ -79,15 +101,16 @@ func Dir() string {
 // function suitable for t.Cleanup. Tests use this to point library
 // writes at a temp dir without touching the operator's real library.
 func SetDirForTest(path string) (restore func()) {
-	prev := libDir
-	prevOnce := dirOnce
+	dirMu.Lock()
+	prevDir, prevResolved := libDir, resolved
 	libDir = path
-	fresh := &sync.Once{}
-	fresh.Do(func() {}) // mark as resolved so Dir returns libDir directly
-	dirOnce = fresh
+	resolved = true // mark as resolved so Dir returns libDir directly
+	dirMu.Unlock()
 	return func() {
-		libDir = prev
-		dirOnce = prevOnce
+		dirMu.Lock()
+		libDir = prevDir
+		resolved = prevResolved
+		dirMu.Unlock()
 	}
 }
 

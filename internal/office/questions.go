@@ -74,10 +74,10 @@ const (
 	// `cm task blocked` than a longer wait.
 	askMinWait = 1 * time.Second
 	askMaxWait = 30 * time.Minute
-	// Hard ceiling on question text. Mirrors the 8 KB cap on `cm message`
-	// in OfficeAgentMessage so a runaway prompt can't fill the recipient's
-	// context.
-	askMaxContentLen = 8000
+	// Hard ceiling on question text. Shares MaxMessageContentLen with
+	// `cm message` (OfficeAgentMessage) so a runaway prompt can't fill the
+	// recipient's context — single source of truth for the 8 KB cap.
+	askMaxContentLen = MaxMessageContentLen
 )
 
 // AskQuestion is the entry point for `cm ask`. It blocks until either a
@@ -89,12 +89,16 @@ const (
 // well above the typical "I'm in the middle of a turn, let me finish"
 // window.
 func (m *Manager) AskQuestion(fromSession, content, aboutTaskID string, totalWait time.Duration) (*Question, error) {
-	content = sanitizeForTerminal(strings.TrimSpace(content))
-	if content == "" {
-		return nil, fmt.Errorf("question content is required")
-	}
+	// Validate the real 8 KB limit on the raw input and REJECT oversized
+	// questions (previously sanitizeForTerminal truncated to 2048 first, so
+	// the check below was unreachable and long questions were silently cut).
+	content = strings.TrimSpace(content)
 	if len(content) > askMaxContentLen {
 		return nil, fmt.Errorf("question too long (max %d chars)", askMaxContentLen)
+	}
+	content = stripControlChars(content)
+	if content == "" {
+		return nil, fmt.Errorf("question content is required")
 	}
 	if totalWait < askMinWait {
 		totalWait = askMinWait
@@ -291,12 +295,15 @@ func (m *Manager) askOnce(q *Question, recipient *AgentState, maxWait time.Durat
 // Validates that fromSession is the question's current recipient
 // (rotation-safe) and delivers the answer to the asker's wait slot.
 func (m *Manager) AnswerQuestion(qID, fromSession, answer string) error {
-	answer = sanitizeForTerminal(strings.TrimSpace(answer))
-	if answer == "" {
-		return fmt.Errorf("answer is required")
-	}
+	// Same fix as AskQuestion: reject oversized answers at the real 8 KB
+	// limit instead of silently truncating to 2048 via sanitizeForTerminal.
+	answer = strings.TrimSpace(answer)
 	if len(answer) > askMaxContentLen {
 		return fmt.Errorf("answer too long (max %d chars)", askMaxContentLen)
+	}
+	answer = stripControlChars(answer)
+	if answer == "" {
+		return fmt.Errorf("answer is required")
 	}
 
 	m.mu.Lock()

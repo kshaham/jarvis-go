@@ -191,6 +191,15 @@ var (
 	skillFrontmatterOnce  sync.Once
 )
 
+// resetSkillFrontmatterCacheForTest clears the lazy cache + its sync.Once
+// so tests can re-exercise loadSkillFrontmatterCache against different
+// fixtures (missing dir, malformed SKILL.md, etc). Production code must
+// not call this.
+func resetSkillFrontmatterCacheForTest() {
+	skillFrontmatterCache = map[string]string{}
+	skillFrontmatterOnce = sync.Once{}
+}
+
 // BuildSuggestedSkillsSection returns the markdown block to inject into
 // the kickstart prompt for the given role. The block lists skill names
 // with their one-line descriptions read from each SKILL.md frontmatter,
