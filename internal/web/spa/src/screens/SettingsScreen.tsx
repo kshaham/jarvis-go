@@ -114,6 +114,7 @@ export function SettingsScreen() {
             options={[
               { value: 'dark', label: 'Dark' },
               { value: 'light', label: 'Light' },
+              { value: 'blue', label: 'Blue' },
               { value: 'system', label: 'System' },
             ]}
           />

@@ -369,6 +369,110 @@
   --lg-panel-footer: rgba(17, 24, 39, 0.025);
 }
 
+/* ── Blue mode — cyan palette ───────────────────────
+   A vibrant LIGHT theme: soft cyan background,
+   white tiles, deep-teal ink (#0a3a30), cyan accent (#06b6d4 /
+   #67e8f9). Mirrors the [data-theme='light'] structure (three-step
+   surface hierarchy, soft layered shadows) recolored to teal/cyan; only
+   the brand accent changes hue — status colors stay semantic. */
+[data-theme='blue'] {
+  --bg-app: #e8f6f9;
+  --bg-surface: #ffffff;
+  --bg-elevated: #d9eff4;
+  --bg-pressed: #cbe8ef;
+  --border-subtle: rgba(10, 58, 48, 0.06);
+  --border-default: rgba(10, 58, 48, 0.1);
+  --border-strong: rgba(10, 58, 48, 0.16);
+  --text-primary: #0a3a30;
+  --text-secondary: #355f63;
+  --text-muted: #5f868d;
+  --text-faint: #93b6bd;
+  --accent: #06b6d4;
+  --accent-muted: rgba(6, 182, 212, 0.14);
+  --accent-strong: #077f9a;
+
+  /* Chrome frame (cyan-tinted, darker than content so white tiles pop). */
+  --chrome-bg: #d3edf2;
+  --accent-on: #ffffff;
+  --status-working: #1e9f6e;
+  --status-success: #1e9f6e;
+  --status-meeting: #d9892c;
+  --status-warn: #d9892c;
+  --status-stuck: #d63b40;
+  --status-error: #d63b40;
+
+  --accent-rgb: 6 182 212; /* #06b6d4 cyan */
+  --accent-strong-rgb: 7 127 154; /* #077f9a */
+  --status-working-rgb: 30 159 110;
+  --status-idle-rgb: 95 134 141; /* teal-grey */
+  --status-meeting-rgb: 217 137 44;
+  --status-stuck-rgb: 214 59 64;
+  --status-success-rgb: 30 159 110;
+  --status-warn-rgb: 217 137 44;
+  --status-error-rgb: 214 59 64;
+  --status-info-rgb: 6 182 212; /* info == accent cyan in blue mode */
+  --surface-tint-rgb: 10 58 48; /* deep teal ink tint over light bg */
+
+  /* Faint cyan ambient wash — a subtle cyan tint behind content. */
+  --aurora-1: rgba(6, 182, 212, 0.1);
+  --aurora-2: rgba(103, 232, 249, 0.1);
+  --aurora-3: rgba(8, 136, 168, 0.06);
+  --aurora-base: #e8f6f9;
+
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-bg-strong: rgba(255, 255, 255, 0.92);
+  --glass-border: rgba(10, 58, 48, 0.08);
+
+  --glow-violet-sm: 0 0 0 1px rgba(6, 182, 212, 0.22), 0 2px 14px rgba(6, 182, 212, 0.14);
+  --glow-violet-md: 0 0 0 1px rgba(6, 182, 212, 0.3), 0 4px 22px rgba(6, 182, 212, 0.2);
+  --glow-violet-lg: 0 0 0 1px rgba(6, 182, 212, 0.4), 0 8px 40px rgba(6, 182, 212, 0.28);
+
+  /* Soft layered cyan-cool elevation. */
+  --elev-1: 0 1px 2px rgba(8, 72, 88, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --elev-2: 0 4px 16px -4px rgba(8, 72, 88, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --elev-3: 0 12px 40px -8px rgba(8, 72, 88, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+  --focus-ring-color: rgba(6, 182, 212, 0.5);
+  --spotlight-color: rgba(6, 182, 212, 0.1);
+
+  --lg-fill: #ffffff;
+  --lg-fill-hover: #ffffff;
+  --lg-fill-active: #ecf7fa;
+  --lg-fill-accent: rgba(6, 182, 212, 0.12);
+  --lg-fill-accent-hover: rgba(6, 182, 212, 0.2);
+  --lg-fill-danger: rgba(214, 59, 64, 0.1);
+  --lg-fill-danger-hover: rgba(214, 59, 64, 0.16);
+  --lg-rim: rgba(10, 58, 48, 0.1);
+  --lg-rim-strong: rgba(10, 58, 48, 0.16);
+  --lg-specular-convex:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    inset 0 -10px 18px -16px rgba(8, 72, 88, 0.1);
+  --lg-specular-concave:
+    inset 0 1.5px 3px 0 rgba(8, 72, 88, 0.12),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.7);
+  --lg-edge-catch:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.9),
+    inset -1px -1px 0 0 rgba(8, 72, 88, 0.05);
+  --lg-shadow-rest:
+    0 1px 2px rgba(8, 72, 88, 0.08),
+    0 8px 24px -12px rgba(8, 72, 88, 0.16),
+    var(--lg-specular-convex);
+  --lg-shadow-hover:
+    0 2px 5px rgba(8, 72, 88, 0.1),
+    0 18px 40px -14px rgba(8, 72, 88, 0.22),
+    var(--lg-specular-convex);
+  --lg-shadow-press:
+    0 1px 2px rgba(8, 72, 88, 0.1),
+    var(--lg-specular-concave);
+  --lg-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0) 38%
+  );
+  --lg-panel-bg: rgba(255, 255, 255, 0.92);
+  --lg-panel-footer: rgba(10, 58, 48, 0.025);
+}
+
 /* Respect operator preference. Inside this query Motion will fall back
    to opacity-only transitions; all transform/scale animations become
    no-ops. */

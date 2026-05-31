@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { Droplet, Monitor, Moon, Sun } from 'lucide-react';
 import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { CSSProperties } from 'react';
 
@@ -23,11 +23,17 @@ const toggleButtonStyle: CSSProperties = {
 
 const NEXT_LABEL: Record<ThemePref, string> = {
   dark: 'Theme: dark — switch to light',
-  light: 'Theme: light — switch to system',
+  light: 'Theme: light — switch to blue',
+  blue: 'Theme: blue — switch to system',
   system: 'Theme: system — switch to dark',
 };
 
-const ICON = { dark: Moon, light: Sun, system: Monitor };
+const ICON: Record<ThemePref, typeof Moon> = {
+  dark: Moon,
+  light: Sun,
+  blue: Droplet,
+  system: Monitor,
+};
 
 // ThemeToggle — header button that cycles dark → light → system, with a
 // quick rotate/scale crossfade between the moon/sun/monitor glyphs.

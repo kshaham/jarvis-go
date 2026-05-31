@@ -15,10 +15,14 @@
       (function () {
         try {
           var p = localStorage.getItem('office-theme') || 'system';
-          var light =
-            p === 'light' ||
-            (p === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
-          if (light) document.documentElement.setAttribute('data-theme', 'light');
+          if (p === 'blue') {
+            document.documentElement.setAttribute('data-theme', 'blue');
+          } else {
+            var light =
+              p === 'light' ||
+              (p === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
+            if (light) document.documentElement.setAttribute('data-theme', 'light');
+          }
         } catch (e) {}
       })();
     </script>

@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-// Theme preference: dark-first with an opt-in light theme (the
-// [data-theme='light'] block in tokens.css) and a 'system' option.
-// Persisted to localStorage; 'system' follows the OS color scheme live.
-export type ThemePref = 'dark' | 'light' | 'system';
+// Theme preference: dark-first with opt-in light + blue themes (the
+// [data-theme='light'] / [data-theme='blue'] blocks in tokens.css) and a
+// 'system' option. Persisted to localStorage; 'system' follows the OS
+// color scheme live (system never resolves to blue — that's an explicit pick).
+export type ThemePref = 'dark' | 'light' | 'blue' | 'system';
 
 const KEY = 'office-theme';
-const ORDER: ThemePref[] = ['dark', 'light', 'system'];
+const ORDER: ThemePref[] = ['dark', 'light', 'blue', 'system'];
 
 function getStored(): ThemePref {
   try {
     const v = localStorage.getItem(KEY);
-    if (v === 'dark' || v === 'light' || v === 'system') return v;
+    if (v === 'dark' || v === 'light' || v === 'blue' || v === 'system') return v;
   } catch {
     // ignore (private mode / SSR)
   }
@@ -22,17 +23,30 @@ function systemIsLight(): boolean {
   return typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: light)').matches;
 }
 
+// The concrete [data-theme] attribute value for a preference (null = the
+// dark :root default). Blue is its own attribute; system maps to light/dark.
+function themeAttr(pref: ThemePref): 'light' | 'blue' | null {
+  if (pref === 'blue') return 'blue';
+  if (pref === 'light') return 'light';
+  if (pref === 'system') return systemIsLight() ? 'light' : null;
+  return null; // dark
+}
+
+// resolve — the concrete light|dark a preference reads as, for any consumer
+// that only cares about light-vs-dark. Blue is a light theme.
 function resolve(pref: ThemePref): 'dark' | 'light' {
+  if (pref === 'blue') return 'light';
   return pref === 'system' ? (systemIsLight() ? 'light' : 'dark') : pref;
 }
 
-// applyTheme reflects the resolved theme onto <html>: set data-theme
-// for light, remove it for dark (the :root default is dark). Mirrors the
-// no-flash inline script in index.html.
+// applyTheme reflects the preference onto <html> via the data-theme
+// attribute (removed for dark). Mirrors the no-flash inline script in
+// index.html.
 export function applyTheme(pref: ThemePref): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  if (resolve(pref) === 'light') root.setAttribute('data-theme', 'light');
+  const attr = themeAttr(pref);
+  if (attr) root.setAttribute('data-theme', attr);
   else root.removeAttribute('data-theme');
 }
 
