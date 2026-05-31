@@ -47,19 +47,26 @@
     font-feature-settings: 'tnum' 1;
   }
 
-  /* Optically center a single uppercase glyph in a fixed box. Caps sit on
-     the baseline with empty descender space, so flex-centering the line box
-     leaves the letter visually high — and by how much depends on the font's
-     vertical metrics, which renders inconsistently across browsers. The
-     standardized text-box-trim/edge trims the inline box to the cap +
-     alphabetic edges, so the trimmed box IS the cap and align-items:center
-     centers it exactly + identically everywhere it is supported. Applied to
-     an inner span so the 24x24 badge keeps its size. */
-  .glyph-trim {
-    line-height: 1;
-    text-box-trim: trim-both;
-    text-box-edge: cap alphabetic;
-    text-box: trim-both cap alphabetic; /* shorthand fallback for parsers */
+  /* ── Side-rail nav tile ────────────────────────────────────────────
+     Unselected nav rows are faint liquid-glass tiles so they separate from
+     the tinted chrome rail (the active row uses the accent pill instead).
+     Rest = outline + faint fill; hover lifts to a brighter glass. Token-
+     driven, so it adapts to both themes. */
+  .nav-tile {
+    border-color: var(--lg-rim);
+    background: rgb(var(--surface-tint-rgb) / 0.05);
+    box-shadow: var(--elev-1);
+    transition:
+      background var(--duration-short) var(--ease-out-expo),
+      border-color var(--duration-short) var(--ease-out-expo),
+      box-shadow var(--duration-short) var(--ease-out-expo),
+      color var(--duration-short) var(--ease-out-expo);
+  }
+  .nav-tile:hover {
+    background: var(--lg-fill-hover);
+    border-color: var(--lg-rim-strong);
+    box-shadow: var(--lg-shadow-rest);
+    color: var(--text-primary);
   }
 
   /* ── Liquid Glass surfaces ─────────────────────────────────────────
