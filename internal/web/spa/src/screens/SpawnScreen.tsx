@@ -15,9 +15,11 @@ import { validateSpawnState } from '../components/spawn/reviewSummary.utils';
 import { TemplateCard } from '../components/spawn/TemplateCard';
 import { TemplateChip } from '../components/spawn/TemplateChip';
 import { WorkdirSection } from '../components/spawn/WorkdirSection';
-import { recordRecentWorkdir } from '../components/spawn/workdirSection.utils';
+import type { WorkdirMode } from '../components/spawn/WorkdirSection';
 import { fetchJSON } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
+import { useSavedProjects } from '../hooks/useSavedProjects';
+import type { SavedProject } from '../api/types';
 import type { SettingsAccounts, TeamTemplate, TeamTemplateMember } from '../api/types';
 
 const stepCircleBaseStyle: React.CSSProperties = {
@@ -42,8 +44,9 @@ interface SpawnState {
   category: string;
   mission: string;
   workingDir: string;
-  newProject: boolean;
+  mode: WorkdirMode;
   projectName: string;
+  githubRepo: string;
   perpetual: boolean;
   defaultProvider: string;
   defaultModel: string;
@@ -68,8 +71,9 @@ const SPAWN_DEFAULT: SpawnState = {
   category: '',
   mission: '',
   workingDir: '',
-  newProject: false,
+  mode: 'existing',
   projectName: '',
+  githubRepo: '',
   perpetual: true,
   defaultProvider: 'claude-subscription',
   defaultModel: '',
@@ -120,8 +124,9 @@ export function SpawnScreen() {
     category,
     mission,
     workingDir,
-    newProject,
+    mode,
     projectName,
+    githubRepo,
     perpetual,
     defaultProvider,
     defaultModel,
@@ -136,6 +141,20 @@ export function SpawnScreen() {
   } = state;
   const set = <K extends keyof SpawnState>(field: K) => (value: SpawnState[K]) =>
     dispatch({ type: 'set', field, value });
+
+  const savedProjects = useSavedProjects();
+
+  // Picking a saved project sets the matching mode and fills the field:
+  // github → repo URL, local → folder path.
+  const onPickProject = (p: SavedProject) => {
+    if (p.kind === 'github') {
+      dispatch({ type: 'set', field: 'mode', value: 'github' });
+      dispatch({ type: 'set', field: 'githubRepo', value: p.repoUrl ?? '' });
+    } else {
+      dispatch({ type: 'set', field: 'mode', value: 'existing' });
+      dispatch({ type: 'set', field: 'workingDir', value: p.path });
+    }
+  };
 
   const tpl: TeamTemplate | undefined = useMemo(
     () => (templates.data?.templates ?? []).find((t) => t.id === templateId),
@@ -220,9 +239,10 @@ export function SpawnScreen() {
       const body: Record<string, unknown> = {
         templateId,
         mission,
-        workingDir: newProject ? '' : workingDir,
-        newProject,
-        projectName: newProject ? projectName : '',
+        workingDir: mode === 'existing' ? workingDir : '',
+        newProject: mode === 'new',
+        projectName: mode === 'new' ? projectName : '',
+        githubRepo: mode === 'github' ? githubRepo.trim() : '',
         perpetualMode: perpetual,
         telegramEnabled,
         telegramIntervalMin: telegramInterval,
@@ -241,9 +261,9 @@ export function SpawnScreen() {
       return fetchJSON('/api/office/spawn-team', { method: 'POST', body });
     },
     onSuccess: () => {
-      if (!newProject && workingDir.trim()) {
-        recordRecentWorkdir(workingDir.trim());
-      }
+      // The backend persists the working dir as a saved project; refresh
+      // the dropdown so the new entry shows up.
+      qc.invalidateQueries({ queryKey: ['projects'] });
       qc.invalidateQueries({ queryKey: ['office', 'status'] });
       toast.success('Team spawned');
       navigate('/');
@@ -279,12 +299,17 @@ export function SpawnScreen() {
               <TemplateChip tpl={tpl} onChange={() => dispatch({ type: 'set', field: 'templateId', value: '' })} />
               <MissionSection value={mission} onChange={set('mission')} templateName={tpl.name} />
               <WorkdirSection
-                newProject={newProject}
-                setNewProject={set('newProject')}
+                mode={mode}
+                setMode={set('mode')}
                 workingDir={workingDir}
                 setWorkingDir={set('workingDir')}
                 projectName={projectName}
                 setProjectName={set('projectName')}
+                githubRepo={githubRepo}
+                setGithubRepo={set('githubRepo')}
+                projects={savedProjects.projects}
+                onPickProject={onPickProject}
+                onRemoveProject={(id) => savedProjects.remove.mutate(id)}
               />
               <DefaultsSection
                 defaultProvider={defaultProvider}
@@ -325,15 +350,17 @@ export function SpawnScreen() {
             members={members}
             defaultProvider={defaultProvider}
             defaultModel={defaultModel}
-            newProject={newProject}
+            mode={mode}
             workingDir={workingDir}
             projectName={projectName}
+            githubRepo={githubRepo}
             validity={validateSpawnState({
               templateId,
               mission,
-              newProject,
+              mode,
               workingDir,
               projectName,
+              githubRepo,
             })}
             pending={spawn.isPending}
             error={spawn.error instanceof Error ? spawn.error.message : null}

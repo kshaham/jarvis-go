@@ -7,6 +7,7 @@ import type { MemberEdit } from './memberEditor.utils';
 import { TierCounts } from './TierBadge';
 import type { Tier } from './TierBadge';
 import type { Validity } from './reviewSummary.utils';
+import type { WorkdirMode } from './WorkdirSection';
 
 const stickyBarStyle: React.CSSProperties = {
   position: 'sticky',
@@ -37,15 +38,18 @@ const chipStyle: React.CSSProperties = {
 };
 
 function workdirLabel({
-  newProject,
+  mode,
   workingDir,
   projectName,
+  githubRepo,
 }: {
-  newProject: boolean;
+  mode: WorkdirMode;
   workingDir: string;
   projectName: string;
+  githubRepo: string;
 }): string {
-  if (newProject) return `new → /app/workspace/${projectName || 'project-name'}`;
+  if (mode === 'new') return `new → /app/workspace/${projectName || 'project-name'}`;
+  if (mode === 'github') return `github → ${githubRepo || '(no repo set)'}`;
   return workingDir || '(no folder set)';
 }
 
@@ -54,9 +58,10 @@ export function ReviewSummary({
   members,
   defaultProvider,
   defaultModel,
-  newProject,
+  mode,
   workingDir,
   projectName,
+  githubRepo,
   validity,
   pending,
   error,
@@ -66,9 +71,10 @@ export function ReviewSummary({
   members: MemberEdit[];
   defaultProvider: string;
   defaultModel: string;
-  newProject: boolean;
+  mode: WorkdirMode;
   workingDir: string;
   projectName: string;
+  githubRepo: string;
   validity: Validity;
   pending: boolean;
   error: string | null;
@@ -152,7 +158,7 @@ export function ReviewSummary({
 
         <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
           <Chip>{providerLabel}{defaultModel ? ` · ${defaultModel}` : ''}</Chip>
-          <Chip mono>{workdirLabel({ newProject, workingDir, projectName })}</Chip>
+          <Chip mono>{workdirLabel({ mode, workingDir, projectName, githubRepo })}</Chip>
         </span>
 
         <span style={{ flex: 1 }} />

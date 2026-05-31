@@ -1,42 +1,71 @@
-import { useMemo, useState } from 'react';
-import { Chip, Input } from '@/components/ui';
+import { useMemo } from 'react';
+import { Input } from '@/components/ui';
 import { SectionCard, SegmentedControl } from './formPrimitives';
-import { loadRecents } from './workdirSection.utils';
+import { ProjectPicker } from './ProjectPicker';
+import type { SavedProject } from '@/api/types';
+
+export type WorkdirMode = 'existing' | 'new' | 'github';
+
+// githubSlug mirrors the backend's normalizeRepoInput slug derivation
+// (owner-repo) for the live "workdir →" preview. Best-effort only; the
+// server re-validates on spawn.
+function githubSlug(input: string): string {
+  let s = input.trim();
+  for (const p of ['https://github.com/', 'http://github.com/', 'github.com/']) {
+    if (s.toLowerCase().startsWith(p)) {
+      s = s.slice(p.length);
+      break;
+    }
+  }
+  s = s.replace(/\.git$/, '').replace(/^\/+|\/+$/g, '');
+  const parts = s.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return '';
+  const clean = (seg: string) => seg.replace(/[^A-Za-z0-9_-]+/g, '-');
+  return `${clean(parts[0])}-${clean(parts[1])}`;
+}
 
 export function WorkdirSection({
-  newProject,
-  setNewProject,
+  mode,
+  setMode,
   workingDir,
   setWorkingDir,
   projectName,
   setProjectName,
+  githubRepo,
+  setGithubRepo,
+  projects,
+  onPickProject,
+  onRemoveProject,
 }: {
-  newProject: boolean;
-  setNewProject: (b: boolean) => void;
+  mode: WorkdirMode;
+  setMode: (m: WorkdirMode) => void;
   workingDir: string;
   setWorkingDir: (v: string) => void;
   projectName: string;
   setProjectName: (v: string) => void;
+  githubRepo: string;
+  setGithubRepo: (v: string) => void;
+  projects: SavedProject[];
+  onPickProject: (p: SavedProject) => void;
+  onRemoveProject: (id: string) => void;
 }) {
-  // Lazy initializer: loadRecents() reads localStorage, so passing it
-  // as a factory avoids running it on every re-render AND avoids the
-  // mount-time effect flash that no-initialize-state flags.
-  const [recents] = useState<string[]>(loadRecents);
-
   const trailing = useMemo(
     () => (
-      <SegmentedControl<'existing' | 'new'>
+      <SegmentedControl<WorkdirMode>
         ariaLabel="Workdir mode"
         options={[
           { value: 'existing', label: 'Existing folder' },
           { value: 'new', label: 'New project' },
+          { value: 'github', label: 'GitHub repo' },
         ]}
-        value={newProject ? 'new' : 'existing'}
-        onChange={(v) => setNewProject(v === 'new')}
+        value={mode}
+        onChange={setMode}
       />
     ),
-    [newProject, setNewProject],
+    [mode, setMode],
   );
+
+  const githubPreview = githubSlug(githubRepo);
 
   return (
     <SectionCard
@@ -44,31 +73,53 @@ export function WorkdirSection({
       hint="Where the team's agents run. Match this to workingDirAllowlist."
       trailing={trailing}
     >
-      {newProject ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Input
-            value={projectName}
-            onChange={(e) => {
-              const v = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
-              setProjectName(v.slice(0, 64));
-            }}
-            placeholder="project-name"
-            aria-label="New project name"
-            style={{ fontFamily: 'var(--font-mono)' }}
-          />
-          <span
-            style={{
-              fontSize: 12,
-              color: 'var(--text-muted)',
-              fontFamily: 'var(--font-mono)',
-            }}
-          >
-            <span style={{ color: 'var(--text-faint)' }}>workdir →</span>{' '}
-            /app/workspace/{projectName || 'project-name'}
-          </span>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <ProjectPicker projects={projects} onPick={onPickProject} onRemove={onRemoveProject} />
+
+        {mode === 'new' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Input
+              value={projectName}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
+                setProjectName(v.slice(0, 64));
+              }}
+              placeholder="project-name"
+              aria-label="New project name"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+            <span
+              style={{
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              <span style={{ color: 'var(--text-faint)' }}>workdir →</span>{' '}
+              /app/workspace/{projectName || 'project-name'}
+            </span>
+          </div>
+        ) : mode === 'github' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Input
+              value={githubRepo}
+              onChange={(e) => setGithubRepo(e.target.value)}
+              placeholder="owner/repo or https://github.com/owner/repo"
+              aria-label="GitHub repository"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+            <span
+              style={{
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              <span style={{ color: 'var(--text-faint)' }}>workdir →</span>{' '}
+              /app/workspace/{githubPreview || 'owner-repo'}
+            </span>
+          </div>
+        ) : (
           <Input
             value={workingDir}
             onChange={(e) => setWorkingDir(e.target.value)}
@@ -76,34 +127,8 @@ export function WorkdirSection({
             aria-label="Existing folder path"
             style={{ fontFamily: 'var(--font-mono)' }}
           />
-          {recents.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: 'var(--text-faint)',
-                  letterSpacing: 0.4,
-                  textTransform: 'uppercase',
-                  alignSelf: 'center',
-                  marginRight: 4,
-                }}
-              >
-                Recent
-              </span>
-              {recents.map((path) => (
-                <Chip
-                  key={path}
-                  active={path === workingDir}
-                  onClick={() => setWorkingDir(path)}
-                  className="max-w-[220px] truncate font-mono"
-                >
-                  {path}
-                </Chip>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      )}
+        )}
+      </div>
     </SectionCard>
   );
 }

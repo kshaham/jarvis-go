@@ -426,3 +426,17 @@ export interface SettingsAccounts {
   openaiBaseUrl?: string;
   openaiKeyConfigured?: boolean;
 }
+
+// SavedProject — one entry in the operator's persisted spawn-page project
+// list (GET /api/projects). For local projects path is the workdir; for
+// github projects repoUrl is the canonical clone URL and path is filled in
+// after the first successful clone.
+export interface SavedProject {
+  id: string;
+  name: string;
+  kind: 'local' | 'github';
+  path: string;
+  repoUrl?: string;
+  createdAt: string;
+  lastUsedAt: string;
+}
