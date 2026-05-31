@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 
 import { AgentsScreen } from './screens/AgentsScreen';
 import { TasksScreen } from './screens/TasksScreen';
+import { TestsScreen } from './screens/TestsScreen';
 import { StandupScreen } from './screens/StandupScreen';
 import { MessagesScreen } from './screens/MessagesScreen';
 import { TimelineScreen } from './screens/TimelineScreen';
@@ -64,6 +65,7 @@ export function App() {
         <Route element={<AppShell />}>
           <Route index element={<AgentsScreen />} />
           <Route path="tasks" element={<TasksScreen />} />
+          <Route path="tests" element={<TestsScreen />} />
           <Route path="standup" element={<StandupScreen />} />
           <Route path="chat" element={<MessagesScreen />} />
           <Route path="activity" element={<TimelineScreen />} />

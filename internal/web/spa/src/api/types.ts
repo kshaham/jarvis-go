@@ -440,3 +440,32 @@ export interface SavedProject {
   createdAt: string;
   lastUsedAt: string;
 }
+
+// ── Tests page (per-project coverage + vulnerability scanning) ──────────
+export type QualityStatus = 'idle' | 'running' | 'ok' | 'failed' | 'unsupported';
+
+export interface CoverageResult {
+  language: string;
+  pct: number | null; // present only when status === 'ok'
+  status: QualityStatus;
+  error?: string;
+  lastRunAt?: string;
+}
+
+export interface VulnResult {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  unknown: number;
+  total: number;
+  status: QualityStatus;
+  error?: string;
+  lastScanAt?: string;
+}
+
+// TestProject is a SavedProject joined with its latest coverage + vuln results.
+export interface TestProject extends SavedProject {
+  coverage: CoverageResult;
+  vuln: VulnResult;
+}

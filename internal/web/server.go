@@ -24,6 +24,7 @@ import (
 	"github.com/kshaham/jarvis/internal/peers"
 	"github.com/kshaham/jarvis/internal/projects"
 	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/quality"
 	"github.com/kshaham/jarvis/internal/ralph"
 	"github.com/kshaham/jarvis/internal/respawn"
 	"github.com/kshaham/jarvis/internal/runsummary"
@@ -660,6 +661,7 @@ func (s *Server) setupRouter() chi.Router {
 		OfficeManager:           s.officeManager,
 		StateStore:              s.stateStore,
 		Projects:                projects.New(s.stateStore),
+		Quality:                 quality.NewManager(s.rootCtx, projects.New(s.stateStore), s.stateStore, s.sseBroker),
 		ScreenManager:           s.screenManager,
 		SubagentWatcher:         s.subagentWatcher,
 		CaseManager:             s.caseManager,
@@ -976,6 +978,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/settings", h.GetSettings)
 			r.Get("/settings/accounts", h.GetSettingsAccounts)
 			r.Get("/projects", h.ListProjects)
+			r.Get("/tests/results", h.TestsGetResults)
 			r.Get("/debug/memory", h.GetDebugMemory)
 			r.Get("/prompt-processor/config", h.GetPromptProcessor)
 			r.Get("/prompt-processor/stats", h.GetPromptProcessorRules)
@@ -1097,6 +1100,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Put("/settings", h.UpdateSettings)
 				r.Post("/settings/accounts", h.CreateSettingsAccount)
 				r.Delete("/projects/{id}", h.DeleteProject)
+				r.Post("/tests/coverage", h.TestsRunCoverage)
+				r.Post("/tests/scan", h.TestsRunScan)
 				r.Post("/cleanup-state", h.CleanupState)
 				r.Put("/prompt-processor/config", h.UpdatePromptProcessor)
 				r.Put("/prompt-processor/enhancer", h.UpdatePromptProcessorRules)

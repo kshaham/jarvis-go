@@ -13,6 +13,7 @@ import (
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/projects"
 	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/quality"
 	"github.com/kshaham/jarvis/internal/ralph"
 	"github.com/kshaham/jarvis/internal/respawn"
 	"github.com/kshaham/jarvis/internal/runsummary"
@@ -74,6 +75,9 @@ type Context struct {
 
 	// Projects owns the operator's saved-project list (spawn page dropdown).
 	Projects *projects.Service
+
+	// Quality runs per-project coverage + vulnerability jobs (Tests page).
+	Quality *quality.Manager
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,

@@ -45,7 +45,11 @@ export type SSEEventName =
   | 'office:peerStatusChanged'
   | 'session:updated'
   | 'knowledge:autoPromoted'
-  | 'knowledge:revoked';
+  | 'knowledge:revoked'
+  | 'tests:coverageProgress'
+  | 'tests:coverageComplete'
+  | 'tests:scanProgress'
+  | 'tests:scanComplete';
 
 export type SSEHandler = (evt: { name: string; data: unknown }) => void;
 
@@ -94,6 +98,10 @@ const EVENT_NAMES: SSEEventName[] = [
   'session:updated',
   'knowledge:autoPromoted',
   'knowledge:revoked',
+  'tests:coverageProgress',
+  'tests:coverageComplete',
+  'tests:scanProgress',
+  'tests:scanComplete',
 ];
 
 // ── Connected state ──────────────────────────────────────────────────

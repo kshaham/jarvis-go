@@ -10,6 +10,7 @@ import {
   BookOpen,
   CalendarDays,
   FileText,
+  FlaskConical,
   ListTodo,
   Lock,
   Megaphone,
@@ -124,6 +125,7 @@ const classicLinkStyle: React.CSSProperties = {
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'Agents',
   '/tasks': 'Tasks',
+  '/tests': 'Tests',
   '/standup': 'Standup',
   '/chat': 'Chat',
   '/activity': 'Activity',
@@ -211,6 +213,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
     // Office
     { to: '/', label: 'Agents', icon: Users },
     { to: '/tasks', label: 'Tasks', icon: ListTodo },
+    { to: '/tests', label: 'Tests', icon: FlaskConical },
     { to: '/standup', label: 'Standup', icon: Megaphone },
     { to: '/chat', label: 'Chat', icon: MessageSquare },
     { to: '/activity', label: 'Activity', icon: Activity },
