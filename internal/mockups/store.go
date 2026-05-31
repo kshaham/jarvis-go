@@ -1,9 +1,11 @@
-// Package mockups stores the AI-generated UI mockup images the office
-// team produces per project (the "Mockups" page). Layout mirrors the
+// Package mockups stores the AI-generated mockup images the office team
+// produces per project (the "Mockups" page). A mockup is one of two KINDS:
+// "ui" (an image-to-image restyle of the running UI) or "presentation" (a
+// text-to-image slide design from the project's docs). Layout mirrors the
 // task-screenshot store: PNGs live under
-// ~/.jarvis/office-memory/mockups/<projectID>/<index>-<unix>.png, served
-// back to the SPA via /api/mockups/image/<projectID>/<filename>. A run
-// replaces the project's previous set (the latest 6 are what's shown).
+// ~/.jarvis/office-memory/mockups/<projectID>/<kind>/<slot>-<unix>.png,
+// served via /api/mockups/image/<projectID>/<kind>/<filename>. A run
+// replaces that project+kind's previous set (the latest 6 are shown).
 package mockups
 
 import (
@@ -19,9 +21,23 @@ import (
 // MockupCount is how many mockups a generation run produces.
 const MockupCount = 6
 
-// MockupMaxBytes caps one uploaded mockup PNG (gpt-image-1 1024px PNGs are
-// well under this; the headroom covers larger sizes).
+// MockupMaxBytes caps one uploaded mockup PNG (gpt-image-1 1024-1536px PNGs
+// are well under this; the headroom covers larger sizes).
 const MockupMaxBytes = 8 * 1024 * 1024
+
+// Kinds — a mockup is either a UI redesign or a presentation slide design.
+const (
+	KindUI           = "ui"
+	KindPresentation = "presentation"
+)
+
+// Kinds lists the supported mockup kinds (for iteration in handlers).
+var Kinds = []string{KindUI, KindPresentation}
+
+// ValidateKind reports whether kind is a supported mockup kind.
+func ValidateKind(kind string) bool {
+	return kind == KindUI || kind == KindPresentation
+}
 
 var (
 	projectIDRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
@@ -43,21 +59,25 @@ func baseDir() string {
 	return filepath.Join(home, ".jarvis", "office-memory", "mockups")
 }
 
-func projectDir(projectID string) (string, error) {
+// kindDir is the per-project, per-kind storage directory.
+func kindDir(projectID, kind string) (string, error) {
 	if !ValidateProjectID(projectID) {
 		return "", fmt.Errorf("invalid project id")
+	}
+	if !ValidateKind(kind) {
+		return "", fmt.Errorf("invalid mockup kind")
 	}
 	base := baseDir()
 	if base == "" {
 		return "", fmt.Errorf("no home directory")
 	}
-	return filepath.Join(base, projectID), nil
+	return filepath.Join(base, projectID, kind), nil
 }
 
-// ClearProject removes a project's existing mockups so a new run starts
-// from a clean set of 6.
-func ClearProject(projectID string) error {
-	dir, err := projectDir(projectID)
+// ClearProject removes a project's existing mockups for one kind so a new run
+// starts from a clean set of 6.
+func ClearProject(projectID, kind string) error {
+	dir, err := kindDir(projectID, kind)
 	if err != nil {
 		return err
 	}
@@ -67,9 +87,9 @@ func ClearProject(projectID string) error {
 	return nil
 }
 
-// Save writes one mockup PNG for (projectID, index). Returns the relative
-// filename (for building the image URL).
-func Save(projectID string, index int, png []byte, nowUnix int64) (string, error) {
+// Save writes one mockup PNG for (projectID, kind, index). Returns the
+// relative filename (for building the image URL).
+func Save(projectID, kind string, index int, png []byte, nowUnix int64) (string, error) {
 	if index < 0 || index >= MockupCount {
 		return "", fmt.Errorf("index out of range 0..%d", MockupCount-1)
 	}
@@ -82,7 +102,7 @@ func Save(projectID string, index int, png []byte, nowUnix int64) (string, error
 	if len(png) < 8 || string(png[1:4]) != "PNG" {
 		return "", fmt.Errorf("data is not a PNG")
 	}
-	dir, err := projectDir(projectID)
+	dir, err := kindDir(projectID, kind)
 	if err != nil {
 		return "", err
 	}
@@ -104,9 +124,9 @@ func Save(projectID string, index int, png []byte, nowUnix int64) (string, error
 	return filename, nil
 }
 
-// List returns a project's mockup filenames ordered by slot index (0..5).
-func List(projectID string) ([]string, error) {
-	dir, err := projectDir(projectID)
+// List returns a project's mockup filenames for one kind, ordered by slot.
+func List(projectID, kind string) ([]string, error) {
+	dir, err := kindDir(projectID, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -129,11 +149,11 @@ func List(projectID string) ([]string, error) {
 }
 
 // Load returns a stored mockup's bytes, with path containment.
-func Load(projectID, filename string) ([]byte, error) {
+func Load(projectID, kind, filename string) ([]byte, error) {
 	if !ValidateFilename(filename) {
 		return nil, fmt.Errorf("invalid mockup filename")
 	}
-	dir, err := projectDir(projectID)
+	dir, err := kindDir(projectID, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +188,7 @@ func pruneIndex(dir string, index int, keep string) {
 	}
 }
 
-// ── UI detection ───────────────────────────────────────────────────────
+// ── detection ──────────────────────────────────────────────────────────
 
 // uiDeps are package.json dependencies that mark a project as having a UI.
 var uiDeps = []string{
@@ -198,6 +218,31 @@ func HasUI(dir string) bool {
 	for _, p := range []string{"index.html", filepath.Join("public", "index.html"), filepath.Join("src", "index.html")} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err == nil {
 			return true
+		}
+	}
+	return false
+}
+
+// docFiles are markers of presentable docs/research content.
+var docFiles = []string{
+	"README.md", "README.MD", "readme.md", "README.rst",
+	"ARCHITECTURE.md", "docs", "REPORT.md",
+}
+
+// HasDocs reports whether dir has docs/research content worth presenting: a
+// top-level README/doc marker, or any markdown file in the root.
+func HasDocs(dir string) bool {
+	for _, p := range docFiles {
+		if _, err := os.Stat(filepath.Join(dir, p)); err == nil {
+			return true
+		}
+	}
+	// Any *.md in the project root counts as presentable content.
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+				return true
+			}
 		}
 	}
 	return false

@@ -984,7 +984,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/projects", h.ListProjects)
 			r.Get("/tests/results", h.TestsGetResults)
 			r.Get("/mockups/results", h.MockupsGetResults)
-			r.Get("/mockups/image/{projectId}/{filename}", h.MockupsServe)
+			r.Get("/mockups/image/{projectId}/{kind}/{filename}", h.MockupsServe)
 			r.Get("/debug/memory", h.GetDebugMemory)
 			r.Get("/prompt-processor/config", h.GetPromptProcessor)
 			r.Get("/prompt-processor/stats", h.GetPromptProcessorRules)

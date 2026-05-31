@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { fetchJSON } from '@/api/client';
 import { subscribeSSE } from '@/api/sse';
-import type { MockupProject } from '@/api/types';
+import type { MockupKind, MockupProject } from '@/api/types';
 
 const MOCKUPS_KEY = ['mockups', 'results'] as const;
 
@@ -29,8 +29,8 @@ export function useMockups() {
   });
 
   const generate = useMutation({
-    mutationFn: (projectId: string) =>
-      fetchJSON('/api/mockups/generate', { method: 'POST', body: { projectId } }),
+    mutationFn: ({ projectId, kind }: { projectId: string; kind: MockupKind }) =>
+      fetchJSON('/api/mockups/generate', { method: 'POST', body: { projectId, kind } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: MOCKUPS_KEY }),
   });
 

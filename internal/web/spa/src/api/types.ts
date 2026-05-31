@@ -496,10 +496,18 @@ export interface MockupImage {
   url: string;
 }
 
-// MockupProject — a SavedProject joined with its mockup state.
-export interface MockupProject extends SavedProject {
-  hasUi: boolean;
-  teamActive: boolean; // a team is currently spawned on this project's workdir
+export type MockupKind = 'ui' | 'presentation';
+
+export interface MockupKindState {
   status: MockupStatus;
   mockups: MockupImage[];
+}
+
+// MockupProject — a SavedProject joined with its per-kind mockup state.
+export interface MockupProject extends SavedProject {
+  hasUi: boolean;
+  hasDocs: boolean;
+  teamActive: boolean; // a team is currently spawned on this project's workdir
+  ui: MockupKindState;
+  presentation: MockupKindState;
 }
