@@ -49,13 +49,11 @@ const railGlyphStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  // line-height:1 collapses the inherited 1.5em line box; the 2px top
-  // padding optically centers the glyph — caps sit on the baseline with
-  // empty descender space below, so the ink renders ~2px high without it
-  // (verified empirically against a box-center reference for both letters
-  // and the symbol glyphs). box-sizing keeps the badge a fixed 24x24.
+  // line-height:1 collapses the inherited 1.5em line box. Letter glyphs are
+  // wrapped in <span class="glyph-trim"> which uses text-box-trim to center
+  // the cap exactly + identically across browsers (see styles.css); symbol
+  // glyphs are geometrically centered by the flex centering here.
   lineHeight: 1,
-  paddingTop: 2,
   fontSize: 12,
   fontWeight: 700,
   flexShrink: 0,
@@ -288,7 +286,11 @@ export function AppShell({ children }: { children?: ReactNode }) {
                         color: isActive ? 'var(--accent-on)' : 'var(--text-secondary)',
                       }}
                     >
-                      {item.glyph}
+                      {/^[A-Za-z]$/.test(item.glyph) ? (
+                        <span className="glyph-trim">{item.glyph}</span>
+                      ) : (
+                        item.glyph
+                      )}
                     </span>
                     <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
                     {item.badge ? (
