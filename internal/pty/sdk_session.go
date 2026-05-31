@@ -680,6 +680,15 @@ func (s *SDKSession) SendPrompt(ctx context.Context, prompt string) {
 }
 
 // appendOutput writes text to buffers and notifies observers.
+// Tokens returns input, output, and total token counts accumulated across
+// this SDK session's turns. Mirrors Session.Tokens() so the token-stats
+// handler can aggregate SDK sessions alongside PTY and Codex sessions.
+func (s *SDKSession) Tokens() (input, output, total int64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.totalInputTokens, s.totalOutputTokens, s.totalInputTokens + s.totalOutputTokens
+}
+
 func (s *SDKSession) appendOutput(text string) {
 	s.mu.Lock()
 	s.terminalBuffer.Append(text)

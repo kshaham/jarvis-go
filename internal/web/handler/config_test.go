@@ -53,6 +53,33 @@ func TestGetTokenStats_Empty(t *testing.T) {
 	}
 }
 
+// TestGetTokenStats_IncludesSDKAndCodex guards the fix for the token-stats
+// blind spot: SDK and Codex sessions live in separate registries from
+// GetAllSessions, so before the fix their usage never appeared in
+// /api/token-stats. Registering one of each must make sessionCount reflect
+// them (3 total alongside a PTY session).
+func TestGetTokenStats_IncludesSDKAndCodex(t *testing.T) {
+	ctx := newConfigCtx(t)
+	ctx.SessionManager.RegisterSDKSessionForTest(pty.NewSDKSession(pty.SessionConfig{ID: "sdk-1"}))
+	ctx.SessionManager.RegisterCodexSessionForTest(pty.NewCodexSession(pty.SessionConfig{ID: "codex-1"}))
+
+	resp := getJSON(t, ctx.GetTokenStats, "/api/token-stats")
+	stats, _ := resp["stats"].(map[string]interface{})
+	if stats["sessionCount"] != float64(2) {
+		t.Fatalf("expected sessionCount=2 (sdk+codex counted), got %v", stats["sessionCount"])
+	}
+	sessions, _ := stats["sessions"].([]interface{})
+	ids := map[string]bool{}
+	for _, s := range sessions {
+		if m, ok := s.(map[string]interface{}); ok {
+			ids[m["sessionId"].(string)] = true
+		}
+	}
+	if !ids["sdk-1"] || !ids["codex-1"] {
+		t.Fatalf("expected sdk-1 and codex-1 in token-stats sessions, got %v", ids)
+	}
+}
+
 func TestGetConfig_Shape(t *testing.T) {
 	ctx := newConfigCtx(t)
 	resp := getJSON(t, ctx.GetConfig, "/api/config")

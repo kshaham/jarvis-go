@@ -203,6 +203,21 @@ func (m *SessionManager) RegisterSDKSessionForTest(s *SDKSession) {
 	m.mu.Unlock()
 }
 
+// RegisterCodexSessionForTest registers a pre-built CodexSession in the
+// manager's internal map so tests can exercise handler code paths (e.g.
+// token-stats aggregation) without spinning up a real `codex exec`
+// subprocess. Production callers go through CreateCodexSession; this
+// shortcut bypasses subprocess lifecycle entirely and is unsafe for
+// anything other than test fixtures.
+func (m *SessionManager) RegisterCodexSessionForTest(s *CodexSession) {
+	if s == nil {
+		return
+	}
+	m.mu.Lock()
+	m.codexSessions[s.ID] = s
+	m.mu.Unlock()
+}
+
 // GetAllSDKSessions returns every live SDK session. Snapshot copy so
 // callers can iterate without holding the manager lock (useful for
 // bulk operations like daily-cap enforcement that call StopSDKSession

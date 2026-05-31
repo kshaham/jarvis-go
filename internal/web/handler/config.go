@@ -29,20 +29,35 @@ func (ctx *Context) GetStats(w http.ResponseWriter, r *http.Request) {
 // GetTokenStats returns token usage statistics.
 // GET /api/token-stats
 func (ctx *Context) GetTokenStats(w http.ResponseWriter, r *http.Request) {
-	sessions := ctx.SessionManager.GetAllSessions()
 	var totalInput, totalOutput, totalTokens int64
-	perSession := make([]map[string]interface{}, 0, len(sessions))
-	for _, s := range sessions {
-		input, output, total := s.Tokens()
+	perSession := make([]map[string]interface{}, 0)
+	add := func(id string, input, output, total int64) {
 		totalInput += input
 		totalOutput += output
 		totalTokens += total
 		perSession = append(perSession, map[string]interface{}{
-			"sessionId":    s.ID,
+			"sessionId":    id,
 			"inputTokens":  input,
 			"outputTokens": output,
 			"totalTokens":  total,
 		})
+	}
+	// PTY sessions (interactive / hooks-mode agents).
+	for _, s := range ctx.SessionManager.GetAllSessions() {
+		input, output, total := s.Tokens()
+		add(s.ID, input, output, total)
+	}
+	// SDK sessions (office agents in the default "sdk" mode) and Codex
+	// sessions (office agents on the openai-codex harness) live in separate
+	// registries from GetAllSessions, so their usage was previously absent
+	// from these totals — counting them here fixes that blind spot.
+	for _, s := range ctx.SessionManager.GetAllSDKSessions() {
+		input, output, total := s.Tokens()
+		add(s.ID, input, output, total)
+	}
+	for _, s := range ctx.SessionManager.GetAllCodexSessions() {
+		input, output, total := s.Tokens()
+		add(s.ID, input, output, total)
 	}
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -50,7 +65,7 @@ func (ctx *Context) GetTokenStats(w http.ResponseWriter, r *http.Request) {
 			"totalInputTokens":  totalInput,
 			"totalOutputTokens": totalOutput,
 			"totalTokens":       totalTokens,
-			"sessionCount":      len(sessions),
+			"sessionCount":      len(perSession),
 			"sessions":          perSession,
 			"dailyStats":        ctx.StateStore.GetDailyStats(),
 		},
