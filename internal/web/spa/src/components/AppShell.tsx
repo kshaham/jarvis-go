@@ -44,7 +44,7 @@ const railGlyphStyle: React.CSSProperties = {
   width: 24,
   height: 24,
   borderRadius: 6,
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
+  boxShadow: 'inset 0 1px 0 rgba(120,240,180,0.12)',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',

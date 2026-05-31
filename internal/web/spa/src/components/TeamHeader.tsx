@@ -15,7 +15,7 @@ export function TeamHeader() {
         background: 'rgba(3,20,14,0.55)',
         WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
         backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
-        boxShadow: '0 1px 0 0 rgba(255,255,255,0.04)',
+        boxShadow: '0 1px 0 0 rgba(78,240,163,0.05)',
       }}
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
@@ -55,7 +55,7 @@ export function TeamHeader() {
               style={{
                 background: 'var(--lg-fill-accent)',
                 border: '1px solid rgb(var(--accent-rgb) / 0.4)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
+                boxShadow: 'inset 0 1px 0 rgba(120,240,180,0.12)',
                 color: 'var(--accent)',
               }}
             >

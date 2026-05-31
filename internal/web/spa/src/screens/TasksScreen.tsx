@@ -302,7 +302,7 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
       className="flex flex-col gap-1.5 p-2.5"
       style={{
         borderLeft: '2px solid ' + priorityColor,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        boxShadow: 'inset 0 1px 0 rgba(78,240,163,0.05)',
       }}
     >
       <span style={taskTitleStyle}>
