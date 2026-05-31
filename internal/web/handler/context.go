@@ -8,6 +8,7 @@ import (
 
 	"github.com/kshaham/jarvis/internal/cases"
 	"github.com/kshaham/jarvis/internal/claudehooks"
+	"github.com/kshaham/jarvis/internal/deliverables"
 	"github.com/kshaham/jarvis/internal/integrations"
 	"github.com/kshaham/jarvis/internal/mockups"
 	"github.com/kshaham/jarvis/internal/notifications"
@@ -82,6 +83,9 @@ type Context struct {
 
 	// Mockups tracks per-project AI mockup generation (Mockups page).
 	Mockups *mockups.Manager
+
+	// Deliverables stores team-authored documents per project (Deliverables page).
+	Deliverables *deliverables.Manager
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,

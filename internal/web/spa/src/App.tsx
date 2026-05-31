@@ -6,6 +6,7 @@ import { AgentsScreen } from './screens/AgentsScreen';
 import { TasksScreen } from './screens/TasksScreen';
 import { TestsScreen } from './screens/TestsScreen';
 import { MockupsScreen } from './screens/MockupsScreen';
+import { DeliverablesScreen } from './screens/DeliverablesScreen';
 import { StandupScreen } from './screens/StandupScreen';
 import { MessagesScreen } from './screens/MessagesScreen';
 import { TimelineScreen } from './screens/TimelineScreen';
@@ -68,6 +69,7 @@ export function App() {
           <Route path="tasks" element={<TasksScreen />} />
           <Route path="tests" element={<TestsScreen />} />
           <Route path="mockups" element={<MockupsScreen />} />
+          <Route path="deliverables" element={<DeliverablesScreen />} />
           <Route path="standup" element={<StandupScreen />} />
           <Route path="chat" element={<MessagesScreen />} />
           <Route path="activity" element={<TimelineScreen />} />

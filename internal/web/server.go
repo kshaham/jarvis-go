@@ -17,6 +17,7 @@ import (
 
 	"github.com/kshaham/jarvis/internal/cases"
 	"github.com/kshaham/jarvis/internal/claudehooks"
+	"github.com/kshaham/jarvis/internal/deliverables"
 	"github.com/kshaham/jarvis/internal/integrations"
 	"github.com/kshaham/jarvis/internal/metrics"
 	"github.com/kshaham/jarvis/internal/mockups"
@@ -664,6 +665,7 @@ func (s *Server) setupRouter() chi.Router {
 		Projects:                projects.New(s.stateStore),
 		Quality:                 quality.NewManager(s.rootCtx, projects.New(s.stateStore), s.stateStore, s.sseBroker),
 		Mockups:                 mockups.NewManager(s.stateStore, s.sseBroker),
+		Deliverables:            deliverables.NewManager(s.stateStore, s.sseBroker),
 		ScreenManager:           s.screenManager,
 		SubagentWatcher:         s.subagentWatcher,
 		CaseManager:             s.caseManager,
@@ -907,6 +909,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/task/screenshot", h.OfficeAgentTaskScreenshot)
 				// Agent uploads one generated UI mockup (Mockups page).
 				r.Post("/mockup-upload", h.MockupsUpload)
+				// Agent uploads one team-authored deliverable (Deliverables page).
+				r.Post("/deliverable-upload", h.DeliverablesUpload)
 				// R36 · agent adds/removes labels on a task.
 				r.Post("/task/labels", h.OfficeAgentTaskLabels)
 				// Edit acceptance criteria on a task (set|add|remove).
@@ -985,6 +989,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/tests/results", h.TestsGetResults)
 			r.Get("/mockups/results", h.MockupsGetResults)
 			r.Get("/mockups/image/{projectId}/{kind}/{filename}", h.MockupsServe)
+			r.Get("/deliverables/results", h.DeliverablesGetResults)
+			r.Get("/deliverables/doc", h.DeliverablesGetDoc)
 			r.Get("/debug/memory", h.GetDebugMemory)
 			r.Get("/prompt-processor/config", h.GetPromptProcessor)
 			r.Get("/prompt-processor/stats", h.GetPromptProcessorRules)
@@ -1110,6 +1116,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/tests/scan", h.TestsRunScan)
 				r.Post("/tests/react", h.TestsRunReact)
 				r.Post("/mockups/generate", h.MockupsGenerate)
+				r.Post("/deliverables/generate", h.DeliverablesGenerate)
 				r.Post("/cleanup-state", h.CleanupState)
 				r.Put("/prompt-processor/config", h.UpdatePromptProcessor)
 				r.Put("/prompt-processor/enhancer", h.UpdatePromptProcessorRules)

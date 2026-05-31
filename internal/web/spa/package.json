@@ -29,8 +29,10 @@
     "motion": "^12.40.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^6.30.3",
     "recharts": "^3.8.1",
+    "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.4.0",
     "tailwindcss-animate": "^1.0.7"

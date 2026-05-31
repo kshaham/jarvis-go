@@ -511,3 +511,36 @@ export interface MockupProject extends SavedProject {
   ui: MockupKindState;
   presentation: MockupKindState;
 }
+
+// ── Deliverables page ───────────────────────────────────────────────────
+export type DeliverableType =
+  | 'research-brief'
+  | 'competitive-analysis'
+  | 'findings-memo'
+  | 'literature-review'
+  | 'project-plan'
+  | 'sop'
+  | 'decision-memo'
+  | 'status-report'
+  | 'custom';
+
+export interface Deliverable {
+  slug: string;
+  title: string;
+  type: string;
+  versions: number[]; // unix timestamps, newest first
+  updatedAt?: string;
+}
+
+export interface DeliverableDrafting {
+  type: string;
+  title?: string;
+  startedAt: string;
+}
+
+// DeliverableProject — a SavedProject joined with its deliverables + draft state.
+export interface DeliverableProject extends SavedProject {
+  teamActive: boolean;
+  drafting?: DeliverableDrafting;
+  deliverables: Deliverable[];
+}
