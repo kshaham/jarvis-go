@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/office/spawnpayload"
 	"github.com/kshaham/jarvis/internal/projects"
@@ -42,6 +43,37 @@ func TestDeleteProject(t *testing.T) {
 	}
 	if len(ctx.Projects.List()) != 0 {
 		t.Fatal("expected project deleted")
+	}
+}
+
+// TestDeleteProjectRoutesID drives the chi wrapper so DeleteProject reads the
+// {id} URL param and forwards it to deleteProjectWithID.
+func TestDeleteProjectRoutesID(t *testing.T) {
+	t.Parallel()
+	ctx := newProjectsCtx(t)
+	p := ctx.Projects.Upsert(projects.Project{Kind: projects.KindLocal, Path: "/p/a", LastUsedAt: "2026-05-31T10:00:00Z"})
+	r := chi.NewRouter()
+	r.Delete("/api/projects/{id}", ctx.DeleteProject)
+	req := httptest.NewRequest("DELETE", "/api/projects/"+p.ID, nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if len(ctx.Projects.List()) != 0 {
+		t.Fatal("expected project deleted via router")
+	}
+}
+
+// TestDeleteProjectEmptyID covers the 400 branch when no id is supplied.
+func TestDeleteProjectEmptyID(t *testing.T) {
+	t.Parallel()
+	ctx := newProjectsCtx(t)
+	req := httptest.NewRequest("DELETE", "/api/projects/", nil)
+	rec := httptest.NewRecorder()
+	ctx.deleteProjectWithID(rec, req, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty id, got %d", rec.Code)
 	}
 }
 
