@@ -339,7 +339,7 @@ export function useBrowserHealth() {
   return useQuery<BrowserHealth>({
     queryKey: BROWSER_HEALTH_KEY,
     queryFn: ({ signal }) =>
-      fetchJSON<BrowserHealth>('/api/office/browser-health', { signal }),
+      fetchJSON<BrowserHealth>('/api/office/browser/health', { signal }),
     refetchInterval: 60_000,
     // Failures are expected when the sibling container isn't up; don't
     // bother retrying loudly.

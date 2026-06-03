@@ -54,7 +54,8 @@ export function useDeliverableDoc(projectId: string | null, slug: string | null,
     enabled: !!projectId && !!slug,
     queryKey: ['deliverables', 'doc', projectId, slug, version ?? 'latest'],
     queryFn: ({ signal }) => {
-      const params = new URLSearchParams({ projectId: projectId!, slug: slug! });
+      if (!projectId || !slug) throw new Error('deliverable doc requires projectId + slug');
+      const params = new URLSearchParams({ projectId, slug });
       if (version) params.set('version', String(version));
       return fetchJSON<DeliverableDoc>(`/api/deliverables/doc?${params.toString()}`, { signal });
     },

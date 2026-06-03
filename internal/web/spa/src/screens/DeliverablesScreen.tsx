@@ -196,7 +196,10 @@ function DeliverableReader({ open, onClose }: { open: OpenDoc; onClose: () => vo
           {doc.data ? (
             <Button
               variant="secondary"
-              onClick={() => navigator.clipboard?.writeText(doc.data!.content)}
+              onClick={() => {
+                const content = doc.data?.content;
+                if (content) navigator.clipboard?.writeText(content);
+              }}
             >
               Copy
             </Button>

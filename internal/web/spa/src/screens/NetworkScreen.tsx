@@ -247,8 +247,7 @@ function useGraphElements(
   // positionOverrides: tracks user-dragged positions keyed by node id.
   // Lazy-init avoids allocating a new Map on every render (useRef has no
   // lazy-init form, so the pattern is: start null, init on first access).
-  const positionOverrides = useRef<Map<string, { x: number; y: number }> | null>(null);
-  if (positionOverrides.current === null) positionOverrides.current = new Map();
+  const positionOverrides = useRef<Map<string, { x: number; y: number }>>(new Map());
   // topoKey to detect topology changes (node set or edge topology changes).
   const prevTopoKey = useRef('');
 
@@ -283,7 +282,7 @@ function useGraphElements(
       id: m.sessionId,
       type: 'agent' as const,
       position:
-        positionOverrides.current!.get(m.sessionId) ??
+        positionOverrides.current.get(m.sessionId) ??
         settledPositions.get(m.sessionId) ?? { x: W / 2, y: H / 2 },
       data: { member: memberById.get(m.sessionId) as OfficeMember },
     }));
@@ -299,7 +298,7 @@ function useGraphElements(
   function onNodesChange(changes: NodeChange<Node>[]) {
     for (const change of changes) {
       if (change.type === 'position' && change.position) {
-        positionOverrides.current!.set(change.id, change.position);
+        positionOverrides.current.set(change.id, change.position);
       }
     }
     // applyNodeChanges is called for side-effects like select/remove; we

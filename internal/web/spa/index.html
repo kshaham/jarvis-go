@@ -9,6 +9,13 @@
          main.tsx) so the Go-embedded build works offline and the exact
          "Inter Variable" / "JetBrains Mono Variable" family names in
          tokens.css resolve. No external font CDN. -->
+    <!-- Self-host Excalidraw's fonts: serve them from the same-origin build
+         output (/react/fonts) instead of the esm.sh CDN so font-src 'self'
+         is satisfied and /whiteboard is CSP-clean + works offline. The font
+         files are copied into the build by the excalidraw-self-hosted-fonts
+         Vite plugin (see vite.config.ts). Must be set before the Excalidraw
+         chunk loads. -->
+    <script>window.EXCALIDRAW_ASSET_PATH = '/react/';</script>
     <!-- No-flash theme: apply the stored/system theme before first paint
          so light mode never flashes dark on load (mirrors useTheme). -->
     <script>

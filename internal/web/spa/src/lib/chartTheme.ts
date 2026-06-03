@@ -30,11 +30,21 @@ const FALLBACK: ChartTheme = {
   tooltipBorder: 'rgba(255,255,255,0.16)',
 };
 
+// useSyncExternalStore compares snapshots with Object.is and re-renders on
+// any change. getSnapshot MUST therefore return a STABLE reference when the
+// theme hasn't changed — returning a fresh object every call makes React
+// detect a change on every render and loop forever (React error #185). So
+// we cache the last snapshot keyed by its values and only mint a new object
+// when a token value actually differs (e.g. on a theme switch, which the
+// MutationObserver in subscribeChartTheme notifies us about).
+let cachedKey = '';
+let cachedTheme: ChartTheme = FALLBACK;
+
 function read(): ChartTheme {
   if (typeof document === 'undefined') return FALLBACK;
   const s = getComputedStyle(document.documentElement);
   const v = (name: string, fallback: string): string => s.getPropertyValue(name).trim() || fallback;
-  return {
+  const next: ChartTheme = {
     accent: v('--accent', FALLBACK.accent),
     accentStrong: v('--accent-strong', FALLBACK.accentStrong),
     success: v('--status-success', FALLBACK.success),
@@ -46,6 +56,11 @@ function read(): ChartTheme {
     tooltipBg: v('--bg-elevated', FALLBACK.tooltipBg),
     tooltipBorder: v('--border-strong', FALLBACK.tooltipBorder),
   };
+  const key = Object.values(next).join('|');
+  if (key === cachedKey) return cachedTheme;
+  cachedKey = key;
+  cachedTheme = next;
+  return next;
 }
 
 // subscribe wires the MutationObserver so useSyncExternalStore can
