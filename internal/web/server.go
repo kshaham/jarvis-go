@@ -1292,6 +1292,10 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/templates/{id}/duplicate", h.OfficeDuplicateTeamTemplate)
 					r.Post("/templates/from-team", h.OfficeTemplateFromTeam)
 					r.Post("/spawn-team", h.OfficeSpawnTeam)
+					// One-click "Demo Jarvis" — spawns a tiny, cost-bounded,
+					// real demo team into a sandbox project. Reuses the
+					// spawn-team guard (409 if a team is already live).
+					r.Post("/demo-spawn", h.OfficeDemoSpawn)
 					r.Post("/shutdown-team", h.OfficeShutdownTeam)
 					r.Put("/settings", h.OfficePutSettings)
 					r.Put("/auto-standup", h.OfficePutAutoStandup)

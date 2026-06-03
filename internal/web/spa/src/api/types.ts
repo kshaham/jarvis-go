@@ -31,6 +31,10 @@ export interface OfficeMember {
 
 export interface OfficeStatus {
   teamSpawned: boolean;
+  // ID of the template the current team was spawned from. Used to tell a
+  // one-click "Demo Jarvis" team (teamTemplateId === 'demo-jarvis') apart
+  // from a real team so the rail can offer a "Stop demo" control.
+  teamTemplateId?: string;
   paused?: boolean;
   pauseReason?: string;
   mission?: string;

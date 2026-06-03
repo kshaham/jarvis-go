@@ -48,7 +48,6 @@ func safeName(name string) bool {
 type (
 	memberOverride   = spawnpayload.MemberOverride
 	spawnTeamRequest = spawnpayload.SpawnTeamRequest
-	sessionTuning    = spawnpayload.SessionTuning
 )
 
 // Function-pointer aliases for the helpers that moved to spawnpayload.
@@ -58,7 +57,6 @@ var (
 	codegraphOptOut      = spawnpayload.CodegraphOptOut
 	eccOptOut            = spawnpayload.EccOptOut
 	resolveSessionTuning = spawnpayload.ResolveSessionTuning
-	defaultEffortFor     = spawnpayload.DefaultEffortFor
 )
 
 const (
@@ -530,6 +528,99 @@ func (ctx *Context) OfficeSpawnTeam(w http.ResponseWriter, r *http.Request) {
 	var req spawnTeamRequest
 	if !decodeBody(w, r, &req) {
 		return
+	}
+	ctx.spawnTeamFromRequest(w, req)
+}
+
+// demoMaxTurns caps each demo agent's turn count so the one-click demo
+// stays cheap and bounded. Combined with PerpetualMode=false and
+// DisableWorkflows=true, it keeps a demo run to a few minutes of work.
+const demoMaxTurns = 10
+
+// demoMission is the mission handed to the built-in "Demo Jarvis" team.
+// It frames a tiny self-contained sample app and reinforces the ritual
+// sequence the lead's system prompt already describes, so every office
+// screen fills with genuine activity within a few minutes.
+const demoMission = `This is a guided DEMONSTRATION of the Virtual Office. Build a tiny sample to-do web app called "TaskPal" -- but the real point is to show the office working, not to ship a big product.
+
+Keep every step small and do it for real:
+- Run a standup so each member gives a one-line update.
+- Post a short plan to the whiteboard.
+- Create a small task queue (about four tasks) with one dependency, and file one bug.
+- Coordinate over team messages; hold one short brainstorm meeting.
+- Capture at least one knowledge/learning entry.
+- Attach a mockup and a short deliverable summary.
+- Finish with a wrap-up summary.
+
+Breadth over depth: touch every office ritual once rather than polishing any single one.`
+
+// resolveDemoWorkspaceDir picks a writable, allowlisted sandbox
+// directory for the demo team. Preference order:
+//  1. the container workspace (/app/workspace) when it exists — the
+//     server / Docker deploy, already allowlisted;
+//  2. the operator's configured defaultWorkingDir;
+//  3. $HOME (always part of the default working-dir allowlist).
+//
+// In every case the demo project lives at <base>/jarvis-demo, so the
+// standard ResolveWorkingDir validation inside spawnTeamFromRequest
+// accepts it. The dir is reused idempotently across demo runs.
+func (ctx *Context) resolveDemoWorkspaceDir() string {
+	const demoSlug = "jarvis-demo"
+	if info, err := os.Stat(office.NewProjectRoot); err == nil && info.IsDir() {
+		return filepath.Join(office.NewProjectRoot, demoSlug)
+	}
+	if settings := ctx.StateStore.GetSettings(); settings != nil {
+		if dir, _ := settings["defaultWorkingDir"].(string); dir != "" {
+			return filepath.Join(dir, demoSlug)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, demoSlug)
+	}
+	return demoSlug
+}
+
+// OfficeDemoSpawn launches the built-in "Demo Jarvis" team: a tiny,
+// cost-bounded, REAL team spawned into a self-contained sandbox
+// project. It reuses the standard spawn pipeline (and therefore its
+// atomic single-team guard), so attempting a demo while any team is
+// already live returns 409 Conflict — the demo can never clobber a
+// real team's work. The team is tagged via templateId "demo-jarvis"
+// (recorded in office status as teamTemplateId) so the UI can tell a
+// demo team apart from a real one and offer a one-click "Stop demo".
+func (ctx *Context) OfficeDemoSpawn(w http.ResponseWriter, r *http.Request) {
+	dir := ctx.resolveDemoWorkspaceDir()
+
+	// Scaffold + seed the sandbox project. SeedNewProjectCLAUDEMd does
+	// MkdirAll + an atomic, idempotent CLAUDE.md write (never overwrites
+	// an existing one), so re-running the demo reuses the same dir
+	// harmlessly. A seed failure is non-fatal — the team can still spawn.
+	if err := office.SeedNewProjectCLAUDEMd(dir, "jarvis-demo", demoMission); err != nil {
+		slog.Warn("demo spawn: sandbox seed failed", "dir", dir, "err", err)
+	}
+	if ctx.SSEBroker != nil {
+		ctx.SSEBroker.Broadcast("office:projectCreated", map[string]interface{}{
+			"name": "jarvis-demo",
+			"path": dir,
+		})
+	}
+
+	// One-shot, workflows off, low effort, capped turns. Provider/Model
+	// are intentionally left empty on every override so the demo inherits
+	// the operator's configured provider + default model — provider
+	// agnostic (Anthropic / Codex / Z.AI), no brittle hardcoded names.
+	perpetual := false
+	req := spawnTeamRequest{
+		TemplateID:       "demo-jarvis",
+		Mission:          demoMission,
+		WorkingDir:       dir,
+		PerpetualMode:    &perpetual,
+		DisableWorkflows: true,
+		MemberOverrides: []memberOverride{
+			{ID: "atlas", MaxTurns: demoMaxTurns, Effort: "medium"},
+			{ID: "pixel", MaxTurns: demoMaxTurns, Effort: "low"},
+			{ID: "byte", MaxTurns: demoMaxTurns, Effort: "low"},
+		},
 	}
 	ctx.spawnTeamFromRequest(w, req)
 }

@@ -14,12 +14,14 @@ package teamtemplates
 //   - builtin_backend.go    → backendAIMembers
 //   - builtin_frontend.go   → frontendStudioMembers
 //   - builtin_research.go   → researchLabMembers, innovationSprintMembers
+//   - builtin_demo.go       → demoJarvisMembers
 //
 // To add a new builtin: add a new var to the right sibling (or a new
 // sibling file for a new category), then add one row to the slice
 // below. No other wiring is needed — handlers consume this slice.
 func BuiltInTemplates() []TeamTemplate {
 	return []TeamTemplate{
+		{ID: "demo-jarvis", Name: "Demo Jarvis", Description: "A tiny 3-member demo team (lead + designer + engineer) that runs the full office workflow for real — standups, whiteboard, tasks, chats, meetings, knowledge, deliverables — so every screen fills with genuine data. Powers the one-click \"Demo Jarvis\" button.", Category: "demo", IsBuiltIn: true, Members: demoJarvisMembers},
 		{ID: "office-7", Name: "Office (Default)", Description: "The original 7-member dev team: manager, architect, designer, frontend, backend, devops, and QA.", Category: "fullstack", IsBuiltIn: true, Members: office7Members},
 		{ID: "backend-ai-6", Name: "Backend / AI", Description: "AI-focused team with ML engineers, prompt engineer, data engineer, API engineer, and AI QA.", Category: "backend", IsBuiltIn: true, Members: backendAIMembers},
 		{ID: "frontend-studio-6", Name: "Frontend Studio", Description: "Frontend-focused team with design lead, architect, UI engineer, interaction engineer, accessibility, and performance.", Category: "frontend", IsBuiltIn: true, Members: frontendStudioMembers},
