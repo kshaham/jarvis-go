@@ -40,3 +40,7 @@ coverage.out
 /internal/web/spa/node_modules/
 /internal/web/spa/dist/
 /internal/web/static/public/react/
+
+# UI mockup exploration artifacts (heavy PNGs + galleries; design scratch,
+# kept on disk but out of git history and the Docker build context)
+/docs/mockups/

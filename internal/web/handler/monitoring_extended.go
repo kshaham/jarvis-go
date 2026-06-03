@@ -426,7 +426,7 @@ func (ctx *Context) DeleteSubagent(w http.ResponseWriter, r *http.Request) {
 // GET /api/subagent-window-states
 func (ctx *Context) GetSubagentWindowStates(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	states, _ := settings["subagentWindowStates"]
+	states := settings["subagentWindowStates"]
 	if states == nil {
 		states = map[string]interface{}{}
 	}
@@ -457,7 +457,7 @@ func (ctx *Context) UpdateSubagentWindowStates(w http.ResponseWriter, r *http.Re
 // GET /api/subagent-parents
 func (ctx *Context) GetSubagentParents(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	parents, _ := settings["subagentParents"]
+	parents := settings["subagentParents"]
 	if parents == nil {
 		parents = map[string]interface{}{}
 	}

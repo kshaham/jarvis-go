@@ -13,9 +13,6 @@ const circuitBreakerDefaultWindow = 30 * time.Second
 // stays permanently open.
 const maxAutoResets = 5
 
-// autoResetDelay is the base delay before auto-resetting a tripped breaker.
-const autoResetDelay = 5 * time.Minute
-
 // maxCompletionTimes bounds the sliding window of completion timestamps.
 const maxCompletionTimes = 32
 

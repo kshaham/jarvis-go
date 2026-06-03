@@ -1903,7 +1903,6 @@ func (m *Manager) checkOneDevInstance(name string, now time.Time) {
 	}
 	url := inst.URL
 	nextCheckAt := inst.NextCheckAt
-	failures := inst.HealthFailures
 	m.mu.RUnlock()
 
 	if !nextCheckAt.IsZero() && now.Before(nextCheckAt) {
@@ -1931,7 +1930,7 @@ func (m *Manager) checkOneDevInstance(name string, now time.Time) {
 		return
 	}
 	inst.HealthFailures++
-	failures = inst.HealthFailures
+	failures := inst.HealthFailures
 	// Exponential backoff: interval×1, ×2, ×4 (capped at ×4). Uses the
 	// same base interval as the idle monitor so the schedule stays
 	// predictable relative to other checks.
@@ -2145,10 +2144,9 @@ type WrapUpStatus struct {
 
 // wrapUpAgentSnap is an intermediate snapshot used by GetWrapUpStatus.
 type wrapUpAgentSnap struct {
-	agent      *AgentState
-	configID   string
-	name       string
-	wrappingUp bool
+	agent    *AgentState
+	configID string
+	name     string
 }
 
 // GetWrapUpStatus returns the current wrap-up status with per-agent details.
@@ -2308,6 +2306,10 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	teamSpawned := m.teamSpawned
 	wrappingUp := m.wrappingUp
 	perpetualMode := m.perpetualMode
+	// Template the current team was spawned from. Surfaced here (not just in
+	// GetOfficeSettings) so the SPA's office-status hook can tell a one-click
+	// "Demo Jarvis" team apart from a real one and offer a "Stop demo" control.
+	teamTemplateID := m.lastTemplateID
 	// R25 · Pause state so the dashboard can show a banner + gate
 	// operator-affordances (e.g. Pause button flips to Resume).
 	paused := m.paused
@@ -2374,6 +2376,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"meetings":          meetings,
 		"fileLocks":         locks,
 		"teamSpawned":       teamSpawned,
+		"teamTemplateId":    teamTemplateID,
 		"perpetualMode":     perpetualMode,
 		"paused":            paused,
 		"pause":             pauseBlock,

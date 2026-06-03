@@ -505,14 +505,25 @@ func buildAntiPatternFromCluster(c *experienceCluster, avg float64, now time.Tim
 	}
 }
 
+// titleWords upper-cases the first letter of each space-separated word.
+// Replaces the deprecated strings.Title (which mishandles Unicode word
+// boundaries) for the ASCII labels/roles used in experience titles.
+func titleWords(s string) string {
+	parts := strings.Fields(s)
+	for i, p := range parts {
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
 // antiPatternTitleSuffix builds the descriptive half of an
 // anti-pattern title (the "Avoid: <suffix>" sentence).
 func antiPatternTitleSuffix(c *experienceCluster) string {
 	if len(c.labels) > 0 {
-		return strings.Title(c.labels[0]) + " task pitfalls"
+		return titleWords(c.labels[0]) + " task pitfalls"
 	}
 	if c.role != "" {
-		return strings.Title(c.role) + " pitfalls"
+		return titleWords(c.role) + " pitfalls"
 	}
 	return "common team pitfalls"
 }
@@ -534,10 +545,10 @@ func workflowSlugFor(c *experienceCluster) string {
 // logic but title-cases the result.
 func workflowTitleFor(c *experienceCluster) string {
 	if len(c.labels) > 0 {
-		return "Workflow for " + strings.Title(c.labels[0]) + " tasks"
+		return "Workflow for " + titleWords(c.labels[0]) + " tasks"
 	}
 	if c.role != "" {
-		return "Workflow for " + strings.Title(c.role)
+		return "Workflow for " + titleWords(c.role)
 	}
 	return "Workflow for the team"
 }

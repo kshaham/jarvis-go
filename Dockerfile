@@ -9,7 +9,7 @@
 # Run:     docker run --rm -v ~/.jarvis:/home/jarvis/.jarvis -p 3555:3555 jarvis
 
 # --- Stage 1: builder ---------------------------------------------------------
-FROM golang:1.25-alpine AS builder
+FROM golang:1.25.11-alpine AS builder
 WORKDIR /src
 
 # Cache module downloads separately from source changes.

@@ -618,13 +618,7 @@ func (s *SDKSession) processEvent(event claude.Event) {
 		// and emit one EventToolInvocation per matched pair.
 		if len(event.Raw) > 0 && looksLikeUserMessage(event.Raw) {
 			for _, inv := range s.toolTracker.observeUser(event.Raw) {
-				s.emitEvent(EventToolInvocation{
-					Name:       inv.Name,
-					ToolUseID:  inv.ToolUseID,
-					InputHash:  inv.InputHash,
-					ResultHash: inv.ResultHash,
-					IsError:    inv.IsError,
-				})
+				s.emitEvent(EventToolInvocation(inv))
 			}
 		}
 	}

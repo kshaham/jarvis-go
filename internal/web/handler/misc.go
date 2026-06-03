@@ -455,7 +455,7 @@ func (ctx *Context) HandleHookEvent(w http.ResponseWriter, r *http.Request) {
 // GET /api/hook-config
 func (ctx *Context) GetHookConfig(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	hookConfig, _ := settings["hookConfig"]
+	hookConfig := settings["hookConfig"]
 	if hookConfig == nil {
 		hookConfig = map[string]interface{}{}
 	}
@@ -472,7 +472,7 @@ func (ctx *Context) GetHookConfig(w http.ResponseWriter, r *http.Request) {
 func (ctx *Context) GetTaskGate(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	settings := ctx.StateStore.GetSettings()
-	gate, _ := settings["taskGate-"+sessionID]
+	gate := settings["taskGate-"+sessionID]
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"gate":    gate,

@@ -249,7 +249,7 @@ func renderStandup(s StandupTranscript) string {
 	})
 	for _, typ := range order {
 		b.WriteString("## ")
-		b.WriteString(strings.Title(strings.ReplaceAll(typ, "_", " ")))
+		b.WriteString(titleWords(strings.ReplaceAll(typ, "_", " ")))
 		b.WriteString("\n\n")
 		for _, m := range groups[typ] {
 			b.WriteString("### ")

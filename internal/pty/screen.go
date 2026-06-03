@@ -351,7 +351,7 @@ func isValidEnvKey(key string) bool {
 func buildEnvExports(sessionID, screenName string, providerEnv map[string]string) string {
 	parts := []string{
 		fmt.Sprintf("export JARVIS_SESSION_ID=%q", sessionID),
-		fmt.Sprintf("export JARVIS_SCREEN=1"),
+		"export JARVIS_SCREEN=1",
 		fmt.Sprintf("export JARVIS_SCREEN_NAME=%q", screenName),
 	}
 	for k, v := range providerEnv {

@@ -316,7 +316,7 @@ func (m *Manager) waitForBrainstormResponse(sessionID, speakerName string) strin
 		// facilitator died; unblock with a clear message instead of
 		// treating the sentinel string as a real proposal.
 		if response == meetingAbortedSentinel {
-			return fmt.Sprintf("[meeting aborted: facilitator unavailable]")
+			return "[meeting aborted: facilitator unavailable]"
 		}
 		return response
 	case <-timer.C:

@@ -345,7 +345,7 @@ func (ctx *Context) CleanupState(w http.ResponseWriter, r *http.Request) {
 // GET /api/prompt-processor
 func (ctx *Context) GetPromptProcessor(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	pp, _ := settings["promptProcessor"]
+	pp := settings["promptProcessor"]
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success":         true,
 		"promptProcessor": pp,
@@ -373,7 +373,7 @@ func (ctx *Context) UpdatePromptProcessor(w http.ResponseWriter, r *http.Request
 // GET /api/prompt-processor/rules
 func (ctx *Context) GetPromptProcessorRules(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	rules, _ := settings["promptProcessorRules"]
+	rules := settings["promptProcessorRules"]
 	if rules == nil {
 		rules = []interface{}{}
 	}
@@ -404,7 +404,7 @@ func (ctx *Context) UpdatePromptProcessorRules(w http.ResponseWriter, r *http.Re
 // GET /api/respawn/learning
 func (ctx *Context) GetRespawnLearning(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	learning, _ := settings["respawnLearning"]
+	learning := settings["respawnLearning"]
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success":  true,
 		"learning": learning,
@@ -415,7 +415,7 @@ func (ctx *Context) GetRespawnLearning(w http.ResponseWriter, r *http.Request) {
 // GET /api/respawn/learning/stats
 func (ctx *Context) GetRespawnLearningStats(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	stats, _ := settings["respawnLearningStats"]
+	stats := settings["respawnLearningStats"]
 	if stats == nil {
 		stats = map[string]interface{}{}
 	}
@@ -430,7 +430,7 @@ func (ctx *Context) GetRespawnLearningStats(w http.ResponseWriter, r *http.Reque
 func (ctx *Context) GetRespawnLearningRecommendations(w http.ResponseWriter, r *http.Request) {
 	workingDir := r.URL.Query().Get("workingDir")
 	settings := ctx.StateStore.GetSettings()
-	learnings, _ := settings["respawnLearning"]
+	learnings := settings["respawnLearning"]
 
 	recommendations := make([]interface{}, 0)
 	if learningList, ok := learnings.([]interface{}); ok {
@@ -456,7 +456,7 @@ func (ctx *Context) GetRespawnLearningRecommendations(w http.ResponseWriter, r *
 // GET /api/respawn/learning/categories
 func (ctx *Context) GetRespawnLearningCategories(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	learnings, _ := settings["respawnLearning"]
+	learnings := settings["respawnLearning"]
 
 	categories := make(map[string]int)
 	totalLearnings := 0
@@ -496,7 +496,7 @@ func (ctx *Context) PreviewSmartKickstart(w http.ResponseWriter, r *http.Request
 
 	settings := ctx.StateStore.GetSettings()
 	smartKickstart, _ := settings["smartKickstart"].(map[string]interface{})
-	learnings, _ := settings["respawnLearning"]
+	learnings := settings["respawnLearning"]
 
 	sources := make([]string, 0)
 	promptParts := []string{"# Smart Kickstart Prompt"}
@@ -541,7 +541,7 @@ func (ctx *Context) PreviewSmartUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	settings := ctx.StateStore.GetSettings()
-	learnings, _ := settings["respawnLearning"]
+	learnings := settings["respawnLearning"]
 
 	sources := make([]string, 0)
 	promptParts := []string{"# Smart Update Prompt"}
@@ -570,7 +570,7 @@ func (ctx *Context) PreviewSmartUpdate(w http.ResponseWriter, r *http.Request) {
 // GET /api/respawn/smart-kickstart
 func (ctx *Context) GetRespawnSmartKickstart(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	smartKickstart, _ := settings["smartKickstart"]
+	smartKickstart := settings["smartKickstart"]
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success":        true,
 		"smartKickstart": smartKickstart,
@@ -598,7 +598,7 @@ func (ctx *Context) UpdateRespawnSmartKickstart(w http.ResponseWriter, r *http.R
 // GET /api/respawn/smart-kickstart/stats
 func (ctx *Context) GetRespawnSmartKickstartStats(w http.ResponseWriter, r *http.Request) {
 	settings := ctx.StateStore.GetSettings()
-	stats, _ := settings["smartKickstartStats"]
+	stats := settings["smartKickstartStats"]
 	if stats == nil {
 		stats = map[string]interface{}{}
 	}

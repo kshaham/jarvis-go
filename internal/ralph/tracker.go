@@ -136,7 +136,6 @@ type Tracker struct {
 
 	// Event debouncing
 	pendingEvents   bool
-	debounceTimer   *time.Timer
 	debounceStopper chan struct{}
 
 	// Event channel

@@ -352,7 +352,7 @@ func (m *SessionManager) StopCodexSession(id string) error {
 	session, ok := m.codexSessions[id]
 	m.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("Codex session not found: %s", id)
+		return fmt.Errorf("codex session not found: %s", id)
 	}
 	session.Stop()
 	m.mu.Lock()
