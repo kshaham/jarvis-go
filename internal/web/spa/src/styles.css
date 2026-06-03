@@ -666,28 +666,60 @@
   }
 }
 
-/* Spawn screen — collapse the two-pane layout under 900px so the
- * template chip stacks above the configure form instead of cramping
- * the right pane down to a sliver. */
-/* Spawn configure step — two even columns of tiles. Column 1 holds the
- * team-level setup (template chip, mission, workdir, defaults); column 2
- * leads with the Members roster. Collapses to a single column on narrow
- * viewports. */
-.spawn-grid {
-  display: grid;
-  gap: 16px;
-  align-items: start;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+/* ── Spawn "Power Grid" bento (B2) ──────────────────────────────────
+ * Four visual columns matching the B2 mockup. The two left config columns
+ * are ONE CSS multi-column region (.bento-config) so the browser auto-
+ * balances their heights — no matter how tall any single tile's content
+ * is, the two columns stay even. The Roster and Edit+Review columns are
+ * independent flex stacks beside it. Folds to a single config column +
+ * stacked panels on tablet, then one column on phones. */
+.bento {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
 }
-.spawn-col {
+.bento-config {
+  flex: 2 1 480px;
+  min-width: 0;
+  columns: 2;
+  column-gap: 12px;
+}
+/* Multi-column spacing is margin-based (column-gap is horizontal only);
+ * break-inside keeps each tile whole within a column. */
+.bento-config > * {
+  break-inside: avoid;
+  margin-bottom: 12px;
+}
+.bento-col {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
+  flex: 1.15 1 300px;
 }
-@media (max-width: 1000px) {
-  .spawn-grid {
-    grid-template-columns: 1fr;
+
+/* Tablet: config becomes a full-width 2-up; Roster + Edit stack 2-up below. */
+@media (max-width: 1180px) {
+  .bento-config {
+    flex: 1 1 100%;
+  }
+  .bento-col {
+    flex: 1 1 45%;
+  }
+}
+
+/* Phone: single column throughout. */
+@media (max-width: 720px) {
+  .bento {
+    gap: 10px;
+  }
+  .bento-config {
+    columns: 1;
+    flex: 1 1 100%;
+  }
+  .bento-col {
+    flex: 1 1 100%;
   }
 }
 

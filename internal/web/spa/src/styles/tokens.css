@@ -102,7 +102,7 @@
   --stagger-list: 24ms;
 
   /* Layout widths */
-  --width-content: 1180px;        /* main content max-width */
+  --width-content: 1180px;        /* DEPRECATED: app shell is now full-bleed; kept for any opt-in narrow wrappers */
   --width-wide-modal: 1100px;     /* compose-relay modal */
 
   /* Elevation tiers — three only. Depth comes from blur + border, not

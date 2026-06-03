@@ -1,101 +1,36 @@
 import { useMemo } from 'react';
-import { m, useReducedMotion } from 'motion/react';
+import type { CSSProperties } from 'react';
+import { Check, Circle } from 'lucide-react';
 import type { TeamTemplate } from '../../api/types';
-import { Button } from '@/components/ui';
+import { SectionCard } from './formPrimitives';
 import { AvatarStack } from './Avatar';
 import type { MemberEdit } from './memberEditor.utils';
 import { TierCounts } from './TierBadge';
 import type { Tier } from './TierBadge';
-import type { Validity } from './reviewSummary.utils';
-import type { WorkdirMode } from './WorkdirSection';
+import type { ChecklistItem } from './reviewSummary.utils';
 
-const stickyBarStyle: React.CSSProperties = {
-  position: 'sticky',
-  bottom: 0,
-  zIndex: 10,
-  background: 'color-mix(in srgb, var(--bg-app) 92%, transparent)',
-  backdropFilter: 'blur(8px)',
-  WebkitBackdropFilter: 'blur(8px)',
-  borderTop: '1px solid var(--border-default)',
-  padding: 12,
-  marginInline: -12,
-  marginTop: 8,
+const checklistStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
 };
 
-const chipStyle: React.CSSProperties = {
-  padding: '4px 10px',
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 'var(--radius-pill)',
-  color: 'var(--text-secondary)',
-  fontSize: 12,
-  fontWeight: 600,
-  maxWidth: 360,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  display: 'inline-block',
-};
-
-function workdirLabel({
-  mode,
-  workingDir,
-  projectName,
-  githubRepo,
-}: {
-  mode: WorkdirMode;
-  workingDir: string;
-  projectName: string;
-  githubRepo: string;
-}): string {
-  if (mode === 'new') return `new → /app/workspace/${projectName || 'project-name'}`;
-  if (mode === 'github') return `github → ${githubRepo || '(no repo set)'}`;
-  return workingDir || '(no folder set)';
-}
-
-export function ReviewSummary({
+// ReviewTile — the bento "Review" summary: who's on the team and the
+// pre-spawn checklist. The Spawn action itself lives in the page command
+// strip, and the provider/workdir live in their own tiles, so this stays
+// a compact glance in the right column (matching the B2 mockup).
+export function ReviewTile({
   tpl,
   members,
-  defaultProvider,
-  defaultModel,
-  mode,
-  workingDir,
-  projectName,
-  githubRepo,
-  validity,
-  pending,
-  error,
-  onSpawn,
+  checklist,
 }: {
   tpl: TeamTemplate;
   members: MemberEdit[];
-  defaultProvider: string;
-  defaultModel: string;
-  mode: WorkdirMode;
-  workingDir: string;
-  projectName: string;
-  githubRepo: string;
-  validity: Validity;
-  pending: boolean;
-  error: string | null;
-  onSpawn: () => void;
+  checklist: ChecklistItem[];
 }) {
-  const reduce = useReducedMotion();
-  const providerLabel =
-    defaultProvider === 'claude-subscription'
-      ? 'Claude · Sub'
-      : defaultProvider === 'claude-api'
-        ? 'Claude · API'
-        : defaultProvider === 'zai-glm'
-          ? 'Z.AI · GLM'
-          : defaultProvider === 'openai-codex'
-            ? 'OpenAI · Codex'
-            : defaultProvider === 'openai-custom'
-              ? 'OpenAI · Custom'
-              : defaultProvider === 'openai-subscription'
-                ? 'OpenAI · Sub'
-                : defaultProvider;
-
   const baseById = useMemo(
     () => new Map(tpl.members.map((m, i) => [m.id ?? `${tpl.id}-${i}`, m] as const)),
     [tpl],
@@ -110,91 +45,44 @@ export function ReviewSummary({
       tier: m.tier ?? (base?.tier as Tier | undefined),
     };
   });
-  const tiers = members.map((m) => ({ tier: m.tier ?? (baseById.get(m.id)?.tier as Tier | undefined) }));
-  const spawnDisabled = !validity.ok || pending;
+  const tiers = members.map((m) => ({
+    tier: m.tier ?? (baseById.get(m.id)?.tier as Tier | undefined),
+  }));
 
   return (
-    <m.div
-      // Subtle rise-and-fade as the sticky review bar mounts (after a
-      // template is chosen). Disabled under reduced motion.
-      initial={reduce ? false : { opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-      style={stickyBarStyle}
-    >
-      {error ? (
-        <div
-          role="alert"
-          style={{
-            padding: 10,
-            marginBottom: 10,
-            background: 'rgba(255,90,95,0.10)',
-            border: '1px solid var(--status-error)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--status-error)',
-            fontSize: 12,
-          }}
-        >
-          {error}
-        </div>
-      ) : null}
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-          flexWrap: 'wrap',
-        }}
-      >
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+    <SectionCard title="Review" hint="Checked before you spawn.">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <AvatarStack members={stack} max={6} size="sm" />
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             {members.length} member{members.length === 1 ? '' : 's'}
           </span>
-        </span>
+          <TierCounts members={tiers} />
+        </div>
 
-        <TierCounts members={tiers} />
-
-        <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
-          <Chip>{providerLabel}{defaultModel ? ` · ${defaultModel}` : ''}</Chip>
-          <Chip mono>{workdirLabel({ mode, workingDir, projectName, githubRepo })}</Chip>
-        </span>
-
-        <span style={{ flex: 1 }} />
-
-        <Button
-          variant="primary"
-          onClick={spawnDisabled ? undefined : onSpawn}
-          disabled={spawnDisabled}
-          aria-disabled={spawnDisabled}
-          title={validity.ok ? '' : validity.reason}
-        >
-          {pending ? 'Spawning…' : 'Spawn team'}
-        </Button>
+        <ul style={checklistStyle}>
+          {checklist.map((item) => (
+            <li
+              key={item.label}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: item.ok ? 'var(--status-success)' : 'var(--text-muted)',
+              }}
+            >
+              {item.ok ? (
+                <Check size={14} strokeWidth={2.5} aria-hidden />
+              ) : (
+                <Circle size={14} strokeWidth={2} aria-hidden />
+              )}
+              {item.label}
+            </li>
+          ))}
+        </ul>
       </div>
-
-      {!validity.ok ? (
-        <p
-          style={{
-            margin: '8px 0 0',
-            fontSize: 12,
-            color: 'var(--text-muted)',
-          }}
-        >
-          {validity.reason}
-        </p>
-      ) : null}
-    </m.div>
-  );
-}
-
-function Chip({ children, mono }: { children: React.ReactNode; mono?: boolean }) {
-  return (
-    <span
-      style={{ ...chipStyle, fontFamily: mono ? 'var(--font-mono)' : 'inherit' }}
-    >
-      {children}
-    </span>
+    </SectionCard>
   );
 }

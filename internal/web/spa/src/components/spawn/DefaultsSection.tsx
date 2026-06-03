@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Input } from '@/components/ui';
 import { ChipGroup, Field, ModelSelect, SectionCard, Toggle } from './formPrimitives';
 import { inputStyle } from './formPrimitives.utils';
@@ -53,7 +54,31 @@ const KNOWN_VALUES = new Set<string>(PROVIDERS.map((p) => p.value));
 
 const INTERVALS = [30, 60, 120, 240];
 
-export function DefaultsSection({
+// Any OpenAI provider runs on the Codex harness, where Dynamic Workflows is N/A.
+export function isCodexHarnessProvider(provider: string): boolean {
+  return (
+    provider === 'openai-codex' ||
+    provider === 'openai-custom' ||
+    provider === 'openai-subscription'
+  );
+}
+
+const stackStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 10 };
+
+const codexLoginHintStyle: CSSProperties = {
+  padding: '8px 10px',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--lg-fill)',
+  border: '1px solid var(--lg-rim)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+  color: 'var(--text-secondary)',
+};
+
+// ProviderModelSection — the team-wide provider + model defaults tile. Owns
+// the conditional OpenAI base-URL / API-key fields and the Codex-login hint;
+// these defaults apply to every member unless overridden in the editor.
+export function ProviderModelSection({
   defaultProvider,
   setDefaultProvider,
   defaultModel,
@@ -63,14 +88,6 @@ export function DefaultsSection({
   openaiApiKey,
   setOpenaiApiKey,
   openaiKeyConfigured,
-  perpetual,
-  setPerpetual,
-  telegramEnabled,
-  setTelegramEnabled,
-  telegramInterval,
-  setTelegramInterval,
-  workflowsEnabled,
-  setWorkflowsEnabled,
 }: {
   defaultProvider: string;
   setDefaultProvider: (v: string) => void;
@@ -81,14 +98,6 @@ export function DefaultsSection({
   openaiApiKey: string;
   setOpenaiApiKey: (v: string) => void;
   openaiKeyConfigured: boolean;
-  perpetual: boolean;
-  setPerpetual: (b: boolean) => void;
-  telegramEnabled: boolean;
-  setTelegramEnabled: (b: boolean) => void;
-  telegramInterval: number;
-  setTelegramInterval: (n: number) => void;
-  workflowsEnabled: boolean;
-  setWorkflowsEnabled: (b: boolean) => void;
 }) {
   const activeProvider = KNOWN_VALUES.has(defaultProvider)
     ? PROVIDERS.find((p) => p.value === defaultProvider) ?? null
@@ -100,13 +109,11 @@ export function DefaultsSection({
   const isSubscription = defaultProvider === 'openai-subscription';
   const showOpenAIKeyFields =
     defaultProvider === 'openai-codex' || defaultProvider === 'openai-custom';
-  // Any OpenAI provider runs on the Codex harness (Dynamic Workflows N/A).
-  const isCodexHarness = showOpenAIKeyFields || isSubscription;
 
   return (
     <SectionCard
-      title="Defaults"
-      hint="Applies to every member unless overridden in the editor below."
+      title="Provider & model"
+      hint="Applies to every member unless overridden in the editor."
     >
       <Field label="Provider" hint={providerHint}>
         <ChipGroup<Provider | ''>
@@ -134,30 +141,12 @@ export function DefaultsSection({
           label="Codex login required"
           hint="One-time, in the container: run  CODEX_HOME=~/.jarvis/codex-auth codex login  to authorize your ChatGPT/Codex Pro account. jarvis stages those OAuth credentials into each agent — no API key, no per-token cost."
         >
-          <div
-            style={{
-              padding: '8px 10px',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--lg-fill)',
-              border: '1px solid var(--lg-rim)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 12,
-              color: 'var(--text-secondary)',
-            }}
-          >
-            CODEX_HOME=~/.jarvis/codex-auth codex login
-          </div>
+          <div style={codexLoginHintStyle}>CODEX_HOME=~/.jarvis/codex-auth codex login</div>
         </Field>
       ) : null}
 
       {showOpenAIKeyFields ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 12,
-          }}
-        >
+        <div style={stackStyle}>
           {defaultProvider === 'openai-custom' ? (
             <Field
               label="OpenAI base URL"
@@ -191,14 +180,37 @@ export function DefaultsSection({
           </Field>
         </div>
       ) : null}
+    </SectionCard>
+  );
+}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 12,
-        }}
-      >
+// TogglesSection — the team-wide behavior switches tile. `defaultProvider`
+// only drives the Dynamic-workflows hint (ignored on the Codex harness).
+export function TogglesSection({
+  defaultProvider,
+  perpetual,
+  setPerpetual,
+  telegramEnabled,
+  setTelegramEnabled,
+  telegramInterval,
+  setTelegramInterval,
+  workflowsEnabled,
+  setWorkflowsEnabled,
+}: {
+  defaultProvider: string;
+  perpetual: boolean;
+  setPerpetual: (b: boolean) => void;
+  telegramEnabled: boolean;
+  setTelegramEnabled: (b: boolean) => void;
+  telegramInterval: number;
+  setTelegramInterval: (n: number) => void;
+  workflowsEnabled: boolean;
+  setWorkflowsEnabled: (b: boolean) => void;
+}) {
+  const isCodexHarness = isCodexHarnessProvider(defaultProvider);
+  return (
+    <SectionCard title="Options" hint="Team-wide behavior switches.">
+      <div style={stackStyle}>
         <Toggle
           label="Perpetual improvement"
           value={perpetual}
@@ -215,30 +227,28 @@ export function DefaultsSection({
               : 'Let leads fan out subagents for large tasks. Off disables it team-wide.'
           }
         />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Toggle
-            label="Telegram updates"
-            value={telegramEnabled}
-            onChange={setTelegramEnabled}
-            hint="Sends an office summary on a cadence."
-          />
-          {telegramEnabled ? (
-            <Field label="Interval (minutes)">
-              <select
-                value={telegramInterval}
-                onChange={(e) => setTelegramInterval(Number(e.target.value))}
-                style={inputStyle}
-                aria-label="Telegram interval minutes"
-              >
-                {INTERVALS.map((v) => (
-                  <option key={v} value={v}>
-                    every {v} min
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : null}
-        </div>
+        <Toggle
+          label="Telegram updates"
+          value={telegramEnabled}
+          onChange={setTelegramEnabled}
+          hint="Sends an office summary on a cadence."
+        />
+        {telegramEnabled ? (
+          <Field label="Interval (minutes)">
+            <select
+              value={telegramInterval}
+              onChange={(e) => setTelegramInterval(Number(e.target.value))}
+              style={inputStyle}
+              aria-label="Telegram interval minutes"
+            >
+              {INTERVALS.map((v) => (
+                <option key={v} value={v}>
+                  every {v} min
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
       </div>
     </SectionCard>
   );

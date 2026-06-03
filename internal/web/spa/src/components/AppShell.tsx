@@ -41,6 +41,15 @@ import { spring } from '../lib/motion';
 import { usePeers } from '../hooks/usePeers';
 import { useToastBridge } from '../hooks/useToastBridge';
 import { useTheme } from '../hooks/useTheme';
+import { useOfficeStatus } from '../hooks/useOfficeStatus';
+import { fetchJSON } from '../api/client';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+
+// The built-in demo template ID. A team spawned from it is a one-click
+// "Demo Jarvis" run rather than a real team, which lets the rail offer a
+// "Stop demo" control and keeps the demo from clobbering real work.
+const DEMO_TEMPLATE_ID = 'demo-jarvis';
 
 const navLinkBaseStyle: React.CSSProperties = {
   textDecoration: 'none',
@@ -175,6 +184,34 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const location = useLocation();
   const reduce = useReducedMotion();
   const { cycle } = useTheme();
+
+  // Demo Jarvis controls. Read the office status the SPA already polls to
+  // decide the button's state: launch (no team), stop (demo team), or
+  // disabled (a real team is running — don't clobber it).
+  const qc = useQueryClient();
+  const officeStatus = useOfficeStatus();
+  const teamSpawned = officeStatus.data?.teamSpawned ?? false;
+  const isDemoTeam = officeStatus.data?.teamTemplateId === DEMO_TEMPLATE_ID;
+  const startDemo = useMutation({
+    mutationFn: () => fetchJSON('/api/office/demo-spawn', { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['office', 'status'] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      toast.success('Starting demo team…');
+      navigate('/');
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : 'Failed to start demo'),
+  });
+  const stopDemo = useMutation({
+    mutationFn: () => fetchJSON('/api/office/shutdown-team', { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['office', 'status'] });
+      toast.success('Demo stopped');
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : 'Failed to stop demo'),
+  });
   const [commandOpen, setCommandOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -273,6 +310,32 @@ export function AppShell({ children }: { children?: ReactNode }) {
           >
             + Spawn team
           </Button>
+          {/* Demo Jarvis — one-click, cost-bounded real demo team. Becomes
+              a "Stop demo" control while a demo is live, and is disabled
+              (with a tooltip) when a real team is running so it can't
+              clobber real work. */}
+          {isDemoTeam ? (
+            <Button
+              variant="danger"
+              onClick={() => stopDemo.mutate()}
+              disabled={stopDemo.isPending}
+              className="w-full justify-center"
+              style={{ marginBottom: 14 }}
+            >
+              Stop demo
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              onClick={() => startDemo.mutate()}
+              disabled={teamSpawned || startDemo.isPending}
+              title={teamSpawned ? 'A team is already running' : undefined}
+              className="w-full justify-center"
+              style={{ marginBottom: 14 }}
+            >
+              Demo Jarvis
+            </Button>
+          )}
           {items.map((item) => {
             const Icon = item.icon;
             return (
@@ -396,12 +459,14 @@ export function AppShell({ children }: { children?: ReactNode }) {
         {/* Main content. The persistent shell (header/rail/footer/
             CommandBar) stays mounted; only the routed screen inside
             AnimatedOutlet transitions on navigation. */}
+        {/* Full-bleed content. The 1180px cap was removed app-wide so screens
+            run edge-to-edge; px-8 keeps comfortable gutters on ultrawide. A
+            content-heavy screen that reads better narrow can wrap its own body
+            in a max-width container. */}
         <main
-          className="flex flex-1 flex-col px-6 pb-6 pt-3"
+          className="flex flex-1 flex-col px-8 pb-6 pt-3"
           style={{
-            maxWidth: 'var(--width-content, 1180px)',
             width: '100%',
-            margin: '0 auto',
             minWidth: 0,
           }}
         >
