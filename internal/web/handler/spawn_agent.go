@@ -38,7 +38,9 @@ var (
 	codegraphBinaryAvailable = office.CodegraphBinaryAvailable
 	npxAvailable             = office.NpxAvailable
 	pageIndexAvailable       = office.PageIndexAvailable
+	headroomAvailable        = office.HeadroomAvailable
 	pageIndexMcpConfig       = office.PageIndexMcpConfig
+	headroomMcpConfig        = office.HeadroomMcpConfig
 )
 
 // newSpawnSessionID generates the fresh session ID for a spawned agent
@@ -90,7 +92,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		kickstart := office.BuildKickstartPrompt(
 			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
 			req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
-			ctx.OfficeManager.GetProjectInvariants(),
+			ctx.OfficeManager.GetProjectInvariants(), office.ResolveSevenStepMode(req),
 		)
 		// Pre-generate session ID so we can inject it into MCP env and subprocess env.
 		sessionID := newSpawnSessionID()
@@ -182,7 +184,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		} else {
 			// Start event forwarding before broadcast to avoid losing early events
 			go forwardSDKSessionEvents(sdkSession, ctx)
-			ctx.SSEBroker.Broadcast("session:created", map[string]interface{}{
+			ctx.emit("session:created", map[string]interface{}{
 				"id": sdkSession.ID, "name": member.Name, "workingDir": req.WorkingDir,
 				"mode": "claude-sdk", "status": "idle", "createdAt": sdkSession.CreatedAt.UnixMilli(),
 			})
@@ -203,13 +205,28 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		}
 	}
 	tuning := resolveSessionTuning(req, member.Tier, ov)
+	if provider == "claude-api" && ptyEnv["ANTHROPIC_API_KEY"] == "" {
+		// No configured key to re-add, so inherited host auth (if any) is left in
+		// place. Surface it: a misconfigured claude-api agent would otherwise
+		// silently authenticate with whatever ANTHROPIC_* the host happens to export.
+		slog.Warn("claude-api agent has no configured ANTHROPIC_API_KEY; falling back to inherited host auth",
+			"name", member.Name)
+	}
 	session, err := ctx.SessionManager.CreateSession(
 		context.Background(),
 		pty.SessionConfig{
-			WorkingDir:                         req.WorkingDir,
-			Mode:                               pty.ModeClaude,
-			Name:                               member.Name,
-			ProviderEnv:                        ptyEnv,
+			WorkingDir:  req.WorkingDir,
+			Mode:        pty.ModeClaude,
+			Name:        member.Name,
+			ProviderEnv: ptyEnv,
+			// Strip inherited ANTHROPIC_* auth so a stray host key can't flip the
+			// agent onto the wrong account/billing. Subscription/default agents
+			// always strip (they auth via the container's Claude login). claude-api
+			// also strips -- but only when we have a configured key to re-add via
+			// ptyEnv -- otherwise an inherited ANTHROPIC_AUTH_TOKEN would silently
+			// override the intended ANTHROPIC_API_KEY (AUTH_TOKEN wins in the CLI).
+			ClaudeSubscription: provider == "claude-subscription" || provider == "" ||
+				(provider == "claude-api" && ptyEnv["ANTHROPIC_API_KEY"] != ""),
 			Effort:                             tuning.Effort,
 			FallbackModel:                      tuning.FallbackModel,
 			ExcludeDynamicSystemPromptSections: tuning.ExcludeDynamicSystemPromptSections,
@@ -224,7 +241,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		return "", ""
 	}
 	go forwardSessionEvents(session, ctx)
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+	ctx.emit("session:created", sessionToJSON(session))
 	return session.ID, "pty"
 }
 
@@ -263,12 +280,16 @@ func spawnAgentSessionWithHooks(ctx *Context, member teamtemplates.TeamTemplateM
 	session, err := ctx.SessionManager.CreateSession(
 		context.Background(),
 		pty.SessionConfig{
-			ID:                                 spec.PreassignedSessionID, // empty -> uuid; non-empty -> we use it
-			WorkingDir:                         cwd,
-			Mode:                               pty.ModeClaude,
-			Name:                               member.Name,
-			ProviderEnv:                        ptyEnv,
-			HooksEnabled:                       true,
+			ID:           spec.PreassignedSessionID, // empty -> uuid; non-empty -> we use it
+			WorkingDir:   cwd,
+			Mode:         pty.ModeClaude,
+			Name:         member.Name,
+			ProviderEnv:  ptyEnv,
+			HooksEnabled: true,
+			// Hooks mode runs interactive `claude` on the subscription pool;
+			// strip inherited ANTHROPIC_* auth so a stray key can't force API
+			// billing (ptyEnv re-adds a keyed provider's token after the strip).
+			ClaudeSubscription:                 true,
 			Effort:                             tuning.Effort,
 			FallbackModel:                      tuning.FallbackModel,
 			ExcludeDynamicSystemPromptSections: tuning.ExcludeDynamicSystemPromptSections,
@@ -283,7 +304,7 @@ func spawnAgentSessionWithHooks(ctx *Context, member teamtemplates.TeamTemplateM
 		return "", ""
 	}
 	go forwardSessionEvents(session, ctx)
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+	ctx.emit("session:created", sessionToJSON(session))
 	return session.ID, "hooks"
 }
 
@@ -386,6 +407,16 @@ func (ctx *Context) buildOfficeMCPServers(req spawnTeamRequest, sessionID, agent
 			mcpServers["pageindex"] = cfg
 		}
 	}
+	// Headroom context-compression MCP. Gives every agent
+	// mcp__headroom__headroom_compress / _retrieve / _stats so it can
+	// shrink large tool outputs / logs / search results before they land
+	// in context (reversibly -- originals are retrievable via CCR).
+	// Gated on the binary being present and the team not opting out.
+	if !headroomOptOut(req) && headroomAvailable() {
+		if cfg := headroomMcpConfig(); cfg != nil {
+			mcpServers["headroom"] = cfg
+		}
+	}
 	return mcpServers
 }
 
@@ -403,6 +434,10 @@ var codexMCPAllowlist = map[string]bool{
 	"jarvis":           true,
 	"codegraph":        true,
 	"codegraphcontext": true,
+	// Headroom exposes only 3 tools (compress/retrieve/stats), so its
+	// per-turn schema cost on Codex is small -- worth it for the
+	// context savings on long Codex runs.
+	"headroom": true,
 }
 
 // leanCodexMCPServers filters the full office MCP map down to codexMCPAllowlist.
@@ -495,7 +530,7 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	kickstart := office.BuildKickstartPrompt(
 		&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
 		req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
-		invariants,
+		invariants, office.ResolveSevenStepMode(req),
 	)
 	stablePrefix := office.BuildStableSystemPromptCodex(member.Tier, req.Mission, invariants)
 	systemPrompt := stablePrefix + "\n\n" + kickstart
@@ -588,9 +623,9 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 		// namespaces; flip SandboxMode there if the host kernel allows them.
 		SandboxMode:    "danger-full-access",
 		ApprovalPolicy: "never",
-		Provider:        prov,
-		MCPServers:      codexMCPFromMap(leanCodexMCPServers(ctx.buildOfficeMCPServers(req, sessionID, agentToken))),
-		WebSearch:       webSearch,
+		Provider:       prov,
+		MCPServers:     codexMCPFromMap(leanCodexMCPServers(ctx.buildOfficeMCPServers(req, sessionID, agentToken))),
+		WebSearch:      webSearch,
 		// Disable Codex's built-in persona so the per-member personality jarvis
 		// injects in the kickstart drives voice (and keeps output task-focused).
 		Personality: "none",
@@ -666,7 +701,7 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 		return "", ""
 	}
 	go forwardCodexSessionEvents(codexSession, ctx)
-	ctx.SSEBroker.Broadcast("session:created", map[string]interface{}{
+	ctx.emit("session:created", map[string]interface{}{
 		"id": codexSession.ID, "name": member.Name, "workingDir": req.WorkingDir,
 		"mode": "codex-exec", "status": "idle", "createdAt": codexSession.CreatedAt.UnixMilli(),
 	})

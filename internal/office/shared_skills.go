@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // Shared-skill management.
@@ -26,11 +27,22 @@ import (
 // first; this is the backstop).
 var ErrSkillPathTraversal = errors.New("invalid skill name (path traversal)")
 
-// sharedSkillsRoot returns the root directory the Claude CLI scans
-// for shared skills. Pinned to ~/.claude/skills regardless of the
-// jarvis HOME override.
+// sharedSkillsMu serializes the mutating skill helpers. The idle-monitor skill
+// promotion path (memify_tick.go -> WriteSharedSkill) and concurrent HTTP
+// skill-create calls would otherwise race on the same SKILL.md: a TOCTOU on the
+// stat/write and two writers clobbering each other. All writes/deletes hold it.
+var sharedSkillsMu sync.Mutex
+
+// sharedSkillsRoot returns the root directory the Claude CLI scans for shared
+// skills (~/.claude/skills), or "" when the home directory can't be resolved.
+// Callers MUST treat "" as a hard error -- returning a cwd-relative
+// ".claude/skills" (the old silent behavior) would write skills under whatever
+// directory the process happens to run in.
 func sharedSkillsRoot() string {
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return ""
+	}
 	return filepath.Join(homeDir, ".claude", "skills")
 }
 
@@ -44,7 +56,14 @@ func sharedSkillsRoot() string {
 //     escapes the skills root.
 //   - Wrapped I/O errors for mkdir / write failures.
 func WriteSharedSkill(name, content string) (path string, updated bool, err error) {
-	skillDir := filepath.Join(sharedSkillsRoot(), name)
+	sharedSkillsMu.Lock()
+	defer sharedSkillsMu.Unlock()
+
+	root := sharedSkillsRoot()
+	if root == "" {
+		return "", false, errors.New("cannot resolve home directory for shared skills")
+	}
+	skillDir := filepath.Join(root, name)
 	if !isWithinSkillsRoot(skillDir) {
 		return "", false, ErrSkillPathTraversal
 	}
@@ -54,8 +73,16 @@ func WriteSharedSkill(name, content string) (path string, updated bool, err erro
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	_, statErr := os.Stat(skillPath)
 	updated = statErr == nil
-	if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
+	// Atomic write: tmp + rename so an interrupted write (disk full, crash)
+	// can't leave a partially-written SKILL.md that the frontmatter parser
+	// would then read as valid-but-incomplete.
+	tmp := skillPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
 		return "", false, fmt.Errorf("write skill file: %w", err)
+	}
+	if err := os.Rename(tmp, skillPath); err != nil {
+		_ = os.Remove(tmp)
+		return "", false, fmt.Errorf("finalize skill file: %w", err)
 	}
 	return skillPath, updated, nil
 }
@@ -64,7 +91,14 @@ func WriteSharedSkill(name, content string) (path string, updated bool, err erro
 // Returns ErrSkillPathTraversal when the resolved path escapes
 // the skills root, or a wrapped I/O error.
 func DeleteSharedSkill(name string) error {
-	skillPath := filepath.Join(sharedSkillsRoot(), name)
+	sharedSkillsMu.Lock()
+	defer sharedSkillsMu.Unlock()
+
+	root := sharedSkillsRoot()
+	if root == "" {
+		return errors.New("cannot resolve home directory for shared skills")
+	}
+	skillPath := filepath.Join(root, name)
 	if !isWithinSkillsRoot(skillPath) {
 		return ErrSkillPathTraversal
 	}
@@ -79,11 +113,15 @@ func DeleteSharedSkill(name string) error {
 // path separator matters — without it, /.claude/skillsXY would
 // match /.claude/skills.
 func isWithinSkillsRoot(path string) bool {
+	root := sharedSkillsRoot()
+	if root == "" {
+		return false
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
-	absRoot, err := filepath.Abs(sharedSkillsRoot())
+	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return false
 	}

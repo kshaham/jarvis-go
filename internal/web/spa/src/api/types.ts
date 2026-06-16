@@ -132,6 +132,7 @@ export interface Task {
   blockerDescription?: string;
   progressLog?: TaskProgressEntry[];
   labels?: string[];
+  engPhase?: string;
   finalCostUSD?: number;
   finalTurnCount?: number;
 }
@@ -329,6 +330,7 @@ export interface TeamTemplate {
   defaultProvider?: string;
   defaultModel?: string;
   perpetualImprovement?: boolean;
+  sevenStep?: boolean;
   telegram?: {
     enabled?: boolean;
     intervalMinutes?: number;

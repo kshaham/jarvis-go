@@ -33,6 +33,7 @@ export interface SpawnState {
   projectName: string;
   githubRepo: string;
   perpetual: boolean;
+  sevenStep: boolean;
   defaultProvider: string;
   defaultModel: string;
   openaiBaseUrl: string;
@@ -64,6 +65,7 @@ const SPAWN_DEFAULT: SpawnState = {
   projectName: '',
   githubRepo: '',
   perpetual: true,
+  sevenStep: false,
   defaultProvider: 'claude-subscription',
   defaultModel: '',
   openaiBaseUrl: '',
@@ -87,6 +89,7 @@ function spawnReducer(state: SpawnState, action: SpawnAction): SpawnState {
       defaultProvider: tpl.defaultProvider ?? state.defaultProvider,
       defaultModel: tpl.defaultModel ?? state.defaultModel,
       perpetual: typeof tpl.perpetualImprovement === 'boolean' ? tpl.perpetualImprovement : state.perpetual,
+      sevenStep: typeof tpl.sevenStep === 'boolean' ? tpl.sevenStep : state.sevenStep,
       telegramEnabled: tpl.telegram ? !!tpl.telegram.enabled : state.telegramEnabled,
       telegramInterval: tpl.telegram?.intervalMinutes ?? state.telegramInterval,
     };
@@ -117,6 +120,7 @@ export function SpawnScreen() {
     projectName,
     githubRepo,
     perpetual,
+    sevenStep,
     defaultProvider,
     defaultModel,
     openaiBaseUrl,
@@ -232,6 +236,7 @@ export function SpawnScreen() {
         projectName: mode === 'new' ? projectName : '',
         githubRepo: mode === 'github' ? githubRepo.trim() : '',
         perpetualMode: perpetual,
+        sevenStepMode: sevenStep,
         telegramEnabled,
         telegramIntervalMin: telegramInterval,
         disableWorkflows: !workflowsEnabled,

@@ -73,10 +73,10 @@ npm run build</pre>
 
 // Server is the main HTTP server for Jarvis.
 type Server struct {
-	rootCtx             context.Context
-	port                int
-	isHTTPS             bool
-	dataDir             string
+	rootCtx context.Context
+	port    int
+	isHTTPS bool
+	dataDir string
 	// srvMu guards the fields assigned inside Start()/setupRouter()
 	// (httpServer, httpsServer, schedulerRunner, notificationsRouter) against
 	// the concurrent reads in Stop(). main.go runs Start() in a goroutine and
@@ -605,6 +605,45 @@ func (s *Server) SSEBroker() *sse.Broker {
 	return s.sseBroker
 }
 
+// registerAgentMutationRoutes registers the mutating agent endpoints shared by
+// the /office/agent mount (where the cm CLI + jarvis-mcp clients POST) and the
+// /claude/hooks mount (hooks-mode clients). Declared once -- and at package
+// scope so it's unit-testable -- so the two mounts cannot drift: previously
+// these lived ONLY under /claude/hooks, so every cm / jarvis-mcp call to
+// /api/office/agent/task-* (and file-lock, skill-create, memory, handoff, etc.)
+// 404'd. Both mounts apply the same agent-token middleware.
+func registerAgentMutationRoutes(r chi.Router, h *handler.Context) {
+	r.Post("/task-start", h.OfficeAgentTaskStart)
+	r.Post("/task-complete", h.OfficeAgentTaskComplete)
+	r.Post("/task-ack", h.OfficeAgentTaskAck)
+	r.Post("/task-progress", h.OfficeAgentTaskProgress)
+	r.Post("/task/self-add", h.OfficeAgentTaskSelfAdd)
+	r.Post("/task/triage", h.OfficeAgentTaskTriage)
+	r.Post("/task/handoff", h.OfficeAgentHandoffInitiate)
+	r.Post("/task/handoff/accept", h.OfficeAgentHandoffAccept)
+	r.Post("/task/handoff/reject", h.OfficeAgentHandoffReject)
+	r.Post("/task/handoff/cancel", h.OfficeAgentHandoffCancel)
+	r.Post("/task/screenshot", h.OfficeAgentTaskScreenshot)
+	r.Post("/task/labels", h.OfficeAgentTaskLabels)
+	r.Post("/task/criteria", h.OfficeAgentTaskCriteria)
+	r.Post("/task/phase", h.OfficeAgentTaskPhase)
+	r.Post("/brainstorm/response", h.OfficeAgentBrainstormResponse)
+	r.Post("/leader-tasks/response", h.OfficeAgentLeaderTasksResponse)
+	r.Post("/reflection/response", h.OfficeAgentReflectionResponse)
+	r.Post("/curiosity/discovery", h.OfficeAgentCuriosityDiscovery)
+	r.Post("/file-lock", h.OfficeAgentFileLock)
+	r.Post("/skill-create", h.OfficeAgentSkillCreate)
+	r.Delete("/skills/{name}", h.OfficeAgentDeleteSkill)
+	r.Post("/memory", h.OfficeAgentPostMemory)
+	r.Post("/memory/append", h.OfficeAgentPostMemoryAppend)
+	r.Post("/memory/section", h.OfficeAgentPostMemorySection)
+	r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)
+	r.Post("/dev-instance", h.OfficeAgentPostDevInstance)
+	r.Delete("/dev-instance", h.OfficeAgentDeleteDevInstance)
+	r.Post("/dev-credentials", h.OfficeAgentPostDevCredentials)
+	r.Delete("/dev-credentials", h.OfficeAgentDeleteDevCredentials)
+}
+
 func (s *Server) setupRouter() chi.Router {
 	r := chi.NewRouter()
 
@@ -681,6 +720,7 @@ func (s *Server) setupRouter() chi.Router {
 		ScheduledTasks:          make(map[string]interface{}),
 		SessionColors:           make(map[string]string),
 		RalphTrackers:           make(map[string]*ralph.Tracker),
+		RalphConsumerStop:       make(map[string]chan struct{}),
 		RunSummaries:            make(map[string]*runsummary.Tracker),
 		TailFileStreams:         make(map[string]func()),
 		ActivePlanOrchestrators: make(map[string]string),
@@ -872,6 +912,8 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/ask", h.OfficeAgentAsk)
 				r.Post("/ask/answer", h.OfficeAgentAskAnswer)
 				r.Get("/ask/list", h.OfficeAgentListQuestions)
+				// The mutating endpoints cm + jarvis-mcp actually POST to.
+				registerAgentMutationRoutes(r, h)
 			})
 
 			// Claude Code hooks dispatcher. Spawned `claude` processes
@@ -882,44 +924,13 @@ func (s *Server) setupRouter() chi.Router {
 			r.Route("/claude/hooks", func(r chi.Router) {
 				r.Use(mw.AgentTokenAuth(s.agentTokenMgr))
 				r.Post("/{sessionId}/{event}", claudeHooksDispatcher.HandleEvent)
-				r.Post("/task-start", h.OfficeAgentTaskStart)
-				r.Post("/task-complete", h.OfficeAgentTaskComplete)
-				r.Post("/task-ack", h.OfficeAgentTaskAck)
-				r.Post("/task-progress", h.OfficeAgentTaskProgress)
-				r.Post("/task/self-add", h.OfficeAgentTaskSelfAdd)
-				r.Post("/task/triage", h.OfficeAgentTaskTriage)
-				// R29 · Structured handoffs.
-				r.Post("/task/handoff", h.OfficeAgentHandoffInitiate)
-				r.Post("/task/handoff/accept", h.OfficeAgentHandoffAccept)
-				r.Post("/task/handoff/reject", h.OfficeAgentHandoffReject)
-				// R32 · sender-initiated cancel (carry-over from R29).
-				r.Post("/task/handoff/cancel", h.OfficeAgentHandoffCancel)
-				r.Post("/brainstorm/response", h.OfficeAgentBrainstormResponse)
-				r.Post("/leader-tasks/response", h.OfficeAgentLeaderTasksResponse)
-				r.Post("/reflection/response", h.OfficeAgentReflectionResponse)
-				r.Post("/curiosity/discovery", h.OfficeAgentCuriosityDiscovery)
-				r.Post("/file-lock", h.OfficeAgentFileLock)
-				r.Post("/skill-create", h.OfficeAgentSkillCreate)
-				r.Delete("/skills/{name}", h.OfficeAgentDeleteSkill)
-				r.Post("/memory", h.OfficeAgentPostMemory)
-				r.Post("/memory/append", h.OfficeAgentPostMemoryAppend)
-				r.Post("/memory/section", h.OfficeAgentPostMemorySection)
-				// R34 · agent uploads a visual-verification screenshot
-				// that operators see in the task detail modal.
-				r.Post("/task/screenshot", h.OfficeAgentTaskScreenshot)
-				// Agent uploads one generated UI mockup (Mockups page).
+				// Same mutating endpoints as /office/agent (shared helper so the
+				// two mounts can't drift).
+				registerAgentMutationRoutes(r, h)
+				// Hooks-mount only: agent uploads a generated UI mockup
+				// (Mockups page) / a team-authored deliverable (Deliverables page).
 				r.Post("/mockup-upload", h.MockupsUpload)
-				// Agent uploads one team-authored deliverable (Deliverables page).
 				r.Post("/deliverable-upload", h.DeliverablesUpload)
-				// R36 · agent adds/removes labels on a task.
-				r.Post("/task/labels", h.OfficeAgentTaskLabels)
-				// Edit acceptance criteria on a task (set|add|remove).
-				r.Post("/task/criteria", h.OfficeAgentTaskCriteria)
-				r.Post("/telegram-config", h.OfficeAgentPostTelegramConfig)
-				r.Post("/dev-instance", h.OfficeAgentPostDevInstance)
-				r.Delete("/dev-instance", h.OfficeAgentDeleteDevInstance)
-				r.Post("/dev-credentials", h.OfficeAgentPostDevCredentials)
-				r.Delete("/dev-credentials", h.OfficeAgentDeleteDevCredentials)
 			})
 		})
 
@@ -1232,6 +1243,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/messages", h.OfficeGetMessages)
 				r.Get("/metrics", h.OfficeGetMetrics)
 				r.Get("/experiments", h.OfficeGetExperiments)
+				r.Get("/escalations", h.OfficeGetEscalations)
 				r.Get("/scores", h.OfficeGetScores)
 				r.Get("/audit-log", h.OfficeGetAuditLog)
 				r.Get("/meetings", h.OfficeGetMeetings)
@@ -1340,6 +1352,7 @@ func (s *Server) setupRouter() chi.Router {
 					// one handler serves both callers.
 					r.Post("/task/labels", h.OfficeAgentTaskLabels)
 					r.Post("/task/criteria", h.OfficeAgentTaskCriteria)
+					r.Post("/task/phase", h.OfficeAgentTaskPhase)
 					r.Post("/task/self-add", h.OfficeAgentTaskSelfAdd)
 					r.Post("/task/triage", h.OfficeAgentTaskTriage)
 					r.Post("/task/start", h.OfficeAgentTaskStart)

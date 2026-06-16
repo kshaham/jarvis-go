@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/kshaham/jarvis/internal/logscrub"
 	"github.com/kshaham/jarvis/internal/strs"
 	"github.com/kshaham/jarvis/internal/web/request"
-	"github.com/go-chi/chi/v5"
 )
 
 // R4.4 · Operator-facing wrappers for `claude logs` / `claude stop`
@@ -75,11 +75,9 @@ func (ctx *Context) OfficeClaudeStop(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadGateway, runErr.Error())
 		return
 	}
-	if ctx.SSEBroker != nil {
-		ctx.SSEBroker.Broadcast("office:claudeSessionStopped", map[string]interface{}{
-			"claudeSessionId": cid,
-		})
-	}
+	ctx.emit("office:claudeSessionStopped", map[string]interface{}{
+		"claudeSessionId": cid,
+	})
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success":         true,
 		"claudeSessionId": cid,

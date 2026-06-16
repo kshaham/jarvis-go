@@ -90,19 +90,33 @@ func TestSDKSession_SendPrompt_SendError(t *testing.T) {
 	}
 	defer s.Stop()
 
-	// Wait for the subprocess to exit (events channel goes quiet / session idle).
+	// Wait for the subprocess stream to FULLY end: s.Events() closes when the
+	// persistent session's event channel drains, which the SDK does at
+	// subprocess-stdout EOF -- i.e. process exit. This is a strictly stronger
+	// signal than StatusIdle (set on the result event, BEFORE the process is
+	// reaped). Polling StatusIdle raced teardown: occasionally the process was
+	// still alive, so the stdin write buffered+succeeded and isWorking flipped.
+	// Once the stream is closed the subprocess (and its stdin read-end) is gone,
+	// so the next Send deterministically EPIPEs.
+	drained := false
 	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
-		case <-s.Events():
+		case _, ok := <-s.Events():
+			if !ok {
+				drained = true
+			}
 		case <-time.After(150 * time.Millisecond):
 		}
-		if s.GetStatus() == StatusIdle {
+		if drained {
 			break
 		}
 	}
-	// Give the OS a moment to fully tear down the subprocess pipes.
-	time.Sleep(300 * time.Millisecond)
+	if !drained {
+		t.Fatal("subprocess event stream did not close within deadline; cannot assert send-error branch")
+	}
+	// Small cushion for the OS to reclaim the subprocess fds.
+	time.Sleep(100 * time.Millisecond)
 
 	// Reset working state so the assertion is meaningful: the dead subprocess
 	// means Send fails and SendPrompt returns before flipping to working.

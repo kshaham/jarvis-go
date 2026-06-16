@@ -44,7 +44,7 @@ func TestKickstartPromptUnderSizeLimit(t *testing.T) {
 	mission := "Ship the Q2 reliability initiative -- improve uptime to 99.9%."
 
 	for _, member := range team {
-		got := BuildKickstartPrompt(member, "/app/workspace/example", team, mission, "", true, nil)
+		got := BuildKickstartPrompt(member, "/app/workspace/example", team, mission, "", true, nil, false)
 		if len(got) > kickstartMaxChars {
 			t.Errorf("kickstart for %s (%s) is %d chars, exceeds limit of %d",
 				member.Name, member.Role, len(got), kickstartMaxChars)
@@ -64,8 +64,8 @@ func TestKickstartWorkerTrimsLeaderBlocks(t *testing.T) {
 	team := makeOffice7Team()
 	strategic := team[0] // Max, Engineering Manager
 	worker := team[2]    // Nova, UI/UX Designer
-	stratKickstart := BuildKickstartPrompt(strategic, "/tmp/x", team, "", "", true, nil)
-	workerKickstart := BuildKickstartPrompt(worker, "/tmp/x", team, "", "", true, nil)
+	stratKickstart := BuildKickstartPrompt(strategic, "/tmp/x", team, "", "", true, nil, false)
+	workerKickstart := BuildKickstartPrompt(worker, "/tmp/x", team, "", "", true, nil, false)
 
 	if !strings.Contains(stratKickstart, "Leader Task Assignment") {
 		t.Error("strategic kickstart should contain Leader Task Assignment block")
@@ -125,7 +125,7 @@ func TestStableSystemPromptCoversBoilerplate(t *testing.T) {
 func TestKickstartCapsPreviousWorkMemory(t *testing.T) {
 	team := makeOffice7Team()
 	huge := strings.Repeat("x", memoryInjectMaxChars*3)
-	got := BuildKickstartPrompt(team[0], "/app/workspace/example", team, "", huge, false, nil)
+	got := BuildKickstartPrompt(team[0], "/app/workspace/example", team, "", huge, false, nil, false)
 	if !strings.Contains(got, "(truncated") {
 		t.Errorf("expected truncation marker when injecting %d-char memory; got prompt of %d chars",
 			len(huge), len(got))

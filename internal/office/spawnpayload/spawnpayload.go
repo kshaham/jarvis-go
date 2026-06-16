@@ -154,6 +154,21 @@ type SpawnTeamRequest struct {
 	// codegraph pattern. Set true to ship only jarvis-native
 	// content for the team.
 	DisableEcc *bool `json:"disableEcc,omitempty"`
+
+	// Per-team escape hatch for the Headroom context-compression MCP
+	// (mcp__headroom__headroom_compress / _retrieve / _stats). Default
+	// (nil) = Headroom on if the binary is on PATH, mirroring the
+	// codegraph/pageindex pattern. Set true to skip the MCP entry for a
+	// team that won't benefit.
+	DisableHeadroom *bool `json:"disableHeadroom,omitempty"`
+
+	// SevenStepMode enables the additive 7-step engineering discipline overlay
+	// (Addy Osmani's agent-skills SDLC: DEFINE/PLAN/BUILD/VERIFY/REVIEW/SIMPLIFY/
+	// SHIP). Default (nil) = OFF -- it's opt-in, unlike perpetual mode. When on,
+	// agents get the /spec.. /ship slash commands + personas and a kickstart
+	// section driving each task through the 7 phases, combinable with perpetual
+	// or goal-focused mode.
+	SevenStepMode *bool `json:"sevenStepMode,omitempty"`
 }
 
 // SessionTuning is the resolved bundle of Claude Code knobs that
@@ -193,6 +208,12 @@ func CodegraphOptOut(req SpawnTeamRequest) bool {
 // recommender all converge on the same decision.
 func EccOptOut(req SpawnTeamRequest) bool {
 	return req.DisableEcc != nil && *req.DisableEcc
+}
+
+// HeadroomOptOut reports whether the team explicitly disabled the
+// Headroom compression MCP at spawn time. Mirrors CodegraphOptOut.
+func HeadroomOptOut(req SpawnTeamRequest) bool {
+	return req.DisableHeadroom != nil && *req.DisableHeadroom
 }
 
 // DefaultEffortFor returns the floor effort tier for a member based

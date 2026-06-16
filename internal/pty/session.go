@@ -90,8 +90,9 @@ type Session struct {
 	idleReset  chan struct{}
 
 	// Provider env
-	providerEnv map[string]string
-	niceConfig  NiceConfig
+	providerEnv        map[string]string
+	claudeSubscription bool
+	niceConfig         NiceConfig
 
 	// Debounce for heavy processing
 	pendingData   strings.Builder
@@ -182,6 +183,7 @@ func NewSession(config SessionConfig) *Session {
 		done:                make(chan struct{}),
 		idleReset:           make(chan struct{}, 1),
 		providerEnv:         config.ProviderEnv,
+		claudeSubscription:  config.ClaudeSubscription,
 		niceConfig:          config.NiceConfig,
 		omitSkipPermissions: config.OmitSkipPermissions,
 		claudeBinaryPath:    config.ClaudeBinaryPath,
@@ -323,7 +325,7 @@ func (s *Session) Start(ctx context.Context) error {
 	}
 
 	cmd.Dir = s.WorkingDir
-	cmd.Env = append(os.Environ(), s.buildEnv()...)
+	cmd.Env = append(s.inheritedEnv(), s.buildEnv()...)
 	// Ensure TERM is set for interactive shells
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 
@@ -1125,6 +1127,27 @@ func (s *Session) buildEnv() []string {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env
+}
+
+// inheritedEnv returns the parent process env to seed the subprocess with. In
+// claude-subscription mode it strips any inherited ANTHROPIC_API_KEY /
+// ANTHROPIC_AUTH_TOKEN so a stray env var can't silently flip the agent onto
+// API billing instead of the container's subscription login (defense-in-depth
+// matching CodexSession; the daemon-level scrub is the first line). Operator
+// terminals (claudeSubscription == false) inherit the env untouched.
+func (s *Session) inheritedEnv() []string {
+	if !s.claudeSubscription {
+		return os.Environ()
+	}
+	parent := os.Environ()
+	out := make([]string, 0, len(parent))
+	for _, kv := range parent {
+		if strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") || strings.HasPrefix(kv, "ANTHROPIC_AUTH_TOKEN=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // normaliseEffortString validates an operator-supplied effort tier and

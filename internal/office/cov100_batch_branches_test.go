@@ -99,7 +99,7 @@ func TestBuildKickstartPrompt_ShortMemoryAndOwnLearnings(t *testing.T) {
 
 	cfg := &TeamMemberConfig{ID: "me", Name: "Me", Role: "Backend", Tier: "worker"}
 	shortMemory := "short prior-work note, well under the cap"
-	prompt := BuildKickstartPrompt(cfg, t.TempDir(), nil, "", shortMemory, true, nil)
+	prompt := BuildKickstartPrompt(cfg, t.TempDir(), nil, "", shortMemory, true, nil, false)
 
 	// Short memory: included verbatim, NOT truncated.
 	if !strings.Contains(prompt, "## Previous Work Memory") {
@@ -133,7 +133,7 @@ func TestBuildKickstartPrompt_LongMemoryTruncated(t *testing.T) {
 	for i := 0; sb.Len() <= memoryInjectMaxChars*2; i++ {
 		fmt.Fprintf(&sb, "unique-memory-line-%d-%s\n", i, strings.Repeat("y", 40))
 	}
-	prompt := BuildKickstartPrompt(cfg, t.TempDir(), nil, "", sb.String(), true, nil)
+	prompt := BuildKickstartPrompt(cfg, t.TempDir(), nil, "", sb.String(), true, nil, false)
 	if !strings.Contains(prompt, "## Previous Work Memory") {
 		t.Fatal("expected Previous Work Memory header")
 	}

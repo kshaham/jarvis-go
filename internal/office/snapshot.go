@@ -59,6 +59,7 @@ type TeamSnapshot struct {
 	TeamMission   string                `json:"teamMission,omitempty"`
 	WorkingDir    string                `json:"workingDir,omitempty"`
 	PerpetualMode bool                  `json:"perpetualMode"`
+	SevenStepMode bool                  `json:"sevenStepMode,omitempty"`
 	Paused        bool                  `json:"paused,omitempty"`
 	PauseReason   string                `json:"pauseReason,omitempty"`
 	Members       []SnapshotMemberEntry `json:"members"`
@@ -115,6 +116,7 @@ func (m *Manager) CreateSnapshot(name, workingDir string, claudeSessionIDsByConf
 	spawned := m.teamSpawned
 	mission := m.teamMission
 	perpetual := m.perpetualMode
+	sevenStep := m.sevenStepMode
 	paused := m.paused
 	pauseReason := m.pauseReason
 	m.mu.RUnlock()
@@ -152,6 +154,7 @@ func (m *Manager) CreateSnapshot(name, workingDir string, claudeSessionIDsByConf
 		TeamMission:   mission,
 		WorkingDir:    workingDir,
 		PerpetualMode: perpetual,
+		SevenStepMode: sevenStep,
 		Paused:        paused,
 		PauseReason:   pauseReason,
 		Members:       members,
@@ -169,7 +172,7 @@ func (m *Manager) CreateSnapshot(name, workingDir string, claudeSessionIDsByConf
 		return nil, fmt.Errorf("write tmp: %w", err)
 	}
 	if err := os.Rename(tmp, target); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort tmp cleanup; the rename error is what matters
 		return nil, fmt.Errorf("rename: %w", err)
 	}
 	return snap, nil
@@ -239,6 +242,12 @@ func LoadSnapshot(name string) (*TeamSnapshot, error) {
 	var snap TeamSnapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
 		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	// Guard against a corrupted/hand-edited file whose embedded Name disagrees
+	// with the filename we loaded by -- otherwise logs and SSE events would show
+	// a misleading team name (e.g. loading "team-a" but broadcasting "team-b").
+	if snap.Name != "" && snap.Name != name {
+		return nil, fmt.Errorf("snapshot name mismatch: file %q contains name %q", name, snap.Name)
 	}
 	return &snap, nil
 }

@@ -140,6 +140,11 @@ func (m *Manager) FinalizeTeamSpawn(req spawnpayload.SpawnTeamRequest, templateU
 		m.SetTeamMission(req.Mission)
 	}
 	m.SetPerpetualMode(perpetual)
+	// Additive 7-step engineering overlay (opt-in, default off). Resolved from
+	// the request so it can combine with perpetual or goal-focused mode.
+	m.SetSevenStepMode(ResolveSevenStepMode(req))
+	// Persist the ECC opt-out so non-spawn paths (onboarding) filter ECC skills.
+	m.SetEccDisabled(spawnpayload.EccOptOut(req))
 }
 
 // Sentinel errors returned by TriageTaskBetweenAgents. Distinct

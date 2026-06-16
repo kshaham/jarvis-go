@@ -75,7 +75,7 @@ func (ctx *Context) OfficeAgentKill(w http.ResponseWriter, r *http.Request) {
 	}
 	result := ctx.OfficeManager.KillAgent(req.SessionID, req.Reason, ctx.stopAgentSessionByID)
 	if result.MayBroadcast {
-		ctx.SSEBroker.Broadcast("office:agentKilled", map[string]interface{}{
+		ctx.emit("office:agentKilled", map[string]interface{}{
 			"sessionId": req.SessionID,
 			"agentName": result.AgentName,
 			"reason":    result.Reason,
@@ -176,7 +176,7 @@ func (ctx *Context) OfficeAgentInjectPrompt(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	ctx.SSEBroker.Broadcast("office:agentPromptInjected", map[string]interface{}{
+	ctx.emit("office:agentPromptInjected", map[string]interface{}{
 		"sessionId": req.SessionID,
 		"agentName": agentName,
 		"bytes":     len(req.Prompt),
@@ -251,7 +251,7 @@ func (ctx *Context) OfficeAgentBumpWorkdir(w http.ResponseWriter, r *http.Reques
 			"session", req.SessionID, "name", agentName)
 	}
 
-	ctx.SSEBroker.Broadcast("office:agentWorkdirChanged", map[string]interface{}{
+	ctx.emit("office:agentWorkdirChanged", map[string]interface{}{
 		"sessionId":  req.SessionID,
 		"agentName":  agentName,
 		"previous":   previous,
@@ -368,7 +368,7 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "operator"
 	}
-	ctx.SSEBroker.Broadcast("office:agentRestarted", map[string]interface{}{
+	ctx.emit("office:agentRestarted", map[string]interface{}{
 		"sessionId":    newSessionID,
 		"oldSessionId": req.SessionID,
 		"agentName":    agentName,

@@ -190,6 +190,8 @@ export function TogglesSection({
   defaultProvider,
   perpetual,
   setPerpetual,
+  sevenStep,
+  setSevenStep,
   telegramEnabled,
   setTelegramEnabled,
   telegramInterval,
@@ -200,6 +202,8 @@ export function TogglesSection({
   defaultProvider: string;
   perpetual: boolean;
   setPerpetual: (b: boolean) => void;
+  sevenStep: boolean;
+  setSevenStep: (b: boolean) => void;
   telegramEnabled: boolean;
   setTelegramEnabled: (b: boolean) => void;
   telegramInterval: number;
@@ -216,6 +220,12 @@ export function TogglesSection({
           value={perpetual}
           onChange={setPerpetual}
           hint="Auto-restart agents that finish their queue."
+        />
+        <Toggle
+          label="7-step engineering"
+          value={sevenStep}
+          onChange={setSevenStep}
+          hint="Drive each task through DEFINE→PLAN→BUILD→VERIFY→REVIEW→SIMPLIFY→SHIP (agent-skills). Combines with the mode above."
         />
         <Toggle
           label="Dynamic workflows"

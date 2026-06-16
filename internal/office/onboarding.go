@@ -58,7 +58,7 @@ func OnboardingTopics(tier string) []OnboardingTopic {
 //
 // Access control: dev-lead is leader-only. cfg.Tier must be
 // "strategic" for that topic; otherwise callers see "" + false.
-func GetOnboardingTopic(topic OnboardingTopic, cfg *TeamMemberConfig, workingDir string) (string, bool) {
+func GetOnboardingTopic(topic OnboardingTopic, cfg *TeamMemberConfig, workingDir string, eccEnabled bool) (string, bool) {
 	switch topic {
 	case TopicProtocols:
 		return onboardingProtocols(), true
@@ -74,7 +74,7 @@ func GetOnboardingTopic(topic OnboardingTopic, cfg *TeamMemberConfig, workingDir
 	case TopicContextBudget:
 		return onboardingContextBudget(), true
 	case TopicSkills:
-		return onboardingSkills(cfg), true
+		return onboardingSkills(cfg, eccEnabled), true
 	case TopicMemory:
 		return onboardingMemory(), true
 	}
@@ -178,7 +178,7 @@ Full discipline: cm skill read office-context-budget.
 `
 }
 
-func onboardingSkills(cfg *TeamMemberConfig) string {
+func onboardingSkills(cfg *TeamMemberConfig, eccEnabled bool) string {
 	var b strings.Builder
 	b.WriteString("# Suggested Skills\n\n")
 	if cfg != nil && len(cfg.Skills) > 0 {
@@ -190,12 +190,11 @@ func onboardingSkills(cfg *TeamMemberConfig) string {
 	if cfg != nil {
 		role = cfg.Role
 	}
-	// P11.2.7 · For the legacy `GetOnboardingTopic` path (currently
-	// test-only; no production caller) pass eccEnabled=true so the
-	// behaviour matches pre-Phase-11. When a real caller wires this
-	// up, plumb the spawn-time `disableEcc` flag through and pass
-	// `!disableEcc` here.
-	b.WriteString(BuildSuggestedSkillsSection(role, true))
+	// eccEnabled is threaded from the spawn-time DisableEcc flag (the
+	// onboarding handler passes !OfficeManager.IsEccDisabled()). When the team
+	// opted out of ECC, pickSkillsForRole drops the ECC-sourced names so agents
+	// aren't pointed at skills they can't read.
+	b.WriteString(BuildSuggestedSkillsSection(role, eccEnabled))
 	b.WriteString("\n")
 	b.WriteString("Read any of them with `cm skill read <name>`. Search by keyword with `cm skill search <kw>`.\n")
 	return b.String()

@@ -51,6 +51,24 @@ func resolveSessionFilePath(w http.ResponseWriter, session *pty.Session, filePat
 // accidental DoS of the state store on enormous requests.
 const maxBulkItems = 500
 
+// maxSessionFileReadBytes caps single-file reads served from a session's
+// working directory. os.ReadFile loads the whole file into memory (and the
+// raw endpoint base64-encodes it, ~1.33x), so an unbounded read of a multi-GB
+// file would OOM the daemon. 25 MB is generous for source/logs while bounded.
+const maxSessionFileReadBytes = 25 << 20
+
+// fileExceedsReadLimit reports whether absPath is larger than
+// maxSessionFileReadBytes and, if so, writes a 413 response. Callers return
+// early when it returns true. A stat error is ignored here (the subsequent
+// os.ReadFile surfaces it with the right not-found/500 handling).
+func fileExceedsReadLimit(w http.ResponseWriter, absPath string) bool {
+	if fi, err := os.Stat(absPath); err == nil && fi.Size() > maxSessionFileReadBytes {
+		request.WriteError(w, http.StatusRequestEntityTooLarge, "file too large")
+		return true
+	}
+	return false
+}
+
 // atomicTempFile is the seam used to create the staging temp file. It is a
 // package var (defaulting to os.CreateTemp) so tests can inject a temp file
 // whose Write/Close fail, exercising atomicWriteFile's mid-write error arms
@@ -129,7 +147,7 @@ func (ctx *Context) BulkDeleteSessions(w http.ResponseWriter, r *http.Request) {
 			failed = append(failed, map[string]string{"id": id, "error": err.Error()})
 			continue
 		}
-		ctx.SSEBroker.Broadcast("session:deleted", map[string]string{"id": id})
+		ctx.emit("session:deleted", map[string]string{"id": id})
 		ctx.StateStore.RemoveSession(id)
 		ctx.cleanupSessionResources(id)
 		deleted = append(deleted, id)
@@ -214,7 +232,7 @@ func (ctx *Context) BulkUpdateSessionColors(w http.ResponseWriter, r *http.Reque
 
 	// Broadcast color updates so any other open tabs reflect the change.
 	for _, id := range updated {
-		ctx.SSEBroker.Broadcast("session:color", map[string]string{
+		ctx.emit("session:color", map[string]string{
 			"id":    id,
 			"color": req.Colors[id],
 		})
@@ -347,6 +365,11 @@ func (ctx *Context) GetSessionRalphState(w http.ResponseWriter, r *http.Request)
 				"todos":              st.Todos,
 				"lastActivityAt":     st.LastActivityAt,
 				"completionDetected": st.CompletionDetected,
+				// Surface the gate so operators can spot-check it actually
+				// rejects failing work (loop engineering: gates rot).
+				"circuitBreaker":   st.CircuitBreaker,
+				"lastGateResult":   st.LastGateResult,
+				"gateFailureCount": st.GateFailureCount,
 			},
 		})
 	} else {
@@ -802,7 +825,7 @@ func (ctx *Context) SessionAutoClear(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx.SSEBroker.Broadcast("session:autoClear", map[string]interface{}{
+	ctx.emit("session:autoClear", map[string]interface{}{
 		"sessionId": id,
 		"enabled":   req.Enabled,
 		"threshold": req.Threshold,
@@ -858,7 +881,7 @@ func (ctx *Context) SessionAutoCompact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx.SSEBroker.Broadcast("session:autoCompact", map[string]interface{}{
+	ctx.emit("session:autoCompact", map[string]interface{}{
 		"sessionId": id,
 		"enabled":   req.Enabled,
 		"threshold": req.Threshold,
@@ -914,7 +937,7 @@ func (ctx *Context) SessionAutoTrim(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx.SSEBroker.Broadcast("session:autoTrim", map[string]interface{}{
+	ctx.emit("session:autoTrim", map[string]interface{}{
 		"sessionId": id,
 		"enabled":   req.Enabled,
 		"threshold": req.Threshold,
@@ -1240,7 +1263,7 @@ func (ctx *Context) ImportSession(w http.ResponseWriter, r *http.Request) {
 	// Start event forwarding before broadcast to avoid losing early events
 	go forwardSessionEvents(session, ctx)
 
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+	ctx.emit("session:created", sessionToJSON(session))
 
 	ctx.initSessionTrackers(session.ID)
 
@@ -1267,6 +1290,9 @@ func (ctx *Context) GetSessionFileContent(w http.ResponseWriter, r *http.Request
 	}
 	absPath, pathOK := resolveSessionFilePath(w, session, filePath)
 	if !pathOK {
+		return
+	}
+	if fileExceedsReadLimit(w, absPath) {
 		return
 	}
 
@@ -1620,6 +1646,9 @@ func (ctx *Context) GetSessionFileRaw(w http.ResponseWriter, r *http.Request) {
 	if !pathOK {
 		return
 	}
+	if fileExceedsReadLimit(w, absPath) {
+		return
+	}
 
 	data, err := os.ReadFile(absPath)
 	if err != nil {
@@ -1865,7 +1894,7 @@ func (ctx *Context) PatchSessionPlanTask(w http.ResponseWriter, r *http.Request)
 	if hasTracker && tracker != nil {
 		result := tracker.UpdatePlanTask(taskIDStr, update.Status, update.Error, update.IncrementAttempts)
 		if result {
-			ctx.SSEBroker.Broadcast("session:planTaskUpdate", map[string]interface{}{
+			ctx.emit("session:planTaskUpdate", map[string]interface{}{
 				"sessionId": id,
 				"taskId":    taskIDStr,
 				"status":    update.Status,
@@ -1934,7 +1963,7 @@ func (ctx *Context) PatchSessionPlanTask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ctx.SSEBroker.Broadcast("session:planTaskUpdate", map[string]interface{}{
+	ctx.emit("session:planTaskUpdate", map[string]interface{}{
 		"sessionId": id,
 		"taskId":    taskIDStr,
 		"status":    update.Status,

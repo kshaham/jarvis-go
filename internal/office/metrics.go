@@ -11,6 +11,12 @@ type Metrics struct {
 	TotalStandupsComplete atomic.Int64
 	TotalTasks            atomic.Int64
 	TotalTasksCompleted   atomic.Int64
+	// TotalTasksRejected counts tasks that failed verification / criteria
+	// review (objective gate failed, criteria rejected, blocked-category
+	// rejection). Paired with TotalTasksCompleted it yields the
+	// accepted-change rate -- loop engineering's north-star metric. A rate
+	// below 0.5 means the loop is creating review work, not saving it.
+	TotalTasksRejected    atomic.Int64
 	TotalBugs             atomic.Int64
 	TotalBugTasksCreated  atomic.Int64
 	TotalBugsResolved     atomic.Int64
@@ -36,10 +42,16 @@ func (m *Metrics) Uptime() time.Duration {
 
 // MetricsSnapshot returns a point-in-time copy of all metrics.
 type MetricsSnapshot struct {
-	TotalStandups              int64            `json:"totalStandups"`
-	TotalStandupsCompleted     int64            `json:"totalStandupsCompleted"`
-	TotalTasks                 int64            `json:"totalTasks"`
-	TotalTasksCompleted        int64            `json:"totalTasksCompleted"`
+	TotalStandups          int64 `json:"totalStandups"`
+	TotalStandupsCompleted int64 `json:"totalStandupsCompleted"`
+	TotalTasks             int64 `json:"totalTasks"`
+	TotalTasksCompleted    int64 `json:"totalTasksCompleted"`
+	TotalTasksRejected     int64 `json:"totalTasksRejected"`
+	// AcceptedChangeRate = completed / (completed + rejected). The
+	// loop-engineering quality signal; < 0.5 in perpetual mode is a problem.
+	AcceptedChangeRate float64 `json:"acceptedChangeRate"`
+	// CostPerAcceptedChange = TotalCost / TotalTasksCompleted (0 when none).
+	CostPerAcceptedChange      float64          `json:"costPerAcceptedChange"`
 	TotalBugs                  int64            `json:"totalBugs"`
 	TotalBugTasksCreated       int64            `json:"totalBugTasksCreated"`
 	TotalBugTasksResolved      int64            `json:"totalBugTasksResolved"`
@@ -67,11 +79,20 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 		avgRate = float64(completed) / float64(totalStandups)
 	}
 
+	tasksDone := m.TotalTasksCompleted.Load()
+	tasksRejected := m.TotalTasksRejected.Load()
+	var acceptRate float64
+	if tasksDone+tasksRejected > 0 {
+		acceptRate = float64(tasksDone) / float64(tasksDone+tasksRejected)
+	}
+
 	return MetricsSnapshot{
 		TotalStandups:              totalStandups,
 		TotalStandupsCompleted:     completed,
 		TotalTasks:                 m.TotalTasks.Load(),
-		TotalTasksCompleted:        m.TotalTasksCompleted.Load(),
+		TotalTasksCompleted:        tasksDone,
+		TotalTasksRejected:         tasksRejected,
+		AcceptedChangeRate:         acceptRate,
 		TotalBugs:                  m.TotalBugs.Load(),
 		TotalBugTasksCreated:       m.TotalBugTasksCreated.Load(),
 		TotalBugTasksResolved:      m.TotalBugsResolved.Load(),

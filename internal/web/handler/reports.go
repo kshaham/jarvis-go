@@ -87,6 +87,6 @@ func (ctx *Context) OfficeGenerateReport(w http.ResponseWriter, r *http.Request)
 		request.WriteError(w, http.StatusInternalServerError, "failed to generate report")
 		return
 	}
-	ctx.SSEBroker.Broadcast("office:reportGenerated", meta)
+	ctx.emit("office:reportGenerated", meta)
 	ok(w, map[string]interface{}{"report": meta})
 }

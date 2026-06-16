@@ -268,7 +268,7 @@ func (ctx *Context) PostKnowledgeRevoke(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	ctx.SSEBroker.Broadcast("knowledge:revoked", map[string]interface{}{
+	ctx.emit("knowledge:revoked", map[string]interface{}{
 		"path":         req.Path,
 		"reason":       reason,
 		"skillRemoved": skillRemoved,

@@ -22,9 +22,9 @@ import (
 // get a more generous gitWorktreeOpTimeout. Both well over the
 // expected p99 — these are circuit-breakers, not deadlines.
 const (
-	gitProbeTimeout       = 30 * time.Second
-	gitWorktreeOpTimeout  = 5 * time.Minute
-	gitCommitOpTimeout    = 60 * time.Second
+	gitProbeTimeout      = 30 * time.Second
+	gitWorktreeOpTimeout = 5 * time.Minute
+	gitCommitOpTimeout   = 60 * time.Second
 )
 
 // runGit runs git with the supplied timeout + working directory.
@@ -38,6 +38,27 @@ func runGit(timeout time.Duration, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	return cmd.CombinedOutput()
+}
+
+// safeWorktreeID reports whether id is safe to use as a single filesystem path
+// component and a `git worktree`/`git branch` argument. config.ID can originate
+// from operator-supplied MemberOverride JSON (see ResolveMemberList), so a value
+// like "../../etc" must never reach filepath.Join or a git command. Allow only
+// [A-Za-z0-9._-] and reject "", ".", "..". An unsafe ID makes the caller fall
+// back to the shared working dir (setup) or skip cleanup, never escaping
+// .worktrees/.
+func safeWorktreeID(id string) bool {
+	if id == "" || id == "." || id == ".." {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // HookSpawnInfo carries the per-agent data needed to write the
@@ -90,6 +111,15 @@ func SetupWorktrees(workingDir string, members []*TeamMemberConfig) map[string]s
 	for _, config := range members {
 		// Strategic-tier agents work on the main branch.
 		if config.Tier == "strategic" {
+			paths[config.ID] = workingDir
+			continue
+		}
+
+		// Defense-in-depth: an unsafe ID (path traversal from an override)
+		// must not reach filepath.Join / git. Fall back to the shared dir.
+		if !safeWorktreeID(config.ID) {
+			slog.Warn("Unsafe agent ID for worktree path -- using shared directory",
+				"agent", config.Name, "id", config.ID)
 			paths[config.ID] = workingDir
 			continue
 		}
@@ -175,6 +205,11 @@ type WorktreeHooksConfig struct {
 	// ship jarvis's office content + ECC's 3 commands + 4 agents;
 	// true = office only.
 	EccDisabled bool
+	// SevenStepMode layers the vendored agent-skills bundle (the 7 phase
+	// slash commands + 4 specialist personas) onto each agent's .claude/
+	// tree. Off by default; set when the team's 7-step engineering overlay
+	// is enabled.
+	SevenStepMode bool
 }
 
 func SetupWorktreesWithHooks(cfg WorktreeHooksConfig) map[string]string {
@@ -237,6 +272,11 @@ func SetupWorktreesWithHooks(cfg WorktreeHooksConfig) map[string]string {
 		if !cfg.EccDisabled {
 			cmds = append(cmds, BuildECCCommands()...)
 		}
+		// 7-step engineering overlay: layer the agent-skills phase commands
+		// (/spec /plan /build /test /review /code-simplify /ship) when enabled.
+		if cfg.SevenStepMode {
+			cmds = append(cmds, BuildAgentSkillsCommands()...)
+		}
 		if n, err := WriteCommands(cwd, cmds); err != nil {
 			slog.Warn("R2.1: WriteCommands failed", "agent", m.Name, "err", err)
 		} else if n > 0 {
@@ -253,6 +293,11 @@ func SetupWorktreesWithHooks(cfg WorktreeHooksConfig) map[string]string {
 		agents := BuildOfficeAgents()
 		if !cfg.EccDisabled {
 			agents = append(agents, BuildECCAgents()...)
+		}
+		// 7-step engineering overlay: layer the 4 specialist personas
+		// (code-reviewer, security-auditor, test-engineer, web-performance-auditor).
+		if cfg.SevenStepMode {
+			agents = append(agents, BuildAgentSkillsAgents()...)
 		}
 		if n, err := WriteAgents(cwd, agents); err != nil {
 			slog.Warn("R2.2: WriteAgents failed", "agent", m.Name, "err", err)
@@ -306,6 +351,14 @@ func setupAllAgentWorktrees(workingDir string, members []*TeamMemberConfig) map[
 	}
 
 	for _, config := range members {
+		// Defense-in-depth against a path-traversal ID from an override.
+		if !safeWorktreeID(config.ID) {
+			slog.Warn("Unsafe agent ID for worktree path -- using shared workingDir for this agent",
+				"agent", config.Name, "id", config.ID)
+			paths[config.ID] = workingDir
+			continue
+		}
+
 		worktreePath := filepath.Join(worktreeDir, config.ID)
 		branchName := "agent/" + config.ID
 
@@ -338,6 +391,9 @@ func setupAllAgentWorktrees(workingDir string, members []*TeamMemberConfig) map[
 // {workingDir}/.worktrees/{id}/ candidate path.
 func CleanupHookSettings(workingDir string, members []*TeamMemberConfig) {
 	for _, m := range members {
+		if !safeWorktreeID(m.ID) {
+			continue // an unsafe ID never produced a worktree to clean up
+		}
 		cwd := filepath.Join(workingDir, ".worktrees", m.ID)
 		if err := claudehooks.RemoveSettings(cwd); err != nil && !errors.Is(err, claudehooks.ErrOperatorOwned) {
 			slog.Debug("CleanupHookSettings: remove failed", "agent", m.Name, "err", err)
@@ -353,6 +409,9 @@ func CleanupWorktrees(workingDir string, members []*TeamMemberConfig) {
 		if config.Tier == "strategic" {
 			continue
 		}
+		if !safeWorktreeID(config.ID) {
+			continue // an unsafe ID never produced a worktree/branch to remove
+		}
 
 		worktreePath := filepath.Join(worktreeDir, config.ID)
 		branchName := "agent/" + config.ID
@@ -360,15 +419,19 @@ func CleanupWorktrees(workingDir string, members []*TeamMemberConfig) {
 		// Remove worktree (timeout-bounded; git can stall on a busy
 		// .git/index lock during heavy team churn).
 		if output, err := runGit(gitWorktreeOpTimeout, workingDir, "worktree", "remove", worktreePath, "--force"); err != nil {
-			slog.Warn("Failed to remove worktree",
+			// Removal failed -- do NOT delete the branch. Deleting it now would
+			// orphan the on-disk worktree (directory present, branch gone), which
+			// the reuse logic then picks up in an inconsistent state. Leave both
+			// so the next cleanup can retry the pair.
+			slog.Warn("Failed to remove worktree -- leaving branch intact to avoid orphaning",
 				"agent", config.Name,
 				"err", err,
 				"output", string(output))
-		} else {
-			slog.Info("Removed worktree", "agent", config.Name, "path", worktreePath)
+			continue
 		}
+		slog.Info("Removed worktree", "agent", config.Name, "path", worktreePath)
 
-		// Delete branch.
+		// Delete branch only after the worktree was successfully removed.
 		if output, err := runGit(gitProbeTimeout, workingDir, "branch", "-D", branchName); err != nil {
 			slog.Debug("Failed to delete branch (may not exist)",
 				"branch", branchName,
@@ -429,12 +492,19 @@ func ensureWorktreesGitignored(gitignorePath, workingDir string) {
 // the JSON without the mcpServers key (graceful degradation matching
 // every other optional integration).
 func hooksModeMcpServers() map[string]any {
-	if !PageIndexAvailable() {
+	servers := make(map[string]any)
+	if PageIndexAvailable() {
+		if cfg := PageIndexMcpConfig(LibraryDir()); cfg != nil {
+			servers["pageindex"] = cfg
+		}
+	}
+	if HeadroomAvailable() {
+		if cfg := HeadroomMcpConfig(); cfg != nil {
+			servers["headroom"] = cfg
+		}
+	}
+	if len(servers) == 0 {
 		return nil
 	}
-	cfg := PageIndexMcpConfig(LibraryDir())
-	if cfg == nil {
-		return nil
-	}
-	return map[string]any{"pageindex": cfg}
+	return servers
 }

@@ -50,6 +50,7 @@ func TestCreateListLoadDeleteSnapshot_RoundTrip(t *testing.T) {
 	m.SetTeamSpawned(true)
 	m.SetTeamMission("do the thing")
 	m.SetPerpetualMode(true)
+	m.SetSevenStepMode(true)
 	m.RegisterAgent("sess-1", "cfg-1", &TeamMemberConfig{ID: "cfg-1", Name: "Ada", Role: "Lead", Tier: "strategic"})
 	m.RegisterAgent("sess-2", "cfg-2", &TeamMemberConfig{ID: "cfg-2", Name: "Babbage", Role: "Engineer", Tier: "worker"})
 
@@ -92,6 +93,9 @@ func TestCreateListLoadDeleteSnapshot_RoundTrip(t *testing.T) {
 	if loaded.PerpetualMode != true {
 		t.Error("expected PerpetualMode=true preserved")
 	}
+	if loaded.SevenStepMode != true {
+		t.Error("expected SevenStepMode=true preserved across snapshot round-trip")
+	}
 	if loaded.WorkingDir != "/tmp/work" {
 		t.Errorf("WorkingDir: got %q", loaded.WorkingDir)
 	}
@@ -130,6 +134,26 @@ func TestCreateSnapshot_RefusesWhenTeamNotSpawned(t *testing.T) {
 	_, err := m.CreateSnapshot("will-fail", "/tmp", nil)
 	if err == nil {
 		t.Fatal("expected error when team not spawned")
+	}
+}
+
+// TestLoadSnapshot_RejectsNameMismatch verifies a hand-edited/corrupted file
+// whose embedded Name disagrees with its filename is rejected (so logs/events
+// can't show a misleading team name).
+func TestLoadSnapshot_RejectsNameMismatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".jarvis", "office-memory", "snapshots")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// File is "team-a.json" but embeds Name "team-b".
+	if err := os.WriteFile(filepath.Join(dir, "team-a.json"),
+		[]byte(`{"name":"team-b","members":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSnapshot("team-a"); err == nil {
+		t.Error("expected LoadSnapshot to reject a name/filename mismatch")
 	}
 }
 

@@ -320,7 +320,7 @@ func (ctx *Context) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// losing events emitted between broadcast and goroutine start.
 	go forwardSessionEvents(session, ctx)
 
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+	ctx.emit("session:created", sessionToJSON(session))
 
 	// Notify Telegram
 	if ctx.TelegramHandler != nil {
@@ -385,7 +385,7 @@ func (ctx *Context) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx.SSEBroker.Broadcast("session:deleted", map[string]string{"id": id})
+	ctx.emit("session:deleted", map[string]string{"id": id})
 	ctx.StateStore.RemoveSession(id)
 	ctx.cleanupSessionResources(id)
 

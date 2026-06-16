@@ -34,6 +34,14 @@ type SessionConfig struct {
 	NiceConfig    NiceConfig
 	ProviderEnv   map[string]string
 
+	// ClaudeSubscription marks a claude-subscription agent session (no
+	// ANTHROPIC_API_KEY supplied -- auth comes from the container's Claude
+	// login). When set, Start strips any INHERITED ANTHROPIC_API_KEY /
+	// ANTHROPIC_AUTH_TOKEN so a stray env var can't silently flip the agent
+	// onto API billing. Mirrors CodexSubscription. Left false for operator
+	// terminals so their environment is untouched.
+	ClaudeSubscription bool
+
 	// MaxTurnsPerSession is an optional per-session turn-count cap. When
 	// > 0, the session emits EventTurnCapReached and stops once the
 	// cumulative NumTurns from the SDK crosses the ceiling. Zero means

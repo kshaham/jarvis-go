@@ -56,6 +56,7 @@ type (
 var (
 	codegraphOptOut      = spawnpayload.CodegraphOptOut
 	eccOptOut            = spawnpayload.EccOptOut
+	headroomOptOut       = spawnpayload.HeadroomOptOut
 	resolveSessionTuning = spawnpayload.ResolveSessionTuning
 )
 
@@ -290,6 +291,14 @@ type agentTaskCriteriaRequest struct {
 	TaskID    string   `json:"taskId"`
 	Op        string   `json:"op"`
 	Criteria  []string `json:"criteria"`
+}
+
+// agentTaskPhaseRequest is the body for POST /office/agent/task/phase.
+// Phase is one of the 7 engineering phases (define..ship).
+type agentTaskPhaseRequest struct {
+	SessionID string `json:"sessionId"`
+	TaskID    string `json:"taskId"`
+	Phase     string `json:"phase"`
 }
 
 // ---------------------------------------------------------------------------
@@ -598,12 +607,10 @@ func (ctx *Context) OfficeDemoSpawn(w http.ResponseWriter, r *http.Request) {
 	if err := office.SeedNewProjectCLAUDEMd(dir, "jarvis-demo", demoMission); err != nil {
 		slog.Warn("demo spawn: sandbox seed failed", "dir", dir, "err", err)
 	}
-	if ctx.SSEBroker != nil {
-		ctx.SSEBroker.Broadcast("office:projectCreated", map[string]interface{}{
-			"name": "jarvis-demo",
-			"path": dir,
-		})
-	}
+	ctx.emit("office:projectCreated", map[string]interface{}{
+		"name": "jarvis-demo",
+		"path": dir,
+	})
 
 	// One-shot, workflows off, low effort, capped turns. Provider/Model
 	// are intentionally left empty on every override so the demo inherits
@@ -637,7 +644,7 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	// true. The actual work lives in office.PrepareNewProject; here we
 	// just translate its errors into HTTP responses.
 	if req.NewProject {
-		target, err := office.PrepareNewProject(req.ProjectName, req.Mission, ctx.SSEBroker.Broadcast)
+		target, err := office.PrepareNewProject(req.ProjectName, req.Mission, ctx.emit)
 		if err != nil {
 			if errors.Is(err, office.ErrInvalidProjectName) {
 				request.WriteError(w, http.StatusBadRequest, err.Error())
@@ -772,11 +779,12 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 	if hooksMode {
 		daemonURL := ctx.OfficeManager.GetDaemonURL()
 		hooksAgentCwd = office.SetupWorktreesWithHooks(office.WorktreeHooksConfig{
-			WorkingDir:  req.WorkingDir,
-			DaemonURL:   daemonURL,
-			Members:     teamConfigs,
-			SpawnInfo:   hookSpawnInfo,
-			EccDisabled: eccOptOut(req),
+			WorkingDir:    req.WorkingDir,
+			DaemonURL:     daemonURL,
+			Members:       teamConfigs,
+			SpawnInfo:     hookSpawnInfo,
+			EccDisabled:   eccOptOut(req),
+			SevenStepMode: office.ResolveSevenStepMode(req),
 		})
 	}
 
@@ -928,7 +936,7 @@ func (ctx *Context) spawnTeamFromRequest(w http.ResponseWriter, req spawnTeamReq
 					}
 				}()
 				agentMemory := office.LoadAgentMemory(a.ConfigID, req.WorkingDir)
-				prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual, ctx.OfficeManager.GetProjectInvariants())
+				prompt := office.BuildKickstartPrompt(a.Config, req.WorkingDir, teamConfigs, teamMission, agentMemory, perpetual, ctx.OfficeManager.GetProjectInvariants(), office.ResolveSevenStepMode(req))
 				if prompt == "" {
 					return
 				}
@@ -1043,11 +1051,7 @@ func (ctx *Context) resolveGithubRepoDir(req spawnTeamRequest) (string, error) {
 	if token == "" {
 		token = os.Getenv("GITHUB_TOKEN")
 	}
-	var broadcast office.SSEBroadcaster
-	if ctx.SSEBroker != nil {
-		broadcast = ctx.SSEBroker.Broadcast
-	}
-	dir, _, _, err := office.PrepareGitHubProject(req.GithubRepo, token, nil, broadcast)
+	dir, _, _, err := office.PrepareGitHubProject(req.GithubRepo, token, nil, ctx.emit)
 	return dir, err
 }
 
@@ -1087,7 +1091,7 @@ func (ctx *Context) OfficePauseTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	wasPaused := ctx.OfficeManager.SetPaused(true, req.Reason)
 	paused, since, reason := ctx.OfficeManager.PauseSnapshot()
-	ctx.SSEBroker.Broadcast("office:teamPaused", map[string]interface{}{
+	ctx.emit("office:teamPaused", map[string]interface{}{
 		"paused":    paused,
 		"since":     since.UnixMilli(),
 		"reason":    reason,
@@ -1151,7 +1155,7 @@ func (ctx *Context) OfficeCreateSnapshot(w http.ResponseWriter, r *http.Request)
 		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx.SSEBroker.Broadcast("office:snapshotCreated", map[string]interface{}{
+	ctx.emit("office:snapshotCreated", map[string]interface{}{
 		"name":        snap.Name,
 		"createdAt":   snap.CreatedAt.UnixMilli(),
 		"memberCount": len(snap.Members),
@@ -1172,7 +1176,7 @@ func (ctx *Context) OfficeDeleteSnapshot(w http.ResponseWriter, r *http.Request)
 		request.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx.SSEBroker.Broadcast("office:snapshotDeleted", map[string]interface{}{"name": name})
+	ctx.emit("office:snapshotDeleted", map[string]interface{}{"name": name})
 	slog.Info("team snapshot deleted", "name", name)
 	ok(w, map[string]interface{}{"deleted": name})
 }
@@ -1217,11 +1221,13 @@ func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request
 	// runs unchanged.
 	overrides, forkAppliedCount := buildRestoreOverrides(snap, forkRequested)
 	perpetual := snap.PerpetualMode
+	sevenStep := snap.SevenStepMode
 	req := spawnTeamRequest{
 		WorkingDir:      snap.WorkingDir,
 		Mission:         snap.TeamMission,
 		MemberOverrides: overrides,
 		PerpetualMode:   &perpetual,
+		SevenStepMode:   &sevenStep,
 	}
 
 	// spawnTeamFromRequest writes its own response — we can't read
@@ -1244,12 +1250,12 @@ func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request
 	// Restore pause state if the snapshot was paused.
 	if snap.Paused {
 		ctx.OfficeManager.SetPaused(true, snap.PauseReason)
-		ctx.SSEBroker.Broadcast("office:teamPaused", map[string]interface{}{
+		ctx.emit("office:teamPaused", map[string]interface{}{
 			"paused": true, "reason": snap.PauseReason,
 		})
 	}
 
-	ctx.SSEBroker.Broadcast("office:snapshotRestored", map[string]interface{}{
+	ctx.emit("office:snapshotRestored", map[string]interface{}{
 		"name":        snap.Name,
 		"memberCount": len(snap.Members),
 		"seededTasks": seeded,
@@ -1281,7 +1287,7 @@ var (
 // OfficeResumeTeam lifts the pause flag. Idempotent. R25.
 func (ctx *Context) OfficeResumeTeam(w http.ResponseWriter, r *http.Request) {
 	wasPaused := ctx.OfficeManager.SetPaused(false, "")
-	ctx.SSEBroker.Broadcast("office:teamResumed", map[string]interface{}{
+	ctx.emit("office:teamResumed", map[string]interface{}{
 		"wasPaused": wasPaused,
 	})
 	slog.Info("team resumed", "wasPaused", wasPaused)
@@ -1451,7 +1457,7 @@ func (ctx *Context) OfficePutAutoStandup(w http.ResponseWriter, r *http.Request)
 	}
 	ctx.OfficeManager.SetConfig(&updated)
 
-	ctx.SSEBroker.Broadcast("office:autoStandupScheduled", map[string]interface{}{
+	ctx.emit("office:autoStandupScheduled", map[string]interface{}{
 		"enabled":    req.Enabled,
 		"intervalMs": int(updated.AutoStandupInterval.Milliseconds()),
 	})
@@ -1533,7 +1539,7 @@ func (ctx *Context) OfficePostWhiteboard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	ctx.OfficeManager.SetWhiteboardNote(req.SessionID, req.Text)
-	ctx.SSEBroker.Broadcast("office:whiteboardUpdated", map[string]interface{}{"sessionId": req.SessionID})
+	ctx.emit("office:whiteboardUpdated", map[string]interface{}{"sessionId": req.SessionID})
 	ok(w, nil)
 }
 
@@ -1598,7 +1604,7 @@ func (ctx *Context) OfficePostBugTask(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:   time.Now(),
 	}
 	ctx.OfficeManager.AddBugTask(task)
-	ctx.SSEBroker.Broadcast("office:bugTaskCreated", map[string]interface{}{"task": task})
+	ctx.emit("office:bugTaskCreated", map[string]interface{}{"task": task})
 	ok(w, map[string]interface{}{"task": task})
 }
 
@@ -1610,9 +1616,9 @@ func (ctx *Context) OfficePutBugTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx.OfficeManager.UpdateBugTask(id, req.Status)
-	ctx.SSEBroker.Broadcast("office:bugTaskUpdated", map[string]interface{}{"id": id, "status": req.Status})
+	ctx.emit("office:bugTaskUpdated", map[string]interface{}{"id": id, "status": req.Status})
 	if req.Status == "resolved" {
-		ctx.SSEBroker.Broadcast("office:bugTaskResolved", map[string]interface{}{"id": id, "status": req.Status})
+		ctx.emit("office:bugTaskResolved", map[string]interface{}{"id": id, "status": req.Status})
 	}
 	ok(w, nil)
 }
@@ -1627,7 +1633,7 @@ func (ctx *Context) OfficeGetFileLocks(w http.ResponseWriter, r *http.Request) {
 func (ctx *Context) OfficeDeleteFileLock(w http.ResponseWriter, r *http.Request) {
 	filePath := chi.URLParam(r, "*")
 	ctx.OfficeManager.ForceReleaseLock(filePath)
-	ctx.SSEBroker.Broadcast("office:fileLockChanged", map[string]interface{}{
+	ctx.emit("office:fileLockChanged", map[string]interface{}{
 		"action": "unlocked",
 		"lock": map[string]interface{}{
 			"filePath":  filePath,
@@ -1671,6 +1677,18 @@ func (ctx *Context) OfficeGetMetrics(w http.ResponseWriter, r *http.Request) {
 func (ctx *Context) OfficeGetExperiments(w http.ResponseWriter, r *http.Request) {
 	records := office.LoadExperimentHistory()
 	ok(w, map[string]interface{}{"experiments": records})
+}
+
+// OfficeGetEscalations returns the durable escalation-to-humans log -- the
+// single place operators can see what the perpetual loop could not resolve on
+// its own (stuck agents, blocked tasks, hard stops, blocked-category rejects).
+func (ctx *Context) OfficeGetEscalations(w http.ResponseWriter, r *http.Request) {
+	records, err := office.LoadEscalations()
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(w, map[string]interface{}{"escalations": records})
 }
 
 // OfficeGetScores returns current agent performance scores.
@@ -1808,7 +1826,7 @@ func (ctx *Context) OfficePostWrapUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mgr.SetWrappingUp(true)
-	ctx.SSEBroker.Broadcast("office:wrapUpInitiated", map[string]interface{}{"active": true})
+	ctx.emit("office:wrapUpInitiated", map[string]interface{}{"active": true})
 	mgr.NotifyOfficeEvent("Wrap-up Initiated", "")
 
 	// Stop idle monitoring so no new brainstorms/replenishment triggers
@@ -1850,14 +1868,14 @@ func (ctx *Context) OfficePostWrapUp(w http.ResponseWriter, r *http.Request) {
 				slog.Error("panic in wrap-up report generator", "panic", rec)
 			}
 		}()
-		office.GenerateAndBroadcastWrapUpReport(mgr, "wrap-up", "", ctx.SSEBroker.Broadcast)
+		office.GenerateAndBroadcastWrapUpReport(mgr, "wrap-up", "", ctx.emit)
 	}()
 }
 
 // OfficePostWrapUpCancel cancels a wrap-up.
 func (ctx *Context) OfficePostWrapUpCancel(w http.ResponseWriter, r *http.Request) {
 	ctx.OfficeManager.SetWrappingUp(false)
-	ctx.SSEBroker.Broadcast("office:wrapUpCancelled", map[string]interface{}{"active": false})
+	ctx.emit("office:wrapUpCancelled", map[string]interface{}{"active": false})
 	ok(w, nil)
 }
 
@@ -1946,7 +1964,7 @@ func (ctx *Context) OfficePostStandupUserMessage(w http.ResponseWriter, r *http.
 		return
 	}
 	// Broadcast user message to all clients via SSE.
-	ctx.SSEBroker.Broadcast("office:standup:user-message", map[string]interface{}{
+	ctx.emit("office:standup:user-message", map[string]interface{}{
 		"message": req.Content,
 	})
 	ok(w, nil)
@@ -2247,16 +2265,16 @@ func (ctx *Context) OfficeAgentTaskStart(w http.ResponseWriter, r *http.Request)
 	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent != nil {
 		agent.UpdateTaskStatus(req.TaskID, office.TaskInProgress)
-		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+		ctx.emit("office:taskUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 			"taskId":    req.TaskID,
 			"status":    string(office.TaskInProgress),
 		})
-		ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
+		ctx.emit("office:taskQueueUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 		})
 		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+			ctx.emit("office:memberUpdated", payload)
 		}
 	}
 	ok(w, nil)
@@ -2296,7 +2314,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			v, _ := office.EvaluateAcceptanceCriteria(r.Context(), cwd, req.Result, taskCriteria)
 			if v.EvaluatorError != "" {
 				// Fail-open: broadcast the infra error and continue to completion.
-				ctx.SSEBroker.Broadcast("office:taskCriteriaReviewed", map[string]interface{}{
+				ctx.emit("office:taskCriteriaReviewed", map[string]interface{}{
 					"sessionId":      sid,
 					"taskId":         req.TaskID,
 					"results":        v.Results,
@@ -2322,7 +2340,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 					blockerDesc := "Acceptance criteria not met after 2 rejections:\n" + failingSummary.String()
 					agent.SetTaskBlockerDescription(req.TaskID, blockerDesc)
 					agent.SetTaskProgress(req.TaskID, "escalated: criteria not met after 2 rejections\n"+failingSummary.String())
-					ctx.SSEBroker.Broadcast("office:taskCompletionEscalated", map[string]interface{}{
+					ctx.emit("office:taskCompletionEscalated", map[string]interface{}{
 						"sessionId": sid,
 						"taskId":    req.TaskID,
 						"failing":   v.Results,
@@ -2349,7 +2367,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 				}
 				promptBuf.WriteString("\nPlease address the above and call `cm task complete` again when the criteria are satisfied.")
 				ctx.OfficeManager.Sessions().WriteInkPrompt(sid, promptBuf.String())
-				ctx.SSEBroker.Broadcast("office:taskCompletionRejected", map[string]interface{}{
+				ctx.emit("office:taskCompletionRejected", map[string]interface{}{
 					"sessionId":   sid,
 					"taskId":      req.TaskID,
 					"failing":     v.Results,
@@ -2385,7 +2403,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 		// broadcast the SSE + log when it fires.
 		if office.ShouldWarnMissingScreenshot(result.Title, req.Result, req.TaskID) {
 			warning = "UI-tagged task completed without explicit visual verification evidence in the summary. Did you run browser-screenshot against the dev URL? Cite the path (e.g. '/tmp/after.png') in your --summary, or upload the PNG via `cm task complete <id> --screenshot <path>` so operators see the evidence in the dashboard."
-			ctx.SSEBroker.Broadcast("office:uiTaskMissingScreenshot", map[string]interface{}{
+			ctx.emit("office:uiTaskMissingScreenshot", map[string]interface{}{
 				"sessionId": req.SessionID,
 				"taskId":    req.TaskID,
 				"title":     result.Title,
@@ -2394,19 +2412,19 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 				"sessionId", req.SessionID, "taskId", req.TaskID, "title", result.Title)
 		}
 
-		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+		ctx.emit("office:taskUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 			"taskId":    req.TaskID,
 			"status":    string(office.TaskCompleted),
 			"result":    req.Result,
 		})
-		ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
+		ctx.emit("office:taskQueueUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 		})
 
 		// Broadcast full member payload with updated status
 		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+			ctx.emit("office:memberUpdated", payload)
 		}
 
 		// R3.4 · Fire `claude ultrareview` against the agent's
@@ -2420,7 +2438,10 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 				slog.Warn("ultrareview: task tagged needs-review but agent has no worktree",
 					"sessionId", req.SessionID, "taskId", req.TaskID)
 			} else {
-				broker := ctx.SSEBroker
+				// Capture the nil-safe emit (ctx.SSEBroker may be nil in tests/
+				// bootstrap; emit guards it) rather than ctx.SSEBroker.Broadcast,
+				// which panics on a nil broker.
+				emit := ctx.emit
 				sid := req.SessionID
 				tid := req.TaskID
 				configID := agent.ConfigID
@@ -2435,7 +2456,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 					}()
 					// Use the configID-aware variant so the findings
 					// also append to the library experience markdown.
-					office.RunUltrareviewAndBroadcastForAgent(context.Background(), cwd, configID, sid, tid, broker.Broadcast)
+					office.RunUltrareviewAndBroadcastForAgent(context.Background(), cwd, configID, sid, tid, emit)
 				}()
 			}
 		}
@@ -2471,10 +2492,10 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			resultSnap := req.Result
 			cwdSnap := cwd
 			tidSnap := req.TaskID
-			broker := ctx.SSEBroker
+			emit := ctx.emit // nil-safe (ctx.SSEBroker.Broadcast would panic on a nil broker)
 			safego.Go("office.advisoryCriteria", func() {
 				v, _ := office.EvaluateAcceptanceCriteria(context.Background(), cwdSnap, resultSnap, criteriaSnap)
-				broker.Broadcast("office:taskCriteriaReviewed", map[string]interface{}{
+				emit("office:taskCriteriaReviewed", map[string]interface{}{
 					"sessionId":      sid,
 					"taskId":         tidSnap,
 					"results":        v.Results,
@@ -2567,13 +2588,13 @@ func (ctx *Context) OfficeAgentTaskAck(w http.ResponseWriter, r *http.Request) {
 	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
 	if agent != nil {
 		agent.UpdateTaskStatus(req.TaskID, office.TaskAcknowledged)
-		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+		ctx.emit("office:taskUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 			"taskId":    req.TaskID,
 			"status":    string(office.TaskAcknowledged),
 		})
 		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+			ctx.emit("office:memberUpdated", payload)
 		}
 	}
 	ok(w, nil)
@@ -2595,14 +2616,14 @@ func (ctx *Context) OfficeAgentTaskProgress(w http.ResponseWriter, r *http.Reque
 			}
 		}
 		agent.SetTaskProgress(req.TaskID, progress)
-		ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+		ctx.emit("office:taskUpdated", map[string]interface{}{
 			"sessionId": req.SessionID,
 			"taskId":    req.TaskID,
 			"progress":  progress,
 			"isBlocked": req.IsBlocked,
 		})
 		if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-			ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+			ctx.emit("office:memberUpdated", payload)
 		}
 	}
 	ok(w, nil)
@@ -2637,6 +2658,31 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
+	// Loop-engineering guardrail: during perpetual (autonomous) operation,
+	// reject self-invented work that falls into a blocked category
+	// (auth/payments/deploy/migration/architecture). Loops belong on small,
+	// machine-checkable work -- irreversible judgment calls need a human.
+	// Goal-focused teams explicitly tasked with such work are unaffected.
+	if ctx.OfficeManager.IsPerpetualMode() {
+		if blocked, category := ctx.OfficeManager.TaskCategoryBlocked(req.Title + " " + req.Description); blocked {
+			blockedAgentName := agent.ConfigID
+			if agent.Config != nil {
+				blockedAgentName = agent.Config.Name
+			}
+			if err := office.RecordEscalation(office.EscalationRecord{
+				SessionID: req.SessionID,
+				AgentName: blockedAgentName,
+				Reason:    "blocked_task_category",
+				Detail:    "self-add rejected (" + category + "): " + req.Title,
+			}); err != nil {
+				slog.Debug("record blocked-category escalation failed", "err", err)
+			}
+			request.WriteError(w, http.StatusForbidden,
+				"Self-added tasks in the '"+category+"' category are blocked in perpetual mode. "+
+					"This needs a human -- escalate via your lead instead of self-adding.")
+			return
+		}
+	}
 	task := &office.Task{
 		ID:                 uuid.New().String(),
 		Title:              req.Title,
@@ -2650,17 +2696,17 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 	}
 	agent.AddTask(task)
 
-	ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+	ctx.emit("office:taskUpdated", map[string]interface{}{
 		"sessionId": req.SessionID,
 		"taskId":    task.ID,
 		"status":    string(office.TaskPending),
 		"title":     req.Title,
 	})
-	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{
+	ctx.emit("office:taskQueueUpdated", map[string]interface{}{
 		"sessionId": req.SessionID,
 	})
 	if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
-		ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+		ctx.emit("office:memberUpdated", payload)
 	}
 	ok(w, map[string]interface{}{"taskId": task.ID})
 }
@@ -2830,13 +2876,13 @@ func (ctx *Context) OfficeAgentTaskTriage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.SessionID})
-	ctx.SSEBroker.Broadcast("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.ToSessionID})
+	ctx.emit("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.SessionID})
+	ctx.emit("office:taskQueueUpdated", map[string]interface{}{"sessionId": req.ToSessionID})
 	if payload := ctx.OfficeManager.BuildMemberPayload(source); payload != nil {
-		ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+		ctx.emit("office:memberUpdated", payload)
 	}
 	if payload := ctx.OfficeManager.BuildMemberPayload(target); payload != nil {
-		ctx.SSEBroker.Broadcast("office:memberUpdated", payload)
+		ctx.emit("office:memberUpdated", payload)
 	}
 	ok(w, nil)
 }
@@ -2866,7 +2912,7 @@ func (ctx *Context) OfficeAgentTaskCriteria(w http.ResponseWriter, r *http.Reque
 		request.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+	ctx.emit("office:taskUpdated", map[string]interface{}{
 		"sessionId": req.SessionID,
 		"taskId":    req.TaskID,
 	})
@@ -2880,6 +2926,44 @@ func (ctx *Context) OfficeAgentTaskCriteria(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	ok(w, map[string]interface{}{"criteria": current})
+}
+
+// OfficeAgentTaskPhase records the current 7-step engineering phase for a task.
+// POST /api/office/agent/task/phase  Body: {sessionId, taskId, phase}
+// Advisory only -- never changes task Status. 404 unknown agent/task; 400 invalid phase.
+func (ctx *Context) OfficeAgentTaskPhase(w http.ResponseWriter, r *http.Request) {
+	var req agentTaskPhaseRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	agent := ctx.OfficeManager.GetAgentAndTouch(req.SessionID)
+	if agent == nil {
+		request.WriteError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err := agent.SetTaskPhase(req.TaskID, req.Phase); err != nil {
+		msg := err.Error()
+		if msg == "task not found" {
+			request.WriteError(w, http.StatusNotFound, msg)
+			return
+		}
+		request.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	phase := strings.ToLower(strings.TrimSpace(req.Phase))
+	ctx.emit("office:taskUpdated", map[string]interface{}{
+		"sessionId": req.SessionID,
+		"taskId":    req.TaskID,
+	})
+	ctx.emit("office:taskPhaseUpdated", map[string]interface{}{
+		"sessionId": req.SessionID,
+		"taskId":    req.TaskID,
+		"phase":     phase,
+	})
+	if payload := ctx.OfficeManager.BuildMemberPayload(agent); payload != nil {
+		ctx.emit("office:memberUpdated", payload)
+	}
+	ok(w, map[string]interface{}{"phase": phase})
 }
 
 // OfficeAgentBrainstormResponse handles an agent's brainstorm response.
@@ -3396,7 +3480,7 @@ func (ctx *Context) OfficePutMemberVoice(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	agent.SetVoice(req.Voice)
-	ctx.SSEBroker.Broadcast("office:memberUpdated", map[string]interface{}{
+	ctx.emit("office:memberUpdated", map[string]interface{}{
 		"sessionId": sessionID,
 		"voice":     req.Voice,
 	})
@@ -3420,7 +3504,7 @@ func (ctx *Context) OfficePutMemberPersonality(w http.ResponseWriter, r *http.Re
 		// modal on another client reflects the update instead of
 		// blanking the inputs (undefined -> '') and logging
 		// "Personality updated for undefined" in the activity feed.
-		ctx.SSEBroker.Broadcast("office:personalityUpdated", map[string]interface{}{
+		ctx.emit("office:personalityUpdated", map[string]interface{}{
 			"sessionId":    sessionID,
 			"configId":     agent.ConfigID,
 			"personality":  req.Personality,

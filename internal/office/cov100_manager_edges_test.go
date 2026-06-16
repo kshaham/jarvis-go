@@ -279,6 +279,11 @@ func TestLoadPersistedMetrics_RoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := newTestManager()
 	m.metrics.TotalLearnings.Add(7)
+	// Guard the previously-dropped counters: TotalTasksRejected feeds the
+	// accepted-change rate, so losing it on restart silently inflates the rate.
+	m.metrics.TotalTasksCompleted.Add(8)
+	m.metrics.TotalTasksRejected.Add(2)
+	m.metrics.TotalBugTasksCreated.Add(3)
 	m.PersistMetrics()
 
 	m2 := newTestManager()
@@ -286,6 +291,16 @@ func TestLoadPersistedMetrics_RoundTrip(t *testing.T) {
 	snap := m2.metrics.Snapshot()
 	if snap.TotalLearnings != 7 {
 		t.Errorf("expected reloaded TotalLearnings=7, got %d", snap.TotalLearnings)
+	}
+	if snap.TotalTasksRejected != 2 {
+		t.Errorf("expected reloaded TotalTasksRejected=2, got %d", snap.TotalTasksRejected)
+	}
+	if snap.TotalBugTasksCreated != 3 {
+		t.Errorf("expected reloaded TotalBugTasksCreated=3, got %d", snap.TotalBugTasksCreated)
+	}
+	// The accepted-change rate must survive a restart: 8/(8+2)=0.8, not 1.0.
+	if snap.AcceptedChangeRate != 0.8 {
+		t.Errorf("expected reloaded AcceptedChangeRate=0.8, got %v", snap.AcceptedChangeRate)
 	}
 	_ = time.Now()
 }

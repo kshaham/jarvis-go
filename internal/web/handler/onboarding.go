@@ -31,7 +31,7 @@ func (ctx *Context) OfficeAgentOnboarding(w http.ResponseWriter, r *http.Request
 		request.WriteError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	body, ok := office.GetOnboardingTopic(office.OnboardingTopic(topic), agent.Config, agent.WorktreePath)
+	body, ok := office.GetOnboardingTopic(office.OnboardingTopic(topic), agent.Config, agent.WorktreePath, !ctx.OfficeManager.IsEccDisabled())
 	if !ok {
 		// Ambiguity between "unknown topic" and "access denied" is
 		// resolved here: if it's a known topic and the tier is wrong,

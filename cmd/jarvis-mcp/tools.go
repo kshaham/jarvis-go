@@ -229,6 +229,18 @@ var allToolDefs = []ToolDefinition{
 		},
 	},
 	{
+		Name:        "office_task_phase",
+		Description: "Record the current 7-step engineering phase on a task (define|plan|build|verify|review|simplify|ship). Advisory; does not change task status.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"taskId": {Type: "string", Description: "Task ID"},
+				"phase":  {Type: "string", Description: "One of: define, plan, build, verify, review, simplify, ship"},
+			},
+			Required: []string{"taskId", "phase"},
+		},
+	},
+	{
 		Name:        "office_task_blocked",
 		Description: "Report that a task is blocked",
 		InputSchema: InputSchema{
@@ -605,6 +617,7 @@ var allTools = map[string]ToolHandler{
 	"office_task_start":        handleOfficeTaskStart,
 	"office_task_complete":     handleOfficeTaskComplete,
 	"office_task_progress":     handleOfficeTaskProgress,
+	"office_task_phase":        handleOfficeTaskPhase,
 	"office_task_blocked":      handleOfficeTaskBlocked,
 	"office_task_set_criteria": handleOfficeTaskSetCriteria,
 	"office_standup_respond":   handleOfficeStandupRespond,
@@ -1287,11 +1300,36 @@ func handleOfficeTaskProgress(args map[string]interface{}) ToolResult {
 	if !ok {
 		return toolError("taskId is required")
 	}
-	note, _ := requireStringArg(args, "note")
+	note, ok := requireStringArg(args, "note")
+	if !ok {
+		return toolError("note is required")
+	}
 	// The server (agentTaskProgressRequest) reads json:"progress", not "note" —
 	// sending "note" silently dropped the progress text. Match the cm CLI.
 	result, err := apiPost("/api/office/agent/task-progress", map[string]interface{}{
 		"sessionId": sid, "taskId": taskID, "progress": note,
+	})
+	if err != nil {
+		return toolError(err.Error())
+	}
+	return toolSuccess(result)
+}
+
+func handleOfficeTaskPhase(args map[string]interface{}) ToolResult {
+	sid, err := officeSessionID()
+	if err != nil {
+		return toolError(err.Error())
+	}
+	taskID, ok := requireStringArg(args, "taskId")
+	if !ok {
+		return toolError("taskId is required")
+	}
+	phase, ok := requireStringArg(args, "phase")
+	if !ok {
+		return toolError("phase is required")
+	}
+	result, err := apiPost("/api/office/agent/task/phase", map[string]interface{}{
+		"sessionId": sid, "taskId": taskID, "phase": phase,
 	})
 	if err != nil {
 		return toolError(err.Error())
@@ -1308,7 +1346,10 @@ func handleOfficeTaskBlocked(args map[string]interface{}) ToolResult {
 	if !ok {
 		return toolError("taskId is required")
 	}
-	reason, _ := requireStringArg(args, "reason")
+	reason, ok := requireStringArg(args, "reason")
+	if !ok {
+		return toolError("reason is required")
+	}
 	result, err := apiPost("/api/office/agent/task-progress", map[string]interface{}{
 		"sessionId": sid, "taskId": taskID, "progress": reason,
 		"isBlocked": true, "blockerDescription": reason,

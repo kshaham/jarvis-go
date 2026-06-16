@@ -65,7 +65,7 @@ func (ctx *Context) CloneSession(w http.ResponseWriter, r *http.Request) {
 		}
 
 		go forwardSessionEvents(session, ctx)
-		ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+		ctx.emit("session:created", sessionToJSON(session))
 
 		if ctx.TelegramHandler != nil {
 			ctx.TelegramHandler.NotifySessionStart(session.ID, session.Name(), session.WorkingDir)

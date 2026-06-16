@@ -276,26 +276,33 @@ func TestAutoCompleteIdleAgentTasks_CompletesStaleAndStartsNext(t *testing.T) {
 
 	m.autoCompleteIdleAgentTasks()
 
-	tasks := agent.GetTasks()
-	var active *Task
-	for _, tk := range tasks {
-		if tk.ID == "stale-active" {
-			active = tk
+	// Auto-complete now routes through the objective gate asynchronously. With
+	// no working directory configured the gate is Skipped, which preserves the
+	// legacy "complete + auto-start next" behavior -- but it resolves on a
+	// goroutine, so poll for it.
+	completed := waitFor(2*time.Second, func() bool {
+		for _, tk := range agent.GetTasks() {
+			if tk.ID == "stale-active" && tk.Status == TaskCompleted {
+				return true
+			}
 		}
-	}
-	if active == nil || active.Status != TaskCompleted {
-		t.Fatalf("expected stale-active to be TaskCompleted, got %+v", active)
+		return false
+	})
+	if !completed {
+		t.Fatalf("expected stale-active to be TaskCompleted (gate skipped), tasks=%+v", agent.GetTasks())
 	}
 	if !rec.has("office:taskUpdated") {
 		t.Error("expected office:taskUpdated broadcast")
 	}
 	// The next pending task should have triggered an [AUTO-START] prompt.
-	foundStart := false
-	for _, w := range store.writesFor("sess-ac") {
-		if strings.Contains(w.Input, "[AUTO-START]") && strings.Contains(w.Input, "next-pending") {
-			foundStart = true
+	foundStart := waitFor(2*time.Second, func() bool {
+		for _, w := range store.writesFor("sess-ac") {
+			if strings.Contains(w.Input, "[AUTO-START]") && strings.Contains(w.Input, "next-pending") {
+				return true
+			}
 		}
-	}
+		return false
+	})
 	if !foundStart {
 		t.Error("expected [AUTO-START] prompt for next pending task")
 	}

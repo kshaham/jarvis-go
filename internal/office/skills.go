@@ -232,6 +232,13 @@ func BuildSuggestedSkillsSection(role string, eccEnabled bool) string {
 	if CodegraphBinaryAvailable() {
 		b.WriteString("\nFor structural code questions (\"how does X work\", \"what calls Y\", \"blast radius of changing Z\") prefer the `mcp__codegraph__codegraph_context` tool over grep+read. It returns search + callers + callees + signatures in one call against a pre-built AST index of this workspace.\n")
 	}
+
+	// Headroom context-compression nudge. Only emit when the binary is
+	// present so the hint points at tools the agent can actually reach.
+	// You run perpetually -- context is your scarcest resource.
+	if HeadroomAvailable() {
+		b.WriteString("\nContext compression: you run for a long time and context is scarce. Before pasting a LARGE tool output, log, dependency tree, or search result into your reasoning, pass it through `mcp__headroom__headroom_compress` -- it shrinks the blob 60-95% while preserving meaning. The compression is REVERSIBLE: call `mcp__headroom__headroom_retrieve` to get the original back if you need a detail. Check `mcp__headroom__headroom_stats` to see how much context you've saved. Prefer this over dumping raw multi-thousand-line outputs into context.\n")
+	}
 	return b.String()
 }
 

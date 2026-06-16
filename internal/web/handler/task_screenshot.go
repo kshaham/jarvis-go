@@ -67,7 +67,7 @@ func (ctx *Context) OfficeAgentTaskScreenshot(w http.ResponseWriter, r *http.Req
 	}
 
 	relURL := "/api/office/task-screenshots/" + filename
-	ctx.SSEBroker.Broadcast("office:taskScreenshotAttached", map[string]interface{}{
+	ctx.emit("office:taskScreenshotAttached", map[string]interface{}{
 		"sessionId": req.SessionID,
 		"taskId":    req.TaskID,
 		"filename":  filename,

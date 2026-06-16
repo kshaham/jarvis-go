@@ -1,6 +1,7 @@
 package office
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kshaham/jarvis/internal/ralph"
 	"github.com/kshaham/jarvis/internal/safego"
 )
 
@@ -63,13 +65,33 @@ type Manager struct {
 	metrics     *Metrics
 	config      *Config
 
-	teamSpawned        bool
-	wrappingUp         bool
-	perpetualMode      bool
+	teamSpawned   bool
+	wrappingUp    bool
+	perpetualMode bool
+	// sevenStepMode is the additive 7-step engineering discipline overlay
+	// (agent-skills SDLC). Orthogonal to perpetualMode -- it governs HOW each
+	// task is executed, not whether agents self-replenish.
+	sevenStepMode bool
+	// eccDisabled mirrors the spawn-time DisableEcc flag so non-spawn paths
+	// (e.g. the onboarding endpoint, which has no request in hand) can filter
+	// ECC-sourced skill recommendations a team opted out of.
+	eccDisabled        bool
 	teamSpawnedAt      time.Time
 	wrapUpStartedAt    time.Time
 	autoStandupEnabled bool
 	curiosityEnabled   bool
+
+	// gateFactory is a test seam for the objective verify gate. nil in
+	// production (objectiveGate falls back to a BasicCommandGate built from
+	// Config.VerifyCommand). Tests inject a fast stub so loop logic can be
+	// exercised without running a real test suite.
+	gateFactory func() ralph.ObjectiveGate
+
+	// criteriaEvaluator is a test seam for the independent maker/checker
+	// evaluator. nil in production (falls back to EvaluateAcceptanceCriteria,
+	// which shells out to a fresh `claude` process). Lets tests exercise the
+	// autonomous verification path without a live model call.
+	criteriaEvaluator func(ctx context.Context, worktreeDir, summary string, criteria []string) (CriteriaVerdict, error)
 
 	// memifyLastRunAt gates the knowledge-library memify sweep so
 	// it fires roughly every memifyInterval instead of every idle
@@ -118,6 +140,29 @@ type Manager struct {
 	// AgentState status path can't call it directly since AgentState has no
 	// Manager back-reference -- the sweep is the actual reclamation path.)
 	lastRecoveryAt map[string]time.Time // sessionID -> last recovery prompt time (backoff)
+
+	// autoGateInFlight guards against launching overlapping objective-gate
+	// verify runs for the same session during gated auto-complete. Keyed by
+	// sessionID. A verify command (e.g. `go test ./...`) is expensive, so we
+	// never stack two for one agent.
+	autoGateInFlight map[string]bool
+
+	// lastLowAcceptWarnAt throttles the office:lowAcceptanceRate broadcast so a
+	// persistently low accept rate doesn't spam the dashboard every sweep.
+	lastLowAcceptWarnAt time.Time
+
+	// Security-gate state (loop-engineering requirement I). lastSecurityScanAt
+	// gates the bounded secret scan to a cooldown; securityBlocked latches when
+	// the last scan found committed secrets, suppressing replenishment until a
+	// clean scan clears it.
+	lastSecurityScanAt time.Time
+	securityBlocked    bool
+
+	// Headroom failure-mining sweep (opt-in). headroomLearnEnabled gates the
+	// `headroom learn` sweep that writes corrections into the project CLAUDE.md;
+	// headroomLearnLastRunAt is the wall-clock gate timer.
+	headroomLearnEnabled   bool
+	headroomLearnLastRunAt time.Time
 
 	// Q&A primitive (cm ask). Populated lazily by AskQuestion / AnswerQuestion
 	// in questions.go. pendingQuestions is keyed by question ID;
@@ -250,6 +295,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		triageAttempts:     make(map[string]int),
 		lastTriageAt:       make(map[string]time.Time),
 		lastRecoveryAt:     make(map[string]time.Time),
+		autoGateInFlight:   make(map[string]bool),
 		pendingQuestions:   make(map[string]*Question),
 		lastAskAt:          make(map[string]time.Time),
 		events:             make(chan OfficeEvent, 64),
@@ -271,6 +317,12 @@ func (m *Manager) RegisterAgent(sessionID, configID string, config *TeamMemberCo
 	m.agents[sessionID] = agent
 	m.configIndex[configID] = sessionID
 	m.mu.Unlock()
+
+	// Resume the perpetual-loop hard-stop budget if a prior run persisted it.
+	// No-op (loadLoopState ok=false) when there's no saved state, so a fresh
+	// agent starts at zero. Without this the persisted iteration count is
+	// write-only and the cap silently resets on every daemon restart.
+	m.RestoreLoopState(agent)
 
 	m.auditLog("office:memberJoined", sessionID, config.Name, nil)
 	m.emitEvent(MemberJoinedEvent{ConfigID: configID, SessionID: sessionID, Name: config.Name})
@@ -964,9 +1016,32 @@ func (m *Manager) auditLog(event, sessionID, agentName string, data interface{})
 	})
 }
 
-// GetMetricsSnapshot returns a point-in-time copy of all metrics.
+// GetMetricsSnapshot returns a point-in-time copy of all metrics, enriched with
+// office-level cost/token totals aggregated across agents (the base Snapshot
+// reports those as 0 because Metrics has no agent visibility) and the
+// loop-engineering cost-per-accepted-change figure.
 func (m *Manager) GetMetricsSnapshot() MetricsSnapshot {
-	return m.metrics.Snapshot()
+	snap := m.metrics.Snapshot()
+
+	var totalCost float64
+	var totalIn, totalOut int64
+	m.mu.RLock()
+	for _, a := range m.agents {
+		a.mu.Lock()
+		totalCost += a.TotalCostUSD
+		totalIn += a.TotalInputTokens
+		totalOut += a.TotalOutputTokens
+		a.mu.Unlock()
+	}
+	m.mu.RUnlock()
+
+	snap.TotalCost = totalCost
+	snap.TotalInputTokens = totalIn
+	snap.TotalOutputTokens = totalOut
+	if snap.TotalTasksCompleted > 0 {
+		snap.CostPerAcceptedChange = totalCost / float64(snap.TotalTasksCompleted)
+	}
+	return snap
 }
 
 // GetAuditEntries returns all audit log entries.
@@ -1034,6 +1109,10 @@ func (m *Manager) AddBugTask(task *BugTask) {
 	defer m.mu.Unlock()
 	m.bugTasks[task.ID] = task
 	m.metrics.TotalBugs.Add(1)
+	// TotalBugTasksCreated is the dashboard's dedicated "created" counter
+	// (TotalBugs is the same event); increment it here so the field isn't
+	// permanently zero.
+	m.metrics.TotalBugTasksCreated.Add(1)
 }
 
 // UpdateBugTask updates a bug task by ID. Returns true if found.
@@ -1138,6 +1217,37 @@ func (m *Manager) IsPerpetualMode() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.perpetualMode
+}
+
+// SetSevenStepMode toggles the 7-step engineering discipline overlay. It is
+// additive: it combines with perpetual OR goal-focused mode and makes agents
+// drive each feature through DEFINE->PLAN->BUILD->VERIFY->REVIEW->SIMPLIFY->SHIP
+// using the vendored agent-skills commands + skills.
+func (m *Manager) SetSevenStepMode(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sevenStepMode = v
+}
+
+// IsSevenStepMode returns whether the 7-step engineering overlay is active.
+func (m *Manager) IsSevenStepMode() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sevenStepMode
+}
+
+// SetEccDisabled records whether the current team opted out of the ECC bundle.
+func (m *Manager) SetEccDisabled(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.eccDisabled = v
+}
+
+// IsEccDisabled reports whether the current team opted out of the ECC bundle.
+func (m *Manager) IsEccDisabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.eccDisabled
 }
 
 // GetStandup returns a snapshot of the current standup state.
@@ -1290,6 +1400,15 @@ func (m *Manager) GetSpawnContext() (string, string) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.lastTemplateID, m.lastWorkingDir
+}
+
+// VerifyCommand returns the configured objective-gate verify command (empty
+// means auto-detect from the working directory). Exposed so the session-level
+// Ralph trackers can attach the same gate the office loop uses.
+func (m *Manager) VerifyCommand() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.VerifyCommand
 }
 
 // SetTeamPRNumber records the PR number the current team is working
@@ -2032,7 +2151,7 @@ func (m *Manager) GetOfficeSettings() map[string]interface{} {
 	memberCount := len(m.agents)
 	activeMeetingCount := 0
 	for _, mtg := range m.meetings {
-		if mtg.Active {
+		if mtg != nil && mtg.Active {
 			activeMeetingCount++
 		}
 	}
@@ -2104,6 +2223,11 @@ func (m *Manager) UpdateOfficeSettings(settings map[string]interface{}) {
 	}
 	if v, ok := settings["curiosityEnabled"].(bool); ok {
 		m.curiosityEnabled = v
+	}
+	// Opt-in Headroom failure-mining sweep. Off by default; writes
+	// corrections into the project CLAUDE.md when enabled.
+	if v, ok := settings["headroomLearnEnabled"].(bool); ok {
+		m.headroomLearnEnabled = v
 	}
 	if v, ok := settings["curiosityCooldownMs"].(float64); ok && v >= 300000 {
 		m.config.CuriosityCooldown = time.Duration(v) * time.Millisecond
@@ -2306,6 +2430,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	teamSpawned := m.teamSpawned
 	wrappingUp := m.wrappingUp
 	perpetualMode := m.perpetualMode
+	sevenStepMode := m.sevenStepMode
 	// Template the current team was spawned from. Surfaced here (not just in
 	// GetOfficeSettings) so the SPA's office-status hook can tell a one-click
 	// "Demo Jarvis" team apart from a real one and offer a "Stop demo" control.
@@ -2378,6 +2503,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"teamSpawned":       teamSpawned,
 		"teamTemplateId":    teamTemplateID,
 		"perpetualMode":     perpetualMode,
+		"sevenStepMode":     sevenStepMode,
 		"paused":            paused,
 		"pause":             pauseBlock,
 		"whiteboardNotes":   whiteboardNotes,
@@ -2844,7 +2970,9 @@ func (m *Manager) LoadPersistedMetrics() {
 	m.metrics.TotalStandupsComplete.Store(snap.TotalStandupsCompleted)
 	m.metrics.TotalTasks.Store(snap.TotalTasks)
 	m.metrics.TotalTasksCompleted.Store(snap.TotalTasksCompleted)
+	m.metrics.TotalTasksRejected.Store(snap.TotalTasksRejected)
 	m.metrics.TotalBugs.Store(snap.TotalBugs)
+	m.metrics.TotalBugTasksCreated.Store(snap.TotalBugTasksCreated)
 	m.metrics.TotalBugsResolved.Store(snap.TotalBugTasksResolved)
 	m.metrics.TotalMessages.Store(snap.TotalMessages)
 	m.metrics.TotalReflections.Store(snap.TotalReflections)

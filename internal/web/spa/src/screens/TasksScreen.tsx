@@ -308,6 +308,24 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
       <span style={taskTitleStyle}>
         {task.title}
       </span>
+      {task.engPhase ? (
+        <span
+          style={{
+            alignSelf: 'flex-start',
+            fontSize: 11,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            padding: '1px 7px',
+            borderRadius: 999,
+            background: 'rgba(78,240,163,0.12)',
+            color: 'var(--accent, #4ef0a3)',
+            fontFamily: 'var(--font-mono)',
+          }}
+          title="7-step engineering phase"
+        >
+          {task.engPhase}
+        </span>
+      ) : null}
       <div
         style={{
           display: 'flex',

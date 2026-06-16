@@ -16,6 +16,34 @@ func withTempHome(t *testing.T) string {
 	return filepath.Join(home, ".claude", "skills")
 }
 
+// TestSharedSkillsRoot_EmptyHomeFailsClosed verifies that an unresolvable home
+// directory yields "" (not a cwd-relative ".claude/skills"), and that the
+// mutating helpers refuse to write rather than scattering skills under cwd.
+func TestSharedSkillsRoot_EmptyHomeFailsClosed(t *testing.T) {
+	t.Setenv("HOME", "")
+	if root := sharedSkillsRoot(); root != "" {
+		t.Errorf("expected empty root when HOME unset, got %q", root)
+	}
+	if _, _, err := WriteSharedSkill("x", "body"); err == nil {
+		t.Error("expected WriteSharedSkill to fail when home dir is unavailable")
+	}
+	if err := DeleteSharedSkill("x"); err == nil {
+		t.Error("expected DeleteSharedSkill to fail when home dir is unavailable")
+	}
+}
+
+// TestWriteSharedSkill_NoLeftoverTmp verifies the atomic write leaves no .tmp
+// sibling next to the SKILL.md on success.
+func TestWriteSharedSkill_NoLeftoverTmp(t *testing.T) {
+	root := withTempHome(t)
+	if _, _, err := WriteSharedSkill("atomic", "# Atomic\nbody"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "atomic", "SKILL.md.tmp")); !os.IsNotExist(err) {
+		t.Error("expected no leftover SKILL.md.tmp after a successful write")
+	}
+}
+
 func TestWriteSharedSkill_CreatesNewFile(t *testing.T) {
 	root := withTempHome(t)
 	path, updated, err := WriteSharedSkill("test-skill", "# Test\nhello")

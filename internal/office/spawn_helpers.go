@@ -139,6 +139,13 @@ func ResolveMemberList(req spawnpayload.SpawnTeamRequest, lookup TemplateLookup)
 		if _, isTemplate := existing[ov.ID]; isTemplate {
 			continue
 		}
+		// An empty ID would create a member with ID="" that collides in every
+		// configID-keyed map (preassignedIDs, configIndex, loop-state) and
+		// silently corrupts team state. Drop it.
+		if ov.ID == "" {
+			slog.Warn("skipping member override with empty ID")
+			continue
+		}
 		members = append(members, teamtemplates.TeamTemplateMember{
 			ID:           ov.ID,
 			Name:         strs.FirstNonEmpty(ov.Name, ov.ID),
@@ -149,11 +156,53 @@ func ResolveMemberList(req spawnpayload.SpawnTeamRequest, lookup TemplateLookup)
 			Personality:  ov.Personality,
 			Voice:        ov.Voice,
 			SystemPrompt: ov.SystemPrompt,
-			Skills:       ov.Skills,
+			Skills:       sanitizeSkillNames(ov.Skills),
 		})
 	}
 
 	return members, templateUsed
+}
+
+// safeSkillName reports whether a skill name is safe to embed verbatim in an
+// onboarding/kickstart prompt and to use as an identifier. Skill names can come
+// from operator MemberOverride JSON; a name containing a newline or markdown
+// could inject a fake instruction section into the prompt handed to an agent.
+// Allow namespaced/pathy names ([A-Za-z0-9._:/-], up to 64 chars); reject the rest.
+func safeSkillName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-', r == ':', r == '/':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// sanitizeSkillNames returns a NEW slice with only the safe names from in. The
+// copy breaks aliasing with the override's backing array (so a later mutation of
+// the override can't reach into a resolved member); the filter drops names that
+// could corrupt a prompt. Returns nil for an empty/nil input.
+func sanitizeSkillNames(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if safeSkillName(s) {
+			out = append(out, s)
+			continue
+		}
+		slog.Warn("dropping unsafe skill name from member config", "skill", s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // WorkingDirResolver is the callback shape
@@ -390,6 +439,12 @@ func ResolvePerpetualMode(req spawnpayload.SpawnTeamRequest) bool {
 	return *req.PerpetualMode
 }
 
+// ResolveSevenStepMode resolves the 7-step engineering overlay flag. Default is
+// FALSE -- the overlay is opt-in (unlike perpetual mode, which defaults on).
+func ResolveSevenStepMode(req spawnpayload.SpawnTeamRequest) bool {
+	return req.SevenStepMode != nil && *req.SevenStepMode
+}
+
 // CollectModelRequests gathers the inputs the Z.AI rate-limit
 // allocator needs: an ordered list of every member's ID, plus a
 // map of memberID → operator-requested model (drawn from per-member
@@ -437,7 +492,7 @@ func BuildTeamMemberConfigs(members []teamtemplates.TeamTemplateMember) []*TeamM
 			Personality:  m.Personality,
 			Voice:        m.Voice,
 			SystemPrompt: m.SystemPrompt,
-			Skills:       m.Skills,
+			Skills:       append([]string(nil), m.Skills...), // copy: don't alias the source slice
 		})
 	}
 	return out
@@ -494,7 +549,7 @@ func ApplyMemberOverrides(members []teamtemplates.TeamTemplateMember, overrides 
 			members[i].SystemPrompt = ov.SystemPrompt
 		}
 		if len(ov.Skills) > 0 {
-			members[i].Skills = ov.Skills
+			members[i].Skills = sanitizeSkillNames(ov.Skills)
 		}
 	}
 }

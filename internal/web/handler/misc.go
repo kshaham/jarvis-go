@@ -446,7 +446,7 @@ func (ctx *Context) HandleHookEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast the hook event via SSE with hook:{eventType} prefix.
-	ctx.SSEBroker.Broadcast("hook:"+eventType, body)
+	ctx.emit("hook:"+eventType, body)
 
 	request.WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
@@ -638,7 +638,7 @@ func (ctx *Context) QuickStart(w http.ResponseWriter, r *http.Request) {
 	// Start event forwarding before broadcast to avoid losing early events
 	go forwardSessionEvents(session, ctx)
 
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
+	ctx.emit("session:created", sessionToJSON(session))
 
 	ctx.initSessionTrackers(session.ID)
 
@@ -1003,7 +1003,7 @@ func (ctx *Context) LinkCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx.SSEBroker.Broadcast("case:linked", map[string]interface{}{
+	ctx.emit("case:linked", map[string]interface{}{
 		"name": caseInfo.Name,
 		"path": caseInfo.Path,
 	})
@@ -1164,8 +1164,8 @@ func (ctx *Context) GeneratePlanDetailed(w http.ResponseWriter, r *http.Request)
 	ctx.ActivePlanOrchestrators[orchestratorID] = session.ID
 	ctx.ActivePlanOrchestratorsMu.Unlock()
 
-	ctx.SSEBroker.Broadcast("session:created", sessionToJSON(session))
-	ctx.SSEBroker.Broadcast("plan:started", map[string]interface{}{
+	ctx.emit("session:created", sessionToJSON(session))
+	ctx.emit("plan:started", map[string]interface{}{
 		"orchestratorId": orchestratorID,
 	})
 
@@ -1227,7 +1227,7 @@ func (ctx *Context) CancelPlanGeneration(w http.ResponseWriter, r *http.Request)
 		ctx.ActivePlanOrchestratorsMu.Unlock()
 
 		_ = ctx.SessionManager.StopSession(r.Context(), sessionID)
-		ctx.SSEBroker.Broadcast("plan:cancelled", map[string]interface{}{
+		ctx.emit("plan:cancelled", map[string]interface{}{
 			"orchestratorId": req.OrchestratorID,
 		})
 		cancelled = append(cancelled, req.OrchestratorID)
@@ -1246,7 +1246,7 @@ func (ctx *Context) CancelPlanGeneration(w http.ResponseWriter, r *http.Request)
 
 		for orchID, sessionID := range pairs {
 			_ = ctx.SessionManager.StopSession(r.Context(), sessionID)
-			ctx.SSEBroker.Broadcast("plan:cancelled", map[string]interface{}{
+			ctx.emit("plan:cancelled", map[string]interface{}{
 				"orchestratorId": orchID,
 			})
 			cancelled = append(cancelled, orchID)

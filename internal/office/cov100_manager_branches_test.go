@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestInjectRelayMessage_NilConfigAgentSkipped verifies the roster loop in
@@ -226,7 +227,12 @@ func blockTmpFile(t *testing.T, tmpName string) {
 func TestPersistMessages_WriteTmpFails(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := newTestManager()
-	m.SendMessage("a", "b", "hi")
+	// Populate a message SYNCHRONOUSLY (not via SendMessage, which spawns an
+	// async persistMessages goroutine whose tmp-write would race blockTmpFile's
+	// MkdirAll -> intermittent "messages.json.tmp: file exists").
+	m.mu.Lock()
+	m.messages = append(m.messages, OfficeMessage{ID: "m1", From: "a", To: "b", Content: "hi", Timestamp: time.Now()})
+	m.mu.Unlock()
 	blockTmpFile(t, "messages.json.tmp")
 	// Must not panic; the WriteFile error path logs+returns.
 	m.persistMessages()

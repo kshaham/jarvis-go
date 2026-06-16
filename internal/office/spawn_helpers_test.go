@@ -107,6 +107,44 @@ func TestResolveMemberList_OverridesDropRemovedMembers(t *testing.T) {
 	}
 }
 
+// TestResolveMemberList_SkipsEmptyOverrideID verifies a synthetic member is NOT
+// created for an override with an empty ID (which would collide in every
+// configID-keyed map and silently corrupt team state).
+func TestResolveMemberList_SkipsEmptyOverrideID(t *testing.T) {
+	req := spawnpayload.SpawnTeamRequest{
+		TemplateID: "alpha",
+		MemberOverrides: []spawnpayload.MemberOverride{
+			{ID: "m1"},
+			{ID: ""}, // must be dropped, not turned into a synthetic empty-ID member
+		},
+	}
+	lookup := stubLookup(map[string]*teamtemplates.TeamTemplate{"alpha": alphaTeam})
+	got, _ := ResolveMemberList(req, lookup)
+	for _, m := range got {
+		if m.ID == "" {
+			t.Fatalf("empty-ID member leaked into resolved list: %+v", got)
+		}
+	}
+}
+
+// TestSanitizeSkillNames verifies unsafe skill names (newline/markdown
+// injection) are dropped and the returned slice does not alias the input.
+func TestSanitizeSkillNames(t *testing.T) {
+	in := []string{"react-router", "superpowers:brainstorming", "bad\n## Injected", "with space", ""}
+	out := sanitizeSkillNames(in)
+	if len(out) != 2 || out[0] != "react-router" || out[1] != "superpowers:brainstorming" {
+		t.Fatalf("expected only the two safe names, got %v", out)
+	}
+	// No aliasing: mutating the input backing array must not change out.
+	in[0] = "MUTATED"
+	if out[0] != "react-router" {
+		t.Error("sanitizeSkillNames result aliases the input slice")
+	}
+	if sanitizeSkillNames(nil) != nil {
+		t.Error("expected nil for nil input")
+	}
+}
+
 func TestResolveMemberList_OverridesPreserveTemplateOrder(t *testing.T) {
 	// Overrides intentionally listed out-of-template-order; the result
 	// should still follow template order (m1, m2, m3).
@@ -496,8 +534,8 @@ func TestResolveMemberProviderModel_SubscriptionOverrideOnZaiTeamNoGLM(t *testin
 	provider, model := ResolveMemberProviderModel(
 		teamtemplates.TeamTemplateMember{ID: "m", Tier: "worker"},
 		&spawnpayload.MemberOverride{Provider: "openai-subscription"},
-		"zai-glm",     // team-wide default
-		"glm-5.1",     // zaiSonnet from the allocator
+		"zai-glm", // team-wide default
+		"glm-5.1", // zaiSonnet from the allocator
 	)
 	if provider != "openai-subscription" {
 		t.Errorf("provider=%q want openai-subscription", provider)

@@ -115,13 +115,11 @@ func (ctx *Context) OfficeSpawnRemote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ctx.SSEBroker != nil {
-		ctx.SSEBroker.Broadcast("office:remoteSessionCreated", map[string]interface{}{
-			"url":       url,
-			"sessionId": sessionID,
-			"task":      task,
-		})
-	}
+	ctx.emit("office:remoteSessionCreated", map[string]interface{}{
+		"url":       url,
+		"sessionId": sessionID,
+		"task":      task,
+	})
 	slog.Info("remote claude session created", "url", url, "sessionId", sessionID)
 	request.WriteJSON(w, http.StatusOK, spawnRemoteResponse{
 		URL:       url,

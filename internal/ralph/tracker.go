@@ -29,6 +29,11 @@ const (
 	// maxStatusRemainder bounds the cross-chunk line buffer so a pathological
 	// newline-less stream can't grow it without limit.
 	maxStatusRemainder = 64 * 1024
+	// gateMaxConsecutiveFailures is how many times the objective gate may fail
+	// in a row before the tracker flags escalation (Escalate=true on
+	// GateCheckFailed). Mirrors the loop-engineering rule that a loop which
+	// cannot pass its own gate is stuck and needs a human, not another retry.
+	gateMaxConsecutiveFailures = 3
 )
 
 // TodoItem represents a single todo item detected from terminal output.
@@ -50,6 +55,13 @@ type TrackerState struct {
 	CompletionDetected bool                 `json:"completionDetected"`
 	CircuitBreaker     CircuitBreakerStatus `json:"circuitBreaker"`
 	LastRalphStatus    *RalphStatus         `json:"lastRalphStatus,omitempty"`
+	// LastGateResult is the most recent objective-gate outcome. nil until the
+	// gate has run at least once. Surfaced so operators can spot-check that the
+	// gate actually rejects failing work (loop-engineering: gates rot).
+	LastGateResult *GateResult `json:"lastGateResult,omitempty"`
+	// GateFailureCount is the number of consecutive objective-gate failures
+	// since the last pass. Drives escalation to stuck-agent recovery.
+	GateFailureCount int `json:"gateFailureCount"`
 }
 
 // TrackerEvent represents an event emitted by the Ralph tracker.
@@ -72,13 +84,41 @@ type StatusBlockDetected struct {
 
 func (StatusBlockDetected) trackerEventType() string { return "status_block" }
 
-// ExitGateMet is emitted when the circuit breaker trips.
+// ExitGateMet is emitted when the dual-condition circuit breaker trips AND the
+// objective gate passes (or no gate is configured). It is the only signal that
+// legitimately ends a loop.
 type ExitGateMet struct {
 	CompletionIndicators int  `json:"completionIndicators"`
 	ExitSignal           bool `json:"exitSignal"`
 }
 
 func (ExitGateMet) trackerEventType() string { return "exit_gate_met" }
+
+// GateCheckFailed is emitted when the dual-condition circuit breaker tripped but
+// the objective verify gate (tests/build/lint) failed. The loop must NOT exit:
+// the circuit breaker is reset so the agent keeps working until the gate passes.
+// This is the core Ralph-Wiggum defense -- a completion phrase cannot override a
+// failing test suite. Escalate is set once ConsecutiveFails crosses the cap.
+type GateCheckFailed struct {
+	Reason           string `json:"reason"`
+	Command          string `json:"command"`
+	ExitCode         int    `json:"exitCode"`
+	ConsecutiveFails int    `json:"consecutiveFails"`
+	Escalate         bool   `json:"escalate"`
+}
+
+func (GateCheckFailed) trackerEventType() string { return "gate_check_failed" }
+
+// LoopLimitReached is emitted when the loop has completed MaxIterations cycles.
+// It is a HARD STOP: the loop has run its configured budget and should pause for
+// human review rather than keep spending. Distinct from ExitGateMet (success) --
+// reaching the iteration cap is not a success signal.
+type LoopLimitReached struct {
+	Iteration     int `json:"iteration"`
+	MaxIterations int `json:"maxIterations"`
+}
+
+func (LoopLimitReached) trackerEventType() string { return "loop_limit_reached" }
 
 // TodosUpdated is emitted when the todo list changes.
 type TodosUpdated struct {
@@ -120,6 +160,15 @@ type Tracker struct {
 	// Circuit breaker for dual-condition exit
 	circuitBreaker *CircuitBreaker
 
+	// Objective gate: when set, the dual-condition circuit breaker tripping is
+	// necessary but NOT sufficient to exit -- the verify command must also pass.
+	// gateWorkingDir is where the gate runs; gateInFlight guards against
+	// launching overlapping checks; gateFailures counts consecutive failures.
+	gate           ObjectiveGate
+	gateWorkingDir string
+	gateInFlight   bool
+	gateFailures   int
+
 	// RALPH_STATUS block parsing state
 	inStatusBlock    bool
 	statusBlockLines []string
@@ -140,6 +189,12 @@ type Tracker struct {
 
 	// Event channel
 	events chan TrackerEvent
+
+	// droppedEvents counts events shed by emitEvent when the consumer can't keep
+	// up (the buffer is full). Surfaced so a silently-lagging consumer is visible
+	// instead of the tracker appearing to hang. Guarded by t.mu (emitEvent holds it).
+	droppedEvents int
+	droppedWarned bool
 
 	// Legacy callbacks (kept for backward compatibility)
 	onCompletion func(phrase string)
@@ -181,6 +236,106 @@ func (t *Tracker) Configure(phrase string, maxIterations int) {
 	}
 }
 
+// SetGate attaches an objective verify gate. Once set, the dual-condition
+// circuit breaker tripping kicks off an asynchronous gate check (the verify
+// command runs in workingDir); ExitGateMet is emitted only if the gate passes.
+// Passing a nil gate clears it and restores the original phrase-only behavior.
+func (t *Tracker) SetGate(gate ObjectiveGate, workingDir string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.gate = gate
+	t.gateWorkingDir = workingDir
+	// gateFailures counts CONSECUTIVE failures of the CURRENT gate, so a new
+	// gate starts with a clean budget -- otherwise swapping a failing gate for
+	// a fresh one would inherit the old count and falsely escalate on the new
+	// gate's first failure.
+	t.gateFailures = 0
+	t.state.GateFailureCount = 0
+}
+
+// maybeRunGateLocked decides what happens when the circuit breaker has tripped.
+// With no gate configured it preserves the legacy behavior (emit ExitGateMet
+// immediately). With a gate configured it launches a single async verify check;
+// ExitGateMet (pass) or GateCheckFailed (fail) is emitted from the goroutine.
+// Must be called with t.mu held.
+func (t *Tracker) maybeRunGateLocked() {
+	if t.gate == nil {
+		t.emitEvent(ExitGateMet{
+			CompletionIndicators: t.circuitBreaker.Status().CompletionIndicators,
+			ExitSignal:           t.circuitBreaker.Status().ExitSignalSeen,
+		})
+		return
+	}
+	if t.gateInFlight {
+		return // a check is already running; don't stack verify subprocesses
+	}
+	t.gateInFlight = true
+	gate := t.gate
+	workingDir := t.gateWorkingDir
+
+	// Run the (slow) verify command off the lock so ProcessOutput never blocks
+	// on a test suite. safego converts any panic into a logged event instead of
+	// crashing the daemon.
+	safego.Go("ralph.objectiveGate", func() {
+		result := gate.Check(workingDir)
+		t.applyGateResult(result)
+	})
+}
+
+// applyGateResult records an objective-gate outcome and emits the appropriate
+// terminal event. A pass (or a skip -- an un-gateable project falls back to the
+// dual-condition decision) emits ExitGateMet. A real failure resets the circuit
+// breaker so the loop continues and emits GateCheckFailed, flagging escalation
+// once consecutive failures cross the cap.
+func (t *Tracker) applyGateResult(result GateResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.gateInFlight = false
+	res := result
+	t.state.LastGateResult = &res
+
+	if result.Pass || result.Skipped {
+		t.gateFailures = 0
+		t.state.GateFailureCount = 0
+		// Read the breaker status FRESH here (not a snapshot captured before the
+		// async gate ran) so ExitGateMet reports state at fire time, matching the
+		// synchronous no-gate path.
+		cbStatus := t.circuitBreaker.Status()
+		t.emitEvent(ExitGateMet{
+			CompletionIndicators: cbStatus.CompletionIndicators,
+			ExitSignal:           cbStatus.ExitSignalSeen,
+		})
+		return
+	}
+
+	// Real gate failure: the agent claimed completion but the verify command
+	// rejected the work. Keep the loop alive -- reset the breaker so a later
+	// genuine completion can re-trip it once the work actually passes. Reset
+	// returns false once the auto-reset cap is exhausted; if so the breaker
+	// stays tripped and ExitGateMet can never fire again, so surface it loudly
+	// rather than silently stalling the loop.
+	t.gateFailures++
+	t.state.GateFailureCount = t.gateFailures
+	if !t.circuitBreaker.Reset() {
+		slog.Warn("ralph: circuit breaker exhausted its auto-reset budget after a gate failure; loop is stuck-tripped and needs operator attention",
+			"gateFailures", t.gateFailures)
+	}
+
+	reason := "verify command failed"
+	if result.TimedOut {
+		reason = "verify command timed out"
+	} else if result.Err != "" {
+		reason = result.Err
+	}
+	t.emitEvent(GateCheckFailed{
+		Reason:           reason,
+		Command:          result.Command,
+		ExitCode:         result.ExitCode,
+		ConsecutiveFails: t.gateFailures,
+		Escalate:         t.gateFailures >= gateMaxConsecutiveFailures,
+	})
+}
+
 // ProcessOutput scans terminal output data for completion phrases,
 // promise tags, todo items, RALPH_STATUS blocks, and completion indicators.
 func (t *Tracker) ProcessOutput(data string) {
@@ -205,6 +360,17 @@ func (t *Tracker) ProcessOutput(data string) {
 			Phrase:    t.state.CompletionPhrase,
 			Iteration: t.state.LoopIteration,
 		})
+
+		// Hard stop: enforce the iteration cap that was previously parsed but
+		// never compared. Fire LoopLimitReached EXACTLY ONCE -- at the moment
+		// the cap is first reached (==, not >=, so later completions past the
+		// cap don't re-broadcast the one-shot hard-stop signal over SSE).
+		if t.state.MaxIterations > 0 && t.state.LoopIteration == t.state.MaxIterations {
+			t.emitEvent(LoopLimitReached{
+				Iteration:     t.state.LoopIteration,
+				MaxIterations: t.state.MaxIterations,
+			})
+		}
 		if t.onCompletion != nil {
 			cb := t.onCompletion
 			phrase := t.state.CompletionPhrase
@@ -213,12 +379,11 @@ func (t *Tracker) ProcessOutput(data string) {
 			safego.Go("ralph.onCompletion", func() { cb(phrase) })
 		}
 
-		// Check circuit breaker after completion
+		// Check circuit breaker after completion. The dual condition is
+		// necessary but, when an objective gate is configured, not sufficient:
+		// the verify command must also pass before the loop may exit.
 		if t.circuitBreaker.ShouldBreak() {
-			t.emitEvent(ExitGateMet{
-				CompletionIndicators: t.circuitBreaker.Status().CompletionIndicators,
-				ExitSignal:           t.circuitBreaker.Status().ExitSignalSeen,
-			})
+			t.maybeRunGateLocked()
 		}
 	}
 
@@ -429,12 +594,31 @@ func (t *Tracker) maybeCleanupLocked() {
 
 // emitEvent sends an event to the channel without blocking.
 // Must be called with t.mu held.
+//
+// The send is non-blocking by design: emitEvent runs under t.mu, so a blocking
+// send to a slow/absent consumer would deadlock the tracker. When the 64-slot
+// buffer is full the event is dropped, but the drop is now counted and logged
+// once (rather than silently vanishing) so an operator can tell a lagging
+// consumer from a genuinely quiet tracker.
 func (t *Tracker) emitEvent(event TrackerEvent) {
 	select {
 	case t.events <- event:
 	default:
-		// Channel full; drop event to avoid blocking
+		t.droppedEvents++
+		if !t.droppedWarned {
+			t.droppedWarned = true
+			slog.Warn("ralph: tracker event dropped; consumer not draining the channel",
+				"eventType", event.trackerEventType())
+		}
 	}
+}
+
+// DroppedEvents returns the number of tracker events shed because the consumer
+// could not keep up. Zero in the healthy case.
+func (t *Tracker) DroppedEvents() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.droppedEvents
 }
 
 // scheduleDebouncedStateEvent schedules a debounced state change event.
@@ -461,11 +645,14 @@ func (t *Tracker) scheduleDebouncedStateEvent() {
 		}()
 		select {
 		case <-time.After(eventDebounceDuration):
+			// emitEvent must run with t.mu held (it touches droppedEvents/
+			// droppedWarned and the non-blocking channel send is instant), so
+			// keep it inside the critical section rather than after Unlock.
 			t.mu.Lock()
 			t.pendingEvents = false
 			state := t.snapshotStateLocked()
-			t.mu.Unlock()
 			t.emitEvent(StateChanged{State: state})
+			t.mu.Unlock()
 		case <-t.debounceStopper:
 			return
 		}

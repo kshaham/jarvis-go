@@ -24,6 +24,25 @@ func TestTracker_NewTracker(t *testing.T) {
 	tr.Stop()
 }
 
+// TestTracker_EmitEvent_CountsDropsWhenBufferFull verifies that events shed
+// because the consumer isn't draining are COUNTED (not silently lost), so a
+// lagging consumer is observable via DroppedEvents().
+func TestTracker_EmitEvent_CountsDropsWhenBufferFull(t *testing.T) {
+	tr := NewTracker()
+	defer tr.Stop()
+	tr.mu.Lock()
+	// Fill the 64-slot buffer with no consumer draining it.
+	for i := 0; i < cap(tr.events); i++ {
+		tr.emitEvent(TodosUpdated{})
+	}
+	// The next emit has nowhere to go -> must be dropped AND counted.
+	tr.emitEvent(TodosUpdated{})
+	tr.mu.Unlock()
+	if got := tr.DroppedEvents(); got < 1 {
+		t.Errorf("expected >=1 dropped event when buffer full, got %d", got)
+	}
+}
+
 func TestTracker_Configure(t *testing.T) {
 	tr := NewTracker()
 	defer tr.Stop()

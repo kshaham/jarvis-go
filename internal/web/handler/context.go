@@ -19,6 +19,7 @@ import (
 	"github.com/kshaham/jarvis/internal/ralph"
 	"github.com/kshaham/jarvis/internal/respawn"
 	"github.com/kshaham/jarvis/internal/runsummary"
+	"github.com/kshaham/jarvis/internal/safego"
 	"github.com/kshaham/jarvis/internal/scheduler"
 	"github.com/kshaham/jarvis/internal/state"
 	"github.com/kshaham/jarvis/internal/subagent"
@@ -61,8 +62,13 @@ type Context struct {
 	SessionColorsMu     sync.RWMutex
 	RalphTrackers       map[string]*ralph.Tracker // sessionID -> tracker
 	RalphTrackersMu     sync.RWMutex
-	RunSummaries        map[string]*runsummary.Tracker // sessionID -> tracker
-	RunSummariesMu      sync.RWMutex
+	// RalphConsumerStop signals each session's Ralph event-drain goroutine to
+	// exit. Without a live consumer the tracker's gate/exit events
+	// (ExitGateMet, GateCheckFailed, LoopLimitReached) are emitted into a
+	// channel nobody reads -- this is the wiring that makes them actionable.
+	RalphConsumerStop map[string]chan struct{}
+	RunSummaries      map[string]*runsummary.Tracker // sessionID -> tracker
+	RunSummariesMu    sync.RWMutex
 
 	// TailFileStreams tracks active SSE file-tail streams for cleanup.
 	TailFileStreams   map[string]func() // streamID -> cancel func
@@ -86,6 +92,18 @@ type Context struct {
 
 	// Deliverables stores team-authored documents per project (Deliverables page).
 	Deliverables *deliverables.Manager
+}
+
+// emit broadcasts an SSE event when a broker is configured. SSEBroker is
+// allowed to be nil (the Ready probe, tests, and any pre-broker bootstrap
+// path), so EVERY broadcast goes through this nil-safe helper instead of
+// calling ctx.SSEBroker.Broadcast directly -- a nil receiver there panics
+// (e.g. inside Broker.Broadcast's b.nextEventID.Add). Its signature matches
+// office.SSEBroadcaster, so it can also be passed as a broadcaster callback.
+func (ctx *Context) emit(event string, data interface{}) {
+	if ctx.SSEBroker != nil {
+		ctx.SSEBroker.Broadcast(event, data)
+	}
 }
 
 // GetOrCreateRespawnController returns the respawn controller for a session,
@@ -116,6 +134,10 @@ func (ctx *Context) cleanupSessionResources(sessionID string) {
 	if rt, ok := ctx.RalphTrackers[sessionID]; ok {
 		rt.Stop()
 		delete(ctx.RalphTrackers, sessionID)
+	}
+	if stop, ok := ctx.RalphConsumerStop[sessionID]; ok {
+		close(stop)
+		delete(ctx.RalphConsumerStop, sessionID)
 	}
 	ctx.RalphTrackersMu.Unlock()
 
@@ -160,13 +182,89 @@ func (ctx *Context) cleanupSessionResources(sessionID string) {
 // install at some point and silently broke the run-summary panel
 // until the next refactor pass; centralising removes that footgun.
 func (ctx *Context) initSessionTrackers(sessionID string) {
+	tracker := ralph.NewTracker()
+	// Attach the objective gate (loop-engineering): the dual-condition circuit
+	// breaker tripping is necessary but not sufficient -- the verify command
+	// must also pass before ExitGateMet fires. Empty command => auto-detect
+	// from the working directory at check time.
+	tracker.SetGate(ralph.NewBasicCommandGate(ctx.ralphVerifyCommand()), ctx.ralphWorkingDir(sessionID))
+
+	stop := make(chan struct{})
 	ctx.RalphTrackersMu.Lock()
-	ctx.RalphTrackers[sessionID] = ralph.NewTracker()
+	ctx.RalphTrackers[sessionID] = tracker
+	// Lazily init the stop-channel map: some tests construct a Context literal
+	// without it (production wires it in server.go).
+	if ctx.RalphConsumerStop == nil {
+		ctx.RalphConsumerStop = make(map[string]chan struct{})
+	}
+	ctx.RalphConsumerStop[sessionID] = stop
 	ctx.RalphTrackersMu.Unlock()
+
+	// Drain the tracker's event stream so its gate/exit verdicts are actually
+	// consumed (previously emitted into a channel with no production reader).
+	safego.Go("ralph.eventConsumer", func() {
+		ctx.consumeRalphEvents(sessionID, tracker, stop)
+	})
 
 	ctx.RunSummariesMu.Lock()
 	ctx.RunSummaries[sessionID] = runsummary.New(sessionID)
 	ctx.RunSummariesMu.Unlock()
+}
+
+// ralphVerifyCommand returns the configured objective-gate command for Ralph
+// trackers. Empty => auto-detect at check time.
+func (ctx *Context) ralphVerifyCommand() string {
+	if ctx.OfficeManager == nil {
+		return ""
+	}
+	return ctx.OfficeManager.VerifyCommand()
+}
+
+// ralphWorkingDir resolves the working directory the objective gate runs in for
+// a session. Falls back to the office team working dir.
+func (ctx *Context) ralphWorkingDir(sessionID string) string {
+	if ctx.OfficeManager == nil {
+		return ""
+	}
+	_, dir := ctx.OfficeManager.GetSpawnContext()
+	return dir
+}
+
+// consumeRalphEvents drains one session's tracker event channel, forwarding the
+// loop-engineering verdicts to the dashboard via SSE. Exits when stop is closed
+// (session teardown). The gate failing means the agent claimed completion over
+// failing verification -- surfaced so an operator can see the loop is waiting.
+func (ctx *Context) consumeRalphEvents(sessionID string, tracker *ralph.Tracker, stop chan struct{}) {
+	for {
+		select {
+		case <-stop:
+			return
+		case ev := <-tracker.Events():
+			switch e := ev.(type) {
+			case ralph.ExitGateMet:
+				ctx.emit("session:ralphExitGate", map[string]interface{}{
+					"sessionId":            sessionID,
+					"completionIndicators": e.CompletionIndicators,
+					"exitSignal":           e.ExitSignal,
+				})
+			case ralph.GateCheckFailed:
+				ctx.emit("session:ralphGateFailed", map[string]interface{}{
+					"sessionId":        sessionID,
+					"reason":           e.Reason,
+					"command":          e.Command,
+					"exitCode":         e.ExitCode,
+					"consecutiveFails": e.ConsecutiveFails,
+					"escalate":         e.Escalate,
+				})
+			case ralph.LoopLimitReached:
+				ctx.emit("session:ralphLoopLimit", map[string]interface{}{
+					"sessionId":     sessionID,
+					"iteration":     e.Iteration,
+					"maxIterations": e.MaxIterations,
+				})
+			}
+		}
+	}
 }
 
 // ResolveWorkingDir reads the configured allowlist from settings (or falls

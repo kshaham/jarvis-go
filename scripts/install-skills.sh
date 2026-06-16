@@ -74,7 +74,7 @@ run() {
 # below. The script tracks which paths came from a vendor walk so the
 # "no SKILL.md" warning doesn't fire on the vendor parent directory.
 shopt -s nullglob
-vendor_dirs=( "ecc" )
+vendor_dirs=( "ecc" "agent-skills" )
 candidate_paths=( "$src_dir"/*/ )
 declare -A vendor_parent_paths
 for vd in "${vendor_dirs[@]}"; do

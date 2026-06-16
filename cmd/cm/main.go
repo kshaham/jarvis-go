@@ -568,6 +568,17 @@ func handleTask(args []string) {
 		})
 		fmt.Printf("Acceptance criteria %sd on task %s.\n", op, taskID)
 
+	// cm task phase <taskId> <define|plan|build|verify|review|simplify|ship>
+	// Records the current 7-step engineering phase on a task (advisory).
+	case "phase":
+		requireArgs(subargs, 2, "cm task phase <taskId> <define|plan|build|verify|review|simplify|ship>")
+		post("/api/office/agent/task/phase", map[string]interface{}{
+			"sessionId": sessionID,
+			"taskId":    subargs[0],
+			"phase":     subargs[1],
+		})
+		fmt.Printf("Task %s phase set to %s.\n", subargs[0], subargs[1])
+
 	case "triage":
 		requireArgs(subargs, 3, "cm task triage <taskId> <toSessionId> <reason>")
 		post("/api/office/agent/task/triage", map[string]interface{}{
@@ -1198,6 +1209,16 @@ func handleProjectInvariants(args []string) {
 	}
 }
 
+// decodeJSONResponseBody decodes a 2xx response body into out. An empty body
+// (io.EOF) is expected for some endpoints and ignored. Any OTHER error means the
+// server returned malformed JSON; surface it to stderr (callers tolerate a nil
+// result, so this stays non-fatal) instead of swallowing it silently.
+func decodeJSONResponseBody(body io.Reader, out interface{}) {
+	if err := json.NewDecoder(body).Decode(out); err != nil && err != io.EOF {
+		fmt.Fprintln(os.Stderr, "warning: failed to decode server response: "+err.Error())
+	}
+}
+
 // delBody issues an HTTP DELETE and returns the decoded JSON response body.
 // del() exists for fire-and-forget deletes; this variant captures the body.
 func delBody(path string) interface{} {
@@ -1217,7 +1238,7 @@ func delBody(path string) interface{} {
 		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
 	}
 	var out interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
+	decodeJSONResponseBody(resp.Body, &out)
 	return out
 }
 
@@ -1281,7 +1302,7 @@ func postBody(path string, body map[string]interface{}) interface{} {
 		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
 	}
 	var out interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
+	decodeJSONResponseBody(resp.Body, &out)
 	return out
 }
 
@@ -1327,7 +1348,7 @@ func put(path string, body map[string]interface{}) interface{} {
 		fatal(fmt.Sprintf("Error %d: %s", resp.StatusCode, string(text)))
 	}
 	var out interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
+	decodeJSONResponseBody(resp.Body, &out)
 	return out
 }
 

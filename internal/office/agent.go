@@ -79,6 +79,11 @@ type Task struct {
 	// time a reviewer determines the current criteria have not been
 	// met. Advisory only -- never transitions task Status.
 	CriteriaRejectCount int `json:"criteriaRejectCount,omitempty"`
+	// EngPhase is the current 7-step engineering phase for this task
+	// (define|plan|build|verify|review|simplify|ship), set by agents via
+	// `cm task phase` when the team's 7-step mode is on. Advisory only --
+	// never transitions task Status. Empty for non-7-step teams.
+	EngPhase string `json:"engPhase,omitempty"`
 	// R36 · Cost / turn snapshots captured at the transitions into
 	// TaskInProgress (start) and TaskCompleted/TaskFailed (final
 	// delta). FinalCostUSD = agent.TotalCostUSD at completion minus
@@ -219,6 +224,17 @@ type AgentState struct {
 	// Recovery tracking
 	RecoveryAttempts    int
 	RecoveryWindowStart time.Time
+
+	// Loop-engineering hard-stop tracking (perpetual / RALPH mode).
+	// LoopIterationCount increments on each self-replenishment cycle (one
+	// "iteration" of the perpetual loop). LoopStartedAt records when the
+	// agent's perpetual loop began. CheckForIdleAgents pauses replenishment
+	// and escalates once the iteration cap (Config.RalphMaxLoopIterations) or
+	// the wall-clock cap (Config.PerpetualLoopMaxDuration) is exceeded.
+	// LoopPausedForLimit latches so the pause-escalation only fires once.
+	LoopIterationCount int
+	LoopStartedAt      time.Time
+	LoopPausedForLimit bool
 
 	// Ack nudge tracking
 	AckNudges map[string]*AckNudgeState
@@ -555,6 +571,17 @@ func (a *AgentState) applyTaskStatusLocked(t *Task, status TaskStatus) {
 		// cost-by-label view in Insights.
 		t.StartCostUSD = a.TotalCostUSD
 		t.StartTurnCount = a.TurnCount
+	}
+	// Loop-quality counters (accepted-change rate). A task entering
+	// TaskCompleted is an accepted change; entering TaskFailed is a rejected
+	// one. Guarded against double-counting on repeated transitions and against
+	// the nil manager used in unit tests.
+	if a.manager != nil && a.manager.metrics != nil {
+		if status == TaskCompleted && prev != TaskCompleted {
+			a.manager.metrics.TotalTasksCompleted.Add(1)
+		} else if status == TaskFailed && prev != TaskFailed {
+			a.manager.metrics.TotalTasksRejected.Add(1)
+		}
 	}
 	if status == TaskCompleted || status == TaskFailed {
 		t.CompletedAt = now

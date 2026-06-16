@@ -9,6 +9,23 @@ import (
 )
 
 // wtInitRepo creates a fresh git repo in a temp dir with one commit on
+// TestSafeWorktreeID covers the path-traversal guard: only plain slugs are
+// safe to use as a .worktrees/ path component and a git branch suffix.
+func TestSafeWorktreeID(t *testing.T) {
+	safe := []string{"backend", "agent-1", "Lead_2", "a.b-c"}
+	for _, id := range safe {
+		if !safeWorktreeID(id) {
+			t.Errorf("expected %q to be safe", id)
+		}
+	}
+	unsafe := []string{"", ".", "..", "../../etc", "a/../../../tmp/x", "a/b", "has space", "x\ny", "semi;colon"}
+	for _, id := range unsafe {
+		if safeWorktreeID(id) {
+			t.Errorf("expected %q to be REJECTED", id)
+		}
+	}
+}
+
 // HEAD so `git worktree add` has a base. Returns the repo dir. Skips the
 // test if git is unavailable (CI without git).
 func wtInitRepo(t *testing.T) string {
@@ -161,10 +178,10 @@ func TestSetupWorktreesWithHooks_WritesSettingsAndCommands(t *testing.T) {
 	dir := wtInitRepo(t)
 	members := []*TeamMemberConfig{{ID: "vex", Name: "Vex", Tier: "worker"}}
 	paths := SetupWorktreesWithHooks(WorktreeHooksConfig{
-		WorkingDir: dir,
-		DaemonURL:  "http://localhost:9999",
-		Members:    members,
-		SpawnInfo:  []HookSpawnInfo{{ConfigID: "vex", SessionID: "sess-vex"}},
+		WorkingDir:  dir,
+		DaemonURL:   "http://localhost:9999",
+		Members:     members,
+		SpawnInfo:   []HookSpawnInfo{{ConfigID: "vex", SessionID: "sess-vex"}},
 		EccDisabled: true,
 	})
 	cwd := paths["vex"]

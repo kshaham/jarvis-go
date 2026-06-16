@@ -336,7 +336,7 @@ func TestBuildKickstartPrompt_ContainsSections(t *testing.T) {
 		{ID: "sage", Name: "Sage", Role: "Senior Architect"},
 	}
 
-	prompt := BuildKickstartPrompt(config, "/home/project", teammates, "", "", true, nil)
+	prompt := BuildKickstartPrompt(config, "/home/project", teammates, "", "", true, nil, false)
 
 	// R31 · Kickstart was slimmed again. Per-agent unique content
 	// (identity, personality, team relationships, role) stays here;
@@ -391,7 +391,7 @@ func TestBuildKickstartPrompt_StrategicTierIncludesLeaderSection(t *testing.T) {
 		SystemPrompt: "Lead the team.",
 	}
 
-	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true, nil)
+	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true, nil, false)
 
 	if !strings.Contains(prompt, "## Leader Task Assignment") {
 		t.Error("expected strategic tier to include Leader Task Assignment section")
@@ -409,7 +409,7 @@ func TestBuildKickstartPrompt_WorkerTierExcludesLeaderSection(t *testing.T) {
 		SystemPrompt: "Build UIs.",
 	}
 
-	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true, nil)
+	prompt := BuildKickstartPrompt(config, "/project", nil, "", "", true, nil, false)
 
 	if strings.Contains(prompt, "## Leader Task Assignment") {
 		t.Error("expected worker tier to NOT include Leader Task Assignment section")
@@ -427,7 +427,7 @@ func TestBuildKickstartPrompt_ExcludesSelfFromTeammates(t *testing.T) {
 		{ID: "bolt", Name: "Bolt", Role: "Backend"},
 	}
 
-	prompt := BuildKickstartPrompt(config, "/project", teammates, "", "", true, nil)
+	prompt := BuildKickstartPrompt(config, "/project", teammates, "", "", true, nil, false)
 
 	// Should mention Bolt but not list Vex as a teammate.
 	if !strings.Contains(prompt, "Bolt (Backend)") {

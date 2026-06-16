@@ -387,6 +387,27 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 	sender.taskQueue.Tasks = append(sender.taskQueue.Tasks[:idx], sender.taskQueue.Tasks[idx+1:]...)
 	sender.mu.Unlock()
 
+	// Invariant guard: the task is now gone from the sender queue and not yet on
+	// the receiver. The intervening code is panic-free in normal operation, but
+	// if anything panics before AddTask homes it, re-insert it on the sender so a
+	// task can never vanish from BOTH queues. Set on the success path so the
+	// defer is a no-op then.
+	homedOnReceiver := false
+	defer func() {
+		if !homedOnReceiver {
+			sender.mu.Lock()
+			sender.taskQueue.Tasks = append(sender.taskQueue.Tasks, &copied)
+			sender.mu.Unlock()
+		}
+	}()
+
+	// receiver.Config can be nil (NewAgentState accepts a nil config), so
+	// capture the display name safely once before the deref sites below.
+	receiverName := ""
+	if receiver.Config != nil {
+		receiverName = receiver.Config.Name
+	}
+
 	// Prepare the moved copy for the receiver. Deep-copy ProgressLog so the
 	// receiver's append can't mutate the (shared) backing array of the snapshot.
 	copied.Handoff = nil
@@ -395,13 +416,14 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 	copied.AssignedAt = resolvedAt // "new owner got this now"
 	copied.ProgressLog = append(append([]TaskProgressEntry(nil), copied.ProgressLog...), TaskProgressEntry{
 		Timestamp: copied.AssignedAt,
-		Note:      fmt.Sprintf("[handoff accepted by %s]", receiver.Config.Name),
+		Note:      fmt.Sprintf("[handoff accepted by %s]", receiverName),
 	})
 	if len(copied.ProgressLog) > taskProgressLogCap {
 		copied.ProgressLog = copied.ProgressLog[len(copied.ProgressLog)-taskProgressLogCap:]
 	}
 
 	receiver.AddTask(&copied)
+	homedOnReceiver = true // task is now on the receiver; the defer-guard is a no-op
 
 	m.ensureHandoffStore().append(resolved)
 
@@ -409,7 +431,7 @@ func (m *Manager) AcceptHandoff(receiverSessionID, taskID string) (*HandoffReque
 	if sender.Config != nil {
 		senderName = sender.Config.Name
 	}
-	m.auditLog("office:handoffAccepted", receiver.SessionID(), receiver.Config.Name, map[string]interface{}{
+	m.auditLog("office:handoffAccepted", receiver.SessionID(), receiverName, map[string]interface{}{
 		"taskId": taskID, "from": sender.SessionID(), "fromName": senderName,
 	})
 	m.broadcast(EventHandoffAccepted, map[string]interface{}{
@@ -515,6 +537,12 @@ func (m *Manager) finishReject(h *HandoffRequest, task *Task, sender, receiver *
 	// writes to *h that previously raced with AcceptHandoff. We snapshot
 	// *h under the lock so the audit append / broadcast / return value
 	// never touch the live pointer after release.
+	// receiver.Config can be nil; capture the display name safely once, before
+	// the deref site below (the guarded re-capture used to live too late).
+	receiverName := ""
+	if receiver.Config != nil {
+		receiverName = receiver.Config.Name
+	}
 	fireHandoffRecheckHook(task.ID)
 	sender.mu.Lock()
 	if task.Handoff == nil || task.Handoff.Status != HandoffPending {
@@ -529,7 +557,7 @@ func (m *Manager) finishReject(h *HandoffRequest, task *Task, sender, receiver *
 	task.Status = TaskInProgress
 	task.ProgressLog = append(task.ProgressLog, TaskProgressEntry{
 		Timestamp: resolvedAt,
-		Note:      fmt.Sprintf("[handoff rejected by %s: %s]", receiver.Config.Name, reason),
+		Note:      fmt.Sprintf("[handoff rejected by %s: %s]", receiverName, reason),
 	})
 	if len(task.ProgressLog) > taskProgressLogCap {
 		task.ProgressLog = task.ProgressLog[len(task.ProgressLog)-taskProgressLogCap:]
@@ -543,10 +571,6 @@ func (m *Manager) finishReject(h *HandoffRequest, task *Task, sender, receiver *
 	senderName := ""
 	if sender.Config != nil {
 		senderName = sender.Config.Name
-	}
-	receiverName := ""
-	if receiver.Config != nil {
-		receiverName = receiver.Config.Name
 	}
 	msg := fmt.Sprintf("%s declined your handoff of task %q: %s", receiverName, snapshot.TaskTitle, reason)
 	m.SendMessage(receiver.SessionID(), sender.SessionID(), msg)

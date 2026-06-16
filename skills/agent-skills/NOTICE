@@ -1,0 +1,11 @@
+Agent Skills (the 7-step engineering workflow pack) vendored into jarvis.
+
+Source: https://github.com/addyosmani/agent-skills
+Commit: 3a6fc6392823e31e2362091bd4e3cddf5b77af14
+License: MIT (see ./LICENSE)
+Copyright (c) 2025 Addy Osmani
+
+Vendored verbatim except: the `agent-skills:` plugin-namespace prefix is
+stripped from skill references (jarvis installs skills as plain
+~/.claude/skills/<name>), and a one-line source attribution is prepended
+to each command/agent/skill body.

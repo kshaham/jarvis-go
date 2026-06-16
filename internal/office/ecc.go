@@ -207,6 +207,9 @@ func splitFrontmatter(s string) (map[string]string, string) {
 	for _, line := range lines[1:end] {
 		if i := strings.Index(line, ":"); i > 0 {
 			key := strings.TrimSpace(line[:i])
+			if key == "" {
+				continue // a whitespace-only key (e.g. "   : value") is malformed; skip it
+			}
 			val := strings.TrimSpace(line[i+1:])
 			out[key] = val
 		}

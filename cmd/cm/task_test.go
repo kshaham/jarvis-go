@@ -258,6 +258,24 @@ func TestHandleTask_CriteriaBadOp_Fatal(t *testing.T) {
 	}
 }
 
+func TestHandleTask_Phase(t *testing.T) {
+	rec := newServer(t, http.StatusOK, `{}`)
+	res := runCLI(t, func() { handleTask([]string{"phase", "T1", "build"}) })
+	if res.exited {
+		t.Fatalf("unexpected exit: %+v", res)
+	}
+	if rec.path != "/api/office/agent/task/phase" || rec.body["phase"] != "build" || rec.body["taskId"] != "T1" {
+		t.Errorf("path=%q body=%#v", rec.path, rec.body)
+	}
+}
+
+func TestHandleTask_PhaseMissingArg_Fatal(t *testing.T) {
+	res := runCLI(t, func() { handleTask([]string{"phase", "T1"}) })
+	if !res.exited {
+		t.Fatalf("expected fatal on missing phase arg, got %+v", res)
+	}
+}
+
 func TestHandleTask_Triage(t *testing.T) {
 	rec := newServer(t, http.StatusOK, `{}`)
 	res := runCLI(t, func() { handleTask([]string{"triage", "T1", "other-sess", "needs", "domain", "expert"}) })

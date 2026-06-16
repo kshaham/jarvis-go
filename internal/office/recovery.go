@@ -126,6 +126,12 @@ func (m *Manager) runMonitorChecks() {
 
 // defaultMonitorChecks is the production list of periodic monitoring sweeps.
 func (m *Manager) defaultMonitorChecks() {
+	// Loop-engineering: reread the standing spec each sweep so a constraint
+	// added mid-loop reaches the running team (goal-drift mitigation).
+	m.refreshProjectInvariants()
+	// Loop-engineering: warn when the accepted-change rate signals the loop is
+	// creating review work instead of saving it.
+	m.maybeWarnLowAcceptance()
 	m.checkSessionHealth()
 	m.CleanupExpiredLocks()
 	m.SweepBugTasks()
@@ -160,6 +166,10 @@ func (m *Manager) defaultMonitorChecks() {
 	// high-reuse workflows to ~/.claude/skills/ via the
 	// existing WriteSharedSkill path.
 	m.maybeRunMemify()
+	// Headroom failure-mining sweep (opt-in, gated). Mines failed agent
+	// sessions into corrections in the project CLAUDE.md, complementing
+	// memify's completed-task workflows.
+	m.maybeRunHeadroomLearn()
 }
 
 // StopIdleMonitoring stops the idle monitoring goroutine and auto-standup timer.
@@ -485,38 +495,13 @@ func (m *Manager) autoCompleteIdleAgentTasks() {
 			agentName = agent.Config.Name
 		}
 
-		// Auto-complete the current task.
-		agent.UpdateTaskStatus(active.ID, TaskCompleted)
-		slog.Info("Auto-completed idle agent task",
-			"agent", agentName,
-			"taskId", active.ID,
-			"title", active.Title,
-			"taskAge", taskAge)
-
-		m.broadcast("office:taskUpdated", map[string]interface{}{
-			"sessionId": sid,
-			"taskId":    active.ID,
-			"status":    string(TaskCompleted),
-			"reason":    "auto-completed (idle agent)",
-		})
-
-		// Clean up progress check state for completed task.
-		agent.mu.Lock()
-		delete(agent.ProgressChecks, active.ID)
-		agent.mu.Unlock()
-
-		// Start the next pending task if available.
-		if sessions != nil {
-			tasks := agent.GetTasks()
-			for _, t := range tasks {
-				if t.Status == TaskPending || t.Status == TaskAcknowledged {
-					startPrompt := fmt.Sprintf("[AUTO-START] Your previous task was completed. Starting next task:\ncm task start %s", t.ID)
-					sessions.WriteInkPrompt(sid, startPrompt)
-					slog.Info("Auto-started next task", "agent", agentName, "taskId", t.ID, "title", t.Title)
-					break
-				}
-			}
-		}
+		// Loop-engineering: do NOT claim completion from silence alone.
+		// Route through the objective gate -- the task is only auto-completed
+		// if the verify command passes (or no gate applies). On a gate
+		// failure the agent is nudged to finish the work instead of having a
+		// false "completed" stamped on unverified output. Runs async so the
+		// monitor tick never blocks on a test suite.
+		m.gatedAutoComplete(agent, sid, active.ID, active.Title, agentName, taskAge)
 	}
 }
 
@@ -1045,6 +1030,18 @@ func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDurat
 		InactiveDurationMs: inactiveDuration.Milliseconds(),
 	})
 
+	// Durable escalation record (loop-engineering requirement C): a single
+	// queryable place to see what the loop could not resolve on its own.
+	if err := RecordEscalation(EscalationRecord{
+		SessionID:        sessionID,
+		AgentName:        agentName,
+		Reason:           "recovery_exhausted",
+		Detail:           fmt.Sprintf("inactive %s after all recovery tiers", inactiveDuration.Round(time.Second)),
+		RecoveryAttempts: m.config.RecoveryMaxAttempts,
+	}); err != nil {
+		slog.Debug("record recovery-exhausted escalation failed", "err", err)
+	}
+
 	// Notify via Telegram if available.
 	m.NotifyOfficeEvent("Agent Stuck",
 		fmt.Sprintf("%s has been inactive for %s after %d recovery attempts",
@@ -1081,6 +1078,12 @@ func (m *Manager) CheckForIdleAgents() {
 	}
 	if !m.IsPerpetualMode() {
 		return // Goal mode: don't force-replenish, agents stop when tasks are done
+	}
+	// Loop-engineering security tax: before inventing more work, run a bounded
+	// secret scan over the working tree. Committed secrets halt replenishment
+	// for the whole team until a clean scan clears the block.
+	if m.maybeRunSecurityScan() {
+		return
 	}
 	m.mu.RLock()
 	sessions := m.sessions
@@ -1131,6 +1134,18 @@ func (m *Manager) CheckForIdleAgents() {
 			continue
 		}
 
+		// Loop-engineering HARD STOP: before inventing more work, check the
+		// iteration + wall-clock caps. Once a cap is hit, pause replenishment
+		// and escalate for human review instead of grinding forever. A loop
+		// without a hard stop runs until someone notices the bill.
+		if reached, reason := m.loopHardStopReached(agent); reached {
+			m.pauseLoopForLimit(agent, reason)
+			continue
+		}
+		// Count this as one perpetual-loop iteration (starts the clock on the
+		// first one).
+		m.noteLoopIteration(agent)
+
 		// Record this replenishment attempt.
 		agent.mu.Lock()
 		agent.LastReplenishmentAt = time.Now()
@@ -1151,7 +1166,7 @@ func (m *Manager) CheckForIdleAgents() {
 		// facilitator -> timeout).
 		leader := m.findStrategicAgent(sid)
 		leaderSid := m.sessionIDOf(leader) // nil-safe; SessionID under m.mu
-		if leader != nil && leader.ActiveTask() == nil && leader.PendingTaskCount() == 0 &&
+		if leader != nil && sessions != nil && leader.ActiveTask() == nil && leader.PendingTaskCount() == 0 &&
 			!sessions.IsSessionWorking(leaderSid) {
 			meeting := m.StartBrainstorm([]string{sid, leaderSid})
 			if meeting != nil {
@@ -1270,8 +1285,18 @@ func (m *Manager) sendSelfReplenishmentPrompt(agent *AgentState) {
 		roleName = agent.Config.Role
 	}
 
+	// Loop-engineering: reinject the current standing constraints each
+	// replenishment so a rule added mid-loop reaches the running agent.
+	constraintsLine := ""
+	if inv := m.GetProjectInvariants(); len(inv) > 0 {
+		constraintsLine = "\n[CURRENT CONSTRAINTS] (re-read every loop -- honor these now)\n"
+		for _, it := range inv {
+			constraintsLine += "- " + it + "\n"
+		}
+	}
+
 	prompt := fmt.Sprintf(`[URGENT: FIND MORE WORK NOW] Your task queue is empty. You must NOT be idle.
-%s
+%s%s
 As a %s, scan the codebase RIGHT NOW and create tasks for yourself:
 
 1. Run 'git log --oneline -20' to see recent changes -- review for bugs or improvements
@@ -1285,9 +1310,14 @@ CREATE TASKS NOW using these commands:
   cm task self-add "Write tests for untested paths" --priority medium
   cm task self-add "Refactor and improve code quality" --priority medium
 
+Keep self-found work SMALL and machine-checkable (tests, lint-fix, docs, refactors).
+Do NOT self-add auth/payments/deploy/migration/dependency-upgrade/architecture work --
+those need a human; escalate to your lead instead. A task is only DONE when the
+verify gate (tests/build) passes -- not when you say "done".
+
 Then immediately start working: cm task ack <id> && cm task start <id>
 
-DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, roleName)
+DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, constraintsLine, roleName)
 
 	m.mu.RLock()
 	sessions := m.sessions
@@ -1389,6 +1419,16 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 				slog.Warn("Auto-failed blocked task after max triage attempts",
 					"taskId", task.ID, "title", task.Title, "agent", agentName,
 					"attempts", attempts)
+
+				if err := RecordEscalation(EscalationRecord{
+					SessionID: sid,
+					AgentName: agentName,
+					Reason:    "blocked_max_triage",
+					Detail:    fmt.Sprintf("blocked task auto-failed after %d triage attempts: %s", attempts, task.Title),
+					TaskIDs:   []string{task.ID},
+				}); err != nil {
+					slog.Debug("record blocked-max-triage escalation failed", "err", err)
+				}
 
 				m.broadcast("office:taskAutoFailed", map[string]interface{}{
 					"taskId":    task.ID,

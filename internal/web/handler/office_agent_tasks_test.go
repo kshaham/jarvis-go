@@ -221,6 +221,39 @@ func TestOfficeAgentTaskCriteria_AddAndUnknownAgent(t *testing.T) {
 	}
 }
 
+func TestOfficeAgentTaskPhase_SetAndValidation(t *testing.T) {
+	ctx := seedAgentWithTask(t, "t-1", office.TaskInProgress)
+
+	// Valid phase -> 200 + echoed phase.
+	rec := postJSON(t, ctx.OfficeAgentTaskPhase, "/api/office/agent/task/phase", map[string]interface{}{
+		"sessionId": "s-vex", "taskId": "t-1", "phase": "build",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["phase"] != "build" {
+		t.Errorf("expected phase=build, got %v", resp["phase"])
+	}
+
+	// Invalid phase -> 400.
+	bad := postJSON(t, ctx.OfficeAgentTaskPhase, "/api/office/agent/task/phase", map[string]interface{}{
+		"sessionId": "s-vex", "taskId": "t-1", "phase": "deploy",
+	})
+	if bad.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid phase, got %d", bad.Code)
+	}
+
+	// Unknown agent -> 404.
+	missing := postJSON(t, ctx.OfficeAgentTaskPhase, "/api/office/agent/task/phase", map[string]interface{}{
+		"sessionId": "s-nobody", "taskId": "t-1", "phase": "ship",
+	})
+	if missing.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown agent, got %d", missing.Code)
+	}
+}
+
 func TestOfficeAgentFileLock_LockUnlock(t *testing.T) {
 	ctx := newTimelineContext(t)
 	ctx.OfficeManager.RegisterAgent("s-vex", "vex", &office.TeamMemberConfig{ID: "vex", Name: "Vex"})

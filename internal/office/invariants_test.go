@@ -64,11 +64,11 @@ func TestRenderInvariantsBlock(t *testing.T) {
 
 func TestKickstartIncludesInvariants(t *testing.T) {
 	cfg := &TeamMemberConfig{Name: "Alice", Role: "Engineer"}
-	p := BuildKickstartPrompt(cfg, "/tmp", nil, "Ship it", "", false, []string{"No force-push to main"})
+	p := BuildKickstartPrompt(cfg, "/tmp", nil, "Ship it", "", false, []string{"No force-push to main"}, false)
 	if !strings.Contains(p, "Project Invariants") || !strings.Contains(p, "No force-push to main") {
 		t.Fatalf("kickstart missing invariants block")
 	}
-	p2 := BuildKickstartPrompt(cfg, "/tmp", nil, "Ship it", "", false, nil)
+	p2 := BuildKickstartPrompt(cfg, "/tmp", nil, "Ship it", "", false, nil, false)
 	if strings.Contains(p2, "Project Invariants") {
 		t.Fatalf("empty invariants should not emit a block")
 	}

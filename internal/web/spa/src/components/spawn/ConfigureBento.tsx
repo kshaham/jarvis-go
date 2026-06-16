@@ -46,6 +46,7 @@ export function ConfigureBento({
     openaiApiKey,
     openaiKeyConfigured,
     perpetual,
+    sevenStep,
     telegramEnabled,
     telegramInterval,
     workflowsEnabled,
@@ -87,6 +88,8 @@ export function ConfigureBento({
           defaultProvider={defaultProvider}
           perpetual={perpetual}
           setPerpetual={set('perpetual')}
+          sevenStep={sevenStep}
+          setSevenStep={set('sevenStep')}
           telegramEnabled={telegramEnabled}
           setTelegramEnabled={set('telegramEnabled')}
           telegramInterval={telegramInterval}

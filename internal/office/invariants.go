@@ -3,6 +3,7 @@ package office
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,8 +16,15 @@ const (
 	invariantsFileName = "project-invariants.json"
 )
 
+// projectInvariantsPath returns the invariants file path, or "" when the home
+// directory can't be resolved. Callers MUST treat "" as "skip persistence":
+// a relative path would otherwise make agents in different working dirs write
+// to divergent .jarvis/ locations, silently losing invariants across respawns.
 func projectInvariantsPath() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
 	return filepath.Join(home, ".jarvis", "office-memory", invariantsFileName)
 }
 
@@ -91,12 +99,20 @@ func (m *Manager) persistProjectInvariants(items []string) {
 		return
 	}
 	path := projectInvariantsPath()
+	if path == "" {
+		slog.Warn("cannot persist project invariants: home dir unavailable")
+		return
+	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp) // don't leak the orphan tmp on a full/locked disk
+		slog.Warn("failed to persist project invariants (rename)", "err", err)
+		return
+	}
 	// Nil-guard so bare &Manager{} used in unit tests (nil broadcast) does
 	// not panic. The mission store broadcasts unconditionally because
 	// NewManager always sets a non-nil broadcast; we guard here because
@@ -126,6 +142,50 @@ func renderInvariantsBlock(items []string) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// refreshProjectInvariants re-reads the persisted invariants from disk and, if
+// they changed since the in-memory copy, updates the cache and broadcasts.
+// Loop-engineering requirement D (standing spec reread each run): a constraint
+// added mid-loop -- "never push to main", "do not touch auth" -- must reach the
+// running team, not just agents spawned afterward. Called from the idle monitor
+// sweep; a small JSON read is negligible. The refreshed copy reaches running
+// agents via the [CURRENT CONSTRAINTS] block in the replenishment prompt.
+func (m *Manager) refreshProjectInvariants() {
+	data, err := os.ReadFile(projectInvariantsPath())
+	if err != nil {
+		return // no invariants file yet, or unreadable -- nothing to refresh
+	}
+	var items []string
+	if err := json.Unmarshal(data, &items); err != nil {
+		return
+	}
+	clean := sanitizeInvariants(items)
+	m.mu.Lock()
+	changed := !equalStringSlices(m.projectInvariants, clean)
+	if changed {
+		m.projectInvariants = clean
+	}
+	m.mu.Unlock()
+	if changed && m.broadcast != nil {
+		m.broadcast("office:projectInvariantsUpdated", map[string]interface{}{
+			"invariants": clean,
+			"source":     "drift-refresh",
+		})
+	}
+}
+
+// equalStringSlices reports whether two string slices are element-wise equal.
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) loadPersistedInvariants() {

@@ -87,7 +87,7 @@ func (ctx *Context) OfficeAgentTaskLabels(w http.ResponseWriter, r *http.Request
 	// Broadcast so every dashboard client refreshes. Reuse the
 	// generic task-updated event -- existing listeners already
 	// refetch on it.
-	ctx.SSEBroker.Broadcast("office:taskUpdated", map[string]interface{}{
+	ctx.emit("office:taskUpdated", map[string]interface{}{
 		"sessionId": req.SessionID,
 		"taskId":    req.TaskID,
 	})

@@ -53,6 +53,7 @@ func TestBuildKickstartPrompt_AllSections(t *testing.T) {
 		"",                  // agentMemory
 		true,                // perpetualMode
 		[]string{"No force-push to main", "Always run tests"}, // invariants
+		false, // sevenStepMode
 	)
 
 	for _, want := range []string{

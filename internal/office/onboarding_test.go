@@ -8,7 +8,7 @@ import (
 func TestOnboarding_AllTopicsRenderForStrategic(t *testing.T) {
 	cfg := &TeamMemberConfig{ID: "captain", Name: "Captain", Role: "Tech Lead", Tier: "strategic"}
 	for _, topic := range OnboardingTopics("strategic") {
-		body, ok := GetOnboardingTopic(topic, cfg, "/tmp/x")
+		body, ok := GetOnboardingTopic(topic, cfg, "/tmp/x", true)
 		if !ok {
 			t.Fatalf("%s: expected ok=true, got false", topic)
 		}
@@ -20,13 +20,13 @@ func TestOnboarding_AllTopicsRenderForStrategic(t *testing.T) {
 
 func TestOnboarding_DevLeadRequiresStrategic(t *testing.T) {
 	worker := &TeamMemberConfig{ID: "dash", Name: "Dash", Role: "Frontend", Tier: "worker"}
-	body, ok := GetOnboardingTopic(TopicDevLead, worker, "/tmp/x")
+	body, ok := GetOnboardingTopic(TopicDevLead, worker, "/tmp/x", true)
 	if ok || body != "" {
 		t.Errorf("worker calling dev-lead should 403; got ok=%v body_len=%d", ok, len(body))
 	}
 	// sanity: strategic does get it
 	strat := &TeamMemberConfig{ID: "captain", Tier: "strategic"}
-	body2, ok2 := GetOnboardingTopic(TopicDevLead, strat, "/tmp/x")
+	body2, ok2 := GetOnboardingTopic(TopicDevLead, strat, "/tmp/x", true)
 	if !ok2 || body2 == "" {
 		t.Errorf("strategic should get dev-lead; ok=%v len=%d", ok2, len(body2))
 	}
@@ -34,7 +34,7 @@ func TestOnboarding_DevLeadRequiresStrategic(t *testing.T) {
 
 func TestOnboarding_UnknownTopic(t *testing.T) {
 	cfg := &TeamMemberConfig{Tier: "strategic"}
-	_, ok := GetOnboardingTopic(OnboardingTopic("bogus"), cfg, "/tmp/x")
+	_, ok := GetOnboardingTopic(OnboardingTopic("bogus"), cfg, "/tmp/x", true)
 	if ok {
 		t.Error("unknown topic should return ok=false")
 	}
@@ -83,7 +83,7 @@ func TestOnboarding_SkillsIncludesCustom(t *testing.T) {
 		Tier:   "worker",
 		Skills: []string{"react-router-v7", "tailwind-v4"},
 	}
-	body, ok := GetOnboardingTopic(TopicSkills, cfg, "/tmp/x")
+	body, ok := GetOnboardingTopic(TopicSkills, cfg, "/tmp/x", true)
 	if !ok {
 		t.Fatal("skills topic should render")
 	}

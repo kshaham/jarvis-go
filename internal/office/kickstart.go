@@ -24,7 +24,7 @@ const memoryInjectMaxChars = 1500
 // R31 · Per-role trim: worker tier skips the leader-task-assignment
 // and leader-dev-instance blocks entirely; those stay reachable via
 // `cm onboard dev-lead` for the few leaders who need them.
-func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string, perpetualMode bool, invariants []string) string {
+func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates []*TeamMemberConfig, teamMission string, agentMemory string, perpetualMode bool, invariants []string, sevenStepMode bool) string {
 	var b strings.Builder
 
 	// Header
@@ -144,10 +144,27 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 	if perpetualMode {
 		b.WriteString("## Work Mode: RALPH (perpetual)\n")
 		b.WriteString("You must NEVER be idle. After completing any task: `cm task list` -> `cm skill search <topic>` -> `cm reflect \"<lesson>\"` -> `cm task self-add ...` -> start the next task.\n")
-		b.WriteString("If you have no tasks: hunt TODOs, write missing tests, refactor for clarity, or improve docs. Avoid duplicate work -- check `git log --oneline -20` and `cm roster` first.\n\n")
+		b.WriteString("If you have no tasks: hunt TODOs, write missing tests, refactor for clarity, or improve docs. Avoid duplicate work -- check `git log --oneline -20` and `cm roster` first.\n")
+		b.WriteString("**Exit gate:** a task is only DONE when the objective verify gate passes (the project's test/build command), not when you say \"done\". Run the verification yourself before `cm task complete`; if it fails, the work is not finished. Saying \"done\" over failing tests does not end the loop.\n")
+		b.WriteString("**Loop stays on safe ground:** do NOT self-add work in irreversible / judgment-call categories (auth, payments, deploy, schema migrations, dependency upgrades, architecture rewrites) -- those need a human; escalate to your lead instead. Keep self-found work small and machine-checkable (lint-fix, tests, docs, refactors).\n\n")
 	} else {
 		b.WriteString("## Work Mode: Goal-Focused\n")
 		b.WriteString("Complete assigned tasks thoroughly. When done, run `cm task list` to verify, review your work, commit, then wait for the next standup. Do not invent work beyond the mission scope.\n\n")
+	}
+
+	// 7-step engineering discipline overlay (additive -- combines with the
+	// perpetual/goal block above). Vendored from Addy Osmani's agent-skills.
+	if sevenStepMode {
+		b.WriteString("## Work Mode: 7-Step Engineering (overlay)\n")
+		b.WriteString("Drive every non-trivial task through the 7 engineering phases, in order, using the agent-skills slash commands. Don't skip ahead -- each phase has an exit criterion:\n")
+		b.WriteString("1. **DEFINE** `/spec` -- clarify requirements; write/confirm a spec before coding.\n")
+		b.WriteString("2. **PLAN** `/plan` -- break the spec into atomic, verifiable tasks.\n")
+		b.WriteString("3. **BUILD** `/build` -- implement in thin vertical slices, each with tests.\n")
+		b.WriteString("4. **VERIFY** `/test` -- prove it works; tests + runtime checks must pass.\n")
+		b.WriteString("5. **REVIEW** `/review` -- five-axis quality gate before merge.\n")
+		b.WriteString("6. **SIMPLIFY** `/code-simplify` -- improve readability/maintainability, preserving behavior.\n")
+		b.WriteString("7. **SHIP** `/ship` -- pre-launch checklist + go/no-go (opens a PR; a human merges).\n")
+		b.WriteString("Record your current phase on each task as you progress: `cm task phase <taskId> <define|plan|build|verify|review|simplify|ship>`. The deeper skills behind each command are readable via `cm skill read <skill-name>` (e.g. `spec-driven-development`, `test-driven-development`, `code-review-and-quality`). For high-stakes work, the `/ship` command fans out to the code-reviewer, security-auditor, test-engineer, and web-performance-auditor personas.\n\n")
 	}
 
 	// Role (SystemPrompt) -- last, highest-signal, role-unique.

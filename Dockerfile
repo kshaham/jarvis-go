@@ -33,6 +33,22 @@ RUN apt-get update && \
     groupadd --system --gid 10001 jarvis && \
     useradd  --system --uid 10001 --gid jarvis --home-dir /home/jarvis --create-home jarvis
 
+# Headroom context-compression CLI (https://github.com/chopratejas/headroom).
+# Installed into an isolated venv (avoids debian-12 PEP-668 externally-managed
+# breakage) and symlinked onto PATH so `headroom` is visible to the jarvis user.
+# Only the [mcp,code] extras are bundled (MCP server + AST-aware code/JSON
+# structural compressors). The heavy [ml] extra (torch + the Kompress text
+# model, ~GB) is intentionally omitted to keep the image small; the code is
+# feature-gated on `headroom` presence (internal/office/headroom.go), so the
+# integration degrades gracefully if an operator drops this layer.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 python3-venv && \
+    python3 -m venv /opt/headroom && \
+    /opt/headroom/bin/pip install --no-cache-dir "headroom-ai[mcp,code]" && \
+    ln -s /opt/headroom/bin/headroom /usr/local/bin/headroom && \
+    rm -rf /var/lib/apt/lists/* && \
+    /usr/local/bin/headroom --version
+
 COPY --from=builder /out/jarvis      /usr/local/bin/jarvis
 COPY --from=builder /out/cm          /usr/local/bin/cm
 COPY --from=builder /out/jarvis-mcp  /usr/local/bin/jarvis-mcp
