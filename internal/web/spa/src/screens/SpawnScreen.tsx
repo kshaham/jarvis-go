@@ -4,10 +4,11 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui';
-import { ConfigureBento } from '../components/spawn/ConfigureBento';
+import { ConfigureLayout } from '../components/spawn/ConfigureLayout';
 import { memberFromTemplate } from '../components/spawn/memberEditor.utils';
 import type { MemberEdit } from '../components/spawn/memberEditor.utils';
-import { spawnChecklist, validateSpawnState } from '../components/spawn/reviewSummary.utils';
+import { sectionValidity, spawnChecklist, validateSpawnState } from '../components/spawn/reviewSummary.utils';
+import type { SectionId } from '../components/spawn/reviewSummary.utils';
 import { SpawnHeader } from '../components/spawn/SpawnHeader';
 import { TemplateStep } from '../components/spawn/TemplateStep';
 import type { WorkdirMode } from '../components/spawn/WorkdirSection';
@@ -19,10 +20,10 @@ import type { SettingsAccounts, TeamTemplate, TeamTemplateMember } from '../api/
 
 // SpawnScreen — the spawn-team wizard orchestrator. It owns all state (the
 // reducer below), the spawn mutation, and the two-step layout: step 1 is the
-// template gallery (TemplateStep), step 2 is the full-width "power grid"
-// bento (ConfigureBento). The command strip (SpawnHeader) — which hosts the
-// Spawn action — is shared by both steps. The presentational pieces live in
-// components/spawn/*; this file stays focused on state + flow.
+// template gallery (TemplateStep), step 2 is the master–detail configure
+// layout (ConfigureLayout) — a left rail of sections (which hosts the Spawn
+// action) beside a one-section-at-a-time panel. The presentational pieces live
+// in components/spawn/*; this file stays focused on state + flow.
 export interface SpawnState {
   templateId: string;
   query: string;
@@ -44,6 +45,9 @@ export interface SpawnState {
   workflowsEnabled: boolean;
   members: MemberEdit[];
   selectedMemberId: string | null;
+  // Master–detail config UI state (which rail section is open; advanced group).
+  activeSection: SectionId;
+  advancedOpen: boolean;
 }
 
 // SetField — the curried setter factory the bento tiles consume:
@@ -76,6 +80,8 @@ const SPAWN_DEFAULT: SpawnState = {
   workflowsEnabled: true,
   members: [],
   selectedMemberId: null,
+  activeSection: 'mission',
+  advancedOpen: false,
 };
 
 function spawnReducer(state: SpawnState, action: SpawnAction): SpawnState {
@@ -86,6 +92,7 @@ function spawnReducer(state: SpawnState, action: SpawnAction): SpawnState {
       ...state,
       members,
       selectedMemberId: members[0]?.id ?? null,
+      activeSection: 'mission',
       defaultProvider: tpl.defaultProvider ?? state.defaultProvider,
       defaultModel: tpl.defaultModel ?? state.defaultModel,
       perpetual: typeof tpl.perpetualImprovement === 'boolean' ? tpl.perpetualImprovement : state.perpetual,
@@ -273,26 +280,39 @@ export function SpawnScreen() {
   const checklist = spawnChecklist({ templateId, mission, mode, workingDir, projectName, githubRepo });
   const spawnDisabled = !validity.ok || spawn.isPending;
 
-  // The Spawn control lives in the command strip on the configure step.
+  // The Spawn control lives at the bottom of the config rail. It stays
+  // focusable while invalid (aria-disabled, not native disabled); pressing it
+  // when incomplete routes the operator to the first unfinished section.
+  const onSpawnClick = () => {
+    if (spawn.isPending) return;
+    if (!validity.ok) {
+      const v = sectionValidity(state);
+      const target = (['mission', 'workspace'] as SectionId[]).find((id) => v[id] !== 'done');
+      if (target) set('activeSection')(target);
+      return;
+    }
+    spawn.mutate();
+  };
+
   const spawnControls = (
-    <>
-      {!validity.ok ? (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{validity.reason}</span>
-      ) : null}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
       <Button
         variant="primary"
-        onClick={spawnDisabled ? undefined : () => spawn.mutate()}
-        disabled={spawnDisabled}
+        onClick={onSpawnClick}
         aria-disabled={spawnDisabled}
         title={validity.ok ? '' : validity.reason}
+        style={{ width: '100%', opacity: !validity.ok && !spawn.isPending ? 0.6 : 1 }}
       >
         {spawn.isPending ? 'Spawning…' : 'Spawn team'}
       </Button>
-    </>
+      {!validity.ok ? (
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>{validity.reason}</span>
+      ) : null}
+    </div>
   );
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <section className="spawn-shell" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <SpawnHeader
         step={hasTemplate ? 2 : 1}
         subtitle={
@@ -300,12 +320,12 @@ export function SpawnScreen() {
             ? 'Configure the mission, workspace, and roster, then spawn.'
             : 'Pick a template to start.'
         }
-        right={hasTemplate ? spawnControls : null}
+        right={null}
         error={hasTemplate && spawn.error instanceof Error ? spawn.error.message : null}
       />
 
       {hasTemplate ? (
-        <ConfigureBento
+        <ConfigureLayout
           state={state}
           set={set}
           tpl={tpl}
@@ -314,6 +334,11 @@ export function SpawnScreen() {
           onRemoveProject={(id) => savedProjects.remove.mutate(id)}
           onClearTemplate={() => dispatch({ type: 'set', field: 'templateId', value: '' })}
           checklist={checklist}
+          activeSection={state.activeSection}
+          setActiveSection={set('activeSection')}
+          advancedOpen={state.advancedOpen}
+          setAdvancedOpen={set('advancedOpen')}
+          spawnControls={spawnControls}
         />
       ) : (
         <TemplateStep

@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import { LayoutTemplate } from 'lucide-react';
 
-import { Chip, EmptyState, Input, Section, Skeleton } from '@/components/ui';
+import { Chip, EmptyState, Input, Skeleton } from '@/components/ui';
 import { TemplateCard } from './TemplateCard';
 import type { TeamTemplate } from '../../api/types';
 
@@ -36,31 +36,29 @@ export function TemplateStep({
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Section>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search templates…"
-            aria-label="Search templates"
-            style={{ flex: '1 1 220px', width: 'auto' }}
-          />
-          <div
-            role="radiogroup"
-            aria-label="Template category"
-            style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
-          >
-            {['', ...categories].map((cat) => {
-              const active = cat === category;
-              return (
-                <Chip key={cat || 'all'} active={active} onClick={() => setCategory(cat)}>
-                  {cat || 'All'}
-                </Chip>
-              );
-            })}
-          </div>
+      <div className="spawn-gallery-filters">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search templates…"
+          aria-label="Search templates"
+          style={{ flex: '1 1 220px', width: 'auto' }}
+        />
+        <div
+          role="radiogroup"
+          aria-label="Template category"
+          style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
+        >
+          {['', ...categories].map((cat) => {
+            const active = cat === category;
+            return (
+              <Chip key={cat || 'all'} active={active} onClick={() => setCategory(cat)}>
+                {cat || 'All'}
+              </Chip>
+            );
+          })}
         </div>
-      </Section>
+      </div>
 
       {loading ? (
         <div style={templateGridStyle}>

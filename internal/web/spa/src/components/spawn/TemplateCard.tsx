@@ -1,6 +1,5 @@
 import type { CSSProperties } from 'react';
 import type { TeamTemplate } from '../../api/types';
-import { GlowCard } from '@/components/ui';
 import { Avatar, AvatarStack } from './Avatar';
 import { leadOf } from './templateHelpers';
 import { TierCounts } from './TierBadge';
@@ -55,13 +54,11 @@ export function TemplateCard({
 }) {
   const lead = leadOf(tpl);
 
-  // GlowCard gives the hover lift + violet shadow grow; `live` keeps the
-  // selected card glowing at rest. The accent ring on selection is layered
-  // via inline border so it reads as "chosen" even without hover.
+  // Flat-minimal card. Selection = an accent tint + a 2px inset accent ring
+  // (box-shadow, so it never shifts layout); hover is a flat background change
+  // handled by the .spawn-template-card CSS — no glow halo.
   return (
-    <GlowCard
-      interactive
-      live={selected}
+    <div
       role="button"
       tabIndex={0}
       aria-pressed={selected}
@@ -72,12 +69,14 @@ export function TemplateCard({
           onSelect();
         }
       }}
-      className="focus-ring flex cursor-pointer flex-col gap-2.5 p-3"
+      className="spawn-template-card focus-ring"
       style={{
-        // Let GlowCard's glass show through when unselected; selected tiles
-        // wear the accent glass fill + accent rim.
-        background: selected ? 'var(--lg-fill-accent)' : undefined,
-        border: selected ? '1px solid rgb(var(--accent-rgb) / 0.6)' : undefined,
+        ...(selected
+          ? {
+              background: 'var(--accent-subtle)',
+              boxShadow: 'inset 0 0 0 2px var(--accent-border)',
+            }
+          : null),
         ...style,
       }}
     >
@@ -131,6 +130,6 @@ export function TemplateCard({
           </span>
         ) : null}
       </footer>
-    </GlowCard>
+    </div>
   );
 }

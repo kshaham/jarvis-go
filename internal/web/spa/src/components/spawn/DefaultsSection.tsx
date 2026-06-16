@@ -52,6 +52,13 @@ const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: st
 
 const KNOWN_VALUES = new Set<string>(PROVIDERS.map((p) => p.value));
 
+// providerLabel returns the short display label for a provider value (e.g.
+// "Claude · Subscription"), or the raw value for a custom/unknown provider.
+// Used by the spawn rail's secondary-value line.
+export function providerLabel(provider: string): string {
+  return PROVIDERS.find((p) => p.value === provider)?.label ?? provider;
+}
+
 const INTERVALS = [30, 60, 120, 240];
 
 // Any OpenAI provider runs on the Codex harness, where Dynamic Workflows is N/A.
@@ -184,18 +191,15 @@ export function ProviderModelSection({
   );
 }
 
-// TogglesSection — the team-wide behavior switches tile. `defaultProvider`
+// TogglesSection — the team-wide behavior switches (Options). `defaultProvider`
 // only drives the Dynamic-workflows hint (ignored on the Codex harness).
+// Telegram moved to its own Advanced section (TelegramSection, below).
 export function TogglesSection({
   defaultProvider,
   perpetual,
   setPerpetual,
   sevenStep,
   setSevenStep,
-  telegramEnabled,
-  setTelegramEnabled,
-  telegramInterval,
-  setTelegramInterval,
   workflowsEnabled,
   setWorkflowsEnabled,
 }: {
@@ -204,10 +208,6 @@ export function TogglesSection({
   setPerpetual: (b: boolean) => void;
   sevenStep: boolean;
   setSevenStep: (b: boolean) => void;
-  telegramEnabled: boolean;
-  setTelegramEnabled: (b: boolean) => void;
-  telegramInterval: number;
-  setTelegramInterval: (n: number) => void;
   workflowsEnabled: boolean;
   setWorkflowsEnabled: (b: boolean) => void;
 }) {
@@ -237,6 +237,27 @@ export function TogglesSection({
               : 'Let leads fan out subagents for large tasks. Off disables it team-wide.'
           }
         />
+      </div>
+    </SectionCard>
+  );
+}
+
+// TelegramSection — the (Advanced) Telegram notifications fields, split out of
+// Options so the primary flow stays focused on behavior switches.
+export function TelegramSection({
+  telegramEnabled,
+  setTelegramEnabled,
+  telegramInterval,
+  setTelegramInterval,
+}: {
+  telegramEnabled: boolean;
+  setTelegramEnabled: (b: boolean) => void;
+  telegramInterval: number;
+  setTelegramInterval: (n: number) => void;
+}) {
+  return (
+    <SectionCard title="Telegram" hint="Periodic office summaries to your phone.">
+      <div style={stackStyle}>
         <Toggle
           label="Telegram updates"
           value={telegramEnabled}

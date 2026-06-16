@@ -666,61 +666,277 @@
   }
 }
 
-/* ── Spawn "Power Grid" bento (B2) ──────────────────────────────────
- * Four visual columns matching the B2 mockup. The two left config columns
- * are ONE CSS multi-column region (.bento-config) so the browser auto-
- * balances their heights — no matter how tall any single tile's content
- * is, the two columns stay even. The Roster and Edit+Review columns are
- * independent flex stacks beside it. Folds to a single config column +
- * stacked panels on tablet, then one column on phones. */
-.bento {
+/* ── Spawn flow: master–detail, flat-minimal ───────────────────────────────
+ * The configure step is a left rail of sections (completion dots + secondary
+ * values + the Spawn action) beside a right panel showing one section at a
+ * time. Flat-minimal: the .spawn-shell scope strips the app-wide glass/glow off
+ * always-on tiles (blur stays only on genuinely floating layers). Folds to a
+ * horizontal tab strip + sticky Spawn on tablet, single column on phone. */
+
+/* Screen-reader-only (rail state phrases + focusable panel heading). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Flat treatment, scoped to the spawn flow only — never the shared component. */
+.spawn-shell .surface-card {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--bg-surface);
+  box-shadow: none;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card-flat);
+}
+.spawn-shell .surface-card::after {
+  display: none;
+}
+
+.spawn-config {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
   align-items: flex-start;
 }
-.bento-config {
-  flex: 2 1 480px;
-  min-width: 0;
-  columns: 2;
-  column-gap: 12px;
-}
-/* Multi-column spacing is margin-based (column-gap is horizontal only);
- * break-inside keeps each tile whole within a column. */
-.bento-config > * {
-  break-inside: avoid;
-  margin-bottom: 12px;
-}
-.bento-col {
+
+/* Left rail */
+.spawn-rail {
+  flex: 0 0 252px;
+  position: sticky;
+  top: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card-flat);
+  min-height: 420px;
+}
+.spawn-rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.spawn-rail-row {
+  appearance: none;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-instant) ease;
+}
+.spawn-rail-row:hover {
+  background: var(--bg-elevated);
+}
+.spawn-rail-row.is-active {
+  background: var(--accent-subtle);
+  border-left-color: var(--accent);
+}
+.spawn-rail-row.is-active .spawn-rail-row-label {
+  color: var(--accent);
+}
+.spawn-rail-row-text {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  flex: 1.15 1 300px;
+  flex: 1;
+  gap: 1px;
+}
+.spawn-rail-row-label {
+  font-size: var(--text-13);
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+.spawn-rail-row-value {
+  font-size: var(--text-12);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Tablet: config becomes a full-width 2-up; Roster + Edit stack 2-up below. */
+/* Completion dots */
+.spawn-dot {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-on);
+}
+.spawn-dot.is-incomplete {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.spawn-dot.is-info {
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+.spawn-dot.is-done {
+  background: var(--accent);
+}
+.spawn-dot.is-error {
+  background: var(--status-error);
+  color: #fff;
+}
+.spawn-dot.is-current.is-incomplete,
+.spawn-dot.is-current.is-info {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Advanced toggle + bottom Spawn block */
+.spawn-rail-advanced {
+  appearance: none;
+  font: inherit;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-11);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.spawn-rail-advanced:hover {
+  color: var(--text-secondary);
+}
+.spawn-rail-spacer {
+  flex: 1 1 auto;
+  min-height: 8px;
+}
+.spawn-rail-spawn {
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Right detail panel */
+.spawn-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 760px;
+}
+.spawn-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.spawn-team-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+/* Tablet: rail -> horizontal scrollable tab strip; Spawn sticks bottom-right;
+   the nested team split stacks vertically. */
 @media (max-width: 1180px) {
-  .bento-config {
-    flex: 1 1 100%;
+  .spawn-config {
+    flex-direction: column;
   }
-  .bento-col {
-    flex: 1 1 45%;
+  .spawn-rail {
+    flex: 1 1 auto;
+    width: 100%;
+    position: static;
+    min-height: 0;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    align-items: center;
+    gap: 4px;
+  }
+  .spawn-rail-group {
+    flex-direction: row;
+  }
+  .spawn-rail-row {
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+  .spawn-rail-row.is-active {
+    border-left-color: transparent;
+    border-bottom-color: var(--accent);
+  }
+  .spawn-rail-row-value {
+    display: none;
+  }
+  .spawn-rail-advanced {
+    width: auto;
+    margin-top: 0;
+    border-top: 0;
+    border-left: 1px solid var(--border-subtle);
+  }
+  .spawn-rail-spacer {
+    display: none;
+  }
+  .spawn-rail-spawn {
+    margin-left: auto;
+    padding-top: 0;
+    border-top: 0;
+    flex-shrink: 0;
+    min-width: 180px;
+  }
+  .spawn-team-split {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
-/* Phone: single column throughout. */
 @media (max-width: 720px) {
-  .bento {
+  .spawn-config {
     gap: 10px;
   }
-  .bento-config {
-    columns: 1;
-    flex: 1 1 100%;
-  }
-  .bento-col {
-    flex: 1 1 100%;
-  }
+}
+
+/* Flat template-gallery card (step 1) — same flat language as the config. */
+.spawn-template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card-flat);
+  cursor: pointer;
+  transition:
+    background var(--duration-instant) ease,
+    border-color var(--duration-instant) ease;
+}
+.spawn-template-card:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+/* Gallery filter row — a flat row with a hairline divider, not a frosted card. */
+.spawn-gallery-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* Respect operator preference — kill the new ambient/CSS animations.

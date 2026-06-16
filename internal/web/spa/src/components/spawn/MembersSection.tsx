@@ -26,11 +26,9 @@ const MEMBERS_TRAILING = (
 
 const emptyEditorStyle: CSSProperties = {
   padding: 16,
-  background: 'var(--lg-fill)',
-  border: '1px dashed var(--lg-rim-strong)',
-  borderRadius: 'var(--radius-md)',
-  WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-  backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
+  background: 'var(--bg-surface)',
+  border: '1px dashed var(--border-strong)',
+  borderRadius: 'var(--radius-card-flat)',
   color: 'var(--text-muted)',
   fontSize: 12,
   textAlign: 'center' as const,

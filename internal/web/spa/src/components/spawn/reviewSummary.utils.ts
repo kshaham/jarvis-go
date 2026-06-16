@@ -53,3 +53,63 @@ export function spawnChecklist(s: SpawnFields): ChecklistItem[] {
     { label: 'Workspace set', ok: workspaceValid(s) },
   ];
 }
+
+// ── Master–detail section model ──────────────────────────────────────────────
+// The redesign splits the old bento into a left-rail of sections. SectionId is
+// the rail's identity; DotState drives each row's completion indicator.
+
+export type SectionId =
+  | 'mission'
+  | 'workspace'
+  | 'team'
+  | 'options'
+  | 'review'
+  | 'provider'
+  | 'telegram'
+  | 'cost';
+
+export type DotState = 'done' | 'incomplete' | 'error' | 'info';
+
+// Extra fields (beyond SpawnFields) the per-section validity needs. SpawnState
+// is a structural superset, so it satisfies this without an import cycle.
+export interface SectionFields extends SpawnFields {
+  defaultProvider: string;
+  openaiKeyConfigured: boolean;
+  openaiApiKey: string;
+}
+
+// A Codex provider that bills per-token (codex / custom endpoint) needs an API
+// key. The subscription variant authenticates via `codex login`, so no key.
+const CODEX_KEYED_PROVIDERS = new Set(['openai-codex', 'openai-custom']);
+
+export function providerNeedsKey(s: SectionFields): boolean {
+  return (
+    CODEX_KEYED_PROVIDERS.has(s.defaultProvider) &&
+    !s.openaiKeyConfigured &&
+    !s.openaiApiKey.trim()
+  );
+}
+
+function workspaceState(s: SpawnFields): DotState {
+  if (workspaceValid(s)) return 'done';
+  // A new-project name that's been typed but has invalid characters is an
+  // error (not merely incomplete) so the rail flags it before spawn.
+  if (s.mode === 'new' && s.projectName.trim()) return 'error';
+  return 'incomplete';
+}
+
+// sectionValidity drives the rail completion dots. Primary sections gate Spawn
+// (their dots mirror validateSpawnState); advanced sections are informational
+// except provider, which errors when a keyed Codex provider has no key.
+export function sectionValidity(s: SectionFields): Record<SectionId, DotState> {
+  return {
+    mission: s.mission.trim() ? 'done' : 'incomplete',
+    workspace: workspaceState(s),
+    team: 'done', // seeded from the template; never blocks
+    options: 'done', // booleans are always valid
+    review: validateSpawnState(s).ok ? 'done' : 'incomplete',
+    provider: providerNeedsKey(s) ? 'error' : 'done',
+    telegram: 'info',
+    cost: 'info',
+  };
+}

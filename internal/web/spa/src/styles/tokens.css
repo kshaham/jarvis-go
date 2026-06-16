@@ -42,6 +42,11 @@
   --accent: #22c55e;
   --accent-muted: rgba(34, 197, 94, 0.18);
   --accent-strong: #4ef0a3;
+  /* Flat-minimal accent tints — derived from the themed --accent-rgb channel so
+     they recolor automatically in light/blue mode. --accent-subtle = active
+     row / selected-card fill; --accent-border = the 2px active/selected ring. */
+  --accent-subtle: rgb(var(--accent-rgb) / 0.1);
+  --accent-border: rgb(var(--accent-rgb) / 0.4);
 
   /* Status */
   --status-working: #3ddc97;
@@ -70,6 +75,9 @@
   --radius-sm: 4px;
   --radius-md: 10px;
   --radius-card: 14px;
+  /* Flat-minimal card radius (spawn flow + future Linear-style surfaces). The
+     larger --radius-card stays for the legacy glass tiles. */
+  --radius-card-flat: 8px;
   --radius-xl: 22px;
   --radius-pill: 999px;
 

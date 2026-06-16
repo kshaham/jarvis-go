@@ -8,12 +8,9 @@ import type { Tier } from './TierBadge';
 
 const chipAsideStyle: CSSProperties = {
   padding: 12,
-  background: 'var(--lg-fill)',
-  border: '1px solid var(--lg-rim)',
-  borderRadius: 'var(--radius-card)',
-  WebkitBackdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-  backdropFilter: 'blur(var(--lg-blur-tile)) saturate(var(--lg-saturate))',
-  boxShadow: 'var(--lg-shadow-rest)',
+  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-card-flat)',
   display: 'flex',
   alignItems: 'center',
   gap: 12,
