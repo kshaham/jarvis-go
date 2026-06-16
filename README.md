@@ -24,6 +24,25 @@
 
 ---
 
+## 📑 Table of Contents
+
+- [Features at a glance](#-features-at-a-glance)
+- [Overview](#-overview) · [Architecture](#️-architecture)
+- [Quick Start](#-quick-start) — build, run, Docker, env vars, mobile
+- [Office Agent System](#-office-agent-system) — templates, modes, spawn, standup, snapshots, **project invariants**
+- [Agent Autonomy](#-agent-autonomy) — monitoring sweeps, recovery tiers, **loop-engineering discipline**
+- [Self-Improvement](#️-self-improvement) — reflection, learnings, skills, memify, headroom-learn
+- [Task Management](#-task-management) · [cm CLI Reference](#️-cm-cli-reference)
+- [Telegram Integration](#-telegram-integration)
+- [Per-Agent MCP & Tooling Bundle](#-per-agent-mcp--tooling-bundle) — jarvis, CodeGraph, Headroom, PageIndex, ECC
+- [7-Step Engineering Mode](#️-7-step-engineering-mode-agent-skills)
+- [Tool Policy](#️-tool-policy) · [Security Gate](#-security-gate-replenishment-secret-scan)
+- [Z.AI Coding Plan](#-zai-coding-plan) · [Session Management](#-session-management-pty--sdk) · [UI Features](#-ui-features)
+- [Design Inspiration & External Projects](#-design-inspiration--external-projects)
+- [API Reference](docs/API.md) · [Security & Resilience](docs/HARDENING.md) · [Testing](#-testing) · [Development](#️-development)
+
+---
+
 ## 🎯 Features at a glance
 
 | | Feature | What it does |
@@ -48,7 +67,7 @@ Jarvis Go is a production-grade multi-agent orchestration system implemented in 
 
 - **Dual session modes**: Claude Agent SDK (Go) for persistent multi-turn sessions with immediate prompt delivery, plus PTY fallback mode
 - **Virtual office team**: 7 prebuilt templates (43 agent configs) across full-stack, backend/AI, frontend, research, and innovation categories
-- **Autonomous monitoring loop**: 12 functions on a 15-second tick (stuck detection, reflection, curiosity, task triage, water-cooler chat, bug sweeps, blocked-task escalation, more)
+- **Autonomous monitoring loop**: 20+ sweeps on a 15-second tick (stuck detection, reflection, curiosity, task triage, water-cooler chat, bug sweeps, blocked-task escalation, security-secret scan, loop-engineering hard stops, more)
 - **Self-improvement engine**: agents reflect on completed tasks, build a per-agent learning store, auto-distill insights at 30 entries, and share skills across the team
 - **Perpetual RALPH loop**: agents never idle -- they find TODOs, write tests, review commits, refactor code, generate their own tasks
 - **Cross-agent knowledge sharing**: teammate learnings and mission insights injected into each agent's kickstart prompt
@@ -98,6 +117,9 @@ jarvis-go/
     ├── transcript/         # Transcript read/parse with authoritative file position
     ├── cleanup/            # Graceful shutdown helpers
     ├── filewatcher/        # File system watcher for hot-reload
+    ├── library/            # Cross-team knowledge library (skills, experiences, promotion)
+    ├── safego/             # Panic-safe goroutine launcher (safego.Go)
+    ├── logscrub/           # Credential redaction for logs
     └── web/
         ├── handler/        # HTTP handlers (session, office, config, monitoring, scheduler, ...)
         ├── sse/            # Server-Sent Events broker, batcher, client pool
@@ -107,7 +129,7 @@ jarvis-go/
         └── static/         # Embedded frontend assets (office.html, office.js, etc.)
 ```
 
-**30 packages**, ~50k lines of Go. Dual session architecture: SDK sessions spawn
+**49 packages**, ~50k lines of Go. Dual session architecture: SDK sessions spawn
 a persistent `claude.NewSession()` subprocess that stays alive across all turns
 (kickstart, standup, brainstorm, replenishment), while PTY sessions use traditional
 screen-scraping for fallback compatibility.
@@ -301,6 +323,8 @@ Each team member has:
 
 Custom teams can be created and saved through the UI.
 
+**One-click Demo Jarvis** — a built-in demo team (`internal/teamtemplates/builtin_demo.go`) spins up a small, self-contained team in a sandbox working directory so a fresh install can see the office in action without any setup.
+
 ### Perpetual vs Goal-Focused Mode
 
 At spawn time, the UI exposes a **Perpetual Improvement Mode** toggle (default: ON):
@@ -316,7 +340,7 @@ The selected mode is injected into the kickstart prompt and governs whether the 
 2. For each team member, the server creates a PTY session running `claude`
 3. After session stabilizes, `BuildKickstartPrompt` generates the full onboarding prompt and injects it
 4. Each agent receives: team mission, previous memory, learned knowledge, identity, personality, skills, team relationships, task queue instructions, file lock protocol, communication tools, and `cm` CLI reference
-5. Idle monitoring starts on a 60-second tick
+5. Idle monitoring starts on a 15-second tick
 
 ### Kickstart Prompt Sections
 
@@ -389,9 +413,9 @@ Tasks labelled `needs-review` (via `cm label <taskId> needs-review`) trigger an 
 
 ## 🧠 Agent Autonomy
 
-### 12 Monitoring Functions
+### Monitoring Sweeps
 
-The idle monitoring goroutine fires every 60 seconds and runs all 12 functions in sequence:
+The idle monitoring goroutine fires every **15 seconds** (`IdleCheckInterval`) and runs 20+ sweeps in sequence. The core set:
 
 | # | Function | Description |
 |---|---|---|
@@ -408,7 +432,7 @@ The idle monitoring goroutine fires every 60 seconds and runs all 12 functions i
 | 11 | `checkBlockedTasksForLeaderTriage` | Escalates blocked tasks to the strategic-tier leader |
 | 12 | `maybeTriggerWaterCoolerChat` | Random probability social interactions between agents |
 
-Additionally, `PersistMetrics` runs each tick to flush metrics to disk.
+Beyond these, each tick also runs: `maybeRunSecurityScan` (committed-secret gate, see [Security Gate](#-security-gate-replenishment-secret-scan)), `refreshProjectInvariants` (re-read the standing project spec), `maybeWarnLowAcceptance` (flag a low accepted-change rate), `maybeRunMemify` (promote completed tasks into reusable skills), `maybeRunHeadroomLearn` (opt-in failure mining), the loop-engineering hard-stop checks, and `PersistMetrics` (flush metrics to disk).
 
 ### Recovery Tiers
 
@@ -421,6 +445,20 @@ When an agent becomes unresponsive (default stuck threshold: 5 minutes), the rec
 | 3 | Ctrl+C + diagnostic prompt | Third consecutive detection |
 
 After `RecoveryMaxAttempts` (default: 3) exhausted within the recovery window (30 minutes), an `AgentStuckEvent` is emitted and the agent is flagged.
+
+### Loop-Engineering Discipline (Perpetual Mode)
+
+Perpetual mode is governed by four loop-engineering guarantees so an unattended loop can't run forever, fake its own completion, or wander into risky work. Config lives in `internal/office/config.go`; the gate in `internal/ralph/{gate,tracker}.go`.
+
+1. **Objective verify gate** — the dual-condition circuit breaker (completion phrase **and** exit signal) is now *necessary but not sufficient*. An async **verify command** runs as ground truth, so a self-asserted "done" cannot override a failing test suite (the "Ralph Wiggum" defense). `VerifyCommand` defaults to `""` = **auto-detect** (`go.mod` → `go test`, `Cargo.toml` → `cargo test`, `package.json` → `npm test`, `pyproject`/pytest → `pytest -q`, `Makefile` → `make test`); 10-minute timeout; a missing test binary is **Skipped**, not failed. On a gate failure the breaker resets so the loop keeps working, and after 3 consecutive failures (`gateMaxConsecutiveFailures`) it escalates.
+
+2. **Hard stops** — `RalphMaxLoopIterations` (default **10**, `0` = unlimited) and `PerpetualLoopMaxDuration` (default `0` = unlimited; operators opt in) pause replenishment for human review when hit. SSE: `office:loopMaxReached`.
+
+3. **Durable loop state** — `RalphLoopState` is persisted to `~/.jarvis/office-memory/ralph-loop-state-*.json`, keyed by a stable `ConfigID` with a 12-hour resume window, so a daemon restart resumes the iteration budget instead of starting the loop over.
+
+4. **Blocked self-add categories** — `BlockedTaskCategories` rejects self-added tasks whose title/description match risky substrings (auth/login/oauth, payment/billing/refund, deploy/release, migration, dependency-upgrade, architecture-rewrite) with HTTP 403 and an escalation — loops belong on small machine-checkable work, not on auth or payments.
+
+A **maker/checker split** runs an independent `EvaluateAcceptanceCriteria` evaluator on gated auto-complete, and every escalation (reasons like `recovery_exhausted`, `loop_hard_stop`, `gate_failed`, `security_issue`, `blocked_task_category`) is appended to a durable escalation log for operator review. A periodic permission re-audit (`PermissionReauditInterval`, default 30 days) re-checks each agent's tool scope against a baseline.
 
 ### Session Health
 
@@ -508,6 +546,18 @@ Original mission: "Build a real-time chat application"
 
 The updated mission is persisted to `~/.jarvis/office-memory/team-mission.txt` and included in every future kickstart prompt. This creates a feedback loop where team knowledge accumulates across sprints.
 
+### Project Invariants
+
+A standing per-project spec — constraints that must hold no matter what the team does (e.g. "never break the public API", "all money math in integer cents"). Invariants are re-read every monitoring sweep (`refreshProjectInvariants`) and reinjected into the cached, prompt-cache-friendly stable system prompt, so a constraint added mid-loop reaches every running agent (goal-drift mitigation). Managed from the dashboard or via `cm invariants list|add|remove|set`. Implementation: `internal/office/invariants.go`. SSE: `office:projectInvariantsUpdated`.
+
+### Memify & Acceptance Metrics
+
+Two more self-improvement sweeps run on the monitoring tick:
+
+- **memify** (`maybeRunMemify`) — clusters *completed, high-outcome* tasks into reusable workflow skills under `~/.claude/skills`, so the team's own successful patterns become first-class skills.
+- **headroom-learn** (`maybeRunHeadroomLearn`) — opt-in (`Manager.SetHeadroomLearnEnabled`, default **off**); mines *failed/aborted* sessions into a marker-delimited `## Headroom Learned Patterns` section of the project's `CLAUDE.md` on a 6-hour interval (requires the `headroom` binary). SSE: `office:headroomLearnRan`.
+- **Acceptance metrics** (`internal/office/metrics.go`) — the manager tracks an **accepted-change rate** and **cost-per-accepted-change**; when acceptance drops below 0.5, `maybeWarnLowAcceptance` emits `office:lowAcceptanceRate` so operators can spot a loop producing churn instead of progress.
+
 ### Curiosity & Discovery
 
 The monitoring loop fires `checkForCuriousAgents` which sends exploration prompts on a cooldown. Agents respond via `cm discover`:
@@ -584,7 +634,7 @@ The `cm` binary is compiled and injected into every agent session. It communicat
 | `cm task list` | List assigned tasks |
 | `cm task ack <taskId>` | Acknowledge a task |
 | `cm task start <taskId>` | Begin a task |
-| `cm task complete <taskId>` | Complete a task |
+| `cm task complete <taskId> [--summary "<handoff>"] [--screenshot <path>]` | Complete a task (optional handoff summary + screenshot evidence) |
 | `cm task progress <taskId> <note>` | Report progress on a task |
 | `cm task blocked <taskId> <reason>` | Report a blocker |
 | `cm task self-add <title> <desc>` | Self-generate a new task |
@@ -605,10 +655,13 @@ The `cm` binary is compiled and injected into every agent session. It communicat
 | `cm memory query <keyword>` | Search agent memory across all sections |
 | `cm knowledge <query>` (alias `cm know`) | Search the cross-agent knowledge base |
 | `cm label <taskId> <label>` | Attach a feature label to a task (cost rollups) |
-| `cm handoff <taskId> <toAgent> <reason>` | Hand a task off to another teammate |
-| `cm handoff-accept <handoffId>` | Accept an incoming handoff |
-| `cm handoff-reject <handoffId> <reason>` | Decline an incoming handoff |
-| `cm handoff-cancel <handoffId>` | Cancel a handoff you initiated |
+| `cm task handoff <taskId> <toAgent> <reason>` | Hand a task off to another teammate |
+| `cm task handoff-accept <handoffId>` | Accept an incoming handoff |
+| `cm task handoff-reject <handoffId> <reason>` | Decline an incoming handoff |
+| `cm task handoff-cancel <handoffId>` | Cancel a handoff you initiated |
+| `cm task phase <taskId> <define\|plan\|build\|verify\|review\|simplify\|ship>` | Record a task's engineering phase (7-step mode; advisory — never changes status) |
+| `cm task criteria <set\|add\|remove> <taskId> ...` | Edit a task's acceptance criteria |
+| `cm invariants <list\|add\|remove\|set> [value]` | Manage the standing project invariants |
 | `cm ask <toAgent> "<question>" [--timeout <sec>]` | Blocking Q&A — wait for the teammate to answer |
 | `cm answer <questionId> "<answer>"` | Reply to a pending `cm ask` |
 | `cm answered <questionId>` | Mark a question as resolved without an answer |
@@ -660,9 +713,23 @@ When the office team is active, Telegram receives periodic updates (configurable
 
 ---
 
-## 🔌 MCP Server
+## 🔌 Per-Agent MCP & Tooling Bundle
 
-The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio transport. It exposes **44+ tools** split into two categories: **agent-facing `office_*` tools** that use `JARVIS_SESSION_ID` automatically (for in-session agents), and **orchestration tools** for external controllers (Claude Desktop, other Claude Code instances).
+Every spawned agent gets a bundle of MCP servers wired into its `.claude/settings.local.json` at spawn time — no operator config needed. They're all availability-probed and **degrade gracefully** (a missing binary skips the server rather than failing the spawn):
+
+| Server | What it provides | Detail |
+|---|---|---|
+| **jarvis** | Office orchestration: tasks, memory, skills, messaging, roster, file locks | [§ jarvis-mcp tools](#jarvis-mcp-tools) below |
+| **codegraphcontext** / **codegraph** | Code knowledge-graph: symbol search, call graph, impact analysis | [§ CodeGraphContext](#️-codegraphcontext-cgc-integration) |
+| **headroom** | Local-first context compression of tool outputs / logs / conversation | table below |
+| **pageindex** | Vectorless reasoning-RAG over the office-memory library | table below |
+| **context7 / sequential-thinking / shadcn** | Docs lookup, structured reasoning, UI component discovery (ECC) | [§ ECC Bundle](#-ecc-bundle) |
+
+The SDK-session backing and the 7-step overlay round out the per-agent toolset — see [Session Management](#-session-management-pty--sdk) and [7-Step Engineering Mode](#️-7-step-engineering-mode-agent-skills).
+
+### jarvis-mcp tools
+
+The `jarvis-mcp` binary implements the Model Context Protocol (MCP) over stdio transport. It exposes **48+ tools** split into two categories: **agent-facing `office_*` tools** that use `JARVIS_SESSION_ID` automatically (for in-session agents), and **orchestration tools** for external controllers (Claude Desktop, other Claude Code instances).
 
 Jarvis-MCP is also registered as an MCP server inside every spawned agent session, giving agents a natively-scoped toolset for task/memory/skill operations.
 
@@ -797,6 +864,8 @@ at spawn time.
 | `jarvis` | yes | always | Office orchestration tools (roster, tasks, memory, knowledge, skills, file locks). |
 | `codegraphcontext` | yes | always | Symbol search and codebase navigation. |
 | `codegraph` | optional | `codegraph` binary on PATH AND `disableCodegraph: false` (default) | Full symbol index + call graph + impact analysis. |
+| `headroom` | optional | `headroom` binary on PATH AND `disableHeadroom: false` (default) | `mcp__headroom__*` — local-first compression of tool outputs/logs/conversation on long perpetual runs. Shared store at `HEADROOM_HOME=~/.jarvis/headroom`. Bundled in the Docker image. (Apache-2.0) |
+| `pageindex` | optional | `npx` on PATH | `mcp__pageindex__*` — vectorless reasoning-RAG (`npx @pageindex/mcp`) pointed at the office-memory library so agents tree-search prior knowledge. (MIT) |
 | `context7` | optional | `npx` on PATH (Node 18+) AND `disableEcc: false` (default) | Live library documentation lookup. |
 | `sequential-thinking` | optional | same as context7 | Structured chain-of-thought reasoning for complex tasks. |
 | `shadcn` | optional | same as context7 | UI component discovery (metadata only; doesn't run code generation). |
@@ -908,6 +977,23 @@ refresh workflow: `docs/ECC.md`.
 
 ---
 
+## 🛠️ 7-Step Engineering Mode (agent-skills)
+
+An **additive overlay** that drives each task through a disciplined software-development lifecycle. It combines with *either* perpetual or goal mode and is **opt-in** — pass `sevenStepMode: true` in the spawn request (default off). Vendors [Addy Osmani's agent-skills](https://github.com/addyosmani/agent-skills) pack (MIT, attributed in `THIRD_PARTY_LICENSES.md`).
+
+The seven ordered phases:
+
+```
+DEFINE → PLAN → BUILD → VERIFY → REVIEW → SIMPLIFY → SHIP
+ /spec   /plan  /build  /test   /review  /code-simplify  /ship
+```
+
+When enabled, each agent's `.claude/` tree gets the **7 phase slash-commands** plus **4 specialist personas** (`code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`) layered on top of the standard office + ECC bundle (`internal/office/worktree.go` `WorktreeHooksConfig.SevenStepMode`). The 24 skill bundles ship under `skills/agent-skills/`.
+
+Agents record the current phase per task via `cm task phase <taskId> <phase>` — this is **advisory** and never changes the task's status. `/ship` fans out to the four personas and opens a PR for a human to merge. Implementation: `internal/office/agentskills.go`, `eng_phase.go`.
+
+---
+
 ## 🛡️ Tool Policy
 
 Every spawned team enforces an operator-controlled allow/deny matrix
@@ -933,6 +1019,19 @@ curl -X PUT http://127.0.0.1:3555/api/office/tool-policy \
 
 Implementation: `internal/claudehooks/tool_policy.go` (store +
 PreToolUse hook), `internal/web/handler/tool_policy.go` (HTTP).
+
+---
+
+## 🔒 Security Gate (Replenishment Secret Scan)
+
+An unattended loop is an unattended attack surface, so perpetual mode carries a "security tax": before replenishing an idle agent with fresh work, jarvis runs a bounded committed-secret scan over the working tree. It's **always on** in perpetual mode (no flag) and is the **first guard** in `CheckForIdleAgents`.
+
+- **What it catches** — tight, high-signal credential shapes: AWS access keys (`AKIA…`), OpenAI keys (`sk-proj-`/`sk-svcacct-`/`sk-admin-` + legacy `sk-…`), GitHub PATs (`ghp_…`), Slack tokens (`xox…`), PEM private-key blocks, and `aws_secret_access_key=` assignments.
+- **What it does** — any finding **halts replenishment team-wide** until a clean scan clears it, broadcasts `office:securityIssueDetected`, sends a Telegram notice, and records a `security_issue` escalation. `RedactSecrets` also sanitizes credential-shaped strings before they reach the logs.
+- **Bounded** — at most 2000 files, skips VCS/dependency dirs (`.git`, `node_modules`, `vendor`, `dist`, `build`, `.next`, `target`, `__pycache__`) and files larger than 512 KB, so it can't stall the monitor tick.
+- **Self-clearing** — a 15-minute cooldown while clean, but while *blocked* it re-scans every tick, so the loop resumes the moment the operator removes the secret.
+
+Implementation: `internal/office/security_gate.go`.
 
 ---
 
@@ -1030,7 +1129,7 @@ Non-blocking toast system for: task assignments, agent joins/leaves, recovery ev
 
 All state changes are pushed via Server-Sent Events on `GET /api/sse`. The broker supports up to 100 concurrent global connections and 10 per session, with per-client write goroutines for non-blocking delivery.
 
-**SSE Event Types (37+):**
+**SSE Event Types (60+):**
 
 | Event | Description |
 |-------|-------------|
@@ -1067,13 +1166,19 @@ All state changes are pushed via Server-Sent Events on `GET /api/sse`. The broke
 | `office:snapshotRestored` | Snapshot restored (includes `forked: true` when fork mode used) |
 | `office:remoteSessionCreated` | Operator spawned a claude.ai web session via `/api/office/spawn-remote` |
 | `office:claudeSessionStopped` | Operator stopped a Claude session via `/api/office/claude-sessions/{sid}/stop` |
+| `office:loopMaxReached` | Perpetual loop hit its iteration/time hard stop; paused for review |
+| `office:gateCheckFailed` | Objective verify gate failed — completion rejected, loop keeps working |
+| `office:criteriaRejected` | Independent acceptance-criteria evaluator rejected a completion |
+| `office:lowAcceptanceRate` | Accepted-change rate dropped below 0.5 (loop may be churning) |
+| `office:securityIssueDetected` | Committed secret found; replenishment halted team-wide |
+| `office:headroomLearnRan` | Opt-in failure-mining sweep ran |
+| `office:projectInvariantsUpdated` | Standing project invariants changed |
+| `office:snapshotCreated` / `office:snapshotDeleted` | Team snapshot created / deleted |
+| `office:handoffInitiated` / `Accepted` / `Rejected` / `Cancelled` / `Expired` | Structured task-handoff lifecycle |
+| `office:questionAsked` / `office:questionAnswered` | `cm ask` blocking Q&A lifecycle |
 | `respawn:stateChanged` | Respawn controller state transition |
 | `ralph:updated` | RALPH tracker event |
 | `runsummary:updated` | Run summary parsed |
-
-### Agent Personality Icons
-
-Each agent has a unique SVG icon based on their role/personality (24 icons across 4 templates). Icons are Feather-style outlines rendered in the avatar slot: crown (manager), compass (architect), palette (designer), code brackets (frontend), server (backend), wrench (devops), shield (QA), brain (AI lead), atom (React), rocket (ops), and more. Role-based fallbacks match unknown agents by keyword.
 
 ### View Modes
 
@@ -1155,132 +1260,13 @@ Each session has a `respawn.Controller` state machine that tracks: idle detectio
 
 The RALPH (Recognize, Assess, Log, Plan, Handle) tracker monitors each session's output for loop patterns, excessive tool calls, and stalled progress. It acts as a circuit breaker -- if an agent enters a RALPH loop (repeating the same failed action), the tracker triggers intervention via the respawn controller.
 
+In perpetual mode the breaker is backed by an **objective verify gate**: a completion phrase can't override a failing test suite. The tracker emits `ExitGateMet` (real success), `GateCheckFailed` (verify failed — breaker reset, keep working), and `LoopLimitReached` (hard stop) events, and escalates after 3 consecutive gate failures. See [Loop-Engineering Discipline](#loop-engineering-discipline-perpetual-mode).
+
 ---
 
 ## 📡 API Reference
 
-All endpoints are prefixed with `/api`. Mutating endpoints (POST/PUT/DELETE) require a CSRF token from `GET /api/csrf-token` except agent callbacks (called by `cm` CLI) and `POST /api/hook-event`.
-
-### Session Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/sessions` | List all sessions |
-| `POST` | `/api/sessions` | Create session |
-| `GET` | `/api/sessions/{id}` | Get session |
-| `DELETE` | `/api/sessions/{id}` | Delete session |
-| `POST` | `/api/sessions/{id}/input` | Send input to session |
-| `GET` | `/api/sessions/{id}/terminal` | Get terminal buffer |
-| `GET` | `/api/sessions/{id}/output` | Get text output |
-| `GET` | `/api/sessions/{id}/git-status` | Git status |
-| `GET` | `/api/sessions/{id}/build-status` | Build status |
-| `GET` | `/api/sessions/{id}/test-status` | Test run status |
-| `POST` | `/api/sessions/{id}/respawn/start` | Start auto-respawn |
-| `POST` | `/api/sessions/{id}/context/trim` | Trim context window |
-| `POST` | `/api/sessions/{id}/plan/checkpoint` | Checkpoint plan version |
-| `GET` | `/api/sessions/{id}/plan/history` | Plan version history |
-| `POST` | `/api/sessions/{id}/plan/rollback/{version}` | Rollback to plan version |
-
-### Office Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/office/status` | Office state snapshot |
-| `GET` | `/api/office/templates` | Available team templates |
-| `POST` | `/api/office/spawn-team` | Spawn the configured team |
-| `POST` | `/api/office/shutdown-team` | Shutdown all agents |
-| `GET` | `/api/office/task-queues` | All agent task queues |
-| `GET` | `/api/office/task-queues/{sessionId}` | Single agent task queue |
-| `GET` | `/api/office/file-locks` | Active file locks |
-| `GET` | `/api/office/messages` | Office message log |
-| `POST` | `/api/office/message` | Send office message |
-| `GET` | `/api/office/metrics` | Agent metrics snapshot |
-| `GET` | `/api/office/audit-log` | Audit log entries |
-| `GET` | `/api/office/learnings` | All agent learning stores |
-| `GET` | `/api/office/standup` | Current standup state |
-| `POST` | `/api/office/standup` | Trigger standup |
-| `GET` | `/api/office/standup/history` | Standup history |
-| `POST` | `/api/office/wrap-up` | Begin wrap-up sequence |
-| `POST` | `/api/office/wrap-up/cancel` | Cancel wrap-up |
-| `GET` | `/api/office/code-graph` | Code graph snapshot |
-| `POST` | `/api/office/code-graph/build` | Rebuild code graph |
-| `GET` | `/api/office/memory/{sessionId}` | Agent persistent memory |
-| `POST` | `/api/office/brainstorm` | Trigger brainstorm session |
-
-#### Snapshots, search, and integrations
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/office/snapshots` | List saved team snapshots |
-| `POST` | `/api/office/snapshots` | Create a snapshot of the current team |
-| `POST` | `/api/office/snapshots/{name}/restore` | Restore a snapshot. Add `?fork=true` for fork mode (keeps the original team running, spawns a parallel team resuming each member's Claude session via `--fork-session`) |
-| `DELETE` | `/api/office/snapshots/{name}` | Delete a snapshot |
-| `GET` | `/api/office/agent/{sessionId}/usage-series` | Recent per-turn cost series + averages (powers the detail-panel sparkline) |
-| `POST` | `/api/office/search` | Text search across messages + tasks (`{query, types?, limit?}`); returns scored hits with kind, snippet, agent name, timestamp |
-| `GET` | `/api/office/tool-policy` | Current tool-policy deny matrix (operator-readable) |
-| `PUT` | `/api/office/tool-policy` | Replace the tool-policy matrix; takes effect on the next PreToolUse hook fire |
-| `GET` | `/api/office/pr/{number}` | Team + sessions linked to a GitHub PR number |
-| `POST` | `/api/office/spawn-remote` | Spawn a claude.ai web session via `claude --remote`. Returns `{url, sessionId}` |
-| `GET` | `/api/office/claude-sessions/{sid}/logs` | Tail Claude logs for a session (text/plain) |
-| `POST` | `/api/office/claude-sessions/{sid}/stop` | Stop a Claude session (`claude stop <sid>`) |
-| `GET` | `/api/office/claude-sessions/{sid}/attach-command` | Return argv for `claude attach` so operators can re-enter a session from a terminal |
-
-### Agent Callback Endpoints (auth-exempt, called by `cm` CLI and `jarvis-mcp`)
-
-These endpoints are placed outside the auth middleware group so in-session agents can reach them using only their injected `JARVIS_SESSION_ID`. They are not exposed in the authenticated UI routes.
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/office/agent/tasks` | Get agent's task queue |
-| `GET` | `/api/office/agent/team-roster` | Get team roster |
-| `GET` | `/api/office/agent/file-locks` | List file locks |
-| `GET` | `/api/office/agent/skills` | List shared skills |
-| `GET` | `/api/office/agent/skills/{name}` | Read a skill |
-| `GET` | `/api/office/agent/skills/search` | Search skills |
-| `GET` | `/api/office/agent/memory` | Read agent memory |
-| `POST` | `/api/office/agent/memory` | Write agent memory |
-| `POST` | `/api/office/agent/memory/append` | Append to memory |
-| `POST` | `/api/office/agent/standup/response` | Submit standup response |
-| `POST` | `/api/office/agent/message` | Send inter-agent message |
-| `POST` | `/api/office/agent/task-start` | Mark task in-progress |
-| `POST` | `/api/office/agent/task-complete` | Mark task complete |
-| `POST` | `/api/office/agent/task-ack` | Acknowledge task |
-| `POST` | `/api/office/agent/task-progress` | Report progress (with `isBlocked` flag for blockers) |
-| `POST` | `/api/office/agent/task/self-add` | Self-generate a task |
-| `POST` | `/api/office/agent/task/triage` | Transfer task to teammate |
-| `POST` | `/api/office/agent/brainstorm/response` | Submit brainstorm proposals |
-| `POST` | `/api/office/agent/leader-tasks/response` | Submit leader task assignments |
-| `POST` | `/api/office/agent/reflection/response` | Submit post-task learning |
-| `POST` | `/api/office/agent/curiosity/discovery` | Report curiosity discovery |
-| `POST` | `/api/office/agent/file-lock` | Acquire file lock |
-| `POST` | `/api/office/agent/skill-create` | Create/update skill |
-| `DELETE` | `/api/office/agent/skills/{name}` | Delete a skill |
-
-### Config Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/config` | Server configuration |
-| `PUT` | `/api/config` | Update configuration |
-| `GET` | `/api/settings` | Application settings |
-| `PUT` | `/api/settings` | Update settings |
-| `GET` | `/api/settings/accounts` | Provider accounts |
-| `POST` | `/api/settings/accounts` | Add provider account |
-| `GET` | `/api/stats` | Server statistics |
-| `GET` | `/api/token-stats` | Token usage statistics |
-
-### Monitoring Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/health` | Health check |
-| `GET` | `/api/status` | Full status payload |
-| `GET` | `/api/csrf-token` | Fetch CSRF token |
-| `GET` | `/api/auth/status` | Auth status |
-| `GET` | `/api/screens` | Screen list |
-| `GET` | `/api/subagents` | Subagent list |
-| `GET` | `/api/system/stats` | System memory and CPU stats |
-| `GET` | `/api/sse` | SSE event stream |
+The full HTTP API — session, office, agent-callback, config, and monitoring endpoints — lives in **[docs/API.md](docs/API.md)**. All endpoints are prefixed with `/api`; mutating requests require a CSRF token from `GET /api/csrf-token` except the agent-callback routes (called by the `cm` CLI / `jarvis-mcp` with `JARVIS_SESSION_ID`).
 
 ---
 
@@ -1297,7 +1283,7 @@ make test-race
 make bench
 ```
 
-**600+ tests** across 30 packages. Key test coverage areas:
+**600+ tests** across 49 packages. Key test coverage areas:
 
 | Package | Coverage Focus |
 |---|---|
@@ -1315,50 +1301,46 @@ All tests pass with `go test -race ./...` (full race-detector coverage).
 
 ## 🔐 Security & Resilience
 
-Jarvis has undergone **10 comprehensive code review rounds** with **95+ bug fixes** across security, correctness, concurrency, and resource management. Every change is race-tested and the codebase is hardened against common failure modes.
+Jarvis has undergone 10+ code-review rounds plus several adversarial audit passes — **100+ bug fixes** across security, correctness, concurrency, and resource management, all race-tested (`go test -race ./...`). Highlights: CSRF with auto-retry, `safeName()` / whitelist path-traversal guards (skills, memory, worktree IDs, loop-state keys), committed-secret scanning, `0600` state-file perms, escaped HTML everywhere, zero goroutine leaks (done-channel / WaitGroup coordination), strict lock ordering, atomic + serialized file writes, and bounded buffers / timeouts / hard-stops.
 
-### Fix Categories (10 rounds, 95+ total)
+Full round-by-round log and the hardening checklist: **[docs/HARDENING.md](docs/HARDENING.md)**.
 
-| Round | Fixes | Focus |
-|-------|-------|-------|
-| 1 | 15 | Goroutine leaks, data races, crash fixes, SDK session env |
-| 2 | 20 | Correctness, frontend timers, resource management |
-| 3 | 17 | API contract mismatches, TOCTOU races, JSON parsing |
-| 4 | 8 | XSS, task pointer races, Stop() synchronization |
-| 5 | 8 | postJson regressions, nil guards, brainstorm lock promotion |
-| 6 | 10 | Triage contract fix, CSRF retry, null guards |
-| 7 | 8 | N+1 disk reads, wg.Done ordering, raw fetch cleanup |
-| 8 | 1 | PATCH handler CSRF freshness |
-| 9 | 4 | Telegram webhook chi routing, XSS in quieter files |
-| 10 | 4 | PTY reader leak, transcript position, XSS regression |
+---
 
-### Security Hardening
+## 🌟 Design Inspiration & External Projects
 
-- **CSRF protection** with automatic retry on token expiry (postJson/putJson/deleteJson helpers)
-- **Path traversal prevention**: `safeName()` validator (`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`, max 128 chars) applied to all user-supplied names (skills, cases, memory paths, task IDs)
-- **Shell injection prevention**: `/api/run` endpoint uses `exec.Command` with split args, never `sh -c`
-- **State file permissions**: `~/.jarvis/state.json` written with 0600 mode (contains API keys)
-- **Auth middleware**: Password authentication with session cookies, rate-limited login attempts, cached `IsPasswordConfigured` to avoid disk reads on every request
-- **XSS prevention**: All HTML insertion in frontend uses escaped helpers or textContent; Ralph wizard preview escapes `taskDescription` and `completionPhrase`; expand history renders escape all server-supplied fields
-- **Agent endpoint isolation**: `/api/office/agent/*` routes are auth-exempt but require valid `sessionId` from the `cm` CLI's JARVIS_SESSION_ID env var; path-parameter routing uses `chi.URLParam` for consistency
+Jarvis stands on the shoulders of several open-source projects — some vendored into the repo, some bundled into the build, some spawned as external tools, and some that shaped the design. Full license notices: [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
-### Concurrency Safety
+### Vendored (source copied in + attributed)
 
-- **Zero goroutine leaks**: All background goroutines have explicit `done` channels or `sync.WaitGroup` coordination. `StartIdleMonitoring`/`startAutoStandup` use done channels in their select loops so `Stop()` reliably terminates them.
-- **Lock ordering discipline**: `m.mu` (office manager) is always acquired before any `agent.mu` (agent state), never the reverse. `HandleAgentDeath` deep-copies tasks before reassignment to avoid racing on shared pointers.
-- **Race-free agent state**: `SetSDKWorking`/`GetSDKWorking` and `SetPersonalityOverride`/`GetPersonalityOverride` wrap mutations in the agent mutex; concurrent readers get stable snapshots.
-- **Non-blocking SSE delivery**: The SSE broker uses per-client write goroutines with bounded buffers; slow clients don't block the broadcast path.
-- **Brainstorm cooldown TOCTOU fix**: The cooldown check and `lastBrainstormAt` update happen under a single `m.mu.Lock()` so two concurrent goroutines can't launch duplicate brainstorms.
-- **SDK event consumer shutdown**: `eventConsumer`'s `defer s.wg.Done()` is the outermost defer so `Stop()` only unblocks after the events channel is closed and the final log line is written.
+| Project | Used for | License |
+|---|---|---|
+| [ECC](https://github.com/affaan-m/ECC) | Curated skills + Task-tool agents + slash commands + 3 MCP servers (context7, sequential-thinking, shadcn) laid into each agent's `.claude/` | MIT |
+| [agent-skills](https://github.com/addyosmani/agent-skills) | The 7-step engineering SDLC pack — 24 skill bundles, 7 phase commands, 4 specialist personas | MIT |
 
-### Resource Management
+### Integrated external tools (spawned, not vendored)
 
-- **Bounded buffers**: Terminal buffer (2MB trim to 1.5MB), text output (1MB trim to 768KB), message log (50 entries FIFO), activity log (200 entries)
-- **Agent memory caps**: 50 learnings, 25 skills, 10 distilled insights per agent (auto-distillation at 30 learnings)
-- **I/O limits**: `jarvis-mcp` wraps HTTP response bodies with `io.LimitReader(resp.Body, 32<<20)` to cap at 32MB
-- **Context timeouts**: CGC indexing has a 5-minute timeout, state file writes use atomic tmp-file rename with error logging
-- **Single PTY reader**: Only one goroutine reads from each PTY file descriptor, eliminating the reader-per-iteration leak pattern
-- **Transcript position accounting**: Uses `f.Seek(0, io.SeekCurrent)` instead of `len(line)+1` to handle CRLF line endings correctly
+| Project | Used for | Integration | License |
+|---|---|---|---|
+| [Headroom](https://github.com/chopratejas/headroom) | Local-first context compression of tool outputs / logs / conversation on long perpetual runs | per-agent MCP (`headroom mcp serve`), bundled in Docker | Apache-2.0 |
+| [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext) | Code knowledge-graph for call-graph / dependency / impact queries (5–10× context savings) | per-agent MCP (`cgc`) | MIT |
+| codegraph | Rust code-graph MCP (`mcp__codegraph__*`) — symbol index, call graph, impact analysis (distinct from CodeGraphContext) | per-agent MCP (CLI) | upstream repo unpinned |
+| [PageIndex](https://github.com/VectifyAI/PageIndex) | Vectorless reasoning-RAG over the office-memory library | per-agent MCP (`npx @pageindex/mcp`) | MIT |
+| [rtk](https://github.com/rtk-ai/rtk) | Bash-output compression (60–90% token reduction) | PreToolUse hook | Apache-2.0 |
+
+### Bundled runtime dependencies
+
+| Project | Used for | License |
+|---|---|---|
+| [Excalidraw](https://github.com/excalidraw/excalidraw) | The team whiteboard canvas in the SPA (`@excalidraw/excalidraw`) | MIT |
+| [claude-agent-sdk-go](https://github.com/shaharia-lab/claude-agent-sdk-go) | Persistent multi-turn SDK agent sessions (`claude.NewSession()`) | MIT |
+
+### Design inspiration (concept only)
+
+| Influence | What it shaped |
+|---|---|
+| Loop engineering / RALPH ("Ralph Wiggum" coding-agent pattern) | Perpetual mode's objective gate, circuit breaker, dual-condition completion test, and hard stops |
+| Anthropic [code-simplifier plugin](https://github.com/anthropics/claude-plugins-official) | The `/code-simplify` agent-skill (via the agent-skills pack) |
 
 ---
 

@@ -262,7 +262,7 @@ Relevant series to alert on:
 
 - `jarvis_sessions_active` — operator-defined baseline; alert on unexpected zero.
 - `jarvis_sessions_stopped_total{reason="stuck"}` — rate of auto-kill events.
-- `jarvis_cost_usd_total` — derivative over 1h to detect runaway spending.
+- `jarvis_cost_usd_total` — informational only. Dollar/token cost caps were removed (subscription plans report cost as $0), so this series is for visibility, not enforcement. The binding runaway guardrails are the per-session turn cap, the wedged-session stop, and the perpetual-loop iteration/time hard stops — alert on `jarvis_sessions_stopped_total` instead.
 - `jarvis_sse_clients` — unusually high/low may indicate connection issues.
 - `jarvis_http_requests_total{status=~"5.."}` — 5xx rate.
 
@@ -351,9 +351,12 @@ HTTP outside the LAN.
 
 - **`X-Request-ID` header appears in every response** — use this to correlate
   a frontend error to a specific log line. `grep` the journal for the ID.
-- **`jarvis_sessions_stopped_total{reason="cost_cap"}` is climbing** — the
-  per-session cost cap is firing. Raise `MaxCostUSD` or investigate looping
-  agents.
+- **`jarvis_sessions_stopped_total{reason="stuck"}` is climbing** — sessions
+  are hitting the per-session turn cap or the wedged-session hard stop.
+  Investigate looping agents, or raise the per-agent turn ceiling at spawn time
+  if the work legitimately needs more turns. (Dollar/token cost caps and the
+  `reason="cost_cap"` stop were removed — subscription plans report $0 cost, so
+  iteration and time hard stops are the guardrail now.)
 - **SSE disconnects constantly** — check reverse proxy `proxy_read_timeout`
   (must be 24h or larger). Browsers reconnect automatically; the
   `Last-Event-ID` header flushes missed events from the 200-event replay ring.

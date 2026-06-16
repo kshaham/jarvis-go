@@ -84,7 +84,7 @@ The best way to understand Jarvis is through an office metaphor. When you deploy
 
 ### Hiring a Team
 
-Jarvis ships with **six prebuilt team templates** you can deploy with one click:
+Jarvis ships with **seven prebuilt team templates (plus a one-click Demo Jarvis team)** you can deploy with one click:
 
 | Template | Size | What it does |
 |---|---|---|
@@ -94,6 +94,9 @@ Jarvis ships with **six prebuilt team templates** you can deploy with one click:
 | **Full-Stack Compact** | 5 members | A lean shipping team: Tech Lead, Frontend, Backend, QA/Security, and DevOps |
 | **Research Lab** | 7 members | For investigation and proof-of-concept work: a Research Director, a Deep Researcher, a Technical Analyst, a POC Developer, a Presentation Specialist, a Brand Strategist, and a Documentation Writer |
 | **Innovation Sprint** | 6 members | Rapid ideation and validation: an Innovation Lead, a Market Researcher, a Prototype Engineer, a Visual Storyteller, a Technical Writer, and a Validation Analyst |
+| **Core Builders** | 6 members | A product-led full-stack team: a Product Manager who maintains the codebase wiki, an internal technical scout/QA, an external framework scout/QA, a UI/UX Designer, a Senior Full-Stack Engineer, and a Frontend Engineer |
+
+On top of the seven templates, a one-click **Demo Jarvis** team spawns a tiny 3-member crew (lead + designer + engineer) that runs the full office workflow for real -- standups, whiteboard, tasks, chats, meetings, knowledge, and deliverables -- so every dashboard screen fills with genuine data for a first look.
 
 You can also build custom teams by picking roles, assigning personalities, and choosing which AI models each member uses.
 
@@ -371,6 +374,15 @@ The graph is built automatically when the team is spawned. It updates as the cod
 
 The knowledge graph is free and runs locally. There is no downside.
 
+### Context-Compression Layers
+
+The knowledge graph cuts how much an agent has to read in the first place. Two optional compression layers cut how much of what it does read stays in context:
+
+- **Headroom** -- an optional MCP that compresses the bulky stuff agents accumulate over a long run: tool outputs, logs, and earlier conversation. When the binary is on PATH, agents get `mcp__headroom__*` tools and a nudge to pass large blobs (dependency trees, search results, multi-thousand-line logs) through the compressor before pasting them into their reasoning -- typically a 60-95% shrink, and reversible if a detail is needed later.
+- **rtk** -- bash-output compression wired in as a `PreToolUse` hook. It automatically trims verbose command output (`git`, `go build`, `docker`, test runners, `cat`, and the like) by 60-90% before it ever reaches the agent, falling back to raw output when it is uncertain. An agent can prefix a single command with `rtk --raw` when it needs the unfiltered stream.
+
+Both are opt-in and degrade gracefully -- if the binary is not installed, the agent simply runs without that layer.
+
 ---
 
 ## 8. Safety and Control
@@ -404,7 +416,16 @@ Beyond the stop-and-start buttons, Jarvis exposes a full lifecycle surface so th
 
 ### Guardrails Against Runaway Agents
 
-Jarvis uses quota-agnostic defenses -- the kind that work whether you are on a pay-per-token plan or a subscription:
+Jarvis uses quota-agnostic defenses -- the kind that work whether you are on a pay-per-token plan or a subscription. (Dollar and token cost caps existed in earlier versions but were removed: they are meaningless on subscription plans, which is what most deployments use. The binding guardrails are now the iteration and time hard stops, the objective verify gate, and the task-category blocklist described below.)
+
+Perpetual mode is disciplined by loop-engineering, so a self-running agent cannot quietly drift into trouble:
+
+- **Objective verify gate.** A self-asserted "done" cannot override a failing test suite. Before a perpetual-loop task is allowed to close, Jarvis runs an objective verify command (an auto-detected build/test/lint command, or one you configure) against the working tree. The loop advances only when the gate passes -- the agent does not get to grade its own homework.
+- **Iteration and wall-clock hard stops.** A perpetual loop is capped at a maximum number of self-replenishment cycles (default 10) and, optionally, a maximum wall-clock lifetime. When either cap is crossed, the loop pauses for human review rather than charging ahead indefinitely.
+- **Committed-secret scan.** Before replenishing an idle agent with fresh self-generated work, a lightweight secret scan runs over the working tree. Any committed-secret finding halts replenishment and surfaces a dashboard alert, so the team cannot keep building on top of a leaked credential.
+- **Task-category blocklist.** Self-added tasks that fall into risky categories -- authentication, payment, deploy, migration, dependency-upgrade, architecture-rewrite -- are rejected. Loops belong on small, machine-checkable work, not on irreversible judgment calls, so these are routed to a human instead of auto-generated.
+
+On top of the loop discipline, Jarvis backs the session itself with runtime safety nets:
 
 - **Per-session turn ceiling.** Every AI session has a maximum number of turns it is allowed to take, with a sensible default of 100. Cross that ceiling and the session is stopped automatically, an event fires to the dashboard, and the agent's pending tasks get reassigned. This is the primary backstop against an agent running the same loop 200 times.
 - **Wedged-session hard stop.** If an agent's AI session reports itself as "working" for longer than the configured wall-clock window (default 20 minutes) without producing any tool activity or turn events, Jarvis assumes the subprocess is hung and stops it. The dashboard shows a toast so you know cleanup happened.
@@ -630,7 +651,7 @@ When you spawn a team to work on a specific GitHub PR, you can tie the spawn to 
 
 ### Custom Teams
 
-If none of the six prebuilt templates fit your needs, build your own. You define:
+If none of the seven prebuilt templates fit your needs, build your own. You define:
 
 - How many members the team has
 - Each member's name, role, tier, and personality
@@ -1033,7 +1054,7 @@ Compare to **one human engineer at $120,000 to $240,000 per year** and the math 
 
 Absolutely. You can:
 
-- Use any of six prebuilt templates
+- Use any of seven prebuilt templates (plus the one-click Demo Jarvis team)
 - Add, remove, or duplicate members in the spawn modal before you spawn
 - Build custom teams with any mix of roles
 - Write custom personalities
@@ -1091,13 +1112,17 @@ None of the advisories auto-kill the agent (except the hard ceiling + wedged-ses
 
 Jarvis uses quota-agnostic defenses that work whether you are on a pay-per-token plan or a subscription:
 
-1. **Per-session turn ceiling** -- every AI session is capped at 100 turns by default. Operators can adjust per-agent at spawn time.
-2. **Wedged-session hard stop** -- any AI session that reports working for 20+ minutes without tool activity gets stopped.
-3. **Loop advisories** -- the dashboard flags repetitive output and repetitive tool calls so you intervene early.
-4. **Pause button** -- click pause when you see trouble; agents freeze without dying.
-5. **Kill button** -- surgical stop for one agent; the rest keep working.
+1. **Objective verify gate** -- a perpetual-loop task closes only when an auto-detected build/test/lint command passes, so a self-asserted "done" cannot override a failing test suite.
+2. **Iteration and time hard stops** -- a perpetual loop is capped at a maximum number of self-replenishment cycles (default 10) and an optional wall-clock lifetime; crossing either pauses for human review.
+3. **Committed-secret scan** -- a secret scan runs before replenishing an idle agent with new work, and halts replenishment if it finds a committed credential.
+4. **Task-category blocklist** -- self-added tasks in risky categories (auth, payment, deploy, migration, dependency-upgrade, architecture-rewrite) are rejected and routed to a human.
+5. **Per-session turn ceiling** -- every AI session is capped at 100 turns by default. Operators can adjust per-agent at spawn time.
+6. **Wedged-session hard stop** -- any AI session that reports working for 20+ minutes without tool activity gets stopped.
+7. **Loop advisories** -- the dashboard flags repetitive output and repetitive tool calls so you intervene early.
+8. **Pause button** -- click pause when you see trouble; agents freeze without dying.
+9. **Kill button** -- surgical stop for one agent; the rest keep working.
 
-(Dollar-based caps existed in earlier versions but were removed -- they are meaningless on subscription plans, which is what most deployments use.)
+(Dollar- and token-based cost caps existed in earlier versions but were removed -- they are meaningless on subscription plans, which is what most deployments use. The iteration and time hard stops above are the binding guardrail.)
 
 ### Do they work on proprietary code?
 
