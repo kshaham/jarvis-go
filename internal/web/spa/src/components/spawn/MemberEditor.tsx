@@ -4,7 +4,6 @@ import { Button, Input, Textarea } from '@/components/ui';
 import { Avatar } from './Avatar';
 import { ChipGroup, Field, ModelSelect, SectionCard } from './formPrimitives';
 import type { Tier } from './TierBadge';
-import { TierBadge } from './TierBadge';
 import type { MemberEdit } from './memberEditor.utils';
 import { isMemberEdited } from './memberEditor.utils';
 
@@ -63,7 +62,6 @@ export function MemberEditor({
             {member.role || 'No role set'}
           </span>
         </div>
-        {member.tier ? <TierBadge tier={member.tier} variant="pill" /> : null}
       </header>
 
       <div

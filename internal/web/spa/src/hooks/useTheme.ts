@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-// Theme preference: dark-first with opt-in light + blue themes (the
-// [data-theme='light'] / [data-theme='blue'] blocks in tokens.css) and a
-// 'system' option. Persisted to localStorage; 'system' follows the OS
-// color scheme live (system never resolves to blue — that's an explicit pick).
+// Theme preference: dark-first with opt-in light + dark variants (the
+// [data-theme='light'] / 'blue' / 'graphite' blocks in tokens.css) and a
+// 'system' option. Blue (cyan-on-black) and graphite are dark themes;
+// only light + system-light are light. Persisted to localStorage; 'system'
+// follows the OS color scheme live (it never resolves to an explicit pick).
 export type ThemePref = 'dark' | 'light' | 'blue' | 'graphite' | 'system';
 
 const KEY = 'office-theme';
@@ -35,9 +36,9 @@ function themeAttr(pref: ThemePref): 'light' | 'blue' | 'graphite' | null {
 }
 
 // resolve — the concrete light|dark a preference reads as, for any consumer
-// that only cares about light-vs-dark. Blue is light; graphite is a dark theme.
+// that only cares about light-vs-dark. Blue and graphite are dark themes.
 function resolve(pref: ThemePref): 'dark' | 'light' {
-  if (pref === 'blue') return 'light';
+  if (pref === 'blue') return 'dark';
   if (pref === 'graphite') return 'dark';
   return pref === 'system' ? (systemIsLight() ? 'light' : 'dark') : pref;
 }

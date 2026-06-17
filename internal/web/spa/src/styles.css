@@ -728,15 +728,16 @@
   align-items: flex-start;
 }
 
-/* Left rail */
+/* Left rail — compact: a narrow, dense section nav that yields width to the
+   editor panel on the right. */
 .spawn-rail {
-  flex: 0 0 252px;
+  flex: 0 0 208px;
   position: sticky;
   top: 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px;
+  gap: 4px;
+  padding: 10px;
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-card-flat);
@@ -754,8 +755,8 @@
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px 8px 8px;
+  gap: 8px;
+  padding: 6px 8px 6px 7px;
   border: 0;
   border-left: 2px solid transparent;
   border-radius: var(--radius-sm);
@@ -872,7 +873,9 @@
 }
 .spawn-team-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  /* Compact roster on the left, wide editor on the right (the column that
+     actually needs the room — its field grids then lay out two-up). */
+  grid-template-columns: minmax(200px, 0.72fr) minmax(0, 1.7fr);
   gap: 12px;
   align-items: start;
 }

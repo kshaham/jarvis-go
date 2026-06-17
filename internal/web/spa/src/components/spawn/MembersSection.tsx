@@ -8,21 +8,7 @@ import { Avatar } from './Avatar';
 import { MemberEditor } from './MemberEditor';
 import { isMemberEdited, memberFromTemplate } from './memberEditor.utils';
 import type { MemberEdit } from './memberEditor.utils';
-import { TierBadge } from './TierBadge';
 import type { Tier } from './TierBadge';
-
-// Static trailing element for the roster tile — hoisted so it's the same
-// reference on every render (satisfies jsx-no-jsx-as-prop).
-const MEMBERS_TRAILING = (
-  <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-    <TierBadge tier="strategic" variant="dot" />
-    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Strategic</span>
-    <TierBadge tier="worker" variant="dot" />
-    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Worker</span>
-    <TierBadge tier="support" variant="dot" />
-    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Support</span>
-  </span>
-);
 
 const emptyEditorStyle: CSSProperties = {
   padding: 16,
@@ -52,8 +38,8 @@ const memberRowBaseStyle: CSSProperties = {
   width: '100%',
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
-  padding: '8px 10px',
+  gap: 8,
+  padding: '6px 8px',
   cursor: 'pointer',
   borderRadius: 'var(--radius-md)',
 };
@@ -76,9 +62,9 @@ const rowRoleStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-// MemberRow — one compact roster row: avatar, name + role, and the tier
-// badge on the right. Selected = accent fill + ring; an amber dot marks a
-// member overridden from the template. A real <button> for keyboard nav.
+// MemberRow — one compact roster row: avatar plus name + role. Selected =
+// accent fill + ring; an amber dot marks a member overridden from the
+// template. A real <button> for keyboard nav.
 function MemberRow({
   id,
   name,
@@ -117,7 +103,7 @@ function MemberRow({
         border: selected ? '1px solid rgb(var(--accent-rgb) / 0.6)' : undefined,
       }}
     >
-      <Avatar name={name} emoji={emoji} color={color} tier={tier} size="md" ring />
+      <Avatar name={name} emoji={emoji} color={color} tier={tier} size="sm" ring />
       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
         <span style={rowNameStyle}>{name || 'Unnamed'}</span>
         {role ? <span style={rowRoleStyle}>{role}</span> : null}
@@ -129,7 +115,6 @@ function MemberRow({
           style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--status-warn)', flexShrink: 0 }}
         />
       ) : null}
-      {tier ? <TierBadge tier={tier} variant="pill" /> : null}
     </button>
   );
 }
@@ -148,8 +133,8 @@ function useBaseById(tpl: TeamTemplate): Map<string, TeamTemplateMember> {
 }
 
 // RosterTile — the team roster as a compact vertical list of selectable
-// rows plus the tier legend. Selection-only: it never mutates members (the
-// editor tile does). Auto-selects the first member once the roster loads.
+// rows. Selection-only: it never mutates members (the editor tile does).
+// Auto-selects the first member once the roster loads.
 export function RosterTile({
   tpl,
   members,
@@ -188,7 +173,6 @@ export function RosterTile({
     <SectionCard
       title={`Roster (${members.length})`}
       hint="Click a row to edit. Amber dot = overridden from the template."
-      trailing={MEMBERS_TRAILING}
     >
       <div role="list" aria-label="Team roster" style={rosterListStyle}>
         {members.map((m, i) => {

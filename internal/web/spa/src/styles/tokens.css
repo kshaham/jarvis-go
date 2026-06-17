@@ -378,108 +378,133 @@
   --lg-panel-footer: rgba(17, 24, 39, 0.025);
 }
 
-/* ── Blue mode — cyan palette ───────────────────────
-   A vibrant LIGHT theme: soft cyan background,
-   white tiles, deep-teal ink (#0a3a30), cyan accent (#06b6d4 /
-   #67e8f9). Mirrors the [data-theme='light'] structure (three-step
-   surface hierarchy, soft layered shadows) recolored to teal/cyan; only
-   the brand accent changes hue — status colors stay semantic. */
+/* ── Blue mode — "blue & black" ─────────────────
+   A true DARK theme: cool cyan-black surfaces (NOT white),
+   light cyan-white ink, and the cyan accent (#06b6d4 with the bright
+   #67e8f9 as the pop). Mirrors the dark [data-theme='graphite'] structure
+   (neutral cool-black shadows, white hairlines + glass rim, white sheen);
+   only the hue shifts to cyan via --accent, the cyan aurora/glow, and the
+   cyan-white --surface-tint-rgb. Status colors stay semantic. Text greys
+   are tuned to pass WCAG AA on the near-black surfaces. */
 [data-theme='blue'] {
-  --bg-app: #e8f6f9;
-  --bg-surface: #ffffff;
-  --bg-elevated: #d9eff4;
-  --bg-pressed: #cbe8ef;
-  --border-subtle: rgba(10, 58, 48, 0.06);
-  --border-default: rgba(10, 58, 48, 0.1);
-  --border-strong: rgba(10, 58, 48, 0.16);
-  --text-primary: #0a3a30;
-  --text-secondary: #355f63;
-  --text-muted: #5f868d;
-  --text-faint: #93b6bd;
+  /* Surface — cool cyan-black */
+  --bg-app: #0c1416;
+  --bg-surface: #121c1f;
+  --bg-elevated: #18242a;
+  --bg-pressed: #202d33;
+
+  /* Chrome frame — near-black cyan glass */
+  --chrome-bg: rgba(10, 17, 19, 0.62);
+
+  /* Text on the solid cyan accent (near-black so the cyan reads). */
+  --accent-on: #04222a;
+
+  /* Lines — neutral white hairlines */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text — cool cyan-greys, AA on the near-black surfaces */
+  --text-primary: #e3f7fb;
+  --text-secondary: #a9c3c9;
+  --text-muted: #84a0a6;
+  --text-faint: #5a6e73;
+
+  /* Accent — cyan, with the bright #67e8f9 as the strong/pop. */
   --accent: #06b6d4;
-  --accent-muted: rgba(6, 182, 212, 0.14);
-  --accent-strong: #077f9a;
+  --accent-muted: rgba(6, 182, 212, 0.18);
+  --accent-strong: #67e8f9;
 
-  /* Chrome frame (cyan-tinted, darker than content so white tiles pop). */
-  --chrome-bg: #d3edf2;
-  --accent-on: #ffffff;
-  --status-working: #1e9f6e;
-  --status-success: #1e9f6e;
-  --status-meeting: #d9892c;
-  --status-warn: #d9892c;
-  --status-stuck: #d63b40;
-  --status-error: #d63b40;
+  /* Status */
+  --status-working: #3ddc97;
+  --status-idle: #84a0a6;
+  --status-meeting: #ffb454;
+  --status-stuck: #ff5a5f;
+  --status-success: #3ddc97;
+  --status-warn: #ffb454;
+  --status-error: #ff5a5f;
 
+  /* RGB channel triplets */
   --accent-rgb: 6 182 212; /* #06b6d4 cyan */
-  --accent-strong-rgb: 7 127 154; /* #077f9a */
-  --status-working-rgb: 30 159 110;
-  --status-idle-rgb: 95 134 141; /* teal-grey */
-  --status-meeting-rgb: 217 137 44;
-  --status-stuck-rgb: 214 59 64;
-  --status-success-rgb: 30 159 110;
-  --status-warn-rgb: 217 137 44;
-  --status-error-rgb: 214 59 64;
+  --accent-strong-rgb: 103 232 249; /* #67e8f9 */
+  --status-working-rgb: 61 220 151;
+  --status-idle-rgb: 132 160 166; /* cyan-grey */
+  --status-meeting-rgb: 255 180 84;
+  --status-stuck-rgb: 255 90 95;
+  --status-success-rgb: 61 220 151;
+  --status-warn-rgb: 255 180 84;
+  --status-error-rgb: 255 90 95;
   --status-info-rgb: 6 182 212; /* info == accent cyan in blue mode */
-  --surface-tint-rgb: 10 58 48; /* deep teal ink tint over light bg */
 
-  /* Faint cyan ambient wash — a subtle cyan tint behind content. */
-  --aurora-1: rgba(6, 182, 212, 0.1);
-  --aurora-2: rgba(103, 232, 249, 0.1);
-  --aurora-3: rgba(8, 136, 168, 0.06);
-  --aurora-base: #e8f6f9;
+  /* Surface tint — cyan-white so glass fills read cool/blue. */
+  --surface-tint-rgb: 150 220 230;
 
-  --glass-bg: rgba(255, 255, 255, 0.82);
-  --glass-bg-strong: rgba(255, 255, 255, 0.92);
-  --glass-border: rgba(10, 58, 48, 0.08);
+  /* Aurora mesh — subtle cyan wash on the near-black canvas. */
+  --aurora-1: rgba(6, 182, 212, 0.08);
+  --aurora-2: rgba(103, 232, 249, 0.05);
+  --aurora-3: rgba(8, 136, 168, 0.05);
+  --aurora-base: #0c1416;
 
-  --glow-violet-sm: 0 0 0 1px rgba(6, 182, 212, 0.22), 0 2px 14px rgba(6, 182, 212, 0.14);
-  --glow-violet-md: 0 0 0 1px rgba(6, 182, 212, 0.3), 0 4px 22px rgba(6, 182, 212, 0.2);
-  --glow-violet-lg: 0 0 0 1px rgba(6, 182, 212, 0.4), 0 8px 40px rgba(6, 182, 212, 0.28);
+  /* Glassmorphic surface — cyan-black fill + white hairline. */
+  --glass-bg: rgba(18, 28, 31, 0.6);
+  --glass-bg-strong: rgba(24, 36, 42, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
 
-  /* Soft layered cyan-cool elevation. */
-  --elev-1: 0 1px 2px rgba(8, 72, 88, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  --elev-2: 0 4px 16px -4px rgba(8, 72, 88, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  --elev-3: 0 12px 40px -8px rgba(8, 72, 88, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  /* Glow — cyan accent bloom (the live/selection pop). */
+  --glow-violet-sm: 0 0 0 1px rgba(6, 182, 212, 0.22), 0 2px 12px rgba(6, 182, 212, 0.14);
+  --glow-violet-md: 0 0 0 1px rgba(6, 182, 212, 0.3), 0 4px 18px rgba(6, 182, 212, 0.2);
+  --glow-violet-lg: 0 0 0 1px rgba(6, 182, 212, 0.4), 0 8px 32px rgba(6, 182, 212, 0.28);
+  --glow-success: 0 0 0 1px rgba(61, 220, 151, 0.28), 0 4px 18px rgba(61, 220, 151, 0.16);
+  --glow-error: 0 0 0 1px rgba(255, 90, 95, 0.3), 0 4px 18px rgba(255, 90, 95, 0.18);
 
-  --focus-ring-color: rgba(6, 182, 212, 0.5);
+  /* Elevation — neutral cool-black shadows. */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --elev-3: 0 12px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  --focus-ring-color: rgba(6, 182, 212, 0.55);
   --spotlight-color: rgba(6, 182, 212, 0.1);
 
-  --lg-fill: #ffffff;
-  --lg-fill-hover: #f5fafc;
-  --lg-fill-active: #ecf7fa;
-  --lg-fill-accent: rgba(6, 182, 212, 0.12);
-  --lg-fill-accent-hover: rgba(6, 182, 212, 0.2);
-  --lg-fill-danger: rgba(214, 59, 64, 0.1);
-  --lg-fill-danger-hover: rgba(214, 59, 64, 0.16);
-  --lg-rim: rgba(10, 58, 48, 0.1);
-  --lg-rim-strong: rgba(10, 58, 48, 0.16);
+  /* Liquid Glass material — cyan-black fills + white rim/sheen; accent +
+     danger tints keep their hue. */
+  --lg-fill: rgba(18, 28, 31, 0.55);
+  --lg-fill-hover: rgba(26, 38, 43, 0.62);
+  --lg-fill-active: rgba(33, 47, 53, 0.7);
+  --lg-fill-accent: rgba(6, 182, 212, 0.18);
+  --lg-fill-accent-hover: rgba(6, 182, 212, 0.26);
+  --lg-fill-danger: rgba(255, 90, 95, 0.14);
+  --lg-fill-danger-hover: rgba(255, 90, 95, 0.22);
+  --lg-rim: rgba(255, 255, 255, 0.1);
+  --lg-rim-strong: rgba(255, 255, 255, 0.18);
   --lg-specular-convex:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
-    inset 0 -10px 18px -16px rgba(8, 72, 88, 0.1);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+    inset 0 -12px 20px -14px rgba(0, 0, 0, 0.55);
   --lg-specular-concave:
-    inset 0 1.5px 3px 0 rgba(8, 72, 88, 0.12),
-    inset 0 -1px 0 0 rgba(255, 255, 255, 0.7);
+    inset 0 1.5px 3px 0 rgba(0, 0, 0, 0.42),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.05);
   --lg-edge-catch:
-    inset 1px 1px 0 0 rgba(255, 255, 255, 0.9),
-    inset -1px -1px 0 0 rgba(8, 72, 88, 0.05);
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.1),
+    inset -1px -1px 0 0 rgba(255, 255, 255, 0.03);
   --lg-shadow-rest:
-    0 1px 2px rgba(8, 72, 88, 0.08),
-    0 8px 24px -12px rgba(8, 72, 88, 0.16),
+    0 1px 1px rgba(0, 0, 0, 0.3),
+    0 8px 24px -12px rgba(0, 0, 0, 0.55),
     var(--lg-specular-convex);
   --lg-shadow-hover:
-    0 2px 5px rgba(8, 72, 88, 0.1),
-    0 18px 40px -14px rgba(8, 72, 88, 0.22),
+    0 2px 5px rgba(0, 0, 0, 0.32),
+    0 18px 44px -14px rgba(0, 0, 0, 0.62),
     var(--lg-specular-convex);
   --lg-shadow-press:
-    0 1px 2px rgba(8, 72, 88, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.35),
     var(--lg-specular-concave);
   --lg-sheen: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.5) 0%,
-    rgba(255, 255, 255, 0) 38%
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.02) 16%,
+    rgba(255, 255, 255, 0) 42%
   );
-  --lg-panel-bg: rgba(255, 255, 255, 0.92);
-  --lg-panel-footer: rgba(10, 58, 48, 0.025);
+  --lg-panel-bg: rgba(16, 26, 29, 0.72);
+  --lg-panel-footer: rgba(255, 255, 255, 0.03);
 }
 
 /* ── Graphite mode — cool neutral charcoal dark theme ─────────────────────
