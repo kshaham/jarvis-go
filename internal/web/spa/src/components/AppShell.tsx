@@ -296,10 +296,24 @@ export function AppShell({ children }: { children?: ReactNode }) {
       <TopProgress />
       <AuroraBackground />
       <ConnectionBanner />
-      <div className="flex-1 flex" style={{ minHeight: 0 }}>
-        {/* Left rail navigation — sticky to the viewport so it stays
-            visible as content scrolls. 220px wide, collapses to a
-            tighter glyph-only rail under sm. */}
+      {/* The sidebar + content float together as ONE rounded panel so the
+          canvas shows as an even sliver frame all around (including above the
+          sidebar). The frame (margin/border/radius/shadow) lives here; the
+          sidebar and main are panes that round their outer corners to match
+          (no overflow:hidden, so window scrolling is preserved). */}
+      <div
+        className="flex-1 flex"
+        style={{
+          minHeight: 0,
+          margin: 'var(--space-2)',
+          border: '1px solid var(--lg-rim)',
+          borderRadius: 'var(--radius-card)',
+          boxShadow: 'var(--lg-shadow-rest)',
+        }}
+      >
+        {/* Left rail navigation — 220px wide, collapses to a tighter
+            glyph-only rail under sm. Rounds its left corners to match the
+            panel frame. */}
         <nav
           aria-label="Office sections"
           className="hidden sm:flex flex-col gap-1"
@@ -307,6 +321,8 @@ export function AppShell({ children }: { children?: ReactNode }) {
             width: 220,
             padding: 16,
             borderRight: '1px solid var(--lg-rim)',
+            borderTopLeftRadius: 'var(--radius-card)',
+            borderBottomLeftRadius: 'var(--radius-card)',
             background: 'var(--chrome-bg)',
             WebkitBackdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
             backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
@@ -470,16 +486,14 @@ export function AppShell({ children }: { children?: ReactNode }) {
           className="flex flex-1 flex-col px-4 pb-6 pt-3"
           style={{
             minWidth: 0,
-            // The content area is one cohesive dark "page" surface: page
-            // header + body sit on it (integrated), and the canvas shows only
-            // as a thin sliver frame around it (margin). In blue --bg-page is
-            // dark so the cyan is demoted to that sliver; in the other themes
-            // --bg-page == the canvas so it reads as a subtle floating panel.
-            margin: 'var(--space-2)',
+            // The content pane of the floating panel: one cohesive dark "page"
+            // surface (page header + body sit on it, integrated). In blue
+            // --bg-page is dark so the cyan is demoted to the panel's sliver
+            // frame; in the other themes --bg-page == the canvas. Rounds its
+            // right corners to match the panel frame.
             background: 'var(--bg-page)',
-            border: '1px solid var(--lg-rim)',
-            borderRadius: 'var(--radius-card)',
-            boxShadow: 'var(--lg-shadow-rest)',
+            borderTopRightRadius: 'var(--radius-card)',
+            borderBottomRightRadius: 'var(--radius-card)',
           }}
         >
           {children ?? <AnimatedOutlet />}
@@ -490,7 +504,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
         style={{
           color: 'var(--text-muted)',
           background: 'var(--chrome-bg)',
-          borderTop: '1px solid var(--border-subtle)',
+          // Floats with the same even sliver as the panel above it.
+          margin: '0 var(--space-2) var(--space-2)',
+          border: '1px solid var(--lg-rim)',
+          borderRadius: 'var(--radius-card)',
         }}
       >
         jarvis · /office-v2 (React beta) · press{' '}
