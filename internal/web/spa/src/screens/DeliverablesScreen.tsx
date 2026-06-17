@@ -86,6 +86,9 @@ function ProjectDeliverables({
 }) {
   const navigate = useNavigate();
   const [picker, setPicker] = useState('');
+  // Defensive: the API should always send an array, but guard against a null
+  // (older payloads / empty projects serialized `deliverables` as null).
+  const docs = p.deliverables ?? [];
 
   function handlePick(value: string) {
     setPicker('');
@@ -108,8 +111,8 @@ function ProjectDeliverables({
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
             {p.drafting
               ? `Team is drafting ${TYPE_LABEL[p.drafting.type] ?? 'a document'}…`
-              : p.deliverables.length > 0
-                ? `${p.deliverables.length} deliverable${p.deliverables.length === 1 ? '' : 's'}`
+              : docs.length > 0
+                ? `${docs.length} deliverable${docs.length === 1 ? '' : 's'}`
                 : 'No deliverables yet'}
           </div>
         </div>
@@ -135,9 +138,9 @@ function ProjectDeliverables({
         </div>
       </div>
 
-      {p.deliverables.length > 0 ? (
+      {docs.length > 0 ? (
         <div className="flex flex-col gap-1.5">
-          {p.deliverables.map((d) => (
+          {docs.map((d) => (
             <button
               key={d.slug}
               onClick={() => onOpen(d)}

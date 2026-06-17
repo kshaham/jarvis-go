@@ -26,6 +26,11 @@ func (ctx *Context) DeliverablesGetResults(w http.ResponseWriter, _ *http.Reques
 	tiles := make([]deliverableProjectTile, 0, len(list))
 	for _, p := range list {
 		docs, _ := deliverables.List(p.ID)
+		// A nil slice marshals to JSON `null`; the API contract is an array, so
+		// normalize to [] (clients type `deliverables` as a non-null array).
+		if docs == nil {
+			docs = []deliverables.Deliverable{}
+		}
 		var drafting *deliverables.Drafting
 		if d := ctx.Deliverables.Drafting(p.ID); d.Type != "" {
 			drafting = &d
