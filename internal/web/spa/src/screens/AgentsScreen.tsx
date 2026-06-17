@@ -50,11 +50,14 @@ export function AgentsScreen() {
   if (isLoading) {
     return (
       <section>
-        <h1 className="mb-4 text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+        <h1 className="mb-4 heading-lg">
           Agents
         </h1>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div
+          className="grid gap-3"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
             <AgentCardSkeleton key={i} />
           ))}
         </div>
@@ -65,7 +68,7 @@ export function AgentsScreen() {
   if (isError) {
     return (
       <section>
-        <h1 className="mb-4 text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+        <h1 className="mb-4 heading-lg">
           Agents
         </h1>
         <div className="rounded-lg border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
@@ -78,7 +81,7 @@ export function AgentsScreen() {
   if (!data?.teamSpawned || members.length === 0) {
     return (
       <section>
-        <h1 className="mb-4 text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+        <h1 className="mb-4 heading-lg">
           Agents
         </h1>
         <EmptyState
@@ -99,7 +102,7 @@ export function AgentsScreen() {
     <LayoutGroup>
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="heading-lg">
             Agents
           </h1>
           <span className="inline-flex items-baseline gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -141,7 +144,11 @@ export function AgentsScreen() {
           />
         </div>
 
-        <div ref={gridRef} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          ref={gridRef}
+          className="grid gap-3"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}
+        >
           {visible.map((m) => (
             <AgentCard key={m.sessionId} member={m} onSelect={setSelectedMember} />
           ))}

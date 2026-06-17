@@ -464,7 +464,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             content-heavy screen that reads better narrow can wrap its own body
             in a max-width container. */}
         <main
-          className="flex flex-1 flex-col px-8 pb-6 pt-3"
+          className="flex flex-1 flex-col px-4 pb-6 pt-3 sm:px-6 lg:px-8 xl:px-12 2xl:px-16"
           style={{
             width: '100%',
             minWidth: 0,

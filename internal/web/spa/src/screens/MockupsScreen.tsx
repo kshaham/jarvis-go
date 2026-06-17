@@ -11,7 +11,7 @@ const SLOTS = 6;
 const tileGridStyle: React.CSSProperties = {
   display: 'grid',
   gap: 10,
-  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
 };
 
 // MockupsScreen — per saved project, the spawned team generates 6 distinct AI

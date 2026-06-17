@@ -162,7 +162,7 @@ export function RelayScreen() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(220px, 280px) 1fr',
+            gridTemplateColumns: 'minmax(240px, 340px) 1fr',
             gap: 18,
             minHeight: 0,
             flex: 1,
@@ -309,7 +309,7 @@ function Bubble({
       transition={spring.smooth}
       style={{
         alignSelf: isOutbound ? 'flex-end' : 'flex-start',
-        maxWidth: '78%',
+        maxWidth: 'min(78%, 760px)',
         display: 'flex',
         flexDirection: 'column',
         gap: 6,

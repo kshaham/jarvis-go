@@ -58,7 +58,7 @@ export function AddPeerScreen() {
   };
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 720 }}>
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 24, width: '100%', maxWidth: 760, margin: '0 auto' }}>
       <RevealItem index={0} withExit={false}>
         <header>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>

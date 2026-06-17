@@ -54,6 +54,29 @@
     font-feature-settings: 'tnum' 1;
   }
 
+  /* ── Semantic headings ─────────────────────────────────────────────────
+     One typographic scale for page/section titles so headings stay
+     consistent across screens instead of each one inlining its own
+     fontSize/fontWeight/color. Pair with -tight tracking and the primary
+     text token; the weight reads as a title without shouting. */
+  .heading-lg,
+  .heading-md,
+  .heading-sm {
+    color: var(--text-primary);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+  }
+  .heading-lg {
+    font-size: 20px;
+  }
+  .heading-md {
+    font-size: 16px;
+  }
+  .heading-sm {
+    font-size: 14px;
+  }
+
   /* ── Rendered markdown (Deliverables reader) ───────────────────────────
      Tailwind preflight strips default element styling, so re-apply readable
      document styles scoped to .deliverable-md (react-markdown output). */

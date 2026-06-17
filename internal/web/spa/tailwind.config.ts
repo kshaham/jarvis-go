@@ -64,6 +64,10 @@ export default {
         // Live surfaces keep their glass depth AND gain the violet bloom.
         'lg-live': 'var(--lg-shadow-rest), var(--glow-violet-sm)',
         'lg-live-hover': 'var(--lg-shadow-hover), var(--glow-violet-md)',
+        // Blocked/stuck surfaces keep glass depth AND gain the red alert rim,
+        // so a stuck agent reads at a glance across a wall of tiles.
+        'lg-alert': 'var(--lg-shadow-rest), var(--glow-error)',
+        'lg-alert-hover': 'var(--lg-shadow-hover), var(--glow-error)',
         'lg-convex': 'var(--lg-specular-convex)',
         'lg-concave': 'var(--lg-specular-concave)',
         'lg-edge': 'var(--lg-edge-catch)',

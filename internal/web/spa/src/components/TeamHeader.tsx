@@ -18,7 +18,7 @@ export function TeamHeader() {
         boxShadow: '0 1px 0 0 rgba(78,240,163,0.05)',
       }}
     >
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-2">
+      <div className="flex w-full items-center justify-between gap-4 px-4 py-2 sm:px-6 lg:px-8 xl:px-12 2xl:px-16">
         <div className="flex items-center gap-2.5">
           {/* Brand mark — accent glass chip with a top sheen + bloom. */}
           <div
@@ -53,11 +53,11 @@ export function TeamHeader() {
           )}
           {team?.prNumber ? (
             <span
-              className="rounded px-2 py-0.5"
+              className="rounded-full px-2 py-0.5 font-medium"
               style={{
                 background: 'var(--lg-fill-accent)',
                 border: '1px solid rgb(var(--accent-rgb) / 0.4)',
-                boxShadow: 'inset 0 1px 0 rgba(120,240,180,0.12)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
                 color: 'var(--accent)',
               }}
             >
@@ -66,11 +66,11 @@ export function TeamHeader() {
           ) : null}
           {team?.paused && (
             <span
-              className="rounded px-2 py-0.5"
+              className="rounded-full px-2 py-0.5 font-medium"
               style={{
                 background: 'rgb(var(--status-warn-rgb) / 0.16)',
                 border: '1px solid rgb(var(--status-warn-rgb) / 0.35)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
                 color: 'var(--status-warn)',
               }}
             >

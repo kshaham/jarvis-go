@@ -30,11 +30,12 @@
   --border-default: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.16);
 
-  /* Text */
+  /* Text — muted/faint bumped to pass WCAG AA on the dark app surface
+     (old #6e7178 ~4.2:1 and #3f434b ~2.1:1 were below 4.5:1). */
   --text-primary: #ecedee;
   --text-secondary: #a1a4ab;
-  --text-muted: #6e7178;
-  --text-faint: #3f434b;
+  --text-muted: #868d96;
+  --text-faint: #646b75;
 
   /* Accent — signature green (#22c55e on dark green). The one
      signature color. Used sparingly: selection rings, primary CTA, link
@@ -336,7 +337,7 @@
      elevation comes from shadow, not from the fill, so hover lifts the
      tile rather than brightening it). */
   --lg-fill: #ffffff;
-  --lg-fill-hover: #ffffff;
+  --lg-fill-hover: #fafbfc;
   --lg-fill-active: #f2f4f6;
   --lg-fill-accent: rgba(10, 122, 82, 0.12);
   --lg-fill-accent-hover: rgba(10, 122, 82, 0.2);
@@ -444,7 +445,7 @@
   --spotlight-color: rgba(6, 182, 212, 0.1);
 
   --lg-fill: #ffffff;
-  --lg-fill-hover: #ffffff;
+  --lg-fill-hover: #f5fafc;
   --lg-fill-active: #ecf7fa;
   --lg-fill-accent: rgba(6, 182, 212, 0.12);
   --lg-fill-accent-hover: rgba(6, 182, 212, 0.2);
@@ -479,6 +480,134 @@
   );
   --lg-panel-bg: rgba(255, 255, 255, 0.92);
   --lg-panel-footer: rgba(10, 58, 48, 0.025);
+}
+
+/* ── Graphite mode — cool neutral charcoal dark theme ─────────────────────
+   A calm, Linear/GitHub-style dark: cool grey-blue charcoal surfaces with NO
+   green/brown tint, neutral white hairlines + glass rim, and the emerald accent
+   kept as the single pop of color (selection ring, primary CTA, focus, live).
+   Mirrors the dark :root structure; the neutralizers are --surface-tint-rgb,
+   --lg-rim, --lg-sheen, --glass-* and the near-flat aurora (all grey, not green).
+   Text greys are tuned to pass WCAG AA on the charcoal surfaces. */
+[data-theme='graphite'] {
+  /* Surface — cool neutral charcoal */
+  --bg-app: #0e1014;
+  --bg-surface: #161922;
+  --bg-elevated: #1e222c;
+  --bg-pressed: #262b37;
+
+  /* Chrome frame — neutral grey glass */
+  --chrome-bg: rgba(22, 25, 34, 0.6);
+
+  /* Text on the solid emerald accent (near-black so the bright accent reads). */
+  --accent-on: #04150e;
+
+  /* Lines — neutral white hairlines */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text — cool neutral greys, AA on the charcoal surfaces */
+  --text-primary: #e8eaed;
+  --text-secondary: #aab1bd;
+  --text-muted: #828b98;
+  --text-faint: #565d6a;
+
+  /* Accent — the one pop of color, kept emerald. */
+  --accent: #22c55e;
+  --accent-muted: rgba(34, 197, 94, 0.18);
+  --accent-strong: #4ef0a3;
+
+  /* Status */
+  --status-working: #3ddc97;
+  --status-idle: #828b98;
+  --status-meeting: #ffb454;
+  --status-stuck: #ff5a5f;
+  --status-success: #3ddc97;
+  --status-warn: #ffb454;
+  --status-error: #ff5a5f;
+
+  /* RGB channel triplets */
+  --accent-rgb: 34 197 94;
+  --accent-strong-rgb: 78 240 163;
+  --status-working-rgb: 61 220 151;
+  --status-idle-rgb: 130 139 152;
+  --status-meeting-rgb: 255 180 84;
+  --status-stuck-rgb: 255 90 95;
+  --status-success-rgb: 61 220 151;
+  --status-warn-rgb: 255 180 84;
+  --status-error-rgb: 255 90 95;
+  --status-info-rgb: 59 130 246;
+
+  /* Surface tint — NEUTRAL cool-grey (not green) so glass fills read graphite. */
+  --surface-tint-rgb: 200 210 224;
+
+  /* Aurora mesh — near-flat cool neutral wash (no green drift). */
+  --aurora-1: rgba(120, 140, 170, 0.05);
+  --aurora-2: rgba(90, 110, 140, 0.04);
+  --aurora-3: rgba(70, 90, 120, 0.03);
+  --aurora-base: #0e1014;
+
+  /* Glassmorphic surface — neutral grey fill + white hairline. */
+  --glass-bg: rgba(30, 34, 44, 0.6);
+  --glass-bg-strong: rgba(36, 41, 52, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+
+  /* Glow — restrained emerald accent bloom (the single pop), toned down. */
+  --glow-violet-sm: 0 0 0 1px rgba(34, 197, 94, 0.18), 0 2px 12px rgba(34, 197, 94, 0.1);
+  --glow-violet-md: 0 0 0 1px rgba(34, 197, 94, 0.26), 0 4px 18px rgba(34, 197, 94, 0.16);
+  --glow-violet-lg: 0 0 0 1px rgba(34, 197, 94, 0.34), 0 8px 32px rgba(34, 197, 94, 0.22);
+  --glow-success: 0 0 0 1px rgba(61, 220, 151, 0.28), 0 4px 18px rgba(61, 220, 151, 0.16);
+  --glow-error: 0 0 0 1px rgba(255, 90, 95, 0.3), 0 4px 18px rgba(255, 90, 95, 0.18);
+
+  /* Elevation — neutral cool-black shadows. */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --elev-3: 0 12px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  --focus-ring-color: rgba(34, 197, 94, 0.55);
+  --spotlight-color: rgba(34, 197, 94, 0.08);
+
+  /* Liquid Glass material — NEUTRAL grey fills + white rim/sheen (the key to the
+     graphite look); accent + danger tints keep their hue. */
+  --lg-fill: rgba(30, 34, 44, 0.55);
+  --lg-fill-hover: rgba(40, 45, 57, 0.62);
+  --lg-fill-active: rgba(48, 54, 67, 0.7);
+  --lg-fill-accent: rgba(34, 197, 94, 0.16);
+  --lg-fill-accent-hover: rgba(34, 197, 94, 0.24);
+  --lg-fill-danger: rgba(255, 90, 95, 0.14);
+  --lg-fill-danger-hover: rgba(255, 90, 95, 0.22);
+  --lg-rim: rgba(255, 255, 255, 0.1);
+  --lg-rim-strong: rgba(255, 255, 255, 0.18);
+  --lg-specular-convex:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+    inset 0 -12px 20px -14px rgba(0, 0, 0, 0.55);
+  --lg-specular-concave:
+    inset 0 1.5px 3px 0 rgba(0, 0, 0, 0.42),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.05);
+  --lg-edge-catch:
+    inset 1px 1px 0 0 rgba(255, 255, 255, 0.1),
+    inset -1px -1px 0 0 rgba(255, 255, 255, 0.03);
+  --lg-shadow-rest:
+    0 1px 1px rgba(0, 0, 0, 0.3),
+    0 8px 24px -12px rgba(0, 0, 0, 0.55),
+    var(--lg-specular-convex);
+  --lg-shadow-hover:
+    0 2px 5px rgba(0, 0, 0, 0.32),
+    0 18px 44px -14px rgba(0, 0, 0, 0.62),
+    var(--lg-specular-convex);
+  --lg-shadow-press:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    var(--lg-specular-concave);
+  --lg-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.02) 16%,
+    rgba(255, 255, 255, 0) 42%
+  );
+  --lg-panel-bg: rgba(20, 23, 31, 0.72);
+  --lg-panel-footer: rgba(255, 255, 255, 0.03);
 }
 
 /* Respect operator preference. Inside this query Motion will fall back

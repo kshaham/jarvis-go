@@ -12,7 +12,7 @@ type Tab = 'coverage' | 'vulnerabilities';
 const gridStyle: React.CSSProperties = {
   display: 'grid',
   gap: 12,
-  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
 };
 
 // TestsScreen — the TDD dashboard. Two tabs over the saved-projects list:

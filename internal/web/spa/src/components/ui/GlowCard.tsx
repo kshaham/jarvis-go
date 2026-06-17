@@ -12,6 +12,9 @@ type Props = HTMLMotionProps<'div'> & {
   // Signature violet glow at rest — for surfaces representing a live /
   // working agent. Grows to the md tier on hover when interactive.
   live?: boolean;
+  // Red alert rim — for surfaces representing a blocked / stuck agent that
+  // needs attention. Takes precedence over `live` (an agent can't be both).
+  alert?: boolean;
   // Glassmorphic (backdrop-blur) surface instead of the opaque card.
   // Reserve for floating/overlay surfaces — not large always-on panels.
   glass?: boolean;
@@ -27,6 +30,7 @@ type Props = HTMLMotionProps<'div'> & {
 export function GlowCard({
   interactive = false,
   live = false,
+  alert = false,
   glass = false,
   spotlight = false,
   className,
@@ -59,9 +63,15 @@ export function GlowCard({
         interactive && 'transition-shadow duration-200',
         // Live keeps the glass depth shadow AND gains the violet bloom
         // (composite token), so the specular/float aren't lost. Hover
-        // rises the whole stack one tier.
-        live && 'shadow-lg-live',
-        interactive && (live ? 'hover:shadow-lg-live-hover' : 'hover:shadow-lg-hover'),
+        // rises the whole stack one tier. Alert (stuck) takes precedence
+        // and swaps the bloom for the red error rim.
+        alert ? 'shadow-lg-alert' : live && 'shadow-lg-live',
+        interactive &&
+          (alert
+            ? 'hover:shadow-lg-alert-hover'
+            : live
+              ? 'hover:shadow-lg-live-hover'
+              : 'hover:shadow-lg-hover'),
         className,
       )}
       {...rest}

@@ -29,12 +29,13 @@ export function AgentCard({ member, onSelect }: Props) {
   const reduce = useReducedMotion();
   const isInteractive = !!onSelect;
   // Working agents glow violet (replaces the old 2px breathing edge);
-  // the spotlight tracks the cursor. Stuck agents are signalled by the
-  // urgent red StatusPill.
+  // the spotlight tracks the cursor. Stuck agents escalate with the red
+  // alert rim plus the urgent StatusPill so they read across the grid.
   return (
     <GlowCard
       interactive={isInteractive}
       live={member.status === 'working'}
+      alert={member.status === 'stuck'}
       spotlight={isInteractive}
       onClick={onSelect ? () => onSelect(member) : undefined}
       className={cn('group flex flex-col gap-3 p-4', member.paused && 'opacity-60')}

@@ -188,7 +188,7 @@ export function MessagesScreen() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(220px, 280px) 1fr',
+            gridTemplateColumns: 'minmax(240px, 340px) 1fr',
             gap: 18,
             minHeight: 0,
             flex: 1,
@@ -333,7 +333,7 @@ function Bubble({
     <div
       style={{
         alignSelf: isOutboundToSelected ? 'flex-end' : 'flex-start',
-        maxWidth: '78%',
+        maxWidth: 'min(78%, 760px)',
         display: 'flex',
         flexDirection: 'column',
         gap: 6,
@@ -435,7 +435,7 @@ function ThreadSkeleton() {
       {rows.map((r) => (
         <div
           key={`${r.side}-${r.w}`}
-          style={{ alignSelf: r.side, maxWidth: '78%', width: r.w, display: 'flex', flexDirection: 'column', gap: 6 }}
+          style={{ alignSelf: r.side, maxWidth: 'min(78%, 760px)', width: r.w, display: 'flex', flexDirection: 'column', gap: 6 }}
         >
           <Skeleton className="h-2.5 w-24" />
           <Skeleton className="h-10 w-full" style={{ borderRadius: 'var(--radius-card)' }} />

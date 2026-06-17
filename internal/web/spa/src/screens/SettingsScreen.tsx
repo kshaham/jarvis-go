@@ -93,7 +93,7 @@ export function SettingsScreen() {
   const paused = !!status.data?.paused;
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 880 }}>
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%', maxWidth: 1100, margin: '0 auto' }}>
       <header>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>
           Settings

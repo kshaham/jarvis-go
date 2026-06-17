@@ -80,7 +80,7 @@ export function MeetingsScreen() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(240px, 320px) 1fr',
+          gridTemplateColumns: 'minmax(240px, 380px) 1fr',
           gap: 18,
           flex: 1,
           minHeight: 0,

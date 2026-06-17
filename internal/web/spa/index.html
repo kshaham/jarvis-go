@@ -22,8 +22,8 @@
       (function () {
         try {
           var p = localStorage.getItem('office-theme') || 'system';
-          if (p === 'blue') {
-            document.documentElement.setAttribute('data-theme', 'blue');
+          if (p === 'blue' || p === 'graphite') {
+            document.documentElement.setAttribute('data-theme', p);
           } else {
             var light =
               p === 'light' ||
