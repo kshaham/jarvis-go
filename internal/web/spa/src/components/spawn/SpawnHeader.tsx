@@ -54,10 +54,8 @@ export function SpawnHeader({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <header style={headerStyle}>
         <div style={{ minWidth: 0 }}>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>
-            Spawn team
-          </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>{subtitle}</p>
+          <h1 className="page-header">Spawn team</h1>
+          <p className="page-subtitle">{subtitle}</p>
           <StepIndicator step={step} />
         </div>
         {right ? (

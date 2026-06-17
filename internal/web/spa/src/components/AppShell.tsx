@@ -295,7 +295,6 @@ export function AppShell({ children }: { children?: ReactNode }) {
     <div className="min-h-screen flex flex-col">
       <TopProgress />
       <AuroraBackground />
-      <TeamHeader />
       <ConnectionBanner />
       <div className="flex-1 flex" style={{ minHeight: 0 }}>
         {/* Left rail navigation — sticky to the viewport so it stays
@@ -313,6 +312,9 @@ export function AppShell({ children }: { children?: ReactNode }) {
             backdropFilter: 'blur(var(--lg-blur-chrome)) saturate(var(--lg-saturate))',
           }}
         >
+          {/* Brand + live status + theme toggle, integrated at the top of the
+              rail (replaces the old full-width header bar). */}
+          <TeamHeader />
           {/* Top-of-rail spawn CTA — the action operators reach for
               most often. Routes to the SPA's spawn wizard so the
               classic UI isn't needed for new teams. */}
@@ -465,7 +467,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             content-heavy screen that reads better narrow can wrap its own body
             in a max-width container. */}
         <main
-          className="flex flex-1 flex-col pb-6 pt-3"
+          className="flex flex-1 flex-col px-4 pb-6 pt-3"
           style={{
             width: '100%',
             minWidth: 0,
