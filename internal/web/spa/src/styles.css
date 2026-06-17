@@ -751,14 +751,21 @@
   display: none;
 }
 
+/* Blended master-detail: the whole config is ONE connected surface (rail +
+   panel + the team roster|editor) divided only by 1px hairlines — no gaps, so
+   the canvas never shows between columns. Full width. */
 .spawn-config {
   display: flex;
-  gap: 16px;
-  align-items: flex-start;
+  gap: 0;
+  align-items: stretch;
+  background: var(--bg-surface);
+  border: 1px solid var(--lg-rim);
+  border-radius: var(--radius-card);
+  box-shadow: var(--lg-shadow-rest);
 }
 
-/* Left rail — compact: a narrow, dense section nav that yields width to the
-   editor panel on the right. */
+/* Left rail — a pane within the connected surface (not its own card): just a
+   right-edge hairline divider. Compact + dense; yields width to the editor. */
 .spawn-rail {
   flex: 0 0 208px;
   position: sticky;
@@ -767,9 +774,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 10px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-card-flat);
+  border-right: 1px solid var(--lg-rim);
   min-height: 420px;
 }
 .spawn-rail-group {
@@ -900,13 +905,37 @@
   flex-direction: column;
   gap: 16px;
 }
+
+/* Flatten the single section card that is the panel's (or split's) direct
+   child so it blends into the connected surface — keep its .surface-card class
+   (so the blue theme still re-scopes its text white) and its p-4 padding, but
+   strip the floating-card paint. Direct-child only, so nested tiles (the
+   roster's selectable MemberRow cards) keep their distinct look. */
+.spawn-panel-body > .surface-card,
+.spawn-team-split > .surface-card {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.spawn-panel-body > .surface-card::after,
+.spawn-team-split > .surface-card::after {
+  display: none;
+}
+
 .spawn-team-split {
   display: grid;
   /* Compact roster on the left, wide editor on the right (the column that
      actually needs the room — its field grids then lay out two-up). */
   grid-template-columns: minmax(200px, 0.72fr) minmax(0, 1.7fr);
-  gap: 12px;
-  align-items: start;
+  gap: 0;
+  align-items: stretch;
+}
+/* Hairline divider between roster and editor — no gap, no canvas between. */
+.spawn-team-split > .surface-card:first-child {
+  border-right: 1px solid var(--lg-rim);
 }
 
 /* Tablet: rail -> horizontal scrollable tab strip; Spawn sticks bottom-right;
@@ -925,6 +954,9 @@
     overflow-x: auto;
     align-items: center;
     gap: 4px;
+    /* Stacked: the rail is a top strip, so its divider runs along the bottom. */
+    border-right: 0;
+    border-bottom: 1px solid var(--lg-rim);
   }
   .spawn-rail-group {
     flex-direction: row;
@@ -960,11 +992,10 @@
   .spawn-team-split {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-@media (max-width: 720px) {
-  .spawn-config {
-    gap: 10px;
+  /* Stacked roster/editor: divider runs along the bottom of the roster. */
+  .spawn-team-split > .surface-card:first-child {
+    border-right: 0;
+    border-bottom: 1px solid var(--lg-rim);
   }
 }
 

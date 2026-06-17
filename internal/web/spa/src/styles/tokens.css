@@ -526,7 +526,8 @@
     .spawn-template-card,
     [role='dialog'],
     nav[aria-label='Office sections'],
-    header.sticky
+    header.sticky,
+    .spawn-config
   ) {
   --text-primary: #ffffff;
   --text-secondary: #cfe0e3;
