@@ -21,7 +21,7 @@ export function TeamHeader(): React.ReactElement {
         boxShadow: '0 1px 0 0 rgb(var(--accent-rgb) / 0.05)',
       }}
     >
-      <div className="flex w-full items-center justify-between gap-4 px-4 py-2 sm:px-6 lg:px-8 xl:px-12 2xl:px-16">
+      <div className="flex w-full items-center justify-between gap-4 px-4 py-1">
         <div className="flex items-center gap-2.5">
           {/* Brand mark — accent glass chip with a top sheen + a slow
               breathing bloom so the office reads as alive. The bloom is a

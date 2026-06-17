@@ -87,7 +87,7 @@ const railGlyphStyle: React.CSSProperties = {
   height: 24,
   boxSizing: 'border-box',
   borderRadius: 6,
-  boxShadow: 'inset 0 1px 0 rgba(120,240,180,0.12)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -368,9 +368,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
                 // Multi-team) — the spacing separates groups now that each row
                 // is its own tile. A hairline above the first item of each
                 // group reads the section break as real structure.
+                // Extra space + a hairline before a group's first item reads
+                // the section break as structure. Spacing lives in marginTop
+                // only — the row keeps its symmetric 8px vertical padding so
+                // the glyph + label stay vertically centered (no paddingTop
+                // override, which previously pushed divider rows off-center).
                 marginTop: item.divider ? 18 : 0,
-                // Small top padding lifts the row content off the hairline.
-                paddingTop: item.divider ? 14 : undefined,
                 borderTop: item.divider ? '1px solid var(--border-subtle)' : undefined,
                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                 // Active background is the sliding layoutId pill below
@@ -408,7 +411,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                     >
                       <Icon size={15} strokeWidth={2} aria-hidden />
                     </span>
-                    <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
+                    <span style={{ flex: 1, minWidth: 0, lineHeight: 1 }}>{item.label}</span>
                     {item.badge ? (
                       <span style={navBadgeStyle}>
                         <Metric value={item.badge} size={11} />
@@ -462,7 +465,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             content-heavy screen that reads better narrow can wrap its own body
             in a max-width container. */}
         <main
-          className="flex flex-1 flex-col px-4 pb-6 pt-3 sm:px-6 lg:px-8 xl:px-12 2xl:px-16"
+          className="flex flex-1 flex-col pb-6 pt-3"
           style={{
             width: '100%',
             minWidth: 0,
