@@ -856,11 +856,14 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-/* Right detail panel */
+/* Right detail panel — fills the remaining width beside the rail so the
+   spawn flow uses full width on widescreen (no dead space to the right).
+   Individual form controls keep their own readable measure where it
+   matters (e.g. the mission textarea); the member split below spreads to
+   use the extra room. */
 .spawn-panel {
   flex: 1 1 auto;
   min-width: 0;
-  max-width: 760px;
 }
 .spawn-panel-body {
   display: flex;

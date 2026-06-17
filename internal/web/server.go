@@ -1428,6 +1428,12 @@ func (s *Server) setupRouter() chi.Router {
 			_, _ = w.Write([]byte(officeV2PlaceholderHTML))
 			return
 		}
+		// The SPA shell references content-hashed assets, so the shell
+		// itself must always revalidate -- otherwise a browser serves a
+		// stale index.html pointing at old bundles and deploys appear to
+		// "not change" until a hard refresh. no-cache forces revalidation
+		// of this tiny document while the hashed JS/CSS stay cacheable.
+		w.Header().Set("Cache-Control", "no-cache")
 		// Route to the React dir (trailing slash). FileServer would 301
 		// "/react/index.html" to "./" to canonicalize, breaking the page
 		// behind the auth wall; "/react/" makes it serve index.html in
