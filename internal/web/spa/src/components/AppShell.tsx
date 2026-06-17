@@ -469,8 +469,17 @@ export function AppShell({ children }: { children?: ReactNode }) {
         <main
           className="flex flex-1 flex-col px-4 pb-6 pt-3"
           style={{
-            width: '100%',
             minWidth: 0,
+            // The content area is one cohesive dark "page" surface: page
+            // header + body sit on it (integrated), and the canvas shows only
+            // as a thin sliver frame around it (margin). In blue --bg-page is
+            // dark so the cyan is demoted to that sliver; in the other themes
+            // --bg-page == the canvas so it reads as a subtle floating panel.
+            margin: 'var(--space-2)',
+            background: 'var(--bg-page)',
+            border: '1px solid var(--lg-rim)',
+            borderRadius: 'var(--radius-card)',
+            boxShadow: 'var(--lg-shadow-rest)',
           }}
         >
           {children ?? <AnimatedOutlet />}
@@ -480,6 +489,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
         className="px-6 py-3 text-xs"
         style={{
           color: 'var(--text-muted)',
+          background: 'var(--chrome-bg)',
           borderTop: '1px solid var(--border-subtle)',
         }}
       >

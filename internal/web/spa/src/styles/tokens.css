@@ -10,6 +10,11 @@
 :root {
   /* Surface */
   --bg-app: #03140e;
+  /* --bg-page: the surface the content panel (<main>) paints. Equals the
+     canvas in dark/light/graphite (so the panel blends with the canvas);
+     a dark shade in blue so the content area reads dark and the cyan canvas
+     is demoted to a thin sliver frame. */
+  --bg-page: #03140e;
   --bg-surface: #062119;
   --bg-elevated: #0a2e24;
   --bg-pressed: #103c30;
@@ -271,6 +276,7 @@
      chrome (#e9ebee tinted frame) < content (#f4f5f7) < tiles (#ffffff).
      Green is the accent only; everything structural is neutral cool-grey. */
   --bg-app: #f4f5f7;
+  --bg-page: #f4f5f7;
   --bg-surface: #ffffff;
   --bg-elevated: #eceef1;
   --bg-pressed: #e4e7ea;
@@ -389,6 +395,10 @@
 [data-theme='blue'] {
   /* Canvas — exact cyan; components are black. */
   --bg-app: #67e8f9;
+  /* Page surface is DARK (not the cyan canvas) so the content area reads dark
+     and the cyan only shows as a thin sliver frame around <main>. A touch
+     darker than the #0c1416 cards so cards lift off it. */
+  --bg-page: #06090b;
   --bg-surface: #0c1416;
   --bg-elevated: #131e22;
   --bg-pressed: #1b272c;
@@ -527,7 +537,9 @@
     [role='dialog'],
     nav[aria-label='Office sections'],
     header.sticky,
-    .spawn-config
+    .spawn-config,
+    main,
+    footer
   ) {
   --text-primary: #ffffff;
   --text-secondary: #cfe0e3;
@@ -550,6 +562,7 @@
 [data-theme='graphite'] {
   /* Surface — cool neutral charcoal */
   --bg-app: #0e1014;
+  --bg-page: #0e1014;
   --bg-surface: #161922;
   --bg-elevated: #1e222c;
   --bg-pressed: #262b37;
