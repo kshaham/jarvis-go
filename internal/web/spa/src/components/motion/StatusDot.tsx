@@ -12,18 +12,36 @@ const COLOR_VARS: Record<Status, string> = {
   stuck: 'var(--status-stuck)',
 };
 
+const RGB_VARS: Record<Status, string> = {
+  working: 'var(--status-working-rgb)',
+  idle: 'var(--status-idle-rgb)',
+  meeting: 'var(--status-meeting-rgb)',
+  stuck: 'var(--status-stuck-rgb)',
+};
+
+// Every status carries a soft glow halo so the dot reads as a lit indicator,
+// scaled by intensity: working is brightest (it is the "alive" state), stuck
+// is hot, meeting is warm, idle is the subtlest ember. Token-colored so it
+// stays correct in every theme.
+const GLOW_ALPHA: Record<Status, number> = {
+  working: 0.55,
+  stuck: 0.5,
+  meeting: 0.42,
+  idle: 0.22,
+};
+
 type Props = {
   status: Status;
   size?: number;
 };
 
 // StatusDot — animated colored dot keyed to one of four agent statuses.
-//   - working   → 4s breathing pulse
+//   - working   → 2.8s breathing pulse
 //   - stuck     → 1s urgent pulse
-//   - any flip  → 200ms radial ripple in the new status's color
+//   - any flip  → 360ms radial ripple in the new status's color
 // Same visual grammar as the mobile StatusDot — the design language's
 // "something just happened" beat.
-export function StatusDot({ status, size = 8 }: Props) {
+export function StatusDot({ status, size = 8 }: Props): React.ReactElement {
   const reduce = useReducedMotion();
   // rippleKey changes every time the status prop changes, which
   // remounts the ripple element and replays the animation once.
@@ -37,6 +55,9 @@ export function StatusDot({ status, size = 8 }: Props) {
   }
 
   const color = COLOR_VARS[status];
+  // Glow radius tracks intensity so brighter states bloom a touch wider.
+  const glowRadius = Math.round(size * (status === 'working' ? 1.1 : 0.85));
+  const glow = `0 0 ${glowRadius}px rgb(${RGB_VARS[status]} / ${GLOW_ALPHA[status]})`;
 
   // The base dot breathes for working/stuck statuses. For idle/meeting
   // it sits at full opacity.
@@ -86,8 +107,8 @@ export function StatusDot({ status, size = 8 }: Props) {
           inset: 0,
           borderRadius: '50%',
           background: color,
-          // Soft halo so an active status reads as "glowing"; idle stays flat.
-          boxShadow: status === 'idle' ? 'none' : `0 0 6px ${color}`,
+          // Soft glow halo on every state, scaled by status intensity.
+          boxShadow: glow,
         }}
       />
     </span>

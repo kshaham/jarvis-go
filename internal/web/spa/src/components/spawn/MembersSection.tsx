@@ -1,7 +1,9 @@
 import { useEffect, useMemo } from 'react';
-import type { CSSProperties, KeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
+import { m, useReducedMotion } from 'motion/react';
 import type { TeamTemplate, TeamTemplateMember } from '../../api/types';
 import { cn } from '@/lib/cn';
+import { spring } from '@/lib/motion';
 import { RevealItem } from '../motion/RevealItem';
 import { SectionCard } from './formPrimitives';
 import { Avatar } from './Avatar';
@@ -62,9 +64,27 @@ const rowRoleStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
+// A small accent pill marking a member overridden from the template — more
+// legible than a bare dot and token-colored so it tracks every theme.
+const editedPillStyle: CSSProperties = {
+  flexShrink: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '1px var(--space-3)',
+  borderRadius: 'var(--radius-pill)',
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+  lineHeight: 1.5,
+  color: 'var(--accent)',
+  background: 'rgb(var(--accent-rgb) / 0.12)',
+  boxShadow: 'inset 0 0 0 1px rgb(var(--accent-rgb) / 0.28)',
+};
+
 // MemberRow — one compact roster row: avatar plus name + role. Selected =
-// accent fill + ring; an amber dot marks a member overridden from the
-// template. A real <button> for keyboard nav.
+// accent fill + ring + elevation; a small "Edited" pill marks a member
+// overridden from the template. A real <button> for keyboard nav, with a
+// subtle hover-lift (reduced-motion gated).
 function MemberRow({
   id,
   name,
@@ -87,9 +107,10 @@ function MemberRow({
   edited?: boolean;
   onClick?: () => void;
   onKeyDown?: (e: KeyboardEvent<HTMLButtonElement>) => void;
-}) {
+}): ReactNode {
+  const reduce = useReducedMotion();
   return (
-    <button
+    <m.button
       type="button"
       id={id}
       aria-pressed={!!selected}
@@ -101,7 +122,11 @@ function MemberRow({
         ...memberRowBaseStyle,
         background: selected ? 'var(--lg-fill-accent)' : undefined,
         border: selected ? '1px solid rgb(var(--accent-rgb) / 0.6)' : undefined,
+        boxShadow: selected ? 'var(--lg-shadow-rest), var(--glow-violet-sm)' : undefined,
       }}
+      whileHover={reduce ? undefined : { y: -2 }}
+      whileTap={reduce ? undefined : { y: 0, scale: 0.99 }}
+      transition={spring.snappy}
     >
       <Avatar name={name} emoji={emoji} color={color} tier={tier} size="sm" ring />
       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
@@ -109,13 +134,11 @@ function MemberRow({
         {role ? <span style={rowRoleStyle}>{role}</span> : null}
       </span>
       {edited ? (
-        <span
-          aria-label="Overridden from the template"
-          title="Overridden from the template"
-          style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--status-warn)', flexShrink: 0 }}
-        />
+        <span aria-label="Overridden from the template" title="Overridden from the template" style={editedPillStyle}>
+          Edited
+        </span>
       ) : null}
-    </button>
+    </m.button>
   );
 }
 
@@ -172,7 +195,7 @@ export function RosterTile({
   return (
     <SectionCard
       title={`Roster (${members.length})`}
-      hint="Click a row to edit. Amber dot = overridden from the template."
+      hint="Click a row to edit. The Edited pill marks a member overridden from the template."
     >
       <div role="list" aria-label="Team roster" style={rosterListStyle}>
         {members.map((m, i) => {

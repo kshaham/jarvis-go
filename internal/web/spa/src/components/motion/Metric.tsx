@@ -62,9 +62,9 @@ export function Metric({
         controls.start({
           scale: [1, 1.08, 1],
           textShadow: [
-            '0 0 0px rgba(34,197,94,0)',
-            '0 0 10px rgba(34,197,94,0.7)',
-            '0 0 0px rgba(34,197,94,0)',
+            '0 0 0px rgb(var(--accent-rgb) / 0)',
+            '0 0 10px rgb(var(--accent-rgb) / 0.7)',
+            '0 0 0px rgb(var(--accent-rgb) / 0)',
           ],
           transition: { duration: 0.5, ease: 'easeOut' },
         });

@@ -130,10 +130,10 @@ export function RelayScreen() {
     <section style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>
+          <h1 className="page-header">
             Relay
           </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
+          <p className="page-subtitle">
             Cross-team messages. Pass what your team learned to other teams so they don't
             have to re-learn it.
           </p>
@@ -350,11 +350,13 @@ function Bubble({
               <details
                 key={`${a.kind}:${a.title}`}
                 style={{
-                  background: isOutbound ? 'rgba(255,255,255,0.12)' : 'var(--bg-surface)',
+                  background: isOutbound ? 'rgb(var(--accent-rgb) / 0.12)' : 'var(--bg-surface)',
                   borderRadius: 'var(--radius-sm)',
                   padding: '6px 10px',
-                  border: '1px solid ' + (isOutbound ? 'rgba(255,255,255,0.18)' : 'var(--border-subtle)'),
-                  color: isOutbound ? '#fff' : 'var(--text-primary)',
+                  border:
+                    '1px solid ' +
+                    (isOutbound ? 'rgb(var(--accent-rgb) / 0.25)' : 'var(--border-subtle)'),
+                  color: 'var(--text-primary)',
                 }}
               >
                 <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>

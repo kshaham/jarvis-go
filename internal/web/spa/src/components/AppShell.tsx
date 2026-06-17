@@ -92,6 +92,20 @@ const railGlyphStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   flexShrink: 0,
+  // Ease the glyph chip between inactive and active states so the
+  // color/border/background shift glides instead of hard-jumping.
+  transition: 'color 180ms ease, background 180ms ease, border-color 180ms ease',
+};
+
+// Shared keyboard-key chip for the rail's "t" / Command-bar hints — a real
+// keycap look: token border, pressed surface, secondary text, small radius.
+const railKeyHintStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  background: 'var(--bg-pressed)',
+  color: 'var(--text-secondary)',
+  padding: '1px 6px',
+  borderRadius: 4,
+  border: '1px solid var(--border-default)',
 };
 
 const railButtonStyle: React.CSSProperties = {
@@ -306,7 +320,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             variant="primary"
             onClick={() => navigate('/spawn')}
             className="w-full justify-center"
-            style={{ marginBottom: 10 }}
+            style={{ marginBottom: 10, boxShadow: 'var(--lg-shadow-rest)' }}
           >
             + Spawn team
           </Button>
@@ -320,7 +334,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
               onClick={() => stopDemo.mutate()}
               disabled={stopDemo.isPending}
               className="w-full justify-center"
-              style={{ marginBottom: 14 }}
+              style={{ marginBottom: 14, boxShadow: 'var(--lg-shadow-rest)' }}
             >
               Stop demo
             </Button>
@@ -331,7 +345,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
               disabled={teamSpawned || startDemo.isPending}
               title={teamSpawned ? 'A team is already running' : undefined}
               className="w-full justify-center"
-              style={{ marginBottom: 14 }}
+              style={{ marginBottom: 14, boxShadow: 'var(--lg-shadow-rest)' }}
             >
               Demo Jarvis
             </Button>
@@ -352,8 +366,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
                 ...navLinkBaseStyle,
                 // Extra gap before a group's first item (Office / Operations /
                 // Multi-team) — the spacing separates groups now that each row
-                // is its own tile.
+                // is its own tile. A hairline above the first item of each
+                // group reads the section break as real structure.
                 marginTop: item.divider ? 18 : 0,
+                // Small top padding lifts the row content off the hairline.
+                paddingTop: item.divider ? 14 : undefined,
+                borderTop: item.divider ? '1px solid var(--border-subtle)' : undefined,
                 color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                 // Active background is the sliding layoutId pill below
                 // (or a static fill under reduced motion).
@@ -409,17 +427,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             className="focus-ring lg-button"
             style={railButtonStyle}
           >
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                background: 'var(--bg-pressed)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                border: '1px solid var(--border-default)',
-              }}
-            >
-              t
-            </span>
+            <span style={railKeyHintStyle}>t</span>
             Quick task
           </button>
           <button
@@ -428,17 +436,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             className="focus-ring lg-button"
             style={railButtonStyle}
           >
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                background: 'var(--bg-pressed)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                border: '1px solid var(--border-default)',
-              }}
-            >
-              ⌘K
-            </span>
+            <span style={railKeyHintStyle}>⌘K</span>
             Command bar
           </button>
           {/* Classic UI escape hatch — operators with bookmarks or

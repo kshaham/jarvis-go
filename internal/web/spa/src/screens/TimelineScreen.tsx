@@ -64,10 +64,10 @@ export function TimelineScreen() {
     <section style={{ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>
+          <h1 className="page-header">
             Activity
           </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
+          <p className="page-subtitle">
             Chronological feed of every event the team produces.
           </p>
         </div>

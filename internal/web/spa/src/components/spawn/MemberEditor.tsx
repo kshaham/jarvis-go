@@ -45,7 +45,7 @@ export function MemberEditor({
       hint="Overrides apply only to this team. The bundled template stays untouched."
       trailing={trailing}
     >
-      <header style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
         <Avatar
           name={member.name}
           emoji={baseMember?.emoji}
@@ -54,11 +54,11 @@ export function MemberEditor({
           size="lg"
           ring
         />
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 'var(--space-1)' }}>
+          <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.2, color: 'var(--text-primary)' }}>
             {member.name || 'Unnamed'}
           </span>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 12, lineHeight: 1.2, color: 'var(--text-muted)' }}>
             {member.role || 'No role set'}
           </span>
         </div>
@@ -68,7 +68,7 @@ export function MemberEditor({
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 10,
+          gap: 'var(--space-4)',
         }}
       >
         <Field label="Name">
@@ -118,7 +118,7 @@ export function MemberEditor({
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-          gap: 10,
+          gap: 'var(--space-4)',
         }}
       >
         <Field label="Provider" hint={`Team default: ${templateProvider}`}>

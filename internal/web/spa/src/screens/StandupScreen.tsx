@@ -224,10 +224,10 @@ export function StandupScreen() {
     <section style={{ display: 'flex', flexDirection: 'column', gap: 18, height: '100%' }}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>
+          <h1 className="page-header">
             Standup
           </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
+          <p className="page-subtitle">
             {active
               ? 'Live — agents are responding in turn. Inject a message or /task below.'
               : 'No standup running. Hit Start to call the team together.'}

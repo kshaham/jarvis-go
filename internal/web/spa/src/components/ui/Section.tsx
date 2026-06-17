@@ -20,18 +20,32 @@ export function Section({
   className?: string;
   style?: CSSProperties;
 }) {
+  // A hairline under the header reads as a deliberate separator only when the
+  // header carries more than a bare title — a hint line or a trailing slot.
+  const hasSeparator = Boolean((title || trailing) && (hint || trailing));
+
   return (
     <section className={cn('surface-card flex flex-col gap-2.5 p-4', className)} style={style}>
       {title || trailing ? (
-        <header className="flex items-start justify-between gap-3">
+        <header
+          className={cn('flex items-start justify-between gap-3', hasSeparator && 'pb-2.5')}
+          style={
+            hasSeparator
+              ? { borderBottom: '1px solid var(--border-subtle)' }
+              : undefined
+          }
+        >
           <div className="min-w-0 flex-1">
             {title ? (
-              <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              <h2
+                className="text-sm font-semibold leading-tight tracking-[-0.01em]"
+                style={{ color: 'var(--text-primary)' }}
+              >
                 {title}
               </h2>
             ) : null}
             {hint ? (
-              <p className="mt-0.5 text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+              <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
                 {hint}
               </p>
             ) : null}

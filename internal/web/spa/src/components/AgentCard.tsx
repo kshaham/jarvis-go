@@ -1,6 +1,7 @@
 import { m, useReducedMotion } from 'motion/react';
 
 import { cn } from '@/lib/cn';
+import { spring, timing } from '@/lib/motion';
 import { StatusPill } from './StatusPill';
 import { Metric } from './motion/Metric';
 import { GlowCard } from './ui/GlowCard';
@@ -38,14 +39,28 @@ export function AgentCard({ member, onSelect }: Props) {
       alert={member.status === 'stuck'}
       spotlight={isInteractive}
       onClick={onSelect ? () => onSelect(member) : undefined}
-      className={cn('group flex flex-col gap-3 p-4', member.paused && 'opacity-60')}
+      className={cn('group relative flex flex-col gap-3 p-4', member.paused && 'opacity-60')}
       style={{ cursor: isInteractive ? 'pointer' : 'default' }}
     >
+      {/* Inset top highlight — a hairline of light along the upper edge so
+          the tile reads as the same glass material as the rest of the system.
+          Token-driven (rim strength) so it tracks every theme. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit]"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent, var(--lg-rim-strong) 22%, var(--lg-rim-strong) 78%, transparent)',
+        }}
+      />
       <div className="flex items-start gap-3">
         {/* Shared-element morph target — the avatar flies into the
-            MemberDetailModal header on open (gated by reduced motion). */}
+            MemberDetailModal header on open (gated by reduced motion).
+            On hover the tile gives it a 1px lift toward that morph. */}
         <m.div
           layoutId={reduce ? undefined : `agent-avatar-${member.sessionId}`}
+          whileHover={isInteractive && !reduce ? { y: -1 } : undefined}
+          transition={spring.snappy}
           className={cn(
             'flex size-10 shrink-0 items-center justify-center rounded-lg text-base font-semibold',
             color,
@@ -64,29 +79,53 @@ export function AgentCard({ member, onSelect }: Props) {
         <StatusPill status={member.status} />
       </div>
 
-      <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
+      {/* Footer hierarchy: cost is the emphasis (primary text), timeAgo
+          recedes to faint. Gap on the 4pt scale. */}
+      <div className="flex items-baseline justify-between" style={{ gap: 'var(--space-3)' }}>
         {/* Cost ticks digit-by-digit and flashes when more tokens get billed. */}
         <Metric
           value={cost}
           format={{ style: 'currency', currency: 'USD', minimumFractionDigits: 2 }}
-          size={11}
-          tone="muted"
+          size={12}
+          tone="primary"
           pulseOnChange
         />
-        <span>{timeAgo(member.lastActivityAt)}</span>
+        <span className="text-[11px]" style={{ color: 'var(--text-faint)' }}>
+          {timeAgo(member.lastActivityAt)}
+        </span>
       </div>
 
       {member.score?.grade && (
-        <div className="flex items-center gap-2 text-xs">
-          <span
-            className="rounded px-1.5 py-0.5 font-semibold"
+        <div className="flex items-center text-xs" style={{ gap: 'var(--space-3)' }}>
+          {/* Grade badge — shared liquid-glass chip with an accent tint, and a
+              brief mount glow (scale-in + accent bloom) so it lands with weight
+              instead of popping flat. The bloom is a separate overlay that
+              fades out, so it interpolates cleanly across themes. Reduced
+              motion: static chip, no transform, no bloom. */}
+          <m.span
+            initial={reduce ? false : { scale: 0.96 }}
+            animate={reduce ? undefined : { scale: 1 }}
+            transition={spring.snappy}
+            className="badge-glass relative font-semibold"
             style={{
-              background: 'var(--bg-pressed)',
+              padding: 'var(--space-1) var(--space-3)',
               color: 'var(--text-primary)',
+              background:
+                'linear-gradient(var(--lg-fill), var(--lg-fill)), rgb(var(--accent-rgb) / 0.1)',
             }}
           >
+            {!reduce && (
+              <m.span
+                aria-hidden
+                className="pointer-events-none absolute inset-0 -z-10 rounded-[inherit]"
+                initial={{ opacity: 1 }}
+                animate={{ opacity: 0 }}
+                transition={{ ...timing.long, delay: 0.06 }}
+                style={{ boxShadow: 'var(--glow-violet-md)' }}
+              />
+            )}
             {member.score.grade}
-          </span>
+          </m.span>
           <span className="inline-flex items-baseline gap-1" style={{ color: 'var(--text-muted)' }}>
             <Metric
               value={(member.score.overallScore || 0) * 100}

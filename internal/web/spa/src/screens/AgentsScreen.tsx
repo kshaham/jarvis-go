@@ -50,7 +50,7 @@ export function AgentsScreen() {
   if (isLoading) {
     return (
       <section>
-        <h1 className="mb-4 heading-lg">
+        <h1 className="mb-4 page-header">
           Agents
         </h1>
         <div
@@ -68,7 +68,7 @@ export function AgentsScreen() {
   if (isError) {
     return (
       <section>
-        <h1 className="mb-4 heading-lg">
+        <h1 className="mb-4 page-header">
           Agents
         </h1>
         <div className="rounded-lg border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
@@ -81,7 +81,7 @@ export function AgentsScreen() {
   if (!data?.teamSpawned || members.length === 0) {
     return (
       <section>
-        <h1 className="mb-4 heading-lg">
+        <h1 className="mb-4 page-header">
           Agents
         </h1>
         <EmptyState
@@ -102,7 +102,7 @@ export function AgentsScreen() {
     <LayoutGroup>
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h1 className="heading-lg">
+          <h1 className="page-header">
             Agents
           </h1>
           <span className="inline-flex items-baseline gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>

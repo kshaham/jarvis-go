@@ -407,11 +407,11 @@
   --border-default: rgba(10, 58, 48, 0.14);
   --border-strong: rgba(10, 58, 48, 0.2);
 
-  /* Text — deep teal, AA on the #67e8f9 cyan canvas. */
+  /* Text — deep teal, all AA (>=4.5:1) on the #67e8f9 cyan canvas. */
   --text-primary: #0a3a30;
   --text-secondary: #0e463c;
   --text-muted: #20524a;
-  --text-faint: #3f6f66;
+  --text-faint: #2a5249;
 
   /* Accent — cyan, with the bright #67e8f9 as the strong/pop. */
   --accent: #06b6d4;
@@ -531,7 +531,7 @@
   --text-primary: #ffffff;
   --text-secondary: #cfe0e3;
   --text-muted: #a3b8bc;
-  --text-faint: #7a8f93;
+  --text-faint: #889ca1;
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border-default: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.16);

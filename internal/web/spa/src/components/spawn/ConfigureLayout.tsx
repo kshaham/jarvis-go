@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
+import { m, useReducedMotion } from 'motion/react';
 import { AlertTriangle, Check } from 'lucide-react';
 
 import { cn } from '@/lib/cn';
+import { spring } from '@/lib/motion';
 import { estimateDailyCost, formatPerDay } from './costEstimate.utils';
 import { CostEstimate } from './CostEstimate';
 import { ProviderModelSection, TelegramSection, TogglesSection, providerLabel } from './DefaultsSection';
@@ -105,13 +107,52 @@ function dotSrText(state: DotState, active: boolean): string {
 }
 
 // Dot — the completion indicator. Decorative (aria-hidden); the row carries an
-// .sr-only state phrase so it never signals by color alone.
-function Dot({ state, active }: { state: DotState; active: boolean }) {
+// .sr-only state phrase so it never signals by color alone. State changes
+// animate: "done" scale-pops the check in, "error" shakes on the x-axis with a
+// token error glow, "current" rings in via an accent box-shadow. All motion is
+// reduced-motion gated — the visual result is identical, only static.
+function Dot({ state, active }: { state: DotState; active: boolean }): ReactNode {
+  const reduce = useReducedMotion();
+
+  // An accent ring grows in when this dot becomes the current step, and the
+  // error state nudges left/right once to draw the eye. The popped scale on
+  // "done" is keyed below so a fresh completion re-triggers the pop.
+  const animate = reduce
+    ? undefined
+    : {
+        scale: state === 'done' ? [0.7, 1.12, 1] : 1,
+        x: state === 'error' ? [0, -2, 2, -1.5, 0] : 0,
+        boxShadow:
+          active && (state === 'incomplete' || state === 'info')
+            ? 'inset 0 0 0 2px var(--accent), var(--glow-violet-sm)'
+            : state === 'error'
+              ? 'var(--glow-error)'
+              : 'inset 0 0 0 0px transparent',
+      };
+
   return (
-    <span className={cn('spawn-dot', `is-${state}`, active && 'is-current')} aria-hidden="true">
-      {state === 'done' ? <Check size={11} strokeWidth={3} /> : null}
+    <m.span
+      className={cn('spawn-dot', `is-${state}`, active && 'is-current')}
+      aria-hidden="true"
+      animate={animate}
+      transition={
+        reduce
+          ? undefined
+          : { scale: spring.snappy, x: { duration: 0.32, ease: 'easeInOut' }, boxShadow: { duration: 0.22 } }
+      }
+    >
+      {state === 'done' ? (
+        <m.span
+          style={{ display: 'inline-flex' }}
+          initial={reduce ? false : { opacity: 0, scale: 0.6 }}
+          animate={reduce ? undefined : { opacity: 1, scale: 1 }}
+          transition={reduce ? undefined : { duration: 0.2, ease: 'easeOut', delay: 0.05 }}
+        >
+          <Check size={11} strokeWidth={3} />
+        </m.span>
+      ) : null}
       {state === 'error' ? <AlertTriangle size={11} strokeWidth={2.5} /> : null}
-    </span>
+    </m.span>
   );
 }
 

@@ -61,10 +61,10 @@ export function AddPeerScreen() {
     <section style={{ display: 'flex', flexDirection: 'column', gap: 24, width: '100%', maxWidth: 760, margin: '0 auto' }}>
       <RevealItem index={0} withExit={false}>
         <header>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>
+          <h1 className="page-header">
             Add a peer team
           </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
+          <p className="page-subtitle">
             Two-way registration. You generate a token for them; they generate one for you.
             Each side stores the other's token and uses it to authenticate every message.
           </p>

@@ -77,6 +77,37 @@
     font-size: 14px;
   }
 
+  /* ── Page header ────────────────────────────────────────────────────────
+     The screen-level title + subtitle that sit on the app canvas (not in a
+     card). Replaces the repeated inline `fontSize:24` <h1> pattern so every
+     screen header is consistent and recolors per theme via the text tokens
+     (deep teal on the blue cyan canvas; primary elsewhere). */
+  .page-header {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--text-primary);
+  }
+  .page-subtitle {
+    margin: 4px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+
+  /* ── Glass badge ────────────────────────────────────────────────────────
+     Shared liquid-glass chip treatment for small status/meta badges (e.g.
+     the AgentCard grade pill, TeamHeader PR/Paused badges) so they lift off
+     their surface as the same material as the tiles, instead of reading flat. */
+  .badge-glass {
+    background: var(--lg-fill);
+    border: 1px solid var(--lg-rim);
+    box-shadow: var(--lg-shadow-rest);
+    border-radius: var(--radius-sm);
+  }
+
   /* ── Rendered markdown (Deliverables reader) ───────────────────────────
      Tailwind preflight strips default element styling, so re-apply readable
      document styles scoped to .deliverable-md (react-markdown output). */
@@ -312,7 +343,7 @@
     background: linear-gradient(
       120deg,
       transparent 0%,
-      rgba(120, 240, 180, 0.18) 50%,
+      rgba(255, 255, 255, 0.18) 50%,
       transparent 100%
     );
     transform: skewX(-18deg);
