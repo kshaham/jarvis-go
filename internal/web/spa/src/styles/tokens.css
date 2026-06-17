@@ -378,46 +378,49 @@
   --lg-panel-footer: rgba(17, 24, 39, 0.025);
 }
 
-/* ── Blue mode — "blue & black" ─────────────────
-   A true DARK theme: cool cyan-black surfaces (NOT white),
-   light cyan-white ink, and the cyan accent (#06b6d4 with the bright
-   #67e8f9 as the pop). Mirrors the dark [data-theme='graphite'] structure
-   (neutral cool-black shadows, white hairlines + glass rim, white sheen);
-   only the hue shifts to cyan via --accent, the cyan aurora/glow, and the
-   cyan-white --surface-tint-rgb. Status colors stay semantic. Text greys
-   are tuned to pass WCAG AA on the near-black surfaces. */
+/* ── Blue mode — cyan canvas + black components ──
+   The blue-mode look: the page canvas + chrome (header / sidebar) are
+   the exact cyan (#67e8f9) with deep-teal ink, and the content
+   *components* (cards, inputs, the spawn rail, modals) are black with white
+   text. The text custom properties below are the CANVAS values (dark teal,
+   AA on the cyan); the companion rule in styles.css re-scopes them to white
+   INSIDE the black component containers, so a single token set serves both
+   surfaces. Accent is cyan (#06b6d4 / #67e8f9 pop); status semantic. */
 [data-theme='blue'] {
-  /* Surface — cool cyan-black */
-  --bg-app: #0c1416;
-  --bg-surface: #121c1f;
-  --bg-elevated: #18242a;
-  --bg-pressed: #202d33;
+  /* Canvas — exact cyan; components are black. */
+  --bg-app: #67e8f9;
+  --bg-surface: #0c1416;
+  --bg-elevated: #131e22;
+  --bg-pressed: #1b272c;
 
-  /* Chrome frame — near-black cyan glass */
-  --chrome-bg: rgba(10, 17, 19, 0.62);
+  /* Chrome frame (header + sidebar) — black, like the content components,
+     so it frames the cyan content canvas. Its text is re-scoped to white
+     (see the companion rule below). */
+  --chrome-bg: rgba(8, 14, 16, 0.86);
 
   /* Text on the solid cyan accent (near-black so the cyan reads). */
   --accent-on: #04222a;
 
-  /* Lines — neutral white hairlines */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  /* Lines — deep-teal hairlines for dividers on the cyan canvas/chrome.
+     (Re-scoped to white inside the black components — see styles.css.) */
+  --border-subtle: rgba(10, 58, 48, 0.08);
+  --border-default: rgba(10, 58, 48, 0.14);
+  --border-strong: rgba(10, 58, 48, 0.2);
 
-  /* Text — cool cyan-greys, AA on the near-black surfaces */
-  --text-primary: #e3f7fb;
-  --text-secondary: #a9c3c9;
-  --text-muted: #84a0a6;
-  --text-faint: #5a6e73;
+  /* Text — deep teal, AA on the #67e8f9 cyan canvas. */
+  --text-primary: #0a3a30;
+  --text-secondary: #0e463c;
+  --text-muted: #20524a;
+  --text-faint: #3f6f66;
 
   /* Accent — cyan, with the bright #67e8f9 as the strong/pop. */
   --accent: #06b6d4;
-  --accent-muted: rgba(6, 182, 212, 0.18);
+  --accent-muted: rgba(6, 182, 212, 0.2);
   --accent-strong: #67e8f9;
 
   /* Status */
   --status-working: #3ddc97;
-  --status-idle: #84a0a6;
+  --status-idle: #20524a;
   --status-meeting: #ffb454;
   --status-stuck: #ff5a5f;
   --status-success: #3ddc97;
@@ -436,19 +439,19 @@
   --status-error-rgb: 255 90 95;
   --status-info-rgb: 6 182 212; /* info == accent cyan in blue mode */
 
-  /* Surface tint — cyan-white so glass fills read cool/blue. */
+  /* Surface tint — cyan-white so glass fills read cool/blue on the cards. */
   --surface-tint-rgb: 150 220 230;
 
-  /* Aurora mesh — subtle cyan wash on the near-black canvas. */
-  --aurora-1: rgba(6, 182, 212, 0.08);
-  --aurora-2: rgba(103, 232, 249, 0.05);
-  --aurora-3: rgba(8, 136, 168, 0.05);
-  --aurora-base: #0c1416;
+  /* Aurora mesh — gentle depth on the cyan canvas. */
+  --aurora-1: rgba(6, 182, 212, 0.16);
+  --aurora-2: rgba(255, 255, 255, 0.12);
+  --aurora-3: rgba(8, 72, 88, 0.08);
+  --aurora-base: #67e8f9;
 
-  /* Glassmorphic surface — cyan-black fill + white hairline. */
-  --glass-bg: rgba(18, 28, 31, 0.6);
-  --glass-bg-strong: rgba(24, 36, 42, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.08);
+  /* Glassmorphic surface — black fill + white hairline (content components). */
+  --glass-bg: rgba(12, 20, 22, 0.7);
+  --glass-bg-strong: rgba(12, 20, 22, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.1);
 
   /* Glow — cyan accent bloom (the live/selection pop). */
   --glow-violet-sm: 0 0 0 1px rgba(6, 182, 212, 0.22), 0 2px 12px rgba(6, 182, 212, 0.14);
@@ -457,25 +460,25 @@
   --glow-success: 0 0 0 1px rgba(61, 220, 151, 0.28), 0 4px 18px rgba(61, 220, 151, 0.16);
   --glow-error: 0 0 0 1px rgba(255, 90, 95, 0.3), 0 4px 18px rgba(255, 90, 95, 0.18);
 
-  /* Elevation — neutral cool-black shadows. */
-  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --elev-3: 0 12px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  /* Elevation — dark shadows so the black tiles lift off the cyan canvas. */
+  --elev-1: 0 1px 2px rgba(4, 30, 36, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --elev-2: 0 4px 16px rgba(4, 30, 36, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --elev-3: 0 12px 40px rgba(4, 30, 36, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 
-  --focus-ring-color: rgba(6, 182, 212, 0.55);
-  --spotlight-color: rgba(6, 182, 212, 0.1);
+  --focus-ring-color: rgba(6, 182, 212, 0.6);
+  --spotlight-color: rgba(6, 182, 212, 0.12);
 
-  /* Liquid Glass material — cyan-black fills + white rim/sheen; accent +
-     danger tints keep their hue. */
-  --lg-fill: rgba(18, 28, 31, 0.55);
-  --lg-fill-hover: rgba(26, 38, 43, 0.62);
-  --lg-fill-active: rgba(33, 47, 53, 0.7);
-  --lg-fill-accent: rgba(6, 182, 212, 0.18);
-  --lg-fill-accent-hover: rgba(6, 182, 212, 0.26);
-  --lg-fill-danger: rgba(255, 90, 95, 0.14);
-  --lg-fill-danger-hover: rgba(255, 90, 95, 0.22);
-  --lg-rim: rgba(255, 255, 255, 0.1);
-  --lg-rim-strong: rgba(255, 255, 255, 0.18);
+  /* Liquid Glass material — black fills + white rim/sheen for the content
+     components; accent + danger tints keep their hue. */
+  --lg-fill: #0c1416;
+  --lg-fill-hover: #131e22;
+  --lg-fill-active: #1b272c;
+  --lg-fill-accent: rgba(6, 182, 212, 0.2);
+  --lg-fill-accent-hover: rgba(6, 182, 212, 0.28);
+  --lg-fill-danger: rgba(255, 90, 95, 0.16);
+  --lg-fill-danger-hover: rgba(255, 90, 95, 0.24);
+  --lg-rim: rgba(10, 58, 48, 0.18);
+  --lg-rim-strong: rgba(10, 58, 48, 0.26);
   --lg-specular-convex:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
     inset 0 0 0 1px rgba(255, 255, 255, 0.02),
@@ -487,15 +490,15 @@
     inset 1px 1px 0 0 rgba(255, 255, 255, 0.1),
     inset -1px -1px 0 0 rgba(255, 255, 255, 0.03);
   --lg-shadow-rest:
-    0 1px 1px rgba(0, 0, 0, 0.3),
-    0 8px 24px -12px rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(4, 30, 36, 0.2),
+    0 8px 24px -12px rgba(4, 30, 36, 0.45),
     var(--lg-specular-convex);
   --lg-shadow-hover:
-    0 2px 5px rgba(0, 0, 0, 0.32),
-    0 18px 44px -14px rgba(0, 0, 0, 0.62),
+    0 2px 6px rgba(4, 30, 36, 0.24),
+    0 18px 44px -14px rgba(4, 30, 36, 0.5),
     var(--lg-specular-convex);
   --lg-shadow-press:
-    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(4, 30, 36, 0.3),
     var(--lg-specular-concave);
   --lg-sheen: linear-gradient(
     180deg,
@@ -503,8 +506,37 @@
     rgba(255, 255, 255, 0.02) 16%,
     rgba(255, 255, 255, 0) 42%
   );
-  --lg-panel-bg: rgba(16, 26, 29, 0.72);
+  --lg-panel-bg: rgba(12, 20, 22, 0.96);
   --lg-panel-footer: rgba(255, 255, 255, 0.03);
+}
+
+/* Blue mode: the content components are black, so re-scope the text + line
+   custom properties to white/light INSIDE them. Because custom properties
+   cascade, this flips every descendant's text — including inline
+   style={{ color: var(--text-primary) }} usages — to white within cards,
+   inputs, the spawn rail, template cards, and modals, while the cyan
+   canvas + chrome keep the deep-teal ink defined above. */
+[data-theme='blue'] :is(
+    .surface-card,
+    .surface-card--solid,
+    .glass-card,
+    .glass-card--strong,
+    .field,
+    .spawn-rail,
+    .spawn-template-card,
+    [role='dialog'],
+    nav[aria-label='Office sections'],
+    header.sticky
+  ) {
+  --text-primary: #ffffff;
+  --text-secondary: #cfe0e3;
+  --text-muted: #a3b8bc;
+  --text-faint: #7a8f93;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --lg-rim: rgba(255, 255, 255, 0.12);
+  --lg-rim-strong: rgba(255, 255, 255, 0.2);
 }
 
 /* ── Graphite mode — cool neutral charcoal dark theme ─────────────────────

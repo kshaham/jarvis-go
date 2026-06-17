@@ -369,8 +369,9 @@
   [data-theme='light'] .field {
     background: var(--bg-app);
   }
-  /* Blue mode — same light-theme reasoning, recolored to cyan: a
-     solid cyan CTA with white text, and recessed cyan-tinted input wells. */
+  /* Blue mode — solid cyan CTA with white text. Inputs use the
+     default black --lg-fill (they're content components), so no .field
+     override here: --bg-app is the cyan canvas now, not an input well. */
   [data-theme='blue'] .lg-button--primary {
     background: linear-gradient(180deg, #1bb6d4 0%, #06b6d4 100%);
     border-color: #0790ad;
@@ -385,9 +386,6 @@
     box-shadow:
       0 2px 4px rgba(6, 182, 212, 0.3),
       0 10px 24px -8px rgba(6, 182, 212, 0.5);
-  }
-  [data-theme='blue'] .field {
-    background: var(--bg-app);
   }
   .lg-button--danger {
     background: var(--lg-fill-danger);
