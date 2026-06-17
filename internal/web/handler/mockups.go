@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -141,7 +142,10 @@ type mockupUploadRequest struct {
 func (ctx *Context) MockupsUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 16*1024*1024)
 	var req mockupUploadRequest
-	if !decodeBody(w, r, &req) {
+	// Decode directly (NOT decodeBody, which re-caps the body at 1 MB and would
+	// truncate a real mockup image's base64 into "invalid JSON").
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		request.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.ProjectID == "" || req.ImageBase64 == "" {

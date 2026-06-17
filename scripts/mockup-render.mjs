@@ -6,12 +6,13 @@
 //   Presentation (text-to-image slide design):
 //     mockup-render presentation <projectId> <index> "<slide concept + style>"
 //
-// Renders via OpenAI gpt-image-1 (edits for ui, generations for presentation)
-// then uploads the result to the office daemon so it appears on the Mockups
-// page tile for that project + kind.
+// Renders via Google Gemini ("Nano Banana" image model) -- image+text edit for
+// ui, text-to-image for presentation -- then uploads the result to the office
+// daemon so it appears on the Mockups page tile for that project + kind.
 //
 // Env (set in every office agent):
-//   OPENAI_API_KEY      — image generation
+//   GEMINI_API_KEY      — image generation (Nano Banana)
+//   GEMINI_IMAGE_MODEL  — optional model override (default gemini-2.5-flash-image-preview)
 //   JARVIS_API_URL      — daemon base URL (default https://127.0.0.1:3555)
 //   JARVIS_AGENT_TOKEN  — bearer token for the agent-upload endpoint
 
@@ -33,56 +34,61 @@ if (kind !== 'ui' && kind !== 'presentation') die('kind must be ui or presentati
 const index = Number(indexStr);
 if (!Number.isInteger(index) || index < 0 || index > 5) die('index must be 0..5', 2);
 
-const apiKey = process.env.OPENAI_API_KEY;
-if (!apiKey) die('OPENAI_API_KEY is not set', 3);
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) die('GEMINI_API_KEY is not set', 3);
+const model = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
 const base = (process.env.JARVIS_API_URL || 'https://127.0.0.1:3555').replace(/\/+$/, '');
 const token = process.env.JARVIS_AGENT_TOKEN || '';
 
-let b64;
+// Assemble the Gemini generateContent request parts: a text instruction plus
+// (for ui) the inline base screenshot to restyle.
+const parts = [];
 if (kind === 'ui') {
-  // Image-to-image edit of the UI screenshot.
   if (!inputPng) die('ui mode requires an inputPng (the UI screenshot)', 2);
   const png = await readFile(inputPng).catch((e) => die('cannot read input image: ' + e.message, 2));
-  const form = new FormData();
-  form.append('model', 'gpt-image-1');
-  form.append(
-    'prompt',
-    'Redesign this app UI as a polished, production-quality mockup. ' +
+  parts.push({
+    text:
+      'Redesign this web UI as a polished, production-quality full-page mockup. ' +
       prompt +
-      ' Keep it a believable app screen; high fidelity, realistic content.',
-  );
-  form.append('size', '1024x1024');
-  form.append('moderation', 'low');
-  form.append('image', new Blob([png], { type: 'image/png' }), 'base.png');
-  const r = await fetch('https://api.openai.com/v1/images/edits', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
+      ' Keep it a believable, high-fidelity app/landing screen with realistic, legible content.',
   });
-  if (!r.ok) die(`openai ${r.status}: ${(await r.text()).slice(0, 400)}`, 4);
-  b64 = (await r.json())?.data?.[0]?.b64_json;
+  parts.push({ inline_data: { mime_type: 'image/png', data: png.toString('base64') } });
 } else {
-  // Text-to-image generation of a presentation slide (16:9).
-  const r = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-image-1',
-      prompt:
-        'A polished 16:9 presentation slide mockup. ' +
-        prompt +
-        ' Clean typographic hierarchy, real legible text, professional layout.',
-      size: '1536x1024',
-      moderation: 'low',
-    }),
+  parts.push({
+    text:
+      'Generate a polished 16:9 presentation slide mockup. ' +
+      prompt +
+      ' Clean typographic hierarchy, real legible text, professional layout.',
   });
-  if (!r.ok) die(`openai ${r.status}: ${(await r.text()).slice(0, 400)}`, 4);
-  b64 = (await r.json())?.data?.[0]?.b64_json;
 }
-if (!b64) die('no image in openai response', 5);
 
-// Upload to the daemon so it lands on the Mockups page.
-const up = await fetch(`${base}/api/office/agent/mockup-upload`, {
+const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+const r = await fetch(url, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    contents: [{ parts }],
+    generationConfig: { responseModalities: ['IMAGE'] },
+  }),
+});
+if (!r.ok) die(`gemini ${r.status}: ${(await r.text()).slice(0, 400)}`, 4);
+
+// Pull the first inline image out of the candidate parts (REST returns
+// camelCase inlineData; tolerate snake_case too).
+const candParts = r && (await r.json())?.candidates?.[0]?.content?.parts;
+let b64;
+for (const p of candParts || []) {
+  const inl = p.inlineData || p.inline_data;
+  if (inl && inl.data) {
+    b64 = inl.data;
+    break;
+  }
+}
+if (!b64) die('no image in gemini response', 5);
+
+// Upload to the daemon so it lands on the Mockups page. The mockup-upload
+// route lives on the /claude/hooks mount (agent-token auth), not /office/agent.
+const up = await fetch(`${base}/api/claude/hooks/mockup-upload`, {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
