@@ -81,6 +81,77 @@ export async function fetchJSON<T>(url: string, opts: RequestOptions = {}): Prom
   return (await res.json()) as T;
 }
 
+export interface UploadOptions {
+  onProgress?: (pct: number) => void;
+  signal?: AbortSignal;
+}
+
+// uploadFormData POSTs a multipart FormData body (e.g. a large file) and
+// reports upload progress. fetch() can't surface upload progress, so this
+// uses XMLHttpRequest. It mirrors fetchJSON's CSRF handling: seed a token
+// before sending and retry once on a 403. The browser sets the multipart
+// Content-Type (with boundary) automatically — never set it manually.
+export async function uploadFormData<T>(
+  url: string,
+  form: FormData,
+  opts: UploadOptions = {},
+): Promise<T> {
+  if (!currentCSRFToken()) {
+    await refreshCSRFToken(opts.signal);
+  }
+
+  const send = (): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.setRequestHeader('X-CSRF-Token', currentCSRFToken());
+
+      if (opts.onProgress && xhr.upload) {
+        xhr.upload.onprogress = (e: ProgressEvent): void => {
+          if (e.lengthComputable) {
+            opts.onProgress?.(Math.round((e.loaded / e.total) * 100));
+          }
+        };
+      }
+      if (opts.signal) {
+        const onAbort = (): void => xhr.abort();
+        opts.signal.addEventListener('abort', onAbort, { once: true });
+        xhr.onloadend = (): void => opts.signal?.removeEventListener('abort', onAbort);
+      }
+
+      xhr.onerror = (): void => reject(new Error('network error during upload'));
+      xhr.onabort = (): void => reject(new DOMException('Aborted', 'AbortError'));
+      xhr.onload = (): void => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve((xhr.responseText ? JSON.parse(xhr.responseText) : undefined) as T);
+          } catch {
+            reject(new Error('invalid JSON in upload response'));
+          }
+          return;
+        }
+        const err = new Error(`HTTP ${xhr.status}: ${xhr.responseText || xhr.statusText}`);
+        // Tag the status so the caller (and the 403 retry below) can branch.
+        (err as Error & { status?: number }).status = xhr.status;
+        reject(err);
+      };
+
+      xhr.send(form);
+    });
+
+  try {
+    return await send();
+  } catch (e) {
+    if ((e as { status?: number }).status === 403) {
+      await refreshCSRFToken(opts.signal);
+      return await send();
+    }
+    throw e;
+  }
+}
+
 export async function fetchText(url: string, opts: RequestOptions = {}): Promise<string> {
   const res = await fetch(url, {
     method: opts.method || 'GET',

@@ -6,6 +6,19 @@ import type { SavedProject } from '@/api/types';
 
 export type WorkdirMode = 'existing' | 'new' | 'github';
 
+// formatBytes renders a human-friendly file size for the selected-zip chip.
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
 // githubSlug mirrors the backend's normalizeRepoInput slug derivation
 // (owner-repo) for the live "workdir →" preview. Best-effort only; the
 // server re-validates on spawn.
@@ -33,6 +46,8 @@ export function WorkdirSection({
   setProjectName,
   githubRepo,
   setGithubRepo,
+  zipFile,
+  setZipFile,
   projects,
   onPickProject,
   onRemoveProject,
@@ -45,10 +60,13 @@ export function WorkdirSection({
   setProjectName: (v: string) => void;
   githubRepo: string;
   setGithubRepo: (v: string) => void;
+  zipFile: File | null;
+  setZipFile: (f: File | null) => void;
   projects: SavedProject[];
   onPickProject: (p: SavedProject) => void;
   onRemoveProject: (id: string) => void;
 }) {
+  const projectNameValid = /^[a-zA-Z0-9_-]{1,64}$/.test(projectName);
   const trailing = useMemo(
     () => (
       <SegmentedControl<WorkdirMode>
@@ -98,6 +116,87 @@ export function WorkdirSection({
               <span style={{ color: 'var(--text-faint)' }}>workdir →</span>{' '}
               /app/workspace/{projectName || 'project-name'}
             </span>
+
+            {/* Optional: seed the new project from an uploaded codebase.
+                Empty = blank project (the default). */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                Starting codebase (optional)
+              </span>
+              {zipFile ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '6px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--lg-rim)',
+                    background: 'var(--lg-fill)',
+                    fontSize: 12,
+                  }}
+                >
+                  <span
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      color: 'var(--text-primary)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    {zipFile.name}{' '}
+                    <span style={{ color: 'var(--text-faint)' }}>({formatBytes(zipFile.size)})</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setZipFile(null)}
+                    style={{
+                      flexShrink: 0,
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 'fit-content',
+                    padding: '6px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--lg-rim)',
+                    background: 'var(--lg-fill)',
+                    fontSize: 12,
+                    color: projectNameValid ? 'var(--text-secondary)' : 'var(--text-faint)',
+                    cursor: projectNameValid ? 'pointer' : 'not-allowed',
+                    opacity: projectNameValid ? 1 : 0.6,
+                  }}
+                >
+                  Choose .zip
+                  <input
+                    type="file"
+                    accept=".zip,application/zip"
+                    disabled={!projectNameValid}
+                    onChange={(e) => setZipFile(e.target.files?.[0] ?? null)}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              )}
+              <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                {projectNameValid
+                  ? 'Upload a .zip to start the team from that codebase, or leave empty for a blank project.'
+                  : 'Enter a project name first to attach a starting codebase.'}
+              </span>
+            </div>
           </div>
         ) : mode === 'github' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

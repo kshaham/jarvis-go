@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -12,10 +12,10 @@ import type { SectionId } from '../components/spawn/reviewSummary.utils';
 import { SpawnHeader } from '../components/spawn/SpawnHeader';
 import { TemplateStep } from '../components/spawn/TemplateStep';
 import type { WorkdirMode } from '../components/spawn/WorkdirSection';
-import { fetchJSON } from '../api/client';
+import { fetchJSON, uploadFormData } from '../api/client';
 import { useTeamTemplates } from '../hooks/useOfficeData';
 import { useSavedProjects } from '../hooks/useSavedProjects';
-import type { SavedProject } from '../api/types';
+import type { SavedProject, UploadCodebaseResult } from '../api/types';
 import type { SettingsAccounts, TeamTemplate, TeamTemplateMember } from '../api/types';
 
 // SpawnScreen — the spawn-team wizard orchestrator. It owns all state (the
@@ -33,6 +33,8 @@ export interface SpawnState {
   mode: WorkdirMode;
   projectName: string;
   githubRepo: string;
+  // Optional .zip codebase to seed a new project from (mode === 'new').
+  zipFile: File | null;
   perpetual: boolean;
   sevenStep: boolean;
   defaultProvider: string;
@@ -68,6 +70,7 @@ const SPAWN_DEFAULT: SpawnState = {
   mode: 'existing',
   projectName: '',
   githubRepo: '',
+  zipFile: null,
   perpetual: true,
   sevenStep: false,
   defaultProvider: 'claude-subscription',
@@ -92,6 +95,7 @@ function spawnReducer(state: SpawnState, action: SpawnAction): SpawnState {
       ...state,
       members,
       selectedMemberId: members[0]?.id ?? null,
+      zipFile: null,
       activeSection: 'mission',
       defaultProvider: tpl.defaultProvider ?? state.defaultProvider,
       defaultModel: tpl.defaultModel ?? state.defaultModel,
@@ -126,6 +130,7 @@ export function SpawnScreen() {
     mode,
     projectName,
     githubRepo,
+    zipFile,
     perpetual,
     sevenStep,
     defaultProvider,
@@ -143,6 +148,10 @@ export function SpawnScreen() {
       dispatch({ type: 'set', field, value });
 
   const savedProjects = useSavedProjects();
+
+  // Transient progress for the optional codebase upload (mode === 'new' with
+  // a .zip attached). null = not uploading; 0-100 = percent sent.
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
 
   // Picking a saved project sets the matching mode and fills the field:
   // github → repo URL, local → folder path.
@@ -235,6 +244,23 @@ export function SpawnScreen() {
           await fetchJSON('/api/settings', { method: 'PUT', body: settingsUpdate });
         }
       }
+      // When a .zip codebase is attached to a new project, upload + extract it
+      // server-side first (with progress). The spawn then proceeds as a normal
+      // new project: the backend finds the freshly-populated /app/workspace/
+      // <projectName> and seeds CLAUDE.md without clobbering uploaded files.
+      if (mode === 'new' && zipFile) {
+        const fd = new FormData();
+        fd.append('projectName', projectName);
+        fd.append('file', zipFile);
+        setUploadPct(0);
+        try {
+          await uploadFormData<UploadCodebaseResult>('/api/office/upload-codebase', fd, {
+            onProgress: setUploadPct,
+          });
+        } finally {
+          setUploadPct(null);
+        }
+      }
       const body: Record<string, unknown> = {
         templateId,
         mission,
@@ -303,8 +329,33 @@ export function SpawnScreen() {
         title={validity.ok ? '' : validity.reason}
         style={{ width: '100%', opacity: !validity.ok && !spawn.isPending ? 0.6 : 1 }}
       >
-        {spawn.isPending ? 'Spawning…' : 'Spawn team'}
+        {uploadPct !== null
+          ? `Uploading codebase… ${uploadPct}%`
+          : spawn.isPending
+            ? 'Spawning…'
+            : 'Spawn team'}
       </Button>
+      {uploadPct !== null ? (
+        <div
+          aria-hidden
+          style={{
+            height: 4,
+            width: '100%',
+            borderRadius: 999,
+            background: 'var(--lg-fill)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${uploadPct}%`,
+              background: 'var(--accent)',
+              transition: 'width 0.15s ease',
+            }}
+          />
+        </div>
+      ) : null}
       {!validity.ok ? (
         <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>{validity.reason}</span>
       ) : null}

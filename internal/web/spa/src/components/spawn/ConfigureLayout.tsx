@@ -53,6 +53,7 @@ function sectionSummaries(state: SpawnState): Record<SectionId, string> {
     workingDir,
     projectName,
     githubRepo,
+    zipFile,
     members,
     defaultProvider,
     defaultModel,
@@ -70,7 +71,7 @@ function sectionSummaries(state: SpawnState): Record<SectionId, string> {
         : 'Not set'
       : mode === 'new'
         ? projectName.trim()
-          ? `New · ${projectName.trim()}`
+          ? `New · ${projectName.trim()}${zipFile ? ' · zip' : ''}`
           : 'Not set'
         : workingDir.trim()
           ? `Folder · ${baseName(workingDir.trim())}`
@@ -233,6 +234,8 @@ export function ConfigureLayout({
             setProjectName={set('projectName')}
             githubRepo={state.githubRepo}
             setGithubRepo={set('githubRepo')}
+            zipFile={state.zipFile}
+            setZipFile={set('zipFile')}
             projects={projects}
             onPickProject={onPickProject}
             onRemoveProject={onRemoveProject}

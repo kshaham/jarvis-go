@@ -447,6 +447,14 @@ export interface SavedProject {
   lastUsedAt: string;
 }
 
+// UploadCodebaseResult — POST /api/office/upload-codebase response. The
+// server extracted the uploaded .zip into a fresh project and returns its
+// slug + resolved workdir so the spawn can proceed as a new project.
+export interface UploadCodebaseResult {
+  projectName: string;
+  workingDir: string;
+}
+
 // ── Tests page (per-project coverage + vulnerability scanning) ──────────
 export type QualityStatus = 'idle' | 'running' | 'ok' | 'failed' | 'unsupported';
 

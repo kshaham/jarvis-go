@@ -1304,6 +1304,9 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/templates/{id}/duplicate", h.OfficeDuplicateTeamTemplate)
 					r.Post("/templates/from-team", h.OfficeTemplateFromTeam)
 					r.Post("/spawn-team", h.OfficeSpawnTeam)
+					// Upload a .zip codebase to seed a new project before
+					// spawning (multipart; streamed + extracted server-side).
+					r.Post("/upload-codebase", h.OfficeUploadCodebase)
 					// One-click "Demo Jarvis" — spawns a tiny, cost-bounded,
 					// real demo team into a sandbox project. Reuses the
 					// spawn-team guard (409 if a team is already live).
