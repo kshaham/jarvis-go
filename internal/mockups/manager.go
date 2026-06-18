@@ -2,11 +2,24 @@ package mockups
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
 // statusKey holds per-(project,kind) generation status in the shared settings.
 const statusKey = "mockupsStatus"
+
+// MockupRunStaleTimeout is how long a running mockup run may go without
+// any upload advancing it before the sweep re-drives or fails it. Sized
+// above the observed worst case where a busy perpetual lead takes a few
+// minutes to finish its current turn before servicing the injected
+// mockup prompt (measured ~4.5m), so the sweep does not re-drive a run
+// the lead is about to start.
+const MockupRunStaleTimeout = 8 * time.Minute
+
+// MockupRunMaxRedrives caps how many times the sweep re-injects the
+// prompt before giving up and marking the run errored.
+const MockupRunMaxRedrives = 2
 
 // Run/result statuses.
 const (
@@ -30,6 +43,14 @@ type Status struct {
 	StartedAt string `json:"startedAt,omitempty"`
 	UpdatedAt string `json:"updatedAt,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Attempts  int    `json:"attempts,omitempty"` // auto re-drives performed by the sweep
+}
+
+// RunRef is one running run keyed back to its (projectID, kind).
+type RunRef struct {
+	ProjectID string
+	Kind      string
+	Status    Status
 }
 
 // SettingsStore is the minimal settings surface (same shape projects uses).
@@ -128,6 +149,45 @@ func (m *Manager) Fail(projectID, kind, msg string) {
 	s.Status = StatusError
 	s.Error = msg
 	s.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	m.setStatus(projectID, kind, s)
+	m.bus.Broadcast(EventProgress, map[string]any{"projectId": projectID, "kind": kind, "status": s})
+}
+
+// RunningRuns snapshots every run currently in the running state, keyed back
+// to its projectID + kind. Order is unspecified.
+func (m *Manager) RunningRuns() []RunRef {
+	all := m.snapshot()
+	refs := make([]RunRef, 0, len(all))
+	for key, s := range all {
+		if s.Status != StatusRunning {
+			continue
+		}
+		// statusMapKey joins projectID+"|"+kind; projectIDs are validated to
+		// exclude "|", so the first "|" splits the pair unambiguously.
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		refs = append(refs, RunRef{ProjectID: parts[0], Kind: parts[1], Status: s})
+	}
+	return refs
+}
+
+// Redrive records that the sweep re-injected the prompt for a stalled run: it
+// bumps Attempts and UpdatedAt while keeping the run in the running state.
+func (m *Manager) Redrive(projectID, kind string) {
+	s := m.Status(projectID, kind)
+	s.Status = StatusRunning
+	s.Attempts++
+	s.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	m.setStatus(projectID, kind, s)
+	m.bus.Broadcast(EventProgress, map[string]any{"projectId": projectID, "kind": kind, "status": s})
+}
+
+// Cancel clears a stuck run back to idle without deleting already-uploaded
+// images (operators use this to unblock a stranded tile).
+func (m *Manager) Cancel(projectID, kind string) {
+	s := Status{Status: StatusIdle}
 	m.setStatus(projectID, kind, s)
 	m.bus.Broadcast(EventProgress, map[string]any{"projectId": projectID, "kind": kind, "status": s})
 }

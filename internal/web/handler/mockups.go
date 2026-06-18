@@ -4,7 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -128,6 +130,64 @@ func (ctx *Context) MockupsGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.WriteJSON(w, http.StatusAccepted, map[string]interface{}{"success": true, "status": "running"})
+}
+
+// SweepStalledMockupRuns re-drives or fails mockup runs that have gone too
+// long without an upload advancing them, so a stranded lead (restart, team
+// teardown, retry cap) never leaves a run stuck at "running" forever.
+func (ctx *Context) SweepStalledMockupRuns() {
+	for _, ref := range ctx.Mockups.RunningRuns() {
+		updated, err := time.Parse(time.RFC3339, ref.Status.UpdatedAt)
+		if err != nil || time.Since(updated) <= mockups.MockupRunStaleTimeout {
+			continue // missing/unparseable timestamp or not stale yet
+		}
+		proj, found := findSavedProject(ctx.Projects.List(), ref.ProjectID)
+		_, workdir := ctx.OfficeManager.GetSpawnContext()
+		teamLive := found && proj.Path != "" && ctx.OfficeManager.IsTeamSpawned() && workdir == proj.Path
+		roster := ctx.OfficeManager.GetRoster()
+		if teamLive && len(roster) > 0 && ref.Status.Attempts < mockups.MockupRunMaxRedrives {
+			lead := roster[0]
+			if ctx.OfficeManager.Sessions() != nil && ctx.OfficeManager.Sessions().WriteInkPrompt(lead.SessionID(), buildMockupPrompt(proj, ref.Kind)) {
+				ctx.Mockups.Redrive(ref.ProjectID, ref.Kind)
+				slog.Info("re-drove stalled mockup run", "projectId", ref.ProjectID, "kind", ref.Kind, "attempt", ref.Status.Attempts+1)
+				continue
+			}
+		}
+		// Cannot re-drive (no live team / lead not accepting / cap reached):
+		// fail it so the tile shows a retryable error instead of a permanent blank.
+		reason := "mockup run stalled: lead made no progress"
+		if !teamLive {
+			reason = "mockup run orphaned: no active team on this project"
+		} else if ref.Status.Attempts >= mockups.MockupRunMaxRedrives {
+			reason = "mockup run failed: lead did not produce images after retries"
+		}
+		ctx.Mockups.Fail(ref.ProjectID, ref.Kind, reason)
+		slog.Warn("failed stalled mockup run", "projectId", ref.ProjectID, "kind", ref.Kind, "reason", reason)
+	}
+}
+
+type mockupsCancelRequest struct {
+	ProjectID string `json:"projectId"`
+	Kind      string `json:"kind"`
+}
+
+// MockupsCancel clears a stuck run back to idle (operator unblocks a stranded
+// tile). Already-uploaded images are preserved. POST /api/mockups/cancel.
+func (ctx *Context) MockupsCancel(w http.ResponseWriter, r *http.Request) {
+	var req mockupsCancelRequest
+	if !request.DecodeAndValidateMax(w, r, &req, 1<<12) {
+		return
+	}
+	if !mockups.ValidateKind(req.Kind) {
+		request.WriteError(w, http.StatusBadRequest, "kind must be 'ui' or 'presentation'")
+		return
+	}
+	if req.ProjectID == "" {
+		request.WriteError(w, http.StatusBadRequest, "projectId is required")
+		return
+	}
+	ctx.Mockups.Cancel(req.ProjectID, req.Kind)
+	ok(w, map[string]interface{}{"success": true, "status": "idle"})
 }
 
 type mockupUploadRequest struct {

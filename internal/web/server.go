@@ -790,6 +790,18 @@ func (s *Server) setupRouter() chi.Router {
 
 	s.handlerCtx = h
 
+	// Background sweep: re-drive or fail mockup runs stuck at "running" so a
+	// stranded lead (session restart, team teardown, retry cap) never leaves
+	// the Mockups tile blank forever. Fire-and-forget, matching the other
+	// long-lived monitor goroutines in this package.
+	go func() {
+		t := time.NewTicker(90 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			h.SweepStalledMockupRuns()
+		}
+	}()
+
 	// Inter-team relay infrastructure. Identity is generated on first
 	// use (~/.jarvis/identity.json), registry lives at peers.json,
 	// relay messages persist under ~/.jarvis/relay/. The Service binds
@@ -1141,6 +1153,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/tests/scan", h.TestsRunScan)
 				r.Post("/tests/react", h.TestsRunReact)
 				r.Post("/mockups/generate", h.MockupsGenerate)
+				r.Post("/mockups/cancel", h.MockupsCancel)
 				r.Post("/deliverables/generate", h.DeliverablesGenerate)
 				r.Post("/cleanup-state", h.CleanupState)
 				r.Put("/prompt-processor/config", h.UpdatePromptProcessor)
