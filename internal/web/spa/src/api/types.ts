@@ -411,7 +411,7 @@ export interface Whiteboard {
 const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
   'claude-subscription': ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
   'claude-api': ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  'zai-glm': ['glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
+  'zai-glm': ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
   'openai-codex': ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2'],
   'openai-custom': ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2'],
   // Subscription uses the plan's own model lineup, so no fixed dropdown —

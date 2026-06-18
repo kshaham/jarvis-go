@@ -28,7 +28,7 @@ const PROVIDERS: { value: Provider; label: string; hint: string; placeholder: st
     value: 'zai-glm',
     label: 'Z.AI · GLM',
     hint: 'Anthropic-compatible Z.AI API. Requires ZAI_API_KEY.',
-    placeholder: 'glm-5',
+    placeholder: 'glm-5.2',
   },
   {
     value: 'openai-codex',

@@ -347,7 +347,7 @@ func (ctx *Context) getProviderEnvVars() map[string]string {
 			// Opus model (complex tasks, premium -- uses 3x quota during peak)
 			opusModel, _ := settings["zaiModel"].(string)
 			if opusModel == "" {
-				opusModel = "glm-5.1"
+				opusModel = "glm-5.2"
 			}
 			// Sonnet model (routine tasks, budget-friendly)
 			sonnetModel, _ := settings["zaiSonnetModel"].(string)
@@ -423,7 +423,7 @@ func (ctx *Context) getProviderEnvVarsFor(provider, model, sonnetOverride string
 		if key, ok := settings["zaiApiKey"].(string); ok && key != "" {
 			env["ANTHROPIC_AUTH_TOKEN"] = key
 			if model == "" {
-				model = "glm-5.1"
+				model = "glm-5.2"
 			}
 			sonnetModel := sonnetOverride
 			if sonnetModel == "" {

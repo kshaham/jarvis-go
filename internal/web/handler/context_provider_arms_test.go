@@ -64,9 +64,9 @@ func TestGetProviderEnvVarsFor_ZaiSonnetFallbackDefault(t *testing.T) {
 	if env["ANTHROPIC_DEFAULT_SONNET_MODEL"] != "glm-4.7" {
 		t.Errorf("sonnet default=%q, want glm-4.7 fallback", env["ANTHROPIC_DEFAULT_SONNET_MODEL"])
 	}
-	// model "" -> default glm-5.1 mapped onto the opus alias.
-	if env["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.1" {
-		t.Errorf("opus default=%q, want glm-5.1", env["ANTHROPIC_DEFAULT_OPUS_MODEL"])
+	// model "" -> default glm-5.2 mapped onto the opus alias.
+	if env["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.2" {
+		t.Errorf("opus default=%q, want glm-5.2", env["ANTHROPIC_DEFAULT_OPUS_MODEL"])
 	}
 }
 

@@ -52,8 +52,8 @@ func TestGetProviderEnvVars_AllProviders(t *testing.T) {
 	if envZ["ANTHROPIC_AUTH_TOKEN"] != "zai-key" {
 		t.Errorf("zai auth token=%q, want zai-key", envZ["ANTHROPIC_AUTH_TOKEN"])
 	}
-	if envZ["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.1" {
-		t.Errorf("zai default opus=%q, want glm-5.1", envZ["ANTHROPIC_DEFAULT_OPUS_MODEL"])
+	if envZ["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.2" {
+		t.Errorf("zai default opus=%q, want glm-5.2", envZ["ANTHROPIC_DEFAULT_OPUS_MODEL"])
 	}
 	if envZ["ANTHROPIC_BASE_URL"] == "" {
 		t.Error("zai-glm must set a base URL")
