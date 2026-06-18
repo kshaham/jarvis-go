@@ -307,6 +307,8 @@ export function ConfigureLayout({
             defaultProvider={state.defaultProvider}
             perpetual={state.perpetual}
             setPerpetual={set('perpetual')}
+            perpetualHours={state.perpetualHours}
+            setPerpetualHours={set('perpetualHours')}
             sevenStep={state.sevenStep}
             setSevenStep={set('sevenStep')}
             workflowsEnabled={state.workflowsEnabled}

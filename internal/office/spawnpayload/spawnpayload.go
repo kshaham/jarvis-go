@@ -75,13 +75,20 @@ type MemberOverride struct {
 // SpawnTeamRequest is the operator's complete intent for a new team:
 // which template, what overrides, what tuning, what integrations.
 type SpawnTeamRequest struct {
-	WorkingDir          string           `json:"workingDir"`
-	TemplateID          string           `json:"templateId"`
-	Mission             string           `json:"mission"`
-	MemberOverrides     []MemberOverride `json:"memberOverrides"`
-	PerpetualMode       *bool            `json:"perpetualMode"` // nil = default true
-	TelegramEnabled     bool             `json:"telegramEnabled"`
-	TelegramIntervalMin int              `json:"telegramIntervalMin"`
+	WorkingDir      string           `json:"workingDir"`
+	TemplateID      string           `json:"templateId"`
+	Mission         string           `json:"mission"`
+	MemberOverrides []MemberOverride `json:"memberOverrides"`
+	PerpetualMode   *bool            `json:"perpetualMode"` // nil = default true
+	// PerpetualDurationHours, when non-nil and > 0, sets a wall-clock
+	// deadline for perpetual mode: teamSpawnedAt + N hours. Once the
+	// deadline passes the recovery monitor auto-initiates a graceful
+	// wrap-up (mirrors the operator clicking "wrap up"). nil or <= 0
+	// means unlimited (the historical default — perpetual runs until an
+	// operator stops it). Only meaningful when PerpetualMode resolves true.
+	PerpetualDurationHours *int `json:"perpetualDurationHours,omitempty"`
+	TelegramEnabled        bool `json:"telegramEnabled"`
+	TelegramIntervalMin    int  `json:"telegramIntervalMin"`
 
 	// NewProject + ProjectName together signal that the operator
 	// wants to spawn into a freshly-created /app/workspace/<ProjectName>

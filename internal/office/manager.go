@@ -45,6 +45,16 @@ type Manager struct {
 	agents      map[string]*AgentState // sessionId -> state
 	configIndex map[string]string      // configId -> sessionId
 
+	// spawnedMembers snapshots each member's config at spawn time keyed by
+	// ConfigID, so a DEAD member (no live session in the agents map) can be
+	// rebuilt and respawned by the Guardian / peer-restart flow. Populated in
+	// FinalizeTeamSpawn from the live roster; cleared on team teardown.
+	spawnedMembers map[string]*spawnedMemberRecord
+	// respawnHistory tracks per-member respawn timestamps so RespawnMemberByID
+	// can enforce a backoff cap (max respawnCapCount within respawnCapWindow)
+	// and refuse to loop forever on a member that keeps dying.
+	respawnHistory map[string][]time.Time
+
 	// blockedTaskCount is the team-wide count of tasks in TaskBlocked state.
 	// Maintained atomically so the statusline handler can read it in O(1)
 	// without walking all agents*tasks. Updated by NotifyTaskBlocked and
@@ -68,6 +78,14 @@ type Manager struct {
 	teamSpawned   bool
 	wrappingUp    bool
 	perpetualMode bool
+	// perpetualDeadline is the wall-clock instant at which perpetual mode
+	// auto-wraps-up (teamSpawnedAt + PerpetualDurationHours). Zero means
+	// unlimited (the historical default). Set by SetPerpetualDurationHours.
+	perpetualDeadline time.Time
+	// perpetualDurationWrappedUp latches true once the duration deadline has
+	// fired an auto-wrap-up, so checkPerpetualDurationDeadline never
+	// re-triggers the wrap-up fan-out on subsequent ticks.
+	perpetualDurationWrappedUp bool
 	// sevenStepMode is the additive 7-step engineering discipline overlay
 	// (agent-skills SDLC). Orthogonal to perpetualMode -- it governs HOW each
 	// task is executed, not whether agents self-replenish.
@@ -281,6 +299,8 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 	mgr := &Manager{
 		agents:             make(map[string]*AgentState),
 		configIndex:        make(map[string]string),
+		spawnedMembers:     make(map[string]*spawnedMemberRecord),
+		respawnHistory:     make(map[string][]time.Time),
 		fileLocks:          make(map[string]*FileLock),
 		meetings:           make(map[string]*Meeting),
 		bugTasks:           make(map[string]*BugTask),
@@ -729,6 +749,13 @@ func (m *Manager) SetTeamSpawned(v bool) {
 		// lastAskAt accumulates one entry per distinct (session, question) pair
 		// and is otherwise never pruned; reset it on teardown like the siblings.
 		m.lastAskAt = make(map[string]time.Time)
+		// Clear the respawn snapshot + backoff history so a fresh team doesn't
+		// inherit the previous team's dead-member records.
+		m.spawnedMembers = make(map[string]*spawnedMemberRecord)
+		m.respawnHistory = make(map[string][]time.Time)
+		// Reset the perpetual-duration deadline + latch on teardown.
+		m.perpetualDeadline = time.Time{}
+		m.perpetualDurationWrappedUp = false
 	}
 	m.mu.Unlock()
 
@@ -1217,6 +1244,112 @@ func (m *Manager) IsPerpetualMode() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.perpetualMode
+}
+
+// SetPerpetualDurationHours sets (or clears) the perpetual-mode wall-clock
+// deadline. hours <= 0 means unlimited (perpetualDeadline is zeroed). A
+// positive value anchors the deadline at teamSpawnedAt + hours, so the
+// duration counts from when the team was first spawned, not from when this
+// setter runs. Resets the wrapped-up latch so a re-arm (e.g. operator
+// extending the run) can fire a fresh auto-wrap-up.
+func (m *Manager) SetPerpetualDurationHours(hours int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if hours <= 0 {
+		m.perpetualDeadline = time.Time{}
+	} else {
+		m.perpetualDeadline = m.teamSpawnedAt.Add(time.Duration(hours) * time.Hour)
+	}
+	m.perpetualDurationWrappedUp = false
+}
+
+// GetPerpetualDeadline returns the perpetual-mode auto-wrap-up deadline. A
+// zero time means unlimited. Exposed for the status payload + tests.
+func (m *Manager) GetPerpetualDeadline() time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.perpetualDeadline
+}
+
+// spawnedMemberRecord captures everything needed to rebuild a dead member's
+// session: the member config (identity, personality, skills) plus the
+// team-level spawn context (workdir, provider, model, perpetual flag) that
+// the original spawn used. Keyed by ConfigID in Manager.spawnedMembers.
+type spawnedMemberRecord struct {
+	Config     *TeamMemberConfig
+	WorkingDir string
+	Provider   string
+	Model      string
+	Perpetual  bool
+}
+
+// RecordSpawnedMembers snapshots the spawned roster so a member that later
+// dies can be rebuilt by RespawnMemberByID / the peer-restart endpoint. Each
+// record carries the member config plus the team-level spawn context. Called
+// from FinalizeTeamSpawn once the roster is registered. Deep-copies the config
+// so a later mutation of the live AgentState.Config can't tear the snapshot.
+func (m *Manager) RecordSpawnedMembers(workingDir, provider, model string, perpetual bool) {
+	roster := m.GetRoster()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.spawnedMembers == nil {
+		m.spawnedMembers = make(map[string]*spawnedMemberRecord)
+	}
+	for _, a := range roster {
+		if a == nil || a.Config == nil {
+			continue
+		}
+		cfgCopy := *a.Config
+		// Per-member provider/model wins over the team-level default when the
+		// agent recorded its own (e.g. a Z.AI sonnet allocation or a template
+		// pin). Read under the agent lock to avoid racing SetProvider.
+		memberProvider, memberModel := provider, model
+		a.mu.Lock()
+		if a.Provider != "" {
+			memberProvider = a.Provider
+		}
+		if a.Model != "" {
+			memberModel = a.Model
+		}
+		a.mu.Unlock()
+		m.spawnedMembers[a.ConfigID] = &spawnedMemberRecord{
+			Config:     &cfgCopy,
+			WorkingDir: workingDir,
+			Provider:   memberProvider,
+			Model:      memberModel,
+			Perpetual:  perpetual,
+		}
+	}
+}
+
+// GetSpawnedMemberConfig returns a copy of the spawned config + spawn context
+// for the given member ConfigID, or nil if the member was never recorded.
+// Used by the dead-member respawn path to rebuild a session for a member whose
+// live AgentState has been unregistered.
+func (m *Manager) GetSpawnedMemberConfig(id string) *TeamMemberConfig {
+	rec := m.getSpawnedMemberRecord(id)
+	if rec == nil || rec.Config == nil {
+		return nil
+	}
+	cp := *rec.Config
+	return &cp
+}
+
+// getSpawnedMemberRecord returns a copy of the full spawned record (config +
+// spawn context) for the given ConfigID under RLock, or nil if absent.
+func (m *Manager) getSpawnedMemberRecord(id string) *spawnedMemberRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rec, ok := m.spawnedMembers[id]
+	if !ok || rec == nil {
+		return nil
+	}
+	cp := *rec
+	if rec.Config != nil {
+		cfgCopy := *rec.Config
+		cp.Config = &cfgCopy
+	}
+	return &cp
 }
 
 // SetSevenStepMode toggles the 7-step engineering discipline overlay. It is

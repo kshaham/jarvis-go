@@ -61,6 +61,9 @@ export function providerLabel(provider: string): string {
 
 const INTERVALS = [30, 60, 120, 240];
 
+// Perpetual auto-wrap-up durations in hours; 0 renders as "Unlimited".
+const PERPETUAL_HOURS = [0, 1, 2, 4, 6, 8, 12, 24, 48, 72];
+
 // Any OpenAI provider runs on the Codex harness, where Dynamic Workflows is N/A.
 export function isCodexHarnessProvider(provider: string): boolean {
   return (
@@ -198,6 +201,8 @@ export function TogglesSection({
   defaultProvider,
   perpetual,
   setPerpetual,
+  perpetualHours,
+  setPerpetualHours,
   sevenStep,
   setSevenStep,
   workflowsEnabled,
@@ -206,6 +211,8 @@ export function TogglesSection({
   defaultProvider: string;
   perpetual: boolean;
   setPerpetual: (b: boolean) => void;
+  perpetualHours: number;
+  setPerpetualHours: (n: number) => void;
   sevenStep: boolean;
   setSevenStep: (b: boolean) => void;
   workflowsEnabled: boolean;
@@ -221,6 +228,22 @@ export function TogglesSection({
           onChange={setPerpetual}
           hint="Auto-restart agents that finish their queue."
         />
+        {perpetual ? (
+          <Field label="Auto wrap-up after (hours)">
+            <select
+              value={perpetualHours}
+              onChange={(e) => setPerpetualHours(Number(e.target.value))}
+              style={inputStyle}
+              aria-label="Perpetual auto wrap-up hours"
+            >
+              {PERPETUAL_HOURS.map((h) => (
+                <option key={h} value={h}>
+                  {h === 0 ? 'Unlimited' : `${h} hours`}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
         <Toggle
           label="7-step engineering"
           value={sevenStep}

@@ -12,6 +12,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -49,6 +51,16 @@ type agentWorkdirRequest struct {
 type agentRestartRequest struct {
 	SessionID string `json:"sessionId"`
 	Reason    string `json:"reason"`
+}
+
+// agentPeerRestartRequest is the agent-callable peer-restart payload. The
+// Guardian (or any teammate) refers to the target by display name or member id;
+// the handler resolves it to a ConfigID. Reason is optional and surfaced in the
+// broadcast for audit.
+type agentPeerRestartRequest struct {
+	Name     string `json:"name"`
+	MemberID string `json:"memberId"`
+	Reason   string `json:"reason"`
 }
 
 // maxInjectPromptBytes caps operator-supplied prompt size. Keeps
@@ -264,6 +276,80 @@ func (ctx *Context) OfficeAgentBumpWorkdir(w http.ResponseWriter, r *http.Reques
 	ok(w, map[string]interface{}{"workingDir": resolved})
 }
 
+// restartLiveAgent tears down one LIVE agent's SDK/Codex session and attaches
+// a fresh one without dropping the AgentState. Memory, learnings, task queue,
+// whiteboard note, personality — all survive the restart; session cost/token
+// counters reset (fresh session). Returns the new session ID, the agent's
+// display name, and the spawn mode. The error is one of the office sentinels
+// (ErrAgentMissingConfig / ErrRestartWorkingDirUnknown) or a generic spawn
+// failure; the caller maps it to the right HTTP status.
+//
+// Factored out of OfficeAgentRestart so the agent-callable peer-restart
+// endpoint can reuse the exact same in-place restart flow for a teammate that
+// is still alive but stuck.
+func (ctx *Context) restartLiveAgent(sessionID, reason string) (newSessionID, agentName, mode string, err error) {
+	agent := ctx.OfficeManager.GetAgent(sessionID)
+	if agent == nil {
+		return "", "", "", office.ErrAgentMissingConfig
+	}
+	member, mErr := office.BuildRestartTemplateMember(agent)
+	if mErr != nil {
+		return "", "", "", mErr
+	}
+	agentName = agent.Config.Name
+
+	// Snapshot the working dir from the live SDK/Codex session before we stop
+	// it — the spawn helper needs it to build the fresh session at the same
+	// path. Falls back to agent.WorktreePath when no live session lookup hits.
+	sdkWorkingDir := ""
+	sm := ctx.SessionManager
+	if sm != nil {
+		if sdk, ok := sm.GetSDKSession(sessionID); ok {
+			sdkWorkingDir = sdk.WorkingDir
+		} else if cx, ok := sm.GetCodexSession(sessionID); ok {
+			sdkWorkingDir = cx.WorkingDir
+		}
+	}
+	workingDir := office.ResolveRestartWorkingDir(agent, sdkWorkingDir)
+	if workingDir == "" {
+		return "", "", "", office.ErrRestartWorkingDirUnknown
+	}
+
+	// Stop the old session BEFORE reassigning so any in-flight EventExit runs
+	// against the old ID cleanly. One of the two stops is a harmless no-op.
+	if sm != nil {
+		_ = sm.StopSDKSession(sessionID)
+		_ = sm.StopCodexSession(sessionID)
+	}
+
+	spawnReq := spawnTeamRequest{
+		WorkingDir: workingDir,
+		Mission:    ctx.OfficeManager.GetTeamMission(),
+	}
+	teamConfigs := ctx.OfficeManager.SnapshotRosterAsTeamMemberConfigs()
+	perpetual := ctx.OfficeManager.IsPerpetualMode()
+	envVars := ctx.getProviderEnvVars()
+
+	// Respawn path: never opt into hooks-mode here (see OfficeAgentRestart's
+	// original note). Preserve the agent's recorded provider/model so a Codex
+	// agent respawns on Codex and a Claude agent on Claude.
+	newSessionID, mode = spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, true, nil, agent.Provider, agent.Model, spawnAgentSpec{})
+	if newSessionID == "" {
+		return "", "", "", fmt.Errorf("failed to create replacement session")
+	}
+
+	if !ctx.OfficeManager.ReassignSessionID(sessionID, newSessionID) {
+		// UUID-v4 collision (effectively impossible) — don't leak the dangling
+		// replacement. Stop both backends since the replacement may be Codex.
+		if sm != nil {
+			_ = sm.StopSDKSession(newSessionID)
+			_ = sm.StopCodexSession(newSessionID)
+		}
+		return "", "", "", fmt.Errorf("failed to reassign session id")
+	}
+	return newSessionID, agentName, mode, nil
+}
+
 // OfficeAgentRestart tears down one agent's SDK session and attaches
 // a fresh one without dropping the AgentState. Memory, learnings,
 // task queue, whiteboard note, personality — all survive the
@@ -278,89 +364,8 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "sessionId is required")
 		return
 	}
-	agent := ctx.OfficeManager.GetAgent(req.SessionID)
-	if agent == nil {
+	if ctx.OfficeManager.GetAgent(req.SessionID) == nil {
 		request.WriteError(w, http.StatusNotFound, "agent not found")
-		return
-	}
-	member, err := office.BuildRestartTemplateMember(agent)
-	if err != nil {
-		request.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	agentName := agent.Config.Name
-
-	// Snapshot the working dir from the live SDK session before we
-	// stop it — the spawn helper needs it to build the fresh session
-	// at the same path. Falls back to agent.WorktreePath when no SDK
-	// session lookup is available.
-	sdkWorkingDir := ""
-	sm := ctx.SessionManager
-	if sm != nil {
-		if sdk, ok := sm.GetSDKSession(req.SessionID); ok {
-			sdkWorkingDir = sdk.WorkingDir
-		} else if cx, ok := sm.GetCodexSession(req.SessionID); ok {
-			// Codex-harness agent: same restart flow, different backend.
-			sdkWorkingDir = cx.WorkingDir
-		}
-	}
-	workingDir := office.ResolveRestartWorkingDir(agent, sdkWorkingDir)
-	if workingDir == "" {
-		request.WriteError(w, http.StatusInternalServerError,
-			office.ErrRestartWorkingDirUnknown.Error())
-		return
-	}
-
-	// Stop the old SDK session. HandleAgentDeath wouldn't fire
-	// post-reassignment (the old session ID is no longer in the
-	// agents map by then) — but we stop it BEFORE reassigning so any
-	// in-flight EventExit runs against the old ID cleanly.
-	if sm != nil {
-		_ = sm.StopSDKSession(req.SessionID)
-		// Also stop a Codex-backed session if that's what this agent ran on
-		// (one of the two is a no-op "not found" — harmless).
-		_ = sm.StopCodexSession(req.SessionID)
-	}
-
-	spawnReq := spawnTeamRequest{
-		WorkingDir: workingDir,
-		Mission:    ctx.OfficeManager.GetTeamMission(),
-	}
-	teamConfigs := ctx.OfficeManager.SnapshotRosterAsTeamMemberConfigs()
-	perpetual := ctx.OfficeManager.IsPerpetualMode()
-	envVars := ctx.getProviderEnvVars()
-
-	// Respawn path: never opt into hooks-mode here. The previous
-	// session already had its .claude/settings.local.json wired (or
-	// not) when the team was first spawned; redoing it for a single
-	// agent would race with the still-running process and the new
-	// session would see a stale URL pointed at the old sessionID.
-	// Operators wanting to flip an agent into hooks mode mid-team
-	// should kill the team and respawn.
-	// Preserve the agent's original harness on restart: pass its recorded
-	// provider/model so a Codex agent respawns on Codex (and a Claude agent
-	// on Claude). If the resolved provider is a Codex one, getProviderEnvVars
-	// above already emitted OPENAI_API_KEY for it.
-	newSessionID, mode := spawnAgentSession(ctx, member, spawnReq, envVars, teamConfigs, perpetual, true, nil, agent.Provider, agent.Model, spawnAgentSpec{})
-	if newSessionID == "" {
-		request.WriteError(w, http.StatusInternalServerError, "failed to create replacement session")
-		return
-	}
-
-	// Move the existing AgentState onto the new session ID. The
-	// agent's memory, task queue, learnings, personality, recovery
-	// counters — everything — carries over.
-	if !ctx.OfficeManager.ReassignSessionID(req.SessionID, newSessionID) {
-		// Extremely unlikely (collision on UUID v4) but don't leak a dangling
-		// session if it happens. The replacement may be a Codex session (the
-		// restart routes to spawnCodexAgentSession for openai-* providers), so
-		// stop BOTH backends — otherwise an orphaned codex worker keeps
-		// launching `codex exec` and spending tokens. One of these is a no-op.
-		if sm != nil {
-			_ = sm.StopSDKSession(newSessionID)
-			_ = sm.StopCodexSession(newSessionID)
-		}
-		request.WriteError(w, http.StatusInternalServerError, "failed to reassign session id")
 		return
 	}
 
@@ -368,6 +373,12 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "operator"
 	}
+	newSessionID, agentName, mode, err := ctx.restartLiveAgent(req.SessionID, reason)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	ctx.emit("office:agentRestarted", map[string]interface{}{
 		"sessionId":    newSessionID,
 		"oldSessionId": req.SessionID,
@@ -381,5 +392,138 @@ func (ctx *Context) OfficeAgentRestart(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]interface{}{
 		"sessionId":    newSessionID,
 		"oldSessionId": req.SessionID,
+	})
+}
+
+// OfficeAgentPeerRestart lets an agent (the Guardian watchdog, or any teammate)
+// restart a peer that is stuck or has died. The caller names the peer by
+// display name or member id; the handler resolves it to a ConfigID and then:
+//
+//   - LIVE peer (still on the roster): reuse the in-place restartLiveAgent
+//     flow — same path as the operator's /agent/restart, preserving the peer's
+//     memory, task queue, and learnings under a fresh session.
+//   - DEAD peer (no live session): rebuild it from the spawn-time snapshot via
+//     the manager's PrepareMemberRespawn (which enforces a respawn backoff
+//     cap), spawn a fresh session at the recorded workdir, and RegisterAgent.
+//
+// Lives in the agent-token route group so spawned agents can call it; the
+// operator-only kill/restart endpoints stay in the CSRF group.
+func (ctx *Context) OfficeAgentPeerRestart(w http.ResponseWriter, r *http.Request) {
+	var req agentPeerRestartRequest
+	if !request.DecodeAndValidateMax(w, r, &req, 1<<12) {
+		return
+	}
+	target := req.MemberID
+	if target == "" {
+		target = req.Name
+	}
+	if target == "" {
+		request.WriteError(w, http.StatusBadRequest, "name or memberId is required")
+		return
+	}
+
+	configID := ctx.OfficeManager.ResolveMemberConfigID(target)
+	if configID == "" {
+		request.WriteError(w, http.StatusNotFound, "no such teammate: "+target)
+		return
+	}
+
+	reason := req.Reason
+	if reason == "" {
+		reason = "peer-restart"
+	}
+
+	// LIVE peer: reuse the in-place restart flow.
+	if live := ctx.OfficeManager.GetAgentByConfig(configID); live != nil {
+		oldSessionID := live.SessionID()
+		newSessionID, agentName, mode, err := ctx.restartLiveAgent(oldSessionID, reason)
+		if err != nil {
+			request.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		ctx.emit("office:agentRestarted", map[string]interface{}{
+			"sessionId":    newSessionID,
+			"oldSessionId": oldSessionID,
+			"agentName":    agentName,
+			"reason":       reason,
+			"mode":         mode,
+			"via":          "peer",
+		})
+		slog.Info("peer restarted live agent in place",
+			"name", agentName, "oldSession", oldSessionID,
+			"newSession", newSessionID, "reason", reason)
+		ok(w, map[string]interface{}{
+			"sessionId":    newSessionID,
+			"oldSessionId": oldSessionID,
+			"restarted":    "live",
+		})
+		return
+	}
+
+	// DEAD peer: rebuild from the spawn snapshot (backoff-capped).
+	plan, err := ctx.OfficeManager.PrepareMemberRespawn(configID)
+	if err != nil {
+		switch {
+		case errors.Is(err, office.ErrRespawnCapReached):
+			request.WriteError(w, http.StatusTooManyRequests,
+				"respawn cap reached for "+target+"; escalate to the lead instead")
+		case errors.Is(err, office.ErrMemberNotRespawnable):
+			request.WriteError(w, http.StatusNotFound,
+				"no spawn snapshot for "+target+" (cannot respawn)")
+		default:
+			request.WriteError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	spawnReq := spawnTeamRequest{
+		WorkingDir: plan.WorkingDir,
+		Mission:    ctx.OfficeManager.GetTeamMission(),
+	}
+	teamConfigs := ctx.OfficeManager.SnapshotRosterAsTeamMemberConfigs()
+	envVars := ctx.getProviderEnvVars()
+	// If the recorded provider is a Codex one, make sure OPENAI_API_KEY is in
+	// the env block (getProviderEnvVars emits the team default; rebuild for the
+	// member's recorded provider when it differs and lacks the key).
+	if office.HarnessFor(plan.Provider) == "codex" && envVars["OPENAI_API_KEY"] == "" {
+		envVars = ctx.getProviderEnvVarsFor(plan.Provider, plan.Model, "")
+	}
+
+	newSessionID, mode := spawnAgentSession(ctx, plan.Member, spawnReq, envVars, teamConfigs, plan.Perpetual, true, nil, plan.Provider, plan.Model, spawnAgentSpec{})
+	if newSessionID == "" {
+		request.WriteError(w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to respawn dead member %s", target))
+		return
+	}
+
+	// Register the fresh session under the member's config. A dead member has
+	// no surviving AgentState, so this re-creates one (memory on disk is keyed
+	// by ConfigID + workingDir, so kickstart still reloads the member's notes).
+	cfg := &office.TeamMemberConfig{
+		ID:           plan.Member.ID,
+		Name:         plan.Member.Name,
+		Role:         plan.Member.Role,
+		Tier:         plan.Member.Tier,
+		Color:        plan.Member.Color,
+		Personality:  plan.Member.Personality,
+		Voice:        plan.Member.Voice,
+		Skills:       plan.Member.Skills,
+		SystemPrompt: plan.Member.SystemPrompt,
+	}
+	ctx.OfficeManager.RegisterAgentWithProvider(newSessionID, cfg, plan.Provider, plan.Model, mode)
+
+	ctx.emit("office:agentRestarted", map[string]interface{}{
+		"sessionId": newSessionID,
+		"agentName": plan.Member.Name,
+		"reason":    reason,
+		"mode":      mode,
+		"via":       "peer-respawn",
+	})
+	slog.Info("peer respawned dead member",
+		"name", plan.Member.Name, "newSession", newSessionID,
+		"workingDir", plan.WorkingDir, "reason", reason)
+	ok(w, map[string]interface{}{
+		"sessionId": newSessionID,
+		"restarted": "respawned",
 	})
 }

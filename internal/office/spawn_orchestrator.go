@@ -140,11 +140,24 @@ func (m *Manager) FinalizeTeamSpawn(req spawnpayload.SpawnTeamRequest, templateU
 		m.SetTeamMission(req.Mission)
 	}
 	m.SetPerpetualMode(perpetual)
+	// Resolve the optional perpetual-duration deadline (nil -> 0 -> unlimited).
+	// Anchored at teamSpawnedAt inside the setter, so the deadline measures from
+	// the team's spawn, not from this call.
+	durationHours := 0
+	if req.PerpetualDurationHours != nil {
+		durationHours = *req.PerpetualDurationHours
+	}
+	m.SetPerpetualDurationHours(durationHours)
 	// Additive 7-step engineering overlay (opt-in, default off). Resolved from
 	// the request so it can combine with perpetual or goal-focused mode.
 	m.SetSevenStepMode(ResolveSevenStepMode(req))
 	// Persist the ECC opt-out so non-spawn paths (onboarding) filter ECC skills.
 	m.SetEccDisabled(spawnpayload.EccOptOut(req))
+	// Snapshot the spawned roster so a dead member can be rebuilt by the
+	// Guardian / peer-restart flow. Per-member provider/model is read off each
+	// live AgentState inside RecordSpawnedMembers; the team-level args are
+	// fallbacks only.
+	m.RecordSpawnedMembers(req.WorkingDir, "", "", perpetual)
 }
 
 // Sentinel errors returned by TriageTaskBetweenAgents. Distinct
@@ -710,6 +723,141 @@ func (m *Manager) SnapshotRosterAsTeamMemberConfigs() []*TeamMemberConfig {
 		out = append(out, a.Config)
 	}
 	return out
+}
+
+// Respawn backoff knobs. A member that keeps dying is refused after
+// respawnCapCount respawns inside respawnCapWindow so a crash-looping agent
+// can't be restarted forever (each respawn costs a fresh session + tokens).
+const (
+	respawnCapCount  = 3
+	respawnCapWindow = 30 * time.Minute
+)
+
+// ErrRespawnCapReached signals that a member has been respawned too many times
+// in the backoff window. Callers (Guardian / peer-restart) should stop trying
+// and escalate to a human instead of looping.
+var ErrRespawnCapReached = errors.New("respawn cap reached for member")
+
+// ErrMemberNotRespawnable signals that no spawned-member snapshot exists for
+// the given ConfigID, so a dead member can't be rebuilt. Should be impossible
+// for a member that was actually spawned by this team; surfaced so the handler
+// can map it to HTTP 404.
+var ErrMemberNotRespawnable = errors.New("no spawn snapshot for member (cannot respawn)")
+
+// MemberRespawnPlan is the data the handler needs to rebuild a DEAD member's
+// session: the projected template member, the working directory, and the
+// provider/model/perpetual the original spawn used. The office package owns
+// the lookup + backoff bookkeeping; the handler owns the actual
+// spawnAgentSession call (which lives in the handler package and touches the
+// pty.SessionManager the office package deliberately does not import).
+type MemberRespawnPlan struct {
+	Member     teamtemplates.TeamTemplateMember
+	WorkingDir string
+	Provider   string
+	Model      string
+	Perpetual  bool
+}
+
+// ResolveMemberConfigID maps a member identifier (its ConfigID or its
+// case-insensitive display Name) to the member's ConfigID. It checks the live
+// roster first, then the spawn-time snapshot so a DEAD member (no live session)
+// still resolves. Returns "" when nothing matches. Used by the agent-callable
+// peer-restart endpoint, where a teammate refers to a peer by name.
+func (m *Manager) ResolveMemberConfigID(nameOrID string) string {
+	if nameOrID == "" {
+		return ""
+	}
+	// Live roster: exact ConfigID, then case-insensitive name.
+	for _, a := range m.GetRoster() {
+		if a == nil || a.Config == nil {
+			continue
+		}
+		if a.ConfigID == nameOrID {
+			return a.ConfigID
+		}
+	}
+	for _, a := range m.GetRoster() {
+		if a == nil || a.Config == nil {
+			continue
+		}
+		if strings.EqualFold(a.Config.Name, nameOrID) {
+			return a.ConfigID
+		}
+	}
+	// Spawn snapshot: covers dead members no longer on the roster.
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rec, ok := m.spawnedMembers[nameOrID]; ok && rec != nil {
+		return nameOrID
+	}
+	for id, rec := range m.spawnedMembers {
+		if rec == nil || rec.Config == nil {
+			continue
+		}
+		if strings.EqualFold(rec.Config.Name, nameOrID) {
+			return id
+		}
+	}
+	return ""
+}
+
+// PrepareMemberRespawn resolves the respawn plan for a DEAD member by ConfigID,
+// applying the backoff cap. On success it records the respawn attempt timestamp
+// (so repeated calls eventually trip the cap) and returns a plan the handler
+// can feed to spawnAgentSession. Returns:
+//   - ErrMemberNotRespawnable when no spawn snapshot exists for the ID.
+//   - ErrRespawnCapReached when respawnCapCount respawns already happened
+//     inside respawnCapWindow.
+//
+// This intentionally does NOT spawn anything: the office package can't reach
+// the handler's session manager. The handler calls spawnAgentSession with the
+// returned plan and then RegisterAgent.
+func (m *Manager) PrepareMemberRespawn(id string) (MemberRespawnPlan, error) {
+	rec := m.getSpawnedMemberRecord(id)
+	if rec == nil || rec.Config == nil {
+		return MemberRespawnPlan{}, ErrMemberNotRespawnable
+	}
+
+	// Backoff cap: count respawns within the trailing window. Prune older
+	// entries as we go so the slice can't grow unbounded across a long run.
+	now := time.Now()
+	m.mu.Lock()
+	if m.respawnHistory == nil {
+		m.respawnHistory = make(map[string][]time.Time)
+	}
+	var recent []time.Time
+	for _, t := range m.respawnHistory[id] {
+		if now.Sub(t) < respawnCapWindow {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= respawnCapCount {
+		m.respawnHistory[id] = recent
+		m.mu.Unlock()
+		return MemberRespawnPlan{}, ErrRespawnCapReached
+	}
+	recent = append(recent, now)
+	m.respawnHistory[id] = recent
+	m.mu.Unlock()
+
+	cfg := rec.Config
+	return MemberRespawnPlan{
+		Member: teamtemplates.TeamTemplateMember{
+			ID:           cfg.ID,
+			Name:         cfg.Name,
+			Role:         cfg.Role,
+			Tier:         cfg.Tier,
+			Color:        cfg.Color,
+			Personality:  cfg.Personality,
+			Voice:        cfg.Voice,
+			SystemPrompt: cfg.SystemPrompt,
+			Skills:       cfg.Skills,
+		},
+		WorkingDir: rec.WorkingDir,
+		Provider:   rec.Provider,
+		Model:      rec.Model,
+		Perpetual:  rec.Perpetual,
+	}, nil
 }
 
 // NewOrchestrator is the real constructor (not implemented yet). When

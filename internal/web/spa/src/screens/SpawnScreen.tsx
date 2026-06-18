@@ -36,6 +36,8 @@ export interface SpawnState {
   // Optional .zip codebase to seed a new project from (mode === 'new').
   zipFile: File | null;
   perpetual: boolean;
+  // Auto wrap-up after N hours when perpetual mode is on (0 = unlimited).
+  perpetualHours: number;
   sevenStep: boolean;
   defaultProvider: string;
   defaultModel: string;
@@ -72,6 +74,7 @@ const SPAWN_DEFAULT: SpawnState = {
   githubRepo: '',
   zipFile: null,
   perpetual: true,
+  perpetualHours: 0,
   sevenStep: false,
   defaultProvider: 'claude-subscription',
   defaultModel: '',
@@ -100,6 +103,7 @@ function spawnReducer(state: SpawnState, action: SpawnAction): SpawnState {
       defaultProvider: tpl.defaultProvider ?? state.defaultProvider,
       defaultModel: tpl.defaultModel ?? state.defaultModel,
       perpetual: typeof tpl.perpetualImprovement === 'boolean' ? tpl.perpetualImprovement : state.perpetual,
+      perpetualHours: 0,
       sevenStep: typeof tpl.sevenStep === 'boolean' ? tpl.sevenStep : state.sevenStep,
       telegramEnabled: tpl.telegram ? !!tpl.telegram.enabled : state.telegramEnabled,
       telegramInterval: tpl.telegram?.intervalMinutes ?? state.telegramInterval,
@@ -132,6 +136,7 @@ export function SpawnScreen() {
     githubRepo,
     zipFile,
     perpetual,
+    perpetualHours,
     sevenStep,
     defaultProvider,
     defaultModel,
@@ -269,6 +274,7 @@ export function SpawnScreen() {
         projectName: mode === 'new' ? projectName : '',
         githubRepo: mode === 'github' ? githubRepo.trim() : '',
         perpetualMode: perpetual,
+        perpetualDurationHours: perpetual ? perpetualHours : 0,
         sevenStepMode: sevenStep,
         telegramEnabled,
         telegramIntervalMin: telegramInterval,

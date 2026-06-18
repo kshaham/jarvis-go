@@ -585,4 +585,8 @@ What she respects: engineers who measure before optimizing. What irritates her: 
 			"office-reflection",
 		},
 	},
+	// Guardian -- autonomous team-monitor / watchdog. Appended so every
+	// frontend-studio team ships with a member that keeps the roster healthy
+	// and restarts stuck or dead teammates without an operator in the loop.
+	MonitorMember(),
 }

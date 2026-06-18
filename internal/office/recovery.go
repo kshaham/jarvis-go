@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"strings"
 	"time"
+
+	"github.com/kshaham/jarvis/internal/safego"
 )
 
 // AgentReplenishmentEvent is emitted when a self-replenishment prompt is sent.
@@ -147,6 +149,10 @@ func (m *Manager) defaultMonitorChecks() {
 	m.checkForStuckAgents()
 	m.checkForWedgedWorkingAgents()
 	m.CheckForIdleAgents()
+	// Perpetual-duration deadline: when a team was spawned with a finite
+	// PerpetualDurationHours, auto-initiate a graceful wrap-up once the
+	// deadline passes (latched so it only fires once).
+	m.checkPerpetualDurationDeadline()
 	m.checkForCuriousAgents()
 	m.checkForReflectionOpportunity()
 	m.checkBlockedTasksForLeaderTriage()
@@ -1065,6 +1071,81 @@ func (m *Manager) broadcastStuckAlert(sessionID, agentName string, inactiveDurat
 		m.HandleAgentDeath(sessionID)
 		slog.Warn("Auto-killed stuck agent", "agent", agentName, "session", sessionID)
 	}
+}
+
+// checkPerpetualDurationDeadline auto-initiates a graceful wrap-up once a
+// perpetual team's wall-clock duration has elapsed. It is the unattended
+// equivalent of an operator clicking "wrap up": flip the wrapping-up flag,
+// stop the idle monitor, fan out the wrap-up prompt (which also cancels queued
+// work), and kick off the structured wrap-up report.
+//
+// No-op unless the team is in perpetual mode with a finite deadline that has
+// passed. The perpetualDurationWrappedUp latch guarantees the wrap-up fan-out
+// fires exactly once even though this runs on every monitor tick.
+func (m *Manager) checkPerpetualDurationDeadline() {
+	if !m.IsPerpetualMode() || m.IsWrappingUp() {
+		return
+	}
+	m.mu.RLock()
+	deadline := m.perpetualDeadline
+	wrapped := m.perpetualDurationWrappedUp
+	m.mu.RUnlock()
+	if deadline.IsZero() || wrapped {
+		return
+	}
+	if !time.Now().After(deadline) {
+		return
+	}
+
+	// Latch under the write lock so a concurrent tick can't double-fire the
+	// wrap-up. Re-check inside the lock to close the check-then-act window.
+	m.mu.Lock()
+	if m.perpetualDurationWrappedUp {
+		m.mu.Unlock()
+		return
+	}
+	m.perpetualDurationWrappedUp = true
+	m.mu.Unlock()
+
+	slog.Warn("perpetual-duration deadline reached; auto-initiating wrap-up",
+		"deadline", deadline)
+
+	// Mirror OfficePostWrapUp: set the flag, stop monitoring so no new
+	// brainstorms/replenishment fire, then fan out the wrap-up prompt. Note
+	// SetWrappingUp + StopIdleMonitoring each take their own lock, so they run
+	// AFTER releasing m.mu above (don't hold m.mu across re-locking calls).
+	m.SetWrappingUp(true)
+	m.broadcast("office:wrapUpInitiated", map[string]interface{}{
+		"active":  true,
+		"trigger": "duration",
+	})
+	m.NotifyOfficeEvent("Wrap-up Initiated", "perpetual duration limit reached")
+	m.StopIdleMonitoring()
+
+	// Deliver the wrap-up prompt to every agent via the SessionStore (the same
+	// WriteInkPrompt path the handler's writeSessionPrompt funnels into) and
+	// cancel queued tasks. Snapshot the store under RLock first.
+	m.mu.RLock()
+	sessions := m.sessions
+	m.mu.RUnlock()
+	deliver := func(sessionID, prompt string) bool {
+		if sessions == nil {
+			return false
+		}
+		return sessions.WriteInkPrompt(sessionID, prompt)
+	}
+	notified, missed, cancelled := m.FanOutWrapUpPrompt(WrapUpPrompt, deliver)
+	if len(missed) > 0 {
+		slog.Warn("auto-wrap-up prompt undelivered for some agents",
+			"missed", missed, "notified", len(notified))
+	}
+	slog.Info("auto-wrap-up initiated",
+		"notified", len(notified), "missed", len(missed), "tasksCancelled", cancelled)
+
+	// Fire-and-forget structured wrap-up report, matching the handler path.
+	safego.Go("office.autoWrapUpReport", func() {
+		GenerateAndBroadcastWrapUpReport(m, "auto-wrap-up", "duration limit reached", SSEBroadcaster(m.broadcast))
+	})
 }
 
 // CheckForIdleAgents looks for agents with empty task queues and no active work,

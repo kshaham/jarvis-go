@@ -631,6 +631,13 @@ func registerAgentMutationRoutes(r chi.Router, h *handler.Context) {
 	r.Post("/leader-tasks/response", h.OfficeAgentLeaderTasksResponse)
 	r.Post("/reflection/response", h.OfficeAgentReflectionResponse)
 	r.Post("/curiosity/discovery", h.OfficeAgentCuriosityDiscovery)
+	// Agent-callable peer restart. The Guardian watchdog (or any teammate)
+	// restarts a stuck/dead peer by name; for a dead member this rebuilds the
+	// session from the spawn snapshot, backoff-capped to avoid restart loops.
+	// Relative path -> full route /api/office/agent/peer-restart (and the
+	// /claude/hooks mount). Lives in the agent-token group, NOT the operator
+	// CSRF group where /agent/kill + /agent/restart live.
+	r.Post("/peer-restart", h.OfficeAgentPeerRestart)
 	r.Post("/file-lock", h.OfficeAgentFileLock)
 	r.Post("/skill-create", h.OfficeAgentSkillCreate)
 	r.Delete("/skills/{name}", h.OfficeAgentDeleteSkill)

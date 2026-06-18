@@ -137,6 +137,11 @@ func main() {
 	case "project":
 		handleProject(args)
 
+	// Agent recovery (Guardian protocol): inspect peer health and ask the
+	// server to respawn a stuck or exited peer by name.
+	case "agent":
+		handleAgent(args)
+
 	// Help
 	case "help", "--help", "-h":
 		printUsage()
@@ -1491,6 +1496,8 @@ Commands:
   project invariants add "<rule>"     Append a rule to the invariants list
   project invariants remove <index>   Remove rule at given 0-based index
   project invariants set "<r1>" ...   Replace full invariants list
+  agent health                        Guardian: print each peer's name, status, last activity
+  agent restart <name>                Guardian: ask the server to respawn a stuck/exited peer
   help                                Show this help
 
 Environment:
