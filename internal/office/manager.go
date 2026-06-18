@@ -75,6 +75,14 @@ type Manager struct {
 	metrics     *Metrics
 	config      *Config
 
+	// respawnMemberFn is injected by the web handler at startup (same pattern
+	// as broadcast). It rebuilds a DEAD member's session from the spawn-time
+	// snapshot — the office package can't reach the handler's pty.SessionManager
+	// directly, so the callback bridges into respawnDeadMember. nil until wired;
+	// the auto-respawn watchdog (checkForExitedMembers) no-ops while nil so a
+	// manager constructed in a test without the callback is inert.
+	respawnMemberFn func(configID string) error
+
 	teamSpawned   bool
 	wrappingUp    bool
 	perpetualMode bool
@@ -2903,6 +2911,34 @@ func (m *Manager) GetTeamSpawnedAt() time.Time {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.teamSpawnedAt
+}
+
+// SetRespawnMemberFunc installs the dead-member respawn callback the auto-respawn
+// watchdog (checkForExitedMembers) invokes when it detects a perpetual-mode
+// member whose session has died. Wired once at server startup with the handler's
+// respawnDeadMember method, which owns the spawnAgentSession + RegisterAgent path
+// the office package can't reach directly. Lock-guarded so the watchdog's RLock
+// read can't tear against this write.
+func (m *Manager) SetRespawnMemberFunc(fn func(configID string) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.respawnMemberFn = fn
+}
+
+// lastRespawnAttempt returns the most recent recorded respawn timestamp for the
+// given member ConfigID, or the zero time if none was ever recorded. Read under
+// RLock. The watchdog uses this for its 90s per-member debounce; the authoritative
+// backoff cap lives in PrepareMemberRespawn.
+func (m *Manager) lastRespawnAttempt(configID string) time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var latest time.Time
+	for _, t := range m.respawnHistory[configID] {
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	return latest
 }
 
 // SweepMeetings removes inactive meetings older than 6 hours so the meetings

@@ -732,6 +732,13 @@ func (s *Server) setupRouter() chi.Router {
 		TailFileStreams:         make(map[string]func()),
 		ActivePlanOrchestrators: make(map[string]string),
 	}
+	// Wire the backend auto-respawn watchdog: the office monitor tick detects
+	// a perpetual-mode member whose session died and rebuilds it via this
+	// callback (which owns the spawnAgentSession + RegisterAgent path the office
+	// package can't reach). Registered after both the OfficeManager and the
+	// handler Context exist.
+	s.officeManager.SetRespawnMemberFunc(h.RespawnDeadMember)
+
 	// R24 · Spending enforcement was removed (subscription plans don't
 	// benefit from dollar caps). Daily stats are still recorded for
 	// the informational cost widget, but no threshold tracker init
@@ -1300,6 +1307,12 @@ func (s *Server) setupRouter() chi.Router {
 				// the query body can be large; behaviour is otherwise
 				// idempotent and cacheable.
 				r.Post("/search", h.OfficeSearch)
+
+				// Operator/agent-callable manual member restart. Dual-auth
+				// (session OR agent/mobile token via the enclosing
+				// AuthWithTokens group), no CSRF so the bearer-token callers
+				// work. Restarts a live member in place or respawns a dead one.
+				r.Post("/agent-control/restart", h.OfficeAgentControlRestart)
 
 				// Mutating office endpoints (CSRF required)
 				r.Group(func(r chi.Router) {

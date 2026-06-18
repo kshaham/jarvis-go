@@ -1,6 +1,7 @@
 package office
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -135,6 +136,10 @@ func (m *Manager) defaultMonitorChecks() {
 	// creating review work instead of saving it.
 	m.maybeWarnLowAcceptance()
 	m.checkSessionHealth()
+	// Auto-respawn watchdog: after health-cleanup has unregistered any dead
+	// sessions, rebuild perpetual-mode members whose session died so the team
+	// self-heals without an agent issuing a peer-restart.
+	m.checkForExitedMembers()
 	m.CleanupExpiredLocks()
 	m.SweepBugTasks()
 	m.SweepMeetings()
@@ -648,6 +653,76 @@ func (m *Manager) checkSessionHealth() {
 		if !sessions.IsSessionAlive(sid) {
 			slog.Warn("Agent session no longer alive, cleaning up", "session", sid)
 			m.HandleAgentDeath(sid)
+		}
+	}
+}
+
+// checkForExitedMembers is the backend auto-respawn watchdog. In perpetual mode
+// it detects members whose session has died (no live AgentState for a ConfigID
+// that was spawned) and rebuilds them via the injected respawnMemberFn, so a
+// long-running team self-heals without relying on an agent (the Guardian) to
+// notice and issue a peer-restart.
+//
+// Guards mirror the other sweeps: no-op unless the callback is wired, the team
+// is in perpetual mode, not wrapping up, and past the spawn grace period (a
+// freshly spawned team is legitimately mid-boot). A 90s per-member debounce
+// (tick cadence + per-member boot grace) keeps it from re-firing on a member
+// whose fresh session hasn't registered yet; the authoritative backoff cap +
+// attempt recording live inside PrepareMemberRespawn (called down the callback
+// path), so this only does the debounce.
+func (m *Manager) checkForExitedMembers() {
+	m.mu.RLock()
+	respawn := m.respawnMemberFn
+	m.mu.RUnlock()
+	if respawn == nil {
+		return
+	}
+
+	if !m.IsPerpetualMode() || m.IsWrappingUp() {
+		return
+	}
+	spawnedAt := m.GetTeamSpawnedAt()
+	if spawnedAt.IsZero() || time.Since(spawnedAt) <= m.config.StuckGracePeriod {
+		return
+	}
+
+	// Snapshot the spawned ConfigIDs under RLock; don't hold the lock while
+	// calling the callback (it reaches back into the handler + spawn path).
+	m.mu.RLock()
+	configIDs := make([]string, 0, len(m.spawnedMembers))
+	for id := range m.spawnedMembers {
+		configIDs = append(configIDs, id)
+	}
+	m.mu.RUnlock()
+
+	for _, configID := range configIDs {
+		// Live member: a registered AgentState exists -> nothing to respawn.
+		if m.GetAgentByConfig(configID) != nil {
+			continue
+		}
+		// Debounce: a just-respawned member's fresh session may not have
+		// registered yet. Skip until 90s after the last attempt so we don't
+		// stack respawns on top of an in-flight boot.
+		if last := m.lastRespawnAttempt(configID); !last.IsZero() && time.Since(last) < 90*time.Second {
+			continue
+		}
+
+		err := respawn(configID)
+		switch {
+		case err == nil:
+			m.broadcast("office:memberAutoRespawned", map[string]interface{}{
+				"configId": configID,
+			})
+			slog.Info("auto-respawned exited member", "configId", configID)
+		case errors.Is(err, ErrRespawnCapReached):
+			slog.Warn("auto-respawn cap reached for exited member; escalating",
+				"configId", configID)
+			m.broadcast("office:memberRespawnCapReached", map[string]interface{}{
+				"configId": configID,
+			})
+		default:
+			slog.Warn("auto-respawn of exited member failed",
+				"configId", configID, "err", err)
 		}
 	}
 }

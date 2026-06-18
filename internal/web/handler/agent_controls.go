@@ -63,6 +63,16 @@ type agentPeerRestartRequest struct {
 	Reason   string `json:"reason"`
 }
 
+// agentControlRestartRequest is the operator/agent-callable restart payload for
+// the dual-auth /api/office/agent-control/restart endpoint. The caller names the
+// member by display name or member id; the handler resolves it to a ConfigID and
+// restarts in place if live, or respawns from the snapshot if dead.
+type agentControlRestartRequest struct {
+	Name     string `json:"name"`
+	MemberID string `json:"memberId"`
+	Reason   string `json:"reason"`
+}
+
 // maxInjectPromptBytes caps operator-supplied prompt size. Keeps
 // payloads reasonable and prevents accidental codebase pastes.
 const maxInjectPromptBytes = 4 * 1024
@@ -461,8 +471,7 @@ func (ctx *Context) OfficeAgentPeerRestart(w http.ResponseWriter, r *http.Reques
 	}
 
 	// DEAD peer: rebuild from the spawn snapshot (backoff-capped).
-	plan, err := ctx.OfficeManager.PrepareMemberRespawn(configID)
-	if err != nil {
+	if err := ctx.respawnDeadMember(configID); err != nil {
 		switch {
 		case errors.Is(err, office.ErrRespawnCapReached):
 			request.WriteError(w, http.StatusTooManyRequests,
@@ -474,6 +483,52 @@ func (ctx *Context) OfficeAgentPeerRestart(w http.ResponseWriter, r *http.Reques
 			request.WriteError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
+	}
+
+	live := ctx.OfficeManager.GetAgentByConfig(configID)
+	newSessionID := ""
+	respawnedName := target
+	if live != nil {
+		newSessionID = live.SessionID()
+		if live.Config != nil {
+			respawnedName = live.Config.Name
+		}
+	}
+	ctx.emit("office:agentRestarted", map[string]interface{}{
+		"sessionId": newSessionID,
+		"agentName": respawnedName,
+		"reason":    reason,
+		"via":       "peer-respawn",
+	})
+	slog.Info("peer respawned dead member",
+		"name", respawnedName, "newSession", newSessionID, "reason", reason)
+	ok(w, map[string]interface{}{
+		"sessionId": newSessionID,
+		"restarted": "respawned",
+	})
+}
+
+// respawnDeadMember rebuilds a DEAD member (no live session) from the spawn-time
+// snapshot. It is the single source of truth for the dead-member respawn flow,
+// shared by the agent-callable peer-restart endpoint, the operator-facing
+// agent-control restart endpoint, and the backend auto-respawn watchdog (wired
+// via Manager.SetRespawnMemberFunc).
+//
+// Returns office.ErrRespawnCapReached / office.ErrMemberNotRespawnable verbatim
+// so callers can map them to the right HTTP status; any other error is a generic
+// spawn failure.
+// RespawnDeadMember is the exported entry point the office manager's auto-respawn
+// watchdog is wired to via SetRespawnMemberFunc (server.go). It delegates to the
+// unexported respawnDeadMember so cross-package wiring works while in-package
+// callers (peer-restart, agent-control restart) keep using the lowercase method.
+func (ctx *Context) RespawnDeadMember(configID string) error {
+	return ctx.respawnDeadMember(configID)
+}
+
+func (ctx *Context) respawnDeadMember(configID string) error {
+	plan, err := ctx.OfficeManager.PrepareMemberRespawn(configID)
+	if err != nil {
+		return err
 	}
 
 	spawnReq := spawnTeamRequest{
@@ -491,9 +546,7 @@ func (ctx *Context) OfficeAgentPeerRestart(w http.ResponseWriter, r *http.Reques
 
 	newSessionID, mode := spawnAgentSession(ctx, plan.Member, spawnReq, envVars, teamConfigs, plan.Perpetual, true, nil, plan.Provider, plan.Model, spawnAgentSpec{})
 	if newSessionID == "" {
-		request.WriteError(w, http.StatusInternalServerError,
-			fmt.Sprintf("failed to respawn dead member %s", target))
-		return
+		return fmt.Errorf("failed to respawn dead member %s", plan.Member.Name)
 	}
 
 	// Register the fresh session under the member's config. A dead member has
@@ -511,17 +564,100 @@ func (ctx *Context) OfficeAgentPeerRestart(w http.ResponseWriter, r *http.Reques
 		SystemPrompt: plan.Member.SystemPrompt,
 	}
 	ctx.OfficeManager.RegisterAgentWithProvider(newSessionID, cfg, plan.Provider, plan.Model, mode)
+	return nil
+}
 
+// OfficeAgentControlRestart is the dual-auth (operator session OR agent token)
+// manual restart of one team member by name or member id. It mirrors the
+// peer-restart routing: a LIVE member is restarted in place (preserving memory,
+// learnings, and task queue under a fresh session), while a DEAD member is
+// respawned from the spawn-time snapshot. Lives in the AuthWithTokens group so
+// the operator can trigger it from the UI and agents/mobile can call it with a
+// bearer token without CSRF.
+func (ctx *Context) OfficeAgentControlRestart(w http.ResponseWriter, r *http.Request) {
+	var req agentControlRestartRequest
+	if !request.DecodeAndValidateMax(w, r, &req, 1<<12) {
+		return
+	}
+	target := req.MemberID
+	if target == "" {
+		target = req.Name
+	}
+	if target == "" {
+		request.WriteError(w, http.StatusBadRequest, "name or memberId is required")
+		return
+	}
+
+	configID := ctx.OfficeManager.ResolveMemberConfigID(target)
+	if configID == "" {
+		request.WriteError(w, http.StatusNotFound, "no such teammate: "+target)
+		return
+	}
+
+	reason := req.Reason
+	if reason == "" {
+		reason = "operator-restart"
+	}
+
+	// LIVE member: restart in place.
+	if live := ctx.OfficeManager.GetAgentByConfig(configID); live != nil {
+		oldSessionID := live.SessionID()
+		newSessionID, agentName, mode, err := ctx.restartLiveAgent(oldSessionID, reason)
+		if err != nil {
+			request.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		ctx.emit("office:agentRestarted", map[string]interface{}{
+			"sessionId":    newSessionID,
+			"oldSessionId": oldSessionID,
+			"agentName":    agentName,
+			"reason":       reason,
+			"mode":         mode,
+			"via":          "agent-control",
+		})
+		slog.Info("agent-control restarted live agent in place",
+			"name", agentName, "oldSession", oldSessionID,
+			"newSession", newSessionID, "reason", reason)
+		ok(w, map[string]interface{}{
+			"sessionId":    newSessionID,
+			"oldSessionId": oldSessionID,
+			"restarted":    "live",
+		})
+		return
+	}
+
+	// DEAD member: respawn from the spawn snapshot (backoff-capped).
+	if err := ctx.respawnDeadMember(configID); err != nil {
+		switch {
+		case errors.Is(err, office.ErrRespawnCapReached):
+			request.WriteError(w, http.StatusTooManyRequests,
+				"respawn cap reached for "+target+"; escalate to the lead instead")
+		case errors.Is(err, office.ErrMemberNotRespawnable):
+			request.WriteError(w, http.StatusNotFound,
+				"no spawn snapshot for "+target+" (cannot respawn)")
+		default:
+			request.WriteError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	live := ctx.OfficeManager.GetAgentByConfig(configID)
+	newSessionID := ""
+	respawnedName := target
+	if live != nil {
+		newSessionID = live.SessionID()
+		if live.Config != nil {
+			respawnedName = live.Config.Name
+		}
+	}
 	ctx.emit("office:agentRestarted", map[string]interface{}{
 		"sessionId": newSessionID,
-		"agentName": plan.Member.Name,
+		"agentName": respawnedName,
 		"reason":    reason,
-		"mode":      mode,
-		"via":       "peer-respawn",
+		"via":       "agent-control-respawn",
 	})
-	slog.Info("peer respawned dead member",
-		"name", plan.Member.Name, "newSession", newSessionID,
-		"workingDir", plan.WorkingDir, "reason", reason)
+	slog.Info("agent-control respawned dead member",
+		"name", respawnedName, "newSession", newSessionID, "reason", reason)
 	ok(w, map[string]interface{}{
 		"sessionId": newSessionID,
 		"restarted": "respawned",
