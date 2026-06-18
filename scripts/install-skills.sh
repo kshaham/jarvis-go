@@ -40,7 +40,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-src_dir="$(cd "$script_dir/.." && pwd)/skills"
+# The skill bundle was relocated under internal/skillsbundle/ so it can be
+# embedded into the binary (go:embed cannot reach a parent directory). At
+# runtime the daemon materializes the embedded copy into ~/.claude/skills;
+# this script remains a convenience for non-Docker / dev installs.
+src_dir="$(cd "$script_dir/.." && pwd)/internal/skillsbundle/skills"
 
 if [[ ! -d "$src_dir" ]]; then
     echo "error: source directory not found: $src_dir" >&2

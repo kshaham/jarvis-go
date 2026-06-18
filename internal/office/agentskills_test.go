@@ -67,7 +67,7 @@ func TestAgentSkills_BuildAgents(t *testing.T) {
 //	  > skills/agent-skills/CHECKSUMS.sha256
 func TestAgentSkills_VendoredContentChecksumMatches(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	checksumPath := filepath.Join(repoRoot, "skills", "agent-skills", "CHECKSUMS.sha256")
+	checksumPath := filepath.Join(repoRoot, skillsBundleRoot, "agent-skills", "CHECKSUMS.sha256")
 	wantBySuffix, err := readChecksumFile(checksumPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", checksumPath, err)
@@ -76,9 +76,12 @@ func TestAgentSkills_VendoredContentChecksumMatches(t *testing.T) {
 		t.Fatalf("checksum file %s is empty", checksumPath)
 	}
 
+	// CHECKSUMS.sha256 records the bundled files under the original
+	// skills/ prefix; recordedRel maps the relocated on-disk paths back so
+	// content hashes match without regenerating the checksum file.
 	gotBySuffix := map[string]string{}
 	for _, root := range []string{
-		filepath.Join("skills", "agent-skills"),
+		filepath.Join(skillsBundleRoot, "agent-skills"),
 		filepath.Join("internal", "office", "agentskills_agents"),
 		filepath.Join("internal", "office", "agentskills_commands"),
 	} {
@@ -90,8 +93,7 @@ func TestAgentSkills_VendoredContentChecksumMatches(t *testing.T) {
 			if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 				return nil
 			}
-			rel, _ := filepath.Rel(repoRoot, p)
-			relUnix := filepath.ToSlash(rel)
+			relUnix := recordedRel(repoRoot, p)
 			body, rerr := os.ReadFile(p)
 			if rerr != nil {
 				return rerr

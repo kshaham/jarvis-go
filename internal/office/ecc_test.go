@@ -64,7 +64,7 @@ func TestECC_SkillBundleOnDisk_HasMinFifteenSkillsWithAttribution(t *testing.T) 
 	// string. P11.3.14 · use runtime.Caller for stable repoRoot
 	// resolution regardless of where `go test` is invoked from.
 	repoRoot := repoRootFromTestFile(t)
-	bundleDir := filepath.Join(repoRoot, "skills", "ecc")
+	bundleDir := filepath.Join(repoRoot, skillsBundleRoot, "ecc")
 
 	entries, err := os.ReadDir(bundleDir)
 	if err != nil {

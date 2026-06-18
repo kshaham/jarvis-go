@@ -28,7 +28,7 @@ import (
 
 func TestECC_VendoredContentChecksumMatches(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	checksumPath := filepath.Join(repoRoot, "skills", "ecc", "CHECKSUMS.sha256")
+	checksumPath := filepath.Join(repoRoot, skillsBundleRoot, "ecc", "CHECKSUMS.sha256")
 
 	wantBySuffix, err := readChecksumFile(checksumPath)
 	if err != nil {
@@ -38,9 +38,14 @@ func TestECC_VendoredContentChecksumMatches(t *testing.T) {
 		t.Fatalf("checksum file %s is empty; regenerate via the command in this test's doc comment", checksumPath)
 	}
 
+	// The bundled skill files now live under internal/skillsbundle/skills/,
+	// but CHECKSUMS.sha256 records them under the original skills/ prefix
+	// (the vendor-time path). recordedRel maps an on-disk path back to that
+	// recorded path so the content hashes still match without regenerating
+	// the checksum file.
 	gotBySuffix := map[string]string{}
 	for _, root := range []string{
-		filepath.Join("skills", "ecc"),
+		filepath.Join(skillsBundleRoot, "ecc"),
 		filepath.Join("internal", "office", "ecc_agents"),
 		filepath.Join("internal", "office", "ecc_commands"),
 	} {
@@ -52,7 +57,7 @@ func TestECC_VendoredContentChecksumMatches(t *testing.T) {
 			if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 				return nil
 			}
-			rel, _ := filepath.Rel(repoRoot, p)
+			rel := recordedRel(repoRoot, p)
 			// Normalise to forward-slash separators so Windows-built
 			// test binaries don't drift from the recorded paths.
 			relUnix := filepath.ToSlash(rel)
@@ -115,6 +120,27 @@ func readChecksumFile(path string) (map[string]string, error) {
 		out[filepath.ToSlash(path)] = hash
 	}
 	return out, scanner.Err()
+}
+
+// skillsBundleRoot is the repo-relative directory where the curated skill
+// bundle now lives after being relocated under an embeddable Go package
+// (internal/skillsbundle). The bundle is embedded into the binary via
+// internal/skillsbundle and materialized into ~/.claude/skills at startup.
+var skillsBundleRoot = filepath.Join("internal", "skillsbundle", "skills")
+
+// recordedRel maps an on-disk path under the relocated bundle back to the
+// path recorded in CHECKSUMS.sha256, which still uses the original
+// `skills/...` prefix from vendor time. Paths outside the bundle (the
+// embedded ecc_agents / agentskills_agents trees) are returned relative to
+// repoRoot unchanged.
+func recordedRel(repoRoot, p string) string {
+	rel, _ := filepath.Rel(repoRoot, p)
+	relUnix := filepath.ToSlash(rel)
+	prefix := filepath.ToSlash(skillsBundleRoot) + "/"
+	if strings.HasPrefix(relUnix, prefix) {
+		return strings.TrimPrefix(relUnix, filepath.ToSlash(filepath.Join("internal", "skillsbundle"))+"/")
+	}
+	return relUnix
 }
 
 // repoRootFromTestFile resolves the repo root from this test file's

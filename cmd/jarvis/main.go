@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/kshaham/jarvis/internal/pty"
+	"github.com/kshaham/jarvis/internal/skillsbundle"
 	"github.com/kshaham/jarvis/internal/state"
 	"github.com/kshaham/jarvis/internal/web"
 )
@@ -136,6 +138,17 @@ func runWeb() {
 	}
 
 	slog.Info("Starting Jarvis Go", "version", version, "port", port)
+
+	// Materialize the embedded skill bundle into ~/.claude/skills once at
+	// startup so the team gets its skills with no external skills/ directory.
+	// Non-fatal: a failure only degrades skill availability, not the daemon.
+	if home, err := os.UserHomeDir(); err == nil {
+		if n, err := skillsbundle.Materialize(filepath.Join(home, ".claude", "skills")); err != nil {
+			slog.Warn("skills bundle materialize failed", "err", err)
+		} else {
+			slog.Info("materialized bundled skills", "count", n)
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
