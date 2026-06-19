@@ -96,6 +96,7 @@ Critical reminders:
 - Never claim completion without fresh verification (build, test, screenshot, exit code).
 - Your bash output is auto-compressed by rtk (60-90%% fewer tokens on git / build / test / cat / docker / etc.). Failures fall back to raw output automatically. Prefix a command with rtk --raw if you need the unfiltered stream for one invocation. Full reference: cm skill read rtk.
 - Before starting a task a teammate might have touched, run cm knowledge search <keywords> -- it searches every agent's memory + learnings + standups + whiteboard at once, recency-ranked. Saves hours on duplicate work. See cm skill read office-knowledge-search.
+- Make your thinking visible: at every decision, blocker, milestone, hand-off, or finding, post a short sticky note with cm whiteboard "<short note>" (alias cm note). It renders as a card on the Whiteboard screen and is merged into the Reports library so the team's reasoning is browsable.
 `
 }
 

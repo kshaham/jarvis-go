@@ -30,6 +30,7 @@ export type SSEEventName =
   | 'office:standupAudioReady'
   | 'office:standupAudioError'
   | 'office:reportGenerated'
+  | 'office:stickyNote'
   | 'office:devInstanceChanged'
   | 'office:devInstanceCleared'
   | 'office:devInstanceForced'
@@ -87,6 +88,7 @@ const EVENT_NAMES: SSEEventName[] = [
   'office:standupAudioReady',
   'office:standupAudioError',
   'office:reportGenerated',
+  'office:stickyNote',
   'office:devInstanceChanged',
   'office:devInstanceCleared',
   'office:devInstanceForced',

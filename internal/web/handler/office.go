@@ -109,6 +109,20 @@ type whiteboardRequest struct {
 	Text      string `json:"text"`
 }
 
+// stickyNoteRequest is the body for POST /api/office/agent/sticky-note.
+// SessionID resolves the author; Content is the note; Color is optional
+// (the manager assigns a stable per-author color when blank).
+type stickyNoteRequest struct {
+	SessionID string `json:"sessionId"`
+	Content   string `json:"content"`
+	Color     string `json:"color,omitempty"`
+}
+
+// maxStickyNoteContentLen caps a single sticky note. Sticky notes are
+// short status flags, not documents -- long-form belongs in memory /
+// the wrap-up report.
+const maxStickyNoteContentLen = 2000
+
 type bugTaskRequest struct {
 	ReportedBy  string `json:"reportedBy"`
 	AssignedTo  string `json:"assignedTo"`
@@ -1557,6 +1571,44 @@ func (ctx *Context) OfficePostWhiteboard(w http.ResponseWriter, r *http.Request)
 	ctx.OfficeManager.SetWhiteboardNote(req.SessionID, req.Text)
 	ctx.emit("office:whiteboardUpdated", map[string]interface{}{"sessionId": req.SessionID})
 	ok(w, nil)
+}
+
+// OfficeGetStickyNotes returns the agent sticky-note feed, newest-first.
+// GET /api/office/sticky-notes (operator auth).
+func (ctx *Context) OfficeGetStickyNotes(w http.ResponseWriter, r *http.Request) {
+	notes := ctx.OfficeManager.ListStickyNotes()
+	// Newest-first for the SPA panel; ListStickyNotes returns oldest-first.
+	sort.Slice(notes, func(i, j int) bool { return notes[i].CreatedAt.After(notes[j].CreatedAt) })
+	ok(w, map[string]interface{}{"notes": notes})
+}
+
+// OfficePostStickyNote appends an agent sticky note to the team feed.
+// POST /api/office/agent/sticky-note (agent token).
+//
+// The author is resolved from the calling agent's session (same
+// session->agent lookup OfficePostWhiteboard relies on); an unknown
+// session falls back to "agent" so a note is never silently dropped.
+func (ctx *Context) OfficePostStickyNote(w http.ResponseWriter, r *http.Request) {
+	var req stickyNoteRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		request.WriteError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	if len(content) > maxStickyNoteContentLen {
+		request.WriteError(w, http.StatusBadRequest, "Note too long (max 2000 chars)")
+		return
+	}
+	author := "agent"
+	if a := ctx.OfficeManager.GetAgent(req.SessionID); a != nil && a.Config != nil && a.Config.Name != "" {
+		author = a.Config.Name
+	}
+	note := ctx.OfficeManager.AddStickyNote(author, content, req.Color)
+	ctx.emit("office:stickyNote", note)
+	ok(w, map[string]interface{}{"note": note})
 }
 
 // OfficeGetTaskQueues returns task queues for all agents.

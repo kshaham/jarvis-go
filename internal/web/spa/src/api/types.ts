@@ -229,6 +229,25 @@ export interface SavedReport {
   generatedAt?: string;
   size?: number;
   preview?: string;
+  // Feature B · report library now merges wrap-up reports with agent
+  // sticky notes. "report" rows have a downloadable file; "note" rows
+  // are file-less and carry their content inline. Defaults to "report"
+  // for backward compatibility with older payloads.
+  type?: 'report' | 'note';
+  author?: string;
+  // Present on note rows: the full sticky-note body (notes have no file
+  // to fetch, so the modal renders this directly).
+  content?: string;
+  color?: string;
+}
+
+// StickyNote — one agent-authored sticky note on the shared whiteboard.
+export interface StickyNote {
+  id: string;
+  author: string;
+  content: string;
+  color?: string;
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------

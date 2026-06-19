@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FileText } from 'lucide-react';
+import { FileText, StickyNote as StickyNoteIcon } from 'lucide-react';
 
 import { Metric } from '../components/motion/Metric';
 import { Press } from '../components/motion/Press';
@@ -50,6 +50,12 @@ export function ReportsScreen() {
 
   const openReport = async (r: SavedReport) => {
     setOpen(r);
+    // Sticky notes are file-less: their content lives on the row itself,
+    // so render it inline instead of fetching a (non-existent) report file.
+    if (r.type === 'note') {
+      setBody(r.content ?? r.preview ?? '');
+      return;
+    }
     setBody('Loading…');
     try {
       const txt = await fetchText(`/api/office/reports/${encodeURIComponent(r.filename)}`);
@@ -102,58 +108,105 @@ export function ReportsScreen() {
           />
         ) : (
           <div ref={listRef} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {list.map((r) => (
-              <GlowCard key={r.filename} interactive className="p-0">
-                <Press
-                  pressScale={0.97}
-                  onClick={() => openReport(r)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '10px 12px',
-                    width: '100%',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span
-                      style={{
-                        display: 'block',
-                        fontSize: 13,
-                        color: 'var(--text-primary)',
-                        fontFamily: 'var(--font-mono)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {r.filename}
-                    </span>
-                    {r.preview ? (
+            {list.map((r) => {
+              const isNote = r.type === 'note';
+              return (
+                <GlowCard key={r.filename} interactive className="p-0">
+                  <Press
+                    pressScale={0.97}
+                    onClick={() => openReport(r)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '10px 12px',
+                      width: '100%',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
                       <span
                         style={{
-                          display: 'block',
-                          fontSize: 12,
-                          color: 'var(--text-muted)',
-                          marginTop: 4,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: 13,
+                          color: 'var(--text-primary)',
+                          minWidth: 0,
                         }}
                       >
-                        {r.preview}
+                        {isNote ? (
+                          <>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                textTransform: 'uppercase',
+                                letterSpacing: 0.4,
+                                padding: '2px 6px',
+                                borderRadius: 6,
+                                background: 'var(--accent-soft, rgba(124, 92, 255, 0.16))',
+                                color: 'var(--accent, #a78bfa)',
+                              }}
+                            >
+                              <StickyNoteIcon size={11} /> note
+                            </span>
+                            {r.author ? (
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: 999,
+                                  background: 'var(--surface-2, rgba(255, 255, 255, 0.06))',
+                                  color: 'var(--text-muted)',
+                                }}
+                              >
+                                {r.author}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span
+                            style={{
+                              fontFamily: 'var(--font-mono)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {r.filename}
+                          </span>
+                        )}
+                      </span>
+                      {r.preview ? (
+                        <span
+                          style={{
+                            display: 'block',
+                            fontSize: 12,
+                            color: 'var(--text-muted)',
+                            marginTop: 4,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {r.preview}
+                        </span>
+                      ) : null}
+                    </span>
+                    {r.generatedAt ? (
+                      <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+                        {relativeTime(r.generatedAt)}
                       </span>
                     ) : null}
-                  </span>
-                  {r.generatedAt ? (
-                    <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-                      {relativeTime(r.generatedAt)}
-                    </span>
-                  ) : null}
-                </Press>
-              </GlowCard>
-            ))}
+                  </Press>
+                </GlowCard>
+              );
+            })}
           </div>
         )}
       </Section>
@@ -161,8 +214,8 @@ export function ReportsScreen() {
       <Modal
         open={!!open}
         onOpenChange={(next) => (next ? null : setOpen(null))}
-        title={open?.filename ?? 'Report'}
-        description={open?.generatedAt ? `Generated ${relativeTime(open.generatedAt)}` : undefined}
+        title={open?.type === 'note' ? `Note by ${open?.author ?? 'agent'}` : (open?.filename ?? 'Report')}
+        description={open?.generatedAt ? `${open?.type === 'note' ? 'Posted' : 'Generated'} ${relativeTime(open.generatedAt)}` : undefined}
         size="lg"
         footer={
           <>

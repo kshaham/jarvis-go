@@ -122,6 +122,10 @@ func main() {
 	case "dev":
 		handleDev(args)
 
+	// Sticky notes on the shared whiteboard (also fed into Reports).
+	case "whiteboard", "note":
+		handleWhiteboard(args)
+
 	// Unified team knowledge search (R17)
 	case "knowledge", "know":
 		handleKnowledge(args)
@@ -760,6 +764,67 @@ func formatAge(d time.Duration) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// handleWhiteboard dispatches `cm whiteboard <content...>` (alias
+// `cm note`). Posting a note appends a sticky note to the shared team
+// whiteboard feed -- it renders as a card on the Whiteboard screen AND
+// is merged into the Reports library. `cm whiteboard list` prints the
+// recent feed. Optional `--color <hex>` overrides the per-author color.
+func handleWhiteboard(args []string) {
+	if len(args) >= 1 && args[0] == "list" {
+		result := get("/api/office/sticky-notes")
+		printStickyNotes(result)
+		return
+	}
+	rest := append([]string{}, args...)
+	color, _ := extractFlag(&rest, "--color")
+	content := strings.TrimSpace(strings.Join(rest, " "))
+	if content == "" {
+		fatal("Usage: cm whiteboard <content...> [--color <hex>]  |  cm whiteboard list")
+	}
+	body := map[string]interface{}{"sessionId": sessionID, "content": content}
+	if color != "" {
+		body["color"] = color
+	}
+	post("/api/office/agent/sticky-note", body)
+	fmt.Println("Sticky note posted.")
+}
+
+// printStickyNotes renders the sticky-note feed compactly: one block per
+// note with author, relative age, and content.
+func printStickyNotes(result interface{}) {
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		printJSON(result)
+		return
+	}
+	notesAny, _ := m["notes"].([]interface{})
+	if len(notesAny) == 0 {
+		fmt.Println("(no sticky notes)")
+		return
+	}
+	now := time.Now()
+	for _, n := range notesAny {
+		nm, ok := n.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		author, _ := nm["author"].(string)
+		content, _ := nm["content"].(string)
+		tsStr, _ := nm["createdAt"].(string)
+		age := ""
+		if tsStr != "" {
+			if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+				age = formatAge(now.Sub(t))
+			}
+		}
+		if age != "" {
+			fmt.Printf("[%s] %s\n  %s\n", age, author, content)
+		} else {
+			fmt.Printf("%s\n  %s\n", author, content)
+		}
 	}
 }
 
@@ -1492,6 +1557,12 @@ Commands:
   dev creds set <text...> [--name <s>]
                                       Lead: set dev login blob for slot s
   dev creds clear [--name <s>]        Lead: clear dev credentials for slot s
+  whiteboard <note...> [--color <hex>]
+                                      Post a sticky note to the shared whiteboard
+                                      (decisions, blockers, milestones, hand-offs,
+                                      findings). Shows on the Whiteboard screen and
+                                      in the Reports library. Alias: cm note
+  whiteboard list                     Print the recent sticky-note feed
   project invariants                  List project invariants (non-negotiable rules)
   project invariants add "<rule>"     Append a rule to the invariants list
   project invariants remove <index>   Remove rule at given 0-based index

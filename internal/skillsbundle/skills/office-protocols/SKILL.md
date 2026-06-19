@@ -20,6 +20,17 @@ cm roster                       # Get teammate sessionIds
 cm message <sessionId> "..."    # Message a teammate
 ```
 
+## Whiteboard Sticky Notes
+
+Make your thinking visible to the team. At every decision, blocker, milestone, hand-off, or finding, post a short sticky note:
+
+```
+cm whiteboard "<short note>"    # post a sticky note (alias: cm note)
+cm whiteboard list              # read the recent feed
+```
+
+Each note renders as a colored card on the Whiteboard screen and is merged into the Reports library, so the team's reasoning stays browsable during and after the run. Keep notes short and imperative -- one thought per note. This is not a substitute for `cm memory` (your durable state) or `cm task progress` (task updates); it is the shared, at-a-glance narrative of the run.
+
 ## Task Lifecycle (follow this for EVERY task)
 
 ```

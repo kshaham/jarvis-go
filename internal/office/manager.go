@@ -75,6 +75,12 @@ type Manager struct {
 	bugTasks  map[string]*BugTask
 	messages  []OfficeMessage
 
+	// stickyNotes is the append-only agent sticky-note feed (Feature B).
+	// Guarded by m.mu; lazily loaded from sticky-notes.json on first
+	// access (stickyNotesLoaded latches the load). See sticky_notes.go.
+	stickyNotes       []StickyNote
+	stickyNotesLoaded bool
+
 	standup *StandupState
 
 	sessions    SessionStore
@@ -2706,6 +2712,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"paused":            paused,
 		"pause":             pauseBlock,
 		"whiteboardNotes":   whiteboardNotes,
+		"stickyNotes":       m.ListStickyNotes(),
 		"bugTasks":          bugTasks,
 		"taskQueues":        taskQueues,
 		"recentAudit":       recentAudit,

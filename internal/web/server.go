@@ -649,6 +649,9 @@ func registerAgentMutationRoutes(r chi.Router, h *handler.Context) {
 	r.Delete("/dev-instance", h.OfficeAgentDeleteDevInstance)
 	r.Post("/dev-credentials", h.OfficeAgentPostDevCredentials)
 	r.Delete("/dev-credentials", h.OfficeAgentDeleteDevCredentials)
+	// Feature B · post an agent sticky note to the team feed (renders on
+	// the Whiteboard screen + merges into the Reports library).
+	r.Post("/sticky-note", h.OfficePostStickyNote)
 }
 
 func (s *Server) setupRouter() chi.Router {
@@ -1305,6 +1308,10 @@ func (s *Server) setupRouter() chi.Router {
 				// R33 · wrap-up / post-mortem reports (read-only).
 				r.Get("/reports", h.OfficeListReports)
 				r.Get("/reports/{filename}", h.OfficeGetReport)
+				// Feature B · agent sticky-note feed (read-only). Agents
+				// POST to /office/agent/sticky-note (agent token); the SPA
+				// reads the merged feed here.
+				r.Get("/sticky-notes", h.OfficeGetStickyNotes)
 				// R34 · headless-shell sibling container health probe.
 				r.Get("/browser/health", h.OfficeBrowserHealth)
 				// R36 · task labels + cost-by-feature rollups (read-only).

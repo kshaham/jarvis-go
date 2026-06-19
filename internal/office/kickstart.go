@@ -236,6 +236,7 @@ func buildStableSystemPrompt(tier, teamMission string, invariants []string, harn
 	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
 	b.WriteString("- Web-app missions: do not mark the project complete until the live preview renders for the operator through `/api/office/dev-proxy/<slot>/` (announce the dev instance, confirm health is green, then browser-screenshot that proxy path).\n")
 	b.WriteString("- Before duplicating work: `cm knowledge search <keywords>` -- searches every teammate's memory + learnings + standups + whiteboard.\n")
+	b.WriteString("- Make your thinking visible: at every decision, blocker, milestone, hand-off, or finding, post a short sticky note with `cm whiteboard \"<short note>\"`. It shows on the team Whiteboard and in the Reports library.\n")
 	b.WriteString("- Before any browser verification: `cm dev url` (and `cm dev creds` if login-gated). Don't spin up competing dev servers.\n")
 	if isCodex {
 		// Codex has no /compact or /goal evaluator. Keep memory + ask-for-help

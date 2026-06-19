@@ -22,6 +22,7 @@ import type {
   Snapshot,
   Standup,
   StandupHistoryEntry,
+  StickyNote,
   TaskQueuesResponse,
   TeamTemplate,
   TimelineEntry,
@@ -182,11 +183,29 @@ export function useKnowledgePromotions() {
 // ---------------------------------------------------------------------
 
 export function useReports() {
-  useInvalidateOn(['office:reportGenerated'], REPORTS_KEY);
+  // Sticky notes are merged into the report library, so a new note must
+  // also refresh this list (Feature B).
+  useInvalidateOn(['office:reportGenerated', 'office:stickyNote'], REPORTS_KEY);
   return useQuery<{ reports: SavedReport[] }>({
     queryKey: REPORTS_KEY,
     queryFn: ({ signal }) =>
       fetchJSON<{ reports: SavedReport[] }>('/api/office/reports', { signal }),
+    refetchInterval: 2 * 60_000,
+  });
+}
+
+// ---------------------------------------------------------------------
+// Sticky notes (Feature B)
+// ---------------------------------------------------------------------
+
+const STICKY_NOTES_KEY = ['office', 'sticky-notes'] as const;
+
+export function useStickyNotes() {
+  useInvalidateOn(['office:stickyNote'], STICKY_NOTES_KEY);
+  return useQuery<{ notes: StickyNote[] }>({
+    queryKey: STICKY_NOTES_KEY,
+    queryFn: ({ signal }) =>
+      fetchJSON<{ notes: StickyNote[] }>('/api/office/sticky-notes', { signal }),
     refetchInterval: 2 * 60_000,
   });
 }
