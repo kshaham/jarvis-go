@@ -8,6 +8,17 @@
 # Build:   docker build -t jarvis .
 # Run:     docker run --rm -v ~/.jarvis:/home/jarvis/.jarvis -p 3555:3555 jarvis
 
+# --- Stage 0: build the React SPA (/office-v2) so go:embed picks up the
+# react bundle. internal/web/static/public/react/ is gitignored, so it is NOT
+# in the build context and must be produced here before the Go compile.
+FROM node:22-alpine AS spa-build
+WORKDIR /spa
+COPY internal/web/spa/package.json internal/web/spa/package-lock.json ./
+RUN npm ci
+COPY internal/web/spa/ ./
+# vite outDir is ../static/public/react (relative to /spa) -> /static/public/react
+RUN npm run build
+
 # --- Stage 1: builder ---------------------------------------------------------
 FROM golang:1.25.11-alpine AS builder
 WORKDIR /src
@@ -17,6 +28,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+# Graft the built SPA into the embed path so `//go:embed all:public` includes
+# the /react bundle (the dir is gitignored, hence absent from `COPY . .`).
+COPY --from=spa-build /static/public/react ./internal/web/static/public/react
 
 ARG VERSION=dev
 ENV CGO_ENABLED=0
