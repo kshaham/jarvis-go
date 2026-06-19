@@ -9,6 +9,11 @@ import (
 // statusKey holds per-(project,kind) generation status in the shared settings.
 const statusKey = "mockupsStatus"
 
+// appliedKey holds the per-project applied UI-design selection (projectID ->
+// mockup slot index) in the shared settings. Applying a design is a UI concept
+// only, so the map is keyed by projectID alone (no kind component).
+const appliedKey = "mockupsAppliedDesign"
+
 // MockupRunStaleTimeout is how long a running mockup run may go without
 // any upload advancing it before the sweep re-drives or fails it. Sized
 // above the observed worst case where a busy perpetual lead takes a few
@@ -104,6 +109,32 @@ func (m *Manager) setStatus(projectID, kind string, s Status) {
 	all := m.snapshot()
 	all[statusMapKey(projectID, kind)] = s
 	m.store.UpdateSettings(map[string]interface{}{statusKey: all})
+}
+
+// appliedSnapshot returns the raw keyed (projectID -> slot index) map.
+func (m *Manager) appliedSnapshot() map[string]int {
+	out := map[string]int{}
+	raw, ok := m.store.GetSettings()[appliedKey]
+	if ok && raw != nil {
+		if b, err := json.Marshal(raw); err == nil {
+			_ = json.Unmarshal(b, &out)
+		}
+	}
+	return out
+}
+
+// SetAppliedDesign records that the operator selected mockup slot index as the
+// target UI design direction for a project, persisting it to shared settings.
+func (m *Manager) SetAppliedDesign(projectID string, index int) {
+	all := m.appliedSnapshot()
+	all[projectID] = index
+	m.store.UpdateSettings(map[string]interface{}{appliedKey: all})
+}
+
+// AppliedDesign returns the project's applied UI-design slot index, if any.
+func (m *Manager) AppliedDesign(projectID string) (int, bool) {
+	idx, ok := m.appliedSnapshot()[projectID]
+	return idx, ok
 }
 
 // StartRun clears the project+kind's prior mockups and marks the run running.

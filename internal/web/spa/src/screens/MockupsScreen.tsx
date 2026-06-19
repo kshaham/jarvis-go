@@ -19,7 +19,7 @@ const tileGridStyle: React.CSSProperties = {
 // screen) or Presentation (text-to-image slide designs from the project's docs).
 // Generate is enabled only when a team is spawned on that project's workdir.
 export function MockupsScreen() {
-  const { projects, isLoading, generate } = useMockups();
+  const { projects, isLoading, generate, apply } = useMockups();
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -46,6 +46,7 @@ export function MockupsScreen() {
               key={p.id}
               p={p}
               onGenerate={(kind) => generate.mutate({ projectId: p.id, kind })}
+              onApply={(index) => apply.mutate({ projectId: p.id, index })}
             />
           ))}
         </div>
@@ -57,9 +58,11 @@ export function MockupsScreen() {
 function ProjectMockups({
   p,
   onGenerate,
+  onApply,
 }: {
   p: MockupProject;
   onGenerate: (kind: MockupKind) => void;
+  onApply: (index: number) => void;
 }) {
   const navigate = useNavigate();
   const available: MockupKind[] = [];
@@ -153,7 +156,17 @@ function ProjectMockups({
 
       <div style={tileGridStyle}>
         {Array.from({ length: SLOTS }).map((_, i) => (
-          <MockupTile key={i} url={bySlot.get(i)} running={running} aspect={aspect} kind={kind} />
+          <MockupTile
+            key={i}
+            url={bySlot.get(i)}
+            running={running}
+            aspect={aspect}
+            kind={kind}
+            canApply={kind === 'ui'}
+            teamActive={p.teamActive}
+            isActiveDesign={kind === 'ui' && p.appliedUiIndex === i}
+            onApply={kind === 'ui' ? () => onApply(i) : undefined}
+          />
         ))}
       </div>
     </GlowCard>
@@ -165,28 +178,65 @@ function MockupTile({
   running,
   aspect,
   kind,
+  canApply = false,
+  teamActive = false,
+  isActiveDesign = false,
+  onApply,
 }: {
   url?: string;
   running: boolean;
   aspect: string;
   kind: MockupKind;
+  canApply?: boolean;
+  teamActive?: boolean;
+  isActiveDesign?: boolean;
+  onApply?: () => void;
 }) {
   const frame: React.CSSProperties = {
     aspectRatio: aspect,
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--lg-rim)',
+    border: isActiveDesign ? '1px solid var(--accent)' : '1px solid var(--lg-rim)',
     overflow: 'hidden',
     background: 'rgb(var(--surface-tint-rgb) / 0.04)',
   };
   if (url) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" style={{ ...frame, display: 'block' }} title="Open full size">
-        <img
-          src={url}
-          alt={kind === 'ui' ? 'UI mockup' : 'presentation slide'}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
-      </a>
+      <div className="flex flex-col gap-1.5">
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          style={{ ...frame, display: 'block', position: 'relative' }}
+          title="Open full size"
+        >
+          <img
+            src={url}
+            alt={kind === 'ui' ? 'UI mockup' : 'presentation slide'}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+          {isActiveDesign ? (
+            <span
+              className="absolute left-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+              style={{ color: 'var(--accent)', background: 'rgb(var(--surface-tint-rgb) / 0.85)', border: '1px solid var(--accent)' }}
+            >
+              Active design
+            </span>
+          ) : null}
+        </a>
+        {canApply ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!teamActive || isActiveDesign}
+            title={teamActive ? '' : 'Spawn/keep a team on this project first'}
+            onClick={() => {
+              if (window.confirm('Redesign the ENTIRE site to match this mockup?')) onApply?.();
+            }}
+          >
+            {isActiveDesign ? 'Active design' : 'Use this design'}
+          </Button>
+        ) : null}
+      </div>
     );
   }
   if (running) {

@@ -34,9 +34,16 @@ export function useMockups() {
     onSuccess: () => qc.invalidateQueries({ queryKey: MOCKUPS_KEY }),
   });
 
+  const apply = useMutation({
+    mutationFn: ({ projectId, index }: { projectId: string; index: number }) =>
+      fetchJSON('/api/mockups/apply', { method: 'POST', body: { projectId, kind: 'ui', index } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: MOCKUPS_KEY }),
+  });
+
   return {
     projects: query.data?.projects ?? [],
     isLoading: query.isLoading,
     generate,
+    apply,
   };
 }

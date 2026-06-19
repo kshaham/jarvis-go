@@ -549,6 +549,7 @@ export interface MockupProject extends SavedProject {
   teamActive: boolean; // a team is currently spawned on this project's workdir
   ui: MockupKindState;
   presentation: MockupKindState;
+  appliedUiIndex?: number; // the UI mockup slot chosen as the site's target design
 }
 
 // ── Deliverables page ───────────────────────────────────────────────────

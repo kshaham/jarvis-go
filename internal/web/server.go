@@ -1156,6 +1156,7 @@ func (s *Server) setupRouter() chi.Router {
 				r.Post("/tests/scan", h.TestsRunScan)
 				r.Post("/tests/react", h.TestsRunReact)
 				r.Post("/mockups/generate", h.MockupsGenerate)
+				r.Post("/mockups/apply", h.MockupsApply)
 				r.Post("/mockups/cancel", h.MockupsCancel)
 				r.Post("/deliverables/generate", h.DeliverablesGenerate)
 				r.Post("/cleanup-state", h.CleanupState)

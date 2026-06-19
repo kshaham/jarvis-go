@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,6 +37,9 @@ type mockupProjectTile struct {
 	TeamActive   bool            `json:"teamActive"` // a team is spawned on this project's workdir
 	UI           mockupKindState `json:"ui"`
 	Presentation mockupKindState `json:"presentation"`
+	// AppliedUIIndex is the UI mockup slot the operator chose as the target
+	// design direction for the whole site (nil when none applied yet).
+	AppliedUIIndex *int `json:"appliedUiIndex,omitempty"`
 }
 
 func mockupImageURL(projectID, kind, filename string) string {
@@ -59,14 +64,19 @@ func (ctx *Context) MockupsGetResults(w http.ResponseWriter, _ *http.Request) {
 	list := ctx.Projects.List()
 	tiles := make([]mockupProjectTile, 0, len(list))
 	for _, p := range list {
-		tiles = append(tiles, mockupProjectTile{
+		tile := mockupProjectTile{
 			Project:      p,
 			HasUI:        p.Path != "" && mockups.HasUI(p.Path),
 			HasDocs:      p.Path != "" && mockups.HasDocs(p.Path),
 			TeamActive:   teamUp && p.Path != "" && workdir == p.Path,
 			UI:           kindState(ctx.Mockups, p.ID, mockups.KindUI),
 			Presentation: kindState(ctx.Mockups, p.ID, mockups.KindPresentation),
-		})
+		}
+		if applied, ok := ctx.Mockups.AppliedDesign(p.ID); ok {
+			idx := applied
+			tile.AppliedUIIndex = &idx
+		}
+		tiles = append(tiles, tile)
 	}
 	ok(w, map[string]interface{}{"projects": tiles})
 }
@@ -130,6 +140,78 @@ func (ctx *Context) MockupsGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.WriteJSON(w, http.StatusAccepted, map[string]interface{}{"success": true, "status": "running"})
+}
+
+type mockupsApplyRequest struct {
+	ProjectID string `json:"projectId"`
+	Kind      string `json:"kind"`
+	Index     int    `json:"index"`
+}
+
+// MockupsApply tells the spawned team to redesign the ENTIRE site to match the
+// UI mockup at the selected slot. It copies that mockup into the project root as
+// design-reference.png, injects a team directive, and records the selection.
+// POST /api/mockups/apply {projectId, kind, index}
+func (ctx *Context) MockupsApply(w http.ResponseWriter, r *http.Request) {
+	var req mockupsApplyRequest
+	if !request.DecodeAndValidateMax(w, r, &req, 1<<12) {
+		return
+	}
+	if req.Kind != mockups.KindUI {
+		request.WriteError(w, http.StatusBadRequest, "design apply is only for UI mockups")
+		return
+	}
+	if req.Index < 0 || req.Index >= mockups.MockupCount {
+		request.WriteError(w, http.StatusBadRequest, fmt.Sprintf("index must be 0..%d", mockups.MockupCount-1))
+		return
+	}
+	proj, found := findSavedProject(ctx.Projects.List(), req.ProjectID)
+	if !found {
+		request.WriteError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if proj.Path == "" {
+		request.WriteError(w, http.StatusBadRequest, "project has no local path yet")
+		return
+	}
+	_, workdir := ctx.OfficeManager.GetSpawnContext()
+	if !ctx.OfficeManager.IsTeamSpawned() || workdir != proj.Path {
+		request.WriteError(w, http.StatusConflict, "spawn a team for this project first")
+		return
+	}
+	roster := ctx.OfficeManager.GetRoster()
+	if len(roster) == 0 {
+		request.WriteError(w, http.StatusConflict, "the team has no agents")
+		return
+	}
+	sessions := ctx.OfficeManager.Sessions()
+	if sessions == nil {
+		request.WriteError(w, http.StatusInternalServerError, "session store unavailable")
+		return
+	}
+	src, err := mockups.SlotPath(proj.ID, mockups.KindUI, req.Index)
+	if err != nil {
+		request.WriteError(w, http.StatusNotFound, "selected mockup has no image to apply")
+		return
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		request.WriteError(w, http.StatusInternalServerError, "could not read selected mockup")
+		return
+	}
+	dest := filepath.Join(proj.Path, "design-reference.png")
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		request.WriteError(w, http.StatusInternalServerError, "could not write design reference into the project")
+		return
+	}
+	lead := roster[0]
+	if !sessions.WriteInkPrompt(lead.SessionID(), buildApplyDesignPrompt(proj, req.Index)) {
+		request.WriteError(w, http.StatusConflict, "team lead is not accepting prompts")
+		return
+	}
+	ctx.Mockups.SetAppliedDesign(proj.ID, req.Index)
+	ctx.emit("mockups:designApplied", map[string]interface{}{"projectId": proj.ID, "index": req.Index})
+	ok(w, map[string]interface{}{"success": true, "appliedIndex": req.Index})
 }
 
 // SweepStalledMockupRuns re-drives or fails mockup runs that have gone too
@@ -283,4 +365,17 @@ func buildMockupPrompt(p projects.Project, kind string) string {
      mockup-render ui %s <i> "<your concept, 1-3 sentences>" /tmp/mockbase.png
    (mockup-render restyles the screenshot via gpt-image-1 and uploads the result automatically.)
 4) Make sure all 6 are visually unique. Report when all 6 are uploaded.`, p.Name, p.Path, p.ID)
+}
+
+// buildApplyDesignPrompt is the directive written to the team lead's session
+// when the operator picks one UI mockup as the target design for the whole site.
+func buildApplyDesignPrompt(p projects.Project, index int) string {
+	return fmt.Sprintf(`[APPLY DESIGN] The operator selected mockup #%d as the TARGET design direction for the ENTIRE site %q (path: %s). That mockup image is saved in the project root as ./design-reference.png.
+
+Do this now, as a team:
+1) Read ./design-reference.png and study its design language: layout structure, color palette, typography (families, weights, scale), spacing/density, component styling (buttons, cards, nav, forms), imagery, motion feel, and overall aesthetic.
+2) Write/refresh DESIGN_TARGET.md in the project root capturing that design system as concrete design tokens + component rules, so the whole team builds to one spec.
+3) Redesign the ENTIRE site to consistently use that design system across EVERY page, section, and component -- update the shared CSS / design tokens FIRST, then apply it site-wide (not just the hero).
+4) Keep the dev instance live and verify the result renders through the operator live preview; iterate until the FULL site visually matches the selected mockup's style. Do NOT mark the project done until the whole site reflects this design.
+The reference image + DESIGN_TARGET.md stay in the repo so every teammate aligns to the same target.`, index, p.Name, p.Path)
 }

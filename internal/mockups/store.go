@@ -148,6 +148,30 @@ func List(projectID, kind string) ([]string, error) {
 	return out, nil
 }
 
+// SlotPath returns the absolute path of the stored mockup occupying the given
+// slot (0..MockupCount-1) for a project+kind. Errors when the index is out of
+// range or no image has been saved for that slot yet.
+func SlotPath(projectID, kind string, index int) (string, error) {
+	if index < 0 || index >= MockupCount {
+		return "", fmt.Errorf("index out of range 0..%d", MockupCount-1)
+	}
+	dir, err := kindDir(projectID, kind)
+	if err != nil {
+		return "", err
+	}
+	files, err := List(projectID, kind)
+	if err != nil {
+		return "", err
+	}
+	prefix := fmt.Sprintf("%d-", index)
+	for _, f := range files {
+		if strings.HasPrefix(f, prefix) {
+			return filepath.Join(dir, f), nil
+		}
+	}
+	return "", fmt.Errorf("no mockup at slot %d", index)
+}
+
 // Load returns a stored mockup's bytes, with path containment.
 func Load(projectID, kind, filename string) ([]byte, error) {
 	if !ValidateFilename(filename) {
