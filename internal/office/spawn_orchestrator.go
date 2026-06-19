@@ -801,6 +801,45 @@ func (m *Manager) ResolveMemberConfigID(nameOrID string) string {
 	return ""
 }
 
+// MarkTurnCapDeath records that the live agent on sessionID is dying because
+// it hit its per-session turn cap (EventExit carried ExitReasonTurnCap), not
+// because it crashed. The flag is keyed by the agent's ConfigID and consumed
+// once by the next PrepareMemberRespawn for that member, which then skips the
+// respawn-cap increment.
+//
+// MUST be called BEFORE HandleAgentDeath unregisters the agent — once the
+// agent is gone the sessionID no longer resolves to a ConfigID. A turn-cap
+// rollover is a legitimate ceiling hit on productive work; counting it
+// against the crash-loop budget (3/30min) is exactly what permanently
+// retires healthy perpetual members, so this exemption is the load-bearing
+// half of the team-shrinkage fix. No-op when the session has no live agent.
+func (m *Manager) MarkTurnCapDeath(sessionID string) {
+	agent := m.GetAgent(sessionID)
+	if agent == nil || agent.ConfigID == "" {
+		return
+	}
+	m.mu.Lock()
+	if m.turnCapDeaths == nil {
+		m.turnCapDeaths = make(map[string]bool)
+	}
+	m.turnCapDeaths[agent.ConfigID] = true
+	m.mu.Unlock()
+}
+
+// consumeTurnCapDeath atomically reads-and-clears the turn-cap-death flag for
+// a member ConfigID. Returns true exactly once per MarkTurnCapDeath so a
+// single rollover exempts a single respawn from the cap budget; a subsequent
+// genuine crash (no fresh mark) still trips the cap.
+func (m *Manager) consumeTurnCapDeath(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.turnCapDeaths[id] {
+		delete(m.turnCapDeaths, id)
+		return true
+	}
+	return false
+}
+
 // PrepareMemberRespawn resolves the respawn plan for a DEAD member by ConfigID,
 // applying the backoff cap. On success it records the respawn attempt timestamp
 // (so repeated calls eventually trip the cap) and returns a plan the handler
@@ -816,6 +855,19 @@ func (m *Manager) PrepareMemberRespawn(id string) (MemberRespawnPlan, error) {
 	rec := m.getSpawnedMemberRecord(id)
 	if rec == nil || rec.Config == nil {
 		return MemberRespawnPlan{}, ErrMemberNotRespawnable
+	}
+
+	// Clean turn-cap rollovers are exempt from the crash-loop budget. The cap
+	// (3 respawns / 30min) exists to stop a genuinely crash-looping member from
+	// being restarted forever — but a turn-cap death is productive work hitting
+	// a ceiling, and counting it would permanently retire a healthy perpetual
+	// member after three rollovers (the team-shrinkage incident). Consume the
+	// flag (set by MarkTurnCapDeath before HandleAgentDeath unregistered the
+	// agent) and respawn without touching respawnHistory. A real crash leaves
+	// the flag unset and falls through to the cap accounting below.
+	if m.consumeTurnCapDeath(id) {
+		slog.Info("respawning member after turn-cap rollover (exempt from respawn cap)", "configId", id)
+		return m.buildRespawnPlan(rec), nil
 	}
 
 	// Backoff cap: count respawns within the trailing window. Prune older
@@ -840,6 +892,14 @@ func (m *Manager) PrepareMemberRespawn(id string) (MemberRespawnPlan, error) {
 	m.respawnHistory[id] = recent
 	m.mu.Unlock()
 
+	return m.buildRespawnPlan(rec), nil
+}
+
+// buildRespawnPlan projects a spawned-member record into the MemberRespawnPlan
+// the handler feeds to spawnAgentSession. Pure projection — no backoff
+// bookkeeping — so both the turn-cap-exempt and the cap-checked branches of
+// PrepareMemberRespawn share one definition of the plan shape.
+func (m *Manager) buildRespawnPlan(rec *spawnedMemberRecord) MemberRespawnPlan {
 	cfg := rec.Config
 	return MemberRespawnPlan{
 		Member: teamtemplates.TeamTemplateMember{
@@ -857,7 +917,7 @@ func (m *Manager) PrepareMemberRespawn(id string) (MemberRespawnPlan, error) {
 		Provider:   rec.Provider,
 		Model:      rec.Model,
 		Perpetual:  rec.Perpetual,
-	}, nil
+	}
 }
 
 // NewOrchestrator is the real constructor (not implemented yet). When

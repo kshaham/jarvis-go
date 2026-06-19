@@ -43,6 +43,30 @@ var (
 	headroomMcpConfig        = office.HeadroomMcpConfig
 )
 
+// resolveMaxTurns picks the per-session turn cap for a freshly-spawned
+// agent. Precedence:
+//  1. An explicit per-member override (ov.MaxTurns > 0) always wins —
+//     the operator asked for a specific ceiling.
+//  2. PERPETUAL agents get the raised perpetualMaxTurnsPerSession ceiling
+//     instead of the 100-turn default. Perpetual agents run for hours and
+//     self-replenish work; the 100 default (R18, sized for a single
+//     runaway task window) otherwise retires a healthy member
+//     deterministically — fatally so on the Codex backend, which
+//     accumulates turnCount across the whole session and never resets.
+//  3. Non-perpetual (goal/one-shot) agents keep the 100 default unchanged.
+//
+// Never returns 0 (unlimited): both ceilings are non-zero so the runaway
+// defense stays intact for every spawn path.
+func resolveMaxTurns(ov *memberOverride, perpetual bool) int {
+	if ov != nil && ov.MaxTurns > 0 {
+		return ov.MaxTurns
+	}
+	if perpetual {
+		return perpetualMaxTurnsPerSession
+	}
+	return defaultMaxTurnsPerSession
+}
+
 // newSpawnSessionID generates the fresh session ID for a spawned agent
 // (SDK or Codex backend). Indirected through a variable so tests can
 // force a deterministic ID — e.g. to drive OfficeAgentRestart's
@@ -88,6 +112,15 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		return spawnAgentSessionWithHooks(ctx, member, req, envVars, spec)
 	}
 	if trySDK {
+		// Step 3b · Opt perpetual SDK teams into the bounded in-session
+		// reconnect so a transient provider-error stream death (z.ai/GLM rate
+		// cap dropping the CLI) self-heals in place instead of forcing a full
+		// office respawn that churns the respawn cap. Off by default; only a
+		// perpetual team — designed to run for hours — turns it on. The
+		// per-session reconnect cap + the office watchdog remain the backstops.
+		if perpetual {
+			pty.SetSDKReconnectEnabled(true)
+		}
 		agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
 		kickstart := office.BuildKickstartPrompt(
 			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
@@ -117,11 +150,10 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		}
 		// R23 · Apply per-member turn cap if the operator set it.
 		// R24 removed the per-member cost cap — subscription plans
-		// (Z.AI, Claude sub) make dollar caps meaningless.
-		maxTurns := defaultMaxTurnsPerSession
-		if ov != nil && ov.MaxTurns > 0 {
-			maxTurns = ov.MaxTurns
-		}
+		// (Z.AI, Claude sub) make dollar caps meaningless. Perpetual
+		// agents get a raised ceiling (see resolveMaxTurns) so steady-
+		// state work doesn't deterministically retire them.
+		maxTurns := resolveMaxTurns(ov, perpetual)
 		// Per-member model override. Priority: spawn-modal override >
 		// template-pinned member.Model > empty (SDK default). Previously
 		// this value was dropped on the floor for claude-subscription /
@@ -671,10 +703,11 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	}
 	agentEnv["CODEX_HOME"] = codexHome
 
-	maxTurns := defaultMaxTurnsPerSession
-	if ov != nil && ov.MaxTurns > 0 {
-		maxTurns = ov.MaxTurns
-	}
+	// Perpetual Codex agents get the raised ceiling (see resolveMaxTurns).
+	// This matters most on Codex: turnCount accumulates across the whole
+	// session and never resets (codex_session.go), so the 100 default is a
+	// guaranteed death for a continuously working perpetual agent.
+	maxTurns := resolveMaxTurns(ov, perpetual)
 
 	codexSession, err := ctx.SessionManager.CreateCodexSession(
 		context.Background(),

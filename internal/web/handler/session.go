@@ -783,9 +783,22 @@ func forwardAgentEvents(sessionID string, events <-chan pty.SessionEvent, droppe
 				})
 			case pty.EventExit:
 				sawExit = true
-				broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
-				broker.Broadcast("session:exit", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode})
+				// Step 3a · Carry the exit reason on the SSE payloads (empty
+				// for a plain clean finish) so the dashboard can distinguish a
+				// provider-error stream death (non-zero code + "provider-error")
+				// or a turn-cap rollover from a clean exit instead of seeing
+				// every unexpected death as a clean code-0 stop.
+				broker.Broadcast("session:stopped", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode, "reason": e.Reason})
+				broker.Broadcast("session:exit", map[string]interface{}{"id": sessionID, "exitCode": e.ExitCode, "reason": e.Reason})
 				broker.Broadcast("session:updated", map[string]interface{}{"id": sessionID, "status": "stopped", "isWorking": false})
+				// A turn-cap rollover is a legitimate ceiling hit, not a crash.
+				// Mark it BEFORE HandleAgentDeath unregisters the agent (after
+				// which the sessionID no longer resolves to a ConfigID) so the
+				// auto-respawn path exempts it from the respawn-cap budget and a
+				// productive perpetual member isn't permanently retired.
+				if e.Reason == pty.ExitReasonTurnCap && ctx.OfficeManager != nil {
+					ctx.OfficeManager.MarkTurnCapDeath(sessionID)
+				}
 				if ctx.OfficeManager.GetAgent(sessionID) != nil {
 					ctx.OfficeManager.HandleAgentDeath(sessionID)
 				}

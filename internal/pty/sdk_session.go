@@ -29,6 +29,37 @@ import (
 // without a 5-second wall-clock wait. Production never reassigns it.
 var sdkStopWaitTimeout = 5 * time.Second
 
+// In-session reconnect knobs (Step 3b). When the persistent SDK subprocess
+// dies UNEXPECTEDLY on a provider error (429 / 5xx / connection-reset / CLI
+// crash) the Events() channel closes; rather than emit EventExit and force a
+// full office respawn (which churns the respawn cap under a flap storm), the
+// event consumer recreates the persistent claude.Session in place, resuming
+// the same Claude-side transcript, up to sdkReconnectMaxAttempts times with
+// the backoff schedule below. A hard, non-transient failure (auth 401) just
+// keeps failing and falls through to the EventExit path once the cap is hit,
+// where the existing watchdog rebuilds a fresh session as the backstop.
+//
+//   - sdkReconnectEnabled gates the whole feature (off by default; the
+//     office spawn path / operator opts in). When false the consumer behaves
+//     exactly as before: unexpected close -> EventExit.
+//   - Declared as package vars so tests can flip the flag and shrink the
+//     backoff without wall-clock waits. Production reassigns only the flag
+//     (via SetSDKReconnectEnabled) and never the backoff.
+var (
+	sdkReconnectEnabled     = false
+	sdkReconnectMaxAttempts = 3
+	sdkReconnectBackoff     = []time.Duration{2 * time.Second, 8 * time.Second, 30 * time.Second}
+)
+
+// SetSDKReconnectEnabled toggles the bounded in-session reconnect feature
+// (Step 3b) process-wide. Off by default so the conservative behaviour
+// (unexpected close -> EventExit -> office watchdog respawn) stays the
+// default; the office spawn path opts in. Exposed as a setter (not a raw
+// exported var) so callers can't accidentally race the consumer's read.
+func SetSDKReconnectEnabled(enabled bool) {
+	sdkReconnectEnabled = enabled
+}
+
 // sdkSessionSend is the seam used to deliver the kickstart turn to the
 // persistent SDK session. Production points at (*claude.Session).Send; tests
 // override it to force the kickstart-send error branch in Start() without
@@ -65,6 +96,21 @@ type SDKSession struct {
 	totalCostUSD       float64
 	maxTurnsPerSession int  // per-session turn-count cap; 0 = unlimited
 	turnCapFired       bool // so EventTurnCapReached only fires once
+
+	// lastEventWasError latches when the most recent meaningful SDK event was
+	// a provider/stream error (a TypeSystem "error" subtype or a TypeResult
+	// with IsError). It is cleared on a clean TypeResult. When the Events()
+	// channel then closes WITHOUT an intentional Stop(), the defer in
+	// eventConsumer uses this to attribute the exit (non-zero code +
+	// ExitReasonProviderError) instead of masking a provider death as a clean
+	// EventExit{ExitCode:0}. Guarded by mu.
+	lastEventWasError bool
+	// reconnectAttempts counts in-session subprocess reconnects already
+	// attempted for this session so a hard, non-transient failure (e.g. a 401)
+	// can't loop forever — once the per-session cap is hit we fall through to
+	// the EventExit path and let the office watchdog rebuild a fresh session.
+	// Guarded by mu.
+	reconnectAttempts int
 
 	// Buffers
 	terminalBuffer *BufferAccumulator
@@ -207,7 +253,52 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	s.isStopped = false
 	s.mu.Unlock()
 
-	// Build SDK options for persistent session.
+	// Create persistent session -- subprocess stays alive across turns.
+	session, err := claude.NewSession(sessionCtx, s.buildSDKOptions()...)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("failed to create persistent session: %w", err)
+	}
+	s.persistentSession = session
+
+	// Start event consumer goroutine FIRST, wait for it to be ready
+	// before sending the kickstart to avoid dropping early events.
+	// safego wraps so a panic in event parsing (malformed SDK
+	// frame, JSON decode race) doesn't crash the whole daemon.
+	consumerReady := make(chan struct{})
+	s.wg.Add(1)
+	safego.Go("pty.sdk.eventConsumer", func() { s.eventConsumer(sessionCtx, consumerReady) })
+	<-consumerReady
+
+	// Send kickstart as the first turn.
+	if s.systemPrompt != "" {
+		s.sendMu.Lock()
+		err := sdkSessionSend(session, s.systemPrompt)
+		s.sendMu.Unlock()
+		if err != nil {
+			slog.Error("Failed to send kickstart", "session", s.ID, "error", err)
+			cancel()
+			return fmt.Errorf("failed to send kickstart: %w", err)
+		}
+		s.mu.Lock()
+		s.isWorking = true
+		s.status = StatusBusy
+		s.mu.Unlock()
+		s.emitEvent(EventWorking{})
+		slog.Info("SDK session kickstart sent", "session", s.ID, "prompt_len", len(s.systemPrompt))
+	}
+
+	return nil
+}
+
+// buildSDKOptions assembles the claude.Option slice for this session from its
+// stored config. Extracted from Start() so the bounded in-session reconnect
+// (Step 3b) can rebuild an equivalent persistent session without duplicating
+// the option logic. Pure given the session's immutable config fields; the
+// only state read that can change across calls is resumeSessionID (set by the
+// reconnect path to the live claudeSessionID before recreating the session),
+// which is intentional — the rebuilt session resumes the same transcript.
+func (s *SDKSession) buildSDKOptions() []claude.Option {
 	// Per-member model override wins (e.g. claude-opus-4-7 picked in
 	// the spawn modal). Empty string falls back to the SDK's own
 	// default, which also respects ANTHROPIC_DEFAULT_*_MODEL env vars.
@@ -320,6 +411,9 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	// we replay that ID through --resume and add --fork-session so
 	// Claude branches the transcript into a new session instead of
 	// hijacking the original (which may still be running elsewhere).
+	// Step 3b reuses this same path: the reconnect helper stamps
+	// resumeSessionID = the live claudeSessionID so the rebuilt session
+	// continues the same transcript.
 	if s.resumeSessionID != "" {
 		opts = append(opts, claude.WithSessionIDToResume(s.resumeSessionID))
 		if s.forkSession {
@@ -365,48 +459,21 @@ func (s *SDKSession) Start(ctx context.Context) error {
 	if len(s.mcpServers) > 0 {
 		opts = append(opts, claude.WithMcpServers(s.mcpServers))
 	}
-
-	// Create persistent session -- subprocess stays alive across turns.
-	session, err := claude.NewSession(sessionCtx, opts...)
-	if err != nil {
-		cancel()
-		return fmt.Errorf("failed to create persistent session: %w", err)
-	}
-	s.persistentSession = session
-
-	// Start event consumer goroutine FIRST, wait for it to be ready
-	// before sending the kickstart to avoid dropping early events.
-	// safego wraps so a panic in event parsing (malformed SDK
-	// frame, JSON decode race) doesn't crash the whole daemon.
-	consumerReady := make(chan struct{})
-	s.wg.Add(1)
-	safego.Go("pty.sdk.eventConsumer", func() { s.eventConsumer(sessionCtx, consumerReady) })
-	<-consumerReady
-
-	// Send kickstart as the first turn.
-	if s.systemPrompt != "" {
-		s.sendMu.Lock()
-		err := sdkSessionSend(session, s.systemPrompt)
-		s.sendMu.Unlock()
-		if err != nil {
-			slog.Error("Failed to send kickstart", "session", s.ID, "error", err)
-			cancel()
-			return fmt.Errorf("failed to send kickstart: %w", err)
-		}
-		s.mu.Lock()
-		s.isWorking = true
-		s.status = StatusBusy
-		s.mu.Unlock()
-		s.emitEvent(EventWorking{})
-		slog.Info("SDK session kickstart sent", "session", s.ID, "prompt_len", len(s.systemPrompt))
-	}
-
-	return nil
+	return opts
 }
 
 // eventConsumer ranges over the persistent session's Events() channel.
 // Processes events from ALL turns (kickstart, standup, brainstorm, etc.).
-// Only exits when the session is closed.
+//
+// On a clean close (operator Stop(), graceful finish) it exits and the defer
+// emits a terminal EventExit. On an UNEXPECTED close (provider error stream
+// death — 429/5xx/connection-reset/CLI crash) while reconnect is enabled and
+// under the per-session cap, it rebuilds the persistent session in place
+// (resuming the same Claude transcript) and keeps ranging, so a transient
+// provider blip self-heals faster + cheaper than a full office respawn and
+// without churning the respawn cap. Once the cap is hit (or a graceful
+// close), the defer emits a reason-tagged EventExit and the office watchdog
+// remains the backstop.
 func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 	// wg.Done must be the LAST deferred call (runs last) so Stop() only
 	// unblocks after all cleanup (channel close, log) has completed.
@@ -419,17 +486,129 @@ func (s *SDKSession) eventConsumer(ctx context.Context, ready chan<- struct{}) {
 		// Only emit EventExit if Stop() hasn't already run (avoid double cleanup).
 		s.mu.RLock()
 		stopped := s.isStopped
+		errored := s.lastEventWasError
 		s.mu.RUnlock()
 		if !stopped {
-			s.emitEvent(EventExit{ExitCode: 0})
+			// Non-lossy exit signal (Step 3a): when the stream died after a
+			// provider/stream error rather than a graceful finish, attribute
+			// the exit with a non-zero code + ExitReasonProviderError so
+			// HandleAgentDeath / the dashboard / run summary can distinguish a
+			// provider death from a clean completion instead of masking every
+			// unexpected death as EventExit{ExitCode:0}.
+			if errored {
+				s.emitEvent(EventExit{ExitCode: 1, Reason: ExitReasonProviderError})
+			} else {
+				s.emitEvent(EventExit{ExitCode: 0})
+			}
 		}
 		s.eventsOnce.Do(func() { close(s.events) })
 		slog.Info("SDK session event consumer ended", "session", s.ID)
 	}()
 
-	for event := range s.persistentSession.Events() {
-		s.processEvent(event)
+	for {
+		for event := range s.persistentSession.Events() {
+			s.processEvent(event)
+		}
+		// The current persistent session's Events() channel closed. Decide
+		// whether this was intentional (exit) or an unexpected provider-error
+		// death we should try to reconnect through.
+		if !s.shouldReconnect(ctx) {
+			return
+		}
+		if !s.reconnect(ctx) {
+			// Reconnect failed (NewSession error / hard auth failure). Fall
+			// through to the defer's EventExit; the office watchdog rebuilds a
+			// fresh session as the backstop.
+			return
+		}
+		// Reconnect succeeded -- loop back and range over the new session's
+		// Events() channel.
 	}
+}
+
+// shouldReconnect reports whether the just-closed Events() channel warrants an
+// in-place reconnect rather than a terminal exit. True only when ALL hold:
+// the feature is enabled, the session was NOT intentionally stopped, the
+// session context is still live, the last event was a provider/stream error
+// (not a graceful finish), we have a Claude session ID to resume, and the
+// per-session reconnect cap hasn't been hit. Any false -> let eventConsumer
+// emit EventExit and defer to the office watchdog.
+func (s *SDKSession) shouldReconnect(ctx context.Context) bool {
+	if !sdkReconnectEnabled {
+		return false
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.isStopped {
+		return false
+	}
+	if !s.lastEventWasError {
+		// Graceful close (turn cap path Stops the session; a clean finish has
+		// no error latched) -- nothing to reconnect through.
+		return false
+	}
+	if s.claudeSessionID == "" {
+		// No transcript to resume; a fresh session would lose context, so
+		// leave it to the office respawn path instead.
+		return false
+	}
+	return s.reconnectAttempts < sdkReconnectMaxAttempts
+}
+
+// reconnect rebuilds the persistent claude.Session in place after an
+// unexpected provider-error close, resuming the same Claude transcript via the
+// live claudeSessionID. Applies the per-attempt backoff, increments the
+// reconnect counter, and on success clears the error latch + resumes the
+// kickstart-less session (the resumed transcript already holds the agent's
+// state). Returns false if NewSession fails so the caller falls through to the
+// EventExit path. Safe under the per-session cap enforced by shouldReconnect.
+func (s *SDKSession) reconnect(ctx context.Context) bool {
+	s.mu.Lock()
+	attempt := s.reconnectAttempts
+	s.reconnectAttempts++
+	resumeID := s.claudeSessionID
+	s.mu.Unlock()
+
+	backoff := sdkReconnectBackoff[len(sdkReconnectBackoff)-1]
+	if attempt < len(sdkReconnectBackoff) {
+		backoff = sdkReconnectBackoff[attempt]
+	}
+	slog.Warn("SDK session stream died unexpectedly; attempting in-session reconnect",
+		"session", s.ID, "attempt", attempt+1, "max", sdkReconnectMaxAttempts,
+		"resumeSessionID", resumeID, "backoffMs", backoff.Milliseconds())
+
+	select {
+	case <-time.After(backoff):
+	case <-ctx.Done():
+		return false
+	}
+
+	// Resume the same transcript so the rebuilt subprocess continues the
+	// agent's prior state. forkSession stays false here: we want to CONTINUE
+	// the session, not branch it.
+	s.mu.Lock()
+	s.resumeSessionID = resumeID
+	s.forkSession = false
+	s.mu.Unlock()
+
+	session, err := claude.NewSession(ctx, s.buildSDKOptions()...)
+	if err != nil {
+		slog.Error("SDK session reconnect failed; falling through to exit",
+			"session", s.ID, "attempt", attempt+1, "error", err)
+		return false
+	}
+
+	s.mu.Lock()
+	s.persistentSession = session
+	s.lastEventWasError = false
+	s.status = StatusIdle
+	s.lastActivityAt = time.Now()
+	s.mu.Unlock()
+	slog.Info("SDK session reconnected", "session", s.ID, "attempt", attempt+1, "resumeSessionID", resumeID)
+	return true
 }
 
 // processEvent handles a single SDK event from the persistent session's
@@ -454,6 +633,9 @@ func (s *SDKSession) processEvent(event claude.Event) {
 				s.appendOutput(fmt.Sprintf("[Session %s] Model: %s\n", event.System.SessionID, event.System.Model))
 				slog.Info("SDK session initialized", "session", s.ID, "claudeSession", event.System.SessionID, "model", event.System.Model)
 			case "error":
+				s.mu.Lock()
+				s.lastEventWasError = true
+				s.mu.Unlock()
 				s.appendOutput(fmt.Sprintf("[Error] %s\n", event.System.Message))
 				slog.Error("SDK session error", "session", s.ID, "message", event.System.Message)
 			}
@@ -506,6 +688,11 @@ func (s *SDKSession) processEvent(event claude.Event) {
 			s.isWorking = false
 			s.status = StatusIdle
 			clear(s.activeTools)
+			// Latch/clear the provider-error flag from this turn's outcome so a
+			// subsequent Events() channel close can be attributed correctly. A
+			// clean turn clears it; an errored turn (rate-limit / 5xx / gateway
+			// "Network error") latches it.
+			s.lastEventWasError = event.Result.IsError
 			currentCost := s.totalCostUSD
 			// Best-effort model name: pick the key with the largest usage
 			// out of ModelUsages. Multi-model turns are rare; in the common
@@ -564,7 +751,9 @@ func (s *SDKSession) processEvent(event claude.Event) {
 				// won't emit a second EventExit. Without this the events
 				// channel would close with no EventExit and the office agent
 				// would leak (zombie counting against maxSessions).
-				s.emitEvent(EventExit{ExitCode: 0})
+				// Tagged with ExitReasonTurnCap so the office forwarder can
+				// exempt this legitimate rollover from the respawn-cap budget.
+				s.emitEvent(EventExit{ExitCode: 0, Reason: ExitReasonTurnCap})
 				go s.Stop()
 			}
 

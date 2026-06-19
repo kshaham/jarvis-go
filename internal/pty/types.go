@@ -230,7 +230,32 @@ type EventWorking struct{}
 
 func (EventWorking) eventType() string { return "working" }
 
-type EventExit struct{ ExitCode int }
+// Exit reasons carried on EventExit.Reason. Empty means an ordinary exit
+// whose nature isn't otherwise attributed (clean finish or unclassified
+// subprocess close). The office forwarder reads Reason to decide whether a
+// death is a legitimate rollover (turn cap) — which must NOT count against
+// the crash-loop respawn cap — versus a genuine crash that should.
+const (
+	// ExitReasonTurnCap marks the EventExit emitted when a session hits
+	// its per-session MaxTurnsPerSession ceiling. A turn-cap rollover is
+	// productive work hitting a ceiling, not a crash, so it is exempted
+	// from the respawn-cap budget.
+	ExitReasonTurnCap = "turn-cap"
+	// ExitReasonProviderError marks the EventExit emitted when the SDK /
+	// Codex subprocess stream died unexpectedly on a provider error
+	// (429/5xx/connection-reset/CLI crash) rather than a graceful close.
+	ExitReasonProviderError = "provider-error"
+)
+
+// EventExit fires when a session ends. ExitCode is 0 for a clean finish and
+// non-zero for an abnormal exit. Reason (optional) attributes the exit —
+// see the ExitReason* constants — so downstream consumers can distinguish a
+// legitimate turn-cap rollover or a provider-error stream death from a plain
+// clean exit. Empty Reason preserves the historical "clean exit" semantics.
+type EventExit struct {
+	ExitCode int
+	Reason   string
+}
 
 func (EventExit) eventType() string { return "exit" }
 

@@ -76,6 +76,22 @@ const (
 // the member spawn payload.
 const defaultMaxTurnsPerSession = 100
 
+// perpetualMaxTurnsPerSession is the raised per-session turn ceiling for
+// PERPETUAL-mode agents. A perpetual agent is designed to run for hours
+// and self-replenish work, so the 100-turn default (R18 — sized to catch
+// a single runaway task window, not steady-state work) deterministically
+// retires a healthy member: the Codex backend accumulates turnCount across
+// the WHOLE session and never resets (codex_session.go), so a continuously
+// working perpetual Codex agent dies at exactly 100 cumulative turns, and
+// each cap death counts against the respawn cap (3/30min) until the member
+// is permanently abandoned — the documented team-shrinkage incident.
+//
+// We RAISE rather than REMOVE the cap: a non-zero ceiling keeps the
+// runaway defense intact (the cap still fires on a genuinely stuck agent),
+// while the perpetual loop hard-stop, the wall-clock duration deadline, the
+// loop detector, and the respawn cap all remain as the real runaway guards.
+const perpetualMaxTurnsPerSession = 1000
+
 // firstNonEmpty thin-wraps strs.FirstNonEmpty so the existing call
 // sites in this file don't need to grow an import each. P11.3.11
 // dedupe: the shared helper lives in internal/strs/ alongside other

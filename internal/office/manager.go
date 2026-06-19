@@ -54,6 +54,14 @@ type Manager struct {
 	// can enforce a backoff cap (max respawnCapCount within respawnCapWindow)
 	// and refuse to loop forever on a member that keeps dying.
 	respawnHistory map[string][]time.Time
+	// turnCapDeaths flags, per member ConfigID, that the member's most recent
+	// death was a clean per-session turn-cap rollover rather than a crash.
+	// Set by MarkTurnCapDeath (from the event forwarder when EventExit carries
+	// ExitReasonTurnCap) and consumed by PrepareMemberRespawn, which skips the
+	// respawn-cap increment for a turn-cap rollover so legitimate steady-state
+	// work can't permanently retire a perpetual member. A genuine crash flap
+	// leaves the flag unset and still trips the cap.
+	turnCapDeaths map[string]bool
 
 	// blockedTaskCount is the team-wide count of tasks in TaskBlocked state.
 	// Maintained atomically so the statusline handler can read it in O(1)
@@ -309,6 +317,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		configIndex:        make(map[string]string),
 		spawnedMembers:     make(map[string]*spawnedMemberRecord),
 		respawnHistory:     make(map[string][]time.Time),
+		turnCapDeaths:      make(map[string]bool),
 		fileLocks:          make(map[string]*FileLock),
 		meetings:           make(map[string]*Meeting),
 		bugTasks:           make(map[string]*BugTask),
@@ -761,6 +770,7 @@ func (m *Manager) SetTeamSpawned(v bool) {
 		// inherit the previous team's dead-member records.
 		m.spawnedMembers = make(map[string]*spawnedMemberRecord)
 		m.respawnHistory = make(map[string][]time.Time)
+		m.turnCapDeaths = make(map[string]bool)
 		// Reset the perpetual-duration deadline + latch on teardown.
 		m.perpetualDeadline = time.Time{}
 		m.perpetualDurationWrappedUp = false

@@ -339,7 +339,10 @@ func (s *CodexSession) runTurn(ctx context.Context, prompt string) {
 		// Emit EventExit so the death flows through the forwarder's normal
 		// EventExit path (HandleAgentDeath + cleanup). go s.Stop() below sets
 		// isStopped, so the worker's defer won't emit a second EventExit.
-		s.emitEvent(EventExit{ExitCode: 0})
+		// Tagged with ExitReasonTurnCap so the office forwarder can exempt
+		// this legitimate rollover from the respawn-cap budget — critical on
+		// Codex, where turnCount accumulates across the whole session.
+		s.emitEvent(EventExit{ExitCode: 0, Reason: ExitReasonTurnCap})
 		go s.Stop()
 	}
 }
