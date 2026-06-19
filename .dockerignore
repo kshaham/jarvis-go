@@ -1,0 +1,26 @@
+# Shrinks the build context + stops irrelevant file changes from busting layer
+# cache. Deliberately conservative: does NOT exclude any go:embed source
+# (internal/skillsbundle/skills, internal/office/ecc_*, agentskills_*, seeds,
+# internal/web/static/public/*). Only react/ (rebuilt in the spa-build stage)
+# is excluded.
+
+.git
+.gitignore
+
+# Node deps (reinstalled in the spa-build stage via npm ci)
+**/node_modules
+
+# Built SPA bundle -- produced fresh in-image by the spa-build stage
+internal/web/static/public/react
+
+# Build outputs / local binaries / archives
+/out
+**/dist
+*.zip
+
+# Tooling / editor / agent scratch (per-machine, never needed in-image)
+.playwright-mcp
+.codegraph
+.cursor
+.claude
+.DS_Store
