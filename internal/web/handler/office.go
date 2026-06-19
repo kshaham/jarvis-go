@@ -2852,8 +2852,19 @@ func (ctx *Context) OfficeGetDevInstances(w http.ResponseWriter, r *http.Request
 func writeDevInstancesListing(w http.ResponseWriter, mgr *office.Manager) {
 	all := mgr.ListDevInstances()
 	out := make(map[string]interface{}, len(all))
-	for name, inst := range all {
-		out[name] = map[string]interface{}{
+	// instances is a slot-stamped array (each entry carries its own "slot"),
+	// which is what the SPA Dev Instances screen consumes. The legacy "slots"
+	// map is kept for backward compatibility with the classic UI.
+	names := make([]string, 0, len(all))
+	for name := range all {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	instances := make([]map[string]interface{}, 0, len(all))
+	for _, name := range names {
+		inst := all[name]
+		entry := map[string]interface{}{
+			"slot":           name,
 			"url":            inst.URL,
 			"pid":            inst.PID,
 			"credsSet":       inst.Credentials != "",
@@ -2861,8 +2872,10 @@ func writeDevInstancesListing(w http.ResponseWriter, mgr *office.Manager) {
 			"healthFailures": inst.HealthFailures,
 			"lastCheckAt":    inst.LastCheckAt,
 		}
+		out[name] = entry
+		instances = append(instances, entry)
 	}
-	ok(w, map[string]interface{}{"slots": out})
+	ok(w, map[string]interface{}{"slots": out, "instances": instances})
 }
 
 // OfficeAgentPostDevInstance records a slot's URL + optional PID.

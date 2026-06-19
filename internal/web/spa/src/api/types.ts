@@ -291,6 +291,8 @@ export interface DevInstance {
   healthFailures?: number;
   lastCheckAt?: string;
   nextCheckAt?: string;
+  forceAnnounced?: boolean;
+  credsSet?: boolean;
   credentials?: Record<string, string>;
 }
 

@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var (
@@ -780,9 +781,18 @@ func handleWhiteboard(args []string) {
 	}
 	rest := append([]string{}, args...)
 	color, _ := extractFlag(&rest, "--color")
+	// Guard against accidental command fragments: a leftover token that still
+	// looks like a flag (e.g. an agent ran `cm whiteboard --tail 8`) is almost
+	// never a real note, so reject it with a quote-your-note hint instead of
+	// posting the fragment as a sticky note.
+	for _, tok := range rest {
+		if strings.HasPrefix(tok, "-") && len(tok) > 1 {
+			fatal(fmt.Sprintf("cm whiteboard: unexpected option %q -- write a plain note and quote it, e.g.\n  cm whiteboard \"Decided to use SSR for the landing page\"\n(only --color <hex> is supported)", tok))
+		}
+	}
 	content := strings.TrimSpace(strings.Join(rest, " "))
-	if content == "" {
-		fatal("Usage: cm whiteboard <content...> [--color <hex>]  |  cm whiteboard list")
+	if !looksLikeRealNote(content) {
+		fatal("cm whiteboard: note is empty or too short.\nUsage: cm whiteboard \"<your note>\" [--color <hex>]  |  cm whiteboard list")
 	}
 	body := map[string]interface{}{"sessionId": sessionID, "content": content}
 	if color != "" {
@@ -790,6 +800,22 @@ func handleWhiteboard(args []string) {
 	}
 	post("/api/office/agent/sticky-note", body)
 	fmt.Println("Sticky note posted.")
+}
+
+// looksLikeRealNote returns true when s is a plausible sticky note: at least
+// 3 non-space chars and containing at least one letter, so stray fragments
+// (bare punctuation, leftover shell tokens) don't become notes.
+func looksLikeRealNote(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 3 {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // printStickyNotes renders the sticky-note feed compactly: one block per
@@ -1557,11 +1583,13 @@ Commands:
   dev creds set <text...> [--name <s>]
                                       Lead: set dev login blob for slot s
   dev creds clear [--name <s>]        Lead: clear dev credentials for slot s
-  whiteboard <note...> [--color <hex>]
+  whiteboard "<note>" [--color <hex>]
                                       Post a sticky note to the shared whiteboard
                                       (decisions, blockers, milestones, hand-offs,
-                                      findings). Shows on the Whiteboard screen and
-                                      in the Reports library. Alias: cm note
+                                      findings). QUOTE the note as one argument, e.g.
+                                      cm whiteboard "Switched gauge to canvas for perf".
+                                      Shows on the Whiteboard screen and in the
+                                      Reports library. Alias: cm note
   whiteboard list                     Print the recent sticky-note feed
   project invariants                  List project invariants (non-negotiable rules)
   project invariants add "<rule>"     Append a rule to the invariants list
