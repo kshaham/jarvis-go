@@ -1376,6 +1376,8 @@ func (s *Server) setupRouter() chi.Router {
 					r.Post("/code-graph/impact", h.OfficePostCodeGraphImpact)
 					r.Post("/wrap-up", h.OfficePostWrapUp)
 					r.Post("/wrap-up/cancel", h.OfficePostWrapUpCancel)
+					// Update a live perpetual team's auto-wrap-up deadline mid-run.
+					r.Post("/perpetual-duration", h.OfficePostPerpetualDuration)
 					// R33 · on-demand wrap-up report generation.
 					r.Post("/reports/generate", h.OfficeGenerateReport)
 					// R18 · surgical agent controls for operators

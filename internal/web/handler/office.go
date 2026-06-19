@@ -1970,6 +1970,61 @@ func (ctx *Context) OfficePostWrapUpCancel(w http.ResponseWriter, r *http.Reques
 	ok(w, nil)
 }
 
+// maxPerpetualDurationHours caps the live perpetual-duration update at one
+// week to fence off fat-finger inputs; 0 means unlimited.
+const maxPerpetualDurationHours = 168
+
+// OfficePostPerpetualDuration updates a live perpetual team's auto-wrap-up
+// deadline mid-run. Body: {"hours": N} where N is the TOTAL run time from
+// spawn (teamSpawnedAt + N hours), matching the spawn-time semantics; 0 =
+// unlimited. If the team had already started wrapping up because the old
+// deadline passed, extending past now resumes it.
+// POST /api/office/perpetual-duration
+func (ctx *Context) OfficePostPerpetualDuration(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Hours int `json:"hours"`
+	}
+	if !request.DecodeAndValidateMax(w, r, &req, 1<<12) {
+		return
+	}
+	if req.Hours < 0 || req.Hours > maxPerpetualDurationHours {
+		request.WriteError(w, http.StatusBadRequest,
+			fmt.Sprintf("hours must be between 0 (unlimited) and %d", maxPerpetualDurationHours))
+		return
+	}
+	mgr := ctx.OfficeManager
+	if !mgr.IsTeamSpawned() {
+		request.WriteError(w, http.StatusBadRequest, "no team is spawned")
+		return
+	}
+	if !mgr.IsPerpetualMode() {
+		request.WriteError(w, http.StatusConflict,
+			"perpetual mode is off; the auto-wrap-up duration only applies to perpetual teams")
+		return
+	}
+	deadline, resumed := mgr.UpdatePerpetualDuration(req.Hours)
+	if resumed {
+		ctx.emit("office:wrapUpCancelled", map[string]interface{}{"active": false})
+	}
+	payload := map[string]interface{}{
+		"success":           true,
+		"hours":             req.Hours,
+		"perpetualDeadline": perpetualDeadlineForJSON(deadline),
+		"resumed":           resumed,
+	}
+	ctx.emit("office:perpetualDurationChanged", payload)
+	ok(w, payload)
+}
+
+// perpetualDeadlineForJSON renders a deadline as RFC3339 UTC, or "" for the
+// zero time (unlimited).
+func perpetualDeadlineForJSON(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
 // ---------------------------------------------------------------------------
 // Standup handlers
 // ---------------------------------------------------------------------------

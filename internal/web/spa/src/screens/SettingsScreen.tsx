@@ -86,6 +86,15 @@ export function SettingsScreen() {
     },
     onError: () => toast.error('Failed to start brainstorm'),
   });
+  const setDuration = useMutation({
+    mutationFn: (hours: number) =>
+      fetchJSON('/api/office/perpetual-duration', { method: 'POST', body: { hours } }),
+    onSuccess: (_data, hours) => {
+      qc.invalidateQueries({ queryKey: ['office', 'status'] });
+      toast.success(hours === 0 ? 'Set to run indefinitely' : `Auto wrap-up set to ${hours}h from spawn`);
+    },
+    onError: () => toast.error('Failed to update duration'),
+  });
 
   const { theme, setTheme } = useTheme();
 
@@ -184,6 +193,25 @@ export function SettingsScreen() {
         </div>
       </Section>
 
+      {/* Perpetual improvement duration */}
+      <Section
+        title="Perpetual duration"
+        hint={
+          !teamSpawned
+            ? 'No team spawned.'
+            : !status.data?.perpetualMode
+              ? 'Perpetual mode is off for this team. The duration only applies to perpetual teams.'
+              : 'Change when the perpetual team auto-wraps up. Total run time from spawn; 0 = run indefinitely.'
+        }
+      >
+        <PerpetualDurationControl
+          disabled={!teamSpawned || !status.data?.perpetualMode}
+          deadline={status.data?.perpetualDeadline}
+          pending={setDuration.isPending}
+          onApply={(hours) => setDuration.mutate(hours)}
+        />
+      </Section>
+
       {/* Brainstorm */}
       <Section
         title="Brainstorm"
@@ -249,6 +277,70 @@ function BrainstormForm({
           disabled={pending || !prompt.trim()}
         >
           {pending ? 'Brainstorming…' : 'Start brainstorm'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// Total-run-time-from-spawn options (hours), mirroring the spawn modal. 0 =
+// unlimited / run indefinitely.
+const PERPETUAL_HOURS = [0, 1, 2, 4, 6, 8, 12, 24, 48, 72];
+
+// PerpetualDurationControl lets the operator change a live perpetual team's
+// auto-wrap-up deadline mid-run. It shows the current deadline + a select to
+// set a new total run time from spawn, applied via POST /api/office/perpetual-
+// duration.
+function PerpetualDurationControl({
+  disabled,
+  deadline,
+  pending,
+  onApply,
+}: {
+  disabled: boolean;
+  deadline?: string;
+  pending: boolean;
+  onApply: (hours: number) => void;
+}) {
+  const [hours, setHours] = useState(6);
+
+  const deadlineLabel = (() => {
+    if (disabled) return null;
+    if (!deadline) return 'Currently: runs indefinitely (no auto wrap-up).';
+    const when = new Date(deadline);
+    const remainingMs = when.getTime() - Date.now();
+    if (remainingMs <= 0) return `Currently: deadline passed (${when.toLocaleString()}) — wrapping up.`;
+    const h = Math.floor(remainingMs / 3_600_000);
+    const m = Math.floor((remainingMs % 3_600_000) / 60_000);
+    return `Currently: auto-wraps ${when.toLocaleString()} (~${h}h ${m}m left).`;
+  })();
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {deadlineLabel ? (
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{deadlineLabel}</span>
+      ) : null}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select
+          aria-label="Perpetual auto wrap-up hours"
+          value={hours}
+          onChange={(e) => setHours(Number(e.target.value))}
+          disabled={disabled}
+          className="field"
+          style={{ width: 'auto', minWidth: 160 }}
+        >
+          {PERPETUAL_HOURS.map((h) => (
+            <option key={h} value={h}>
+              {h === 0 ? 'Unlimited (run indefinitely)' : `${h} hours from spawn`}
+            </option>
+          ))}
+        </select>
+        <Button
+          variant="primary"
+          disabled={disabled || pending}
+          onClick={() => onApply(hours)}
+        >
+          {pending ? 'Updating…' : 'Update duration'}
         </Button>
       </div>
     </div>

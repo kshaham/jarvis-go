@@ -39,6 +39,10 @@ export interface OfficeStatus {
   pauseReason?: string;
   mission?: string;
   prNumber?: number;
+  // Perpetual improvement mode + its auto-wrap-up deadline (RFC3339, or ""
+  // for unlimited). Updatable mid-run via POST /api/office/perpetual-duration.
+  perpetualMode?: boolean;
+  perpetualDeadline?: string;
   members: OfficeMember[];
   recentMessages?: Array<{
     fromSessionId: string;

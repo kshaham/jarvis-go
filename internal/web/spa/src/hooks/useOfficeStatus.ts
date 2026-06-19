@@ -21,7 +21,8 @@ export function useOfficeStatus() {
       if (
         name === 'office:memberUpdated' ||
         name === 'office:teamSpawned' ||
-        name === 'office:teamKilled'
+        name === 'office:teamKilled' ||
+        name === 'office:perpetualDurationChanged'
       ) {
         qc.invalidateQueries({ queryKey: QUERY_KEY });
       }

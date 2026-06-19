@@ -1295,6 +1295,35 @@ func (m *Manager) GetPerpetualDeadline() time.Time {
 	return m.perpetualDeadline
 }
 
+// perpetualDeadlineISO renders a deadline for the status payload: "" for the
+// zero time (unlimited), RFC3339 UTC otherwise.
+func perpetualDeadlineISO(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// UpdatePerpetualDuration changes a live team's auto-wrap-up deadline mid-run.
+// hours is the TOTAL run time from spawn (teamSpawnedAt + hours), matching the
+// spawn-time semantics; 0 means unlimited. It re-arms the duration latch, and
+// if the team was already wrapping up because the old deadline passed AND the
+// new deadline is in the future (or unlimited), it resumes the team: cancels
+// wrap-up and restarts idle monitoring. Returns the new deadline + whether it
+// resumed a wrapping-up team. Composes the existing locked setters (no nested
+// lock). Caller is responsible for checking IsTeamSpawned / IsPerpetualMode.
+func (m *Manager) UpdatePerpetualDuration(hours int) (time.Time, bool) {
+	m.SetPerpetualDurationHours(hours)
+	deadline := m.GetPerpetualDeadline()
+	resumed := false
+	if m.IsWrappingUp() && (deadline.IsZero() || deadline.After(time.Now())) {
+		m.SetWrappingUp(false)
+		m.StartIdleMonitoring()
+		resumed = true
+	}
+	return deadline, resumed
+}
+
 // spawnedMemberRecord captures everything needed to rebuild a dead member's
 // session: the member config (identity, personality, skills) plus the
 // team-level spawn context (workdir, provider, model, perpetual flag) that
@@ -2635,6 +2664,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	teamSpawned := m.teamSpawned
 	wrappingUp := m.wrappingUp
 	perpetualMode := m.perpetualMode
+	perpetualDeadline := m.perpetualDeadline
 	sevenStepMode := m.sevenStepMode
 	// Template the current team was spawned from. Surfaced here (not just in
 	// GetOfficeSettings) so the SPA's office-status hook can tell a one-click
@@ -2708,6 +2738,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"teamSpawned":       teamSpawned,
 		"teamTemplateId":    teamTemplateID,
 		"perpetualMode":     perpetualMode,
+		"perpetualDeadline": perpetualDeadlineISO(perpetualDeadline),
 		"sevenStepMode":     sevenStepMode,
 		"paused":            paused,
 		"pause":             pauseBlock,

@@ -12,6 +12,7 @@ export type SSEEventName =
   | 'office:memberUpdated'
   | 'office:teamSpawned'
   | 'office:teamKilled'
+  | 'office:perpetualDurationChanged'
   | 'office:taskQueueGenerated'
   | 'office:taskQueueUpdated'
   | 'office:taskAssigned'
@@ -70,6 +71,7 @@ const EVENT_NAMES: SSEEventName[] = [
   'office:memberUpdated',
   'office:teamSpawned',
   'office:teamKilled',
+  'office:perpetualDurationChanged',
   'office:taskQueueGenerated',
   'office:taskQueueUpdated',
   'office:taskAssigned',
