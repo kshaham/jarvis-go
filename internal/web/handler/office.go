@@ -1831,6 +1831,29 @@ func (ctx *Context) OfficePostWrapUp(w http.ResponseWriter, r *http.Request) {
 		request.WriteError(w, http.StatusBadRequest, "No team is spawned")
 		return
 	}
+
+	// Optional {force bool} body. Tolerate an empty/absent body: the
+	// classic UI posts nothing, and we must not 400 those callers.
+	var wrapReq struct {
+		Force bool `json:"force"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&wrapReq)
+	}
+
+	// Live-preview completion gate. For web-app missions, refuse to wrap up
+	// until a healthy dev instance has been announced — otherwise the team
+	// can mark a project done with nothing the operator can actually view.
+	// {force:true} overrides for the deliberate exceptions.
+	if mgr.MissionLooksLikeWebApp() && !mgr.HasHealthyDevInstance() && !wrapReq.Force {
+		request.WriteJSON(w, http.StatusConflict, map[string]interface{}{
+			"success":          false,
+			"error":            `No healthy live preview deployed. Stand up + announce a dev instance (cm dev announce) and verify the live preview before wrapping up, or pass {"force":true} to override.`,
+			"needsLivePreview": true,
+		})
+		return
+	}
+
 	if mgr.IsWrappingUp() {
 		status := mgr.GetWrapUpStatus()
 		ok(w, map[string]interface{}{

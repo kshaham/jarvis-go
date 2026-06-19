@@ -234,6 +234,7 @@ func buildStableSystemPrompt(tier, teamMission string, invariants []string, harn
 	b.WriteString("- Handoff mid-task: `cm task handoff <id> <targetConfigId> \"<context>\"`. Receiver accepts/rejects. Not for dodging work.\n")
 	b.WriteString("- Never push to remote, never switch branches -- you live on `agent/<your-id>`.\n")
 	b.WriteString("- Never claim completion without fresh verification (build, test, screenshot, exit code).\n")
+	b.WriteString("- Web-app missions: do not mark the project complete until the live preview renders for the operator through `/api/office/dev-proxy/<slot>/` (announce the dev instance, confirm health is green, then browser-screenshot that proxy path).\n")
 	b.WriteString("- Before duplicating work: `cm knowledge search <keywords>` -- searches every teammate's memory + learnings + standups + whiteboard.\n")
 	b.WriteString("- Before any browser verification: `cm dev url` (and `cm dev creds` if login-gated). Don't spin up competing dev servers.\n")
 	if isCodex {

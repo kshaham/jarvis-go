@@ -392,6 +392,14 @@ func buildReportBody(m *Manager, generatedAt time.Time, trigger, reason string) 
 		len(handoffHistory), accepted, rejected, cancelled, expired)
 	fmt.Fprintf(&b, "- %d stuck alerts, %d recovery attempts\n",
 		metrics.TotalStuckAlerts, metrics.TotalRecoveryAttempts)
+	// Live preview — did the team leave a deployed, reachable dev instance
+	// the operator could actually view? MISSING is a red flag for any
+	// web-app mission (see the wrap-up completion gate).
+	if inst, ok := m.GetDevInstance(defaultDevSlot); ok && inst.URL != "" && m.HasHealthyDevInstance() {
+		fmt.Fprintf(&b, "- Live preview: %s (healthy)\n", inst.URL)
+	} else {
+		b.WriteString("- Live preview: MISSING — no dev instance was deployed\n")
+	}
 	b.WriteString("\n")
 
 	// Per-agent summary

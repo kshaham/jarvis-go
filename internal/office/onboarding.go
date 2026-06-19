@@ -160,6 +160,14 @@ cm dev list shows the full map. Port conflicts across slots return 409 -- pick a
 
 If the app requires login, also run cm dev creds set "admin@dev.local / password123" (optional --name <slot>) so teammates can get past the login screen. On wrap-up, cm dev clear --all handles every slot.
 
+**Definition of Done for web-app missions:** the project/task is NOT done until (1) a dev instance is announced (cm dev announce http://jarvis:<port>), (2) its health is green (cm dev list shows no failures), AND (3) you have verified the operator live preview renders through the proxy path /api/office/dev-proxy/<slot>/. Browser-screenshot THAT path (not the raw http://jarvis:<port>) -- it is the only path the operator's browser can reach, and a wrap-up will be blocked (409) without a healthy preview.
+
+So the dev server's assets resolve under that subpath, start it with the proxy base set:
+
+  Vite:  npm run dev -- --host 0.0.0.0 --port <P> --base /api/office/dev-proxy/app/
+  Next:  npm run dev -- -H 0.0.0.0 -p <P>   (set basePath '/api/office/dev-proxy/app' in next.config.js)
+  CRA:   set "homepage": "/api/office/dev-proxy/app" in package.json, then HOST=0.0.0.0 PORT=<P> npm start
+
 Full reference: cm skill read team-dev-instance.
 `
 }

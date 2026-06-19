@@ -1287,6 +1287,19 @@ func (s *Server) setupRouter() chi.Router {
 				r.Get("/member/{sessionId}/personality", h.OfficeGetMemberPersonality)
 				r.Get("/telegram-config", h.OfficeGetTelegramConfig)
 				r.Get("/dev-instances", h.OfficeGetDevInstances)
+				// Operator live-preview reverse proxy. The dev servers
+				// leads announce bind to docker-internal hosts on
+				// unpublished ports the operator's browser can't reach;
+				// jarvis can, so it proxies the request through. Accepts
+				// ALL methods and carries NO CSRF — the proxied dev app
+				// issues arbitrary methods (and WebSocket upgrades for
+				// HMR) that must pass straight through.
+				r.Handle("/dev-proxy/{slot}/*", http.HandlerFunc(h.OfficeDevProxy))
+				// Bare slot (no trailing slash) → redirect to .../ so an
+				// iframe src without a trailing slash still resolves.
+				r.Get("/dev-proxy/{slot}", func(w http.ResponseWriter, req *http.Request) {
+					http.Redirect(w, req, req.URL.Path+"/", http.StatusTemporaryRedirect)
+				})
 				// R29 · handoff visibility (read-only)
 				r.Get("/handoffs", h.OfficeListHandoffs)
 				// R33 · wrap-up / post-mortem reports (read-only).

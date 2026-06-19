@@ -1783,6 +1783,54 @@ func (m *Manager) ListDevInstances() map[string]devInstance {
 	return out
 }
 
+// HasHealthyDevInstance reports whether at least one slot has an announced
+// URL with a clean health-check record (HealthFailures == 0). The wrap-up
+// completion gate uses this to require a deployed, reachable live preview
+// before a web-app mission is marked done.
+func (m *Manager) HasHealthyDevInstance() bool {
+	for _, inst := range m.ListDevInstances() {
+		if inst.URL != "" && inst.HealthFailures == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// webAppMissionKeywords are conservative signals that a team's mission is a
+// web app whose definition-of-done should include a working live preview.
+// Kept deliberately narrow: a false negative (skipping the gate for a
+// borderline team) is safer than blocking a non-web team's wrap-up.
+var webAppMissionKeywords = []string{
+	"site", "web", "app", "frontend", "front-end", "ui", "dashboard",
+	"page", "html", "react", "next", "vite", "vue", "svelte",
+}
+
+// MissionLooksLikeWebApp returns true when the team's mission or working
+// directory looks like a web-app build. It checks the working directory for
+// package.json / index.html first (the strongest signal), then falls back to
+// a keyword scan over the mission text.
+func (m *Manager) MissionLooksLikeWebApp() bool {
+	_, workingDir := m.GetSpawnContext()
+	if workingDir != "" {
+		for _, marker := range []string{"package.json", "index.html"} {
+			if _, err := os.Stat(filepath.Join(workingDir, marker)); err == nil {
+				return true
+			}
+		}
+	}
+
+	mission := strings.ToLower(m.GetTeamMission())
+	if mission == "" {
+		return false
+	}
+	for _, kw := range webAppMissionKeywords {
+		if strings.Contains(mission, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // portFromURL extracts the host port as a string ("" if absent/invalid).
 func portFromURL(raw string) string {
 	u, err := urlPkg.Parse(raw)

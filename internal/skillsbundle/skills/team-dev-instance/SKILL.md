@@ -31,6 +31,26 @@ http://jarvis:<P>
 
 **NOT** `http://localhost:<P>`. The `headless-shell` container's localhost points at its own network namespace, not yours. Every announced URL must use `jarvis` as the host.
 
+## Operator live preview
+
+`http://jarvis:<P>` is reachable from the headless-shell browser, but the **operator's** browser cannot reach it — only ports 3555/3556 are published, and `jarvis` resolves only on the docker network. Jarvis reverse-proxies the operator through to your dev server at:
+
+```
+/api/office/dev-proxy/<slot>/
+```
+
+(default slot is `app`, so `/api/office/dev-proxy/app/`). The Dev Instances screen exposes an "Open live preview" link and an inline preview iframe pointed at this path. This works through the published jarvis port and through the server TLS proxy. WebSocket HMR (Vite / Next) passes through.
+
+Because the app is served under a subpath, **start the dev server with a matching base** so its assets resolve (otherwise you get a blank page or 404s on `/assets/...`):
+
+| Framework | Base flag |
+|---|---|
+| **Vite** | `npm run dev -- --host 0.0.0.0 --port <P> --base /api/office/dev-proxy/app/` |
+| **Next.js** | `basePath: '/api/office/dev-proxy/app'` in `next.config.js`, then `-H 0.0.0.0 -p <P>` |
+| **CRA** | `"homepage": "/api/office/dev-proxy/app"` in `package.json` |
+
+**`done` requires the preview to render through this path.** For web-app missions a wrap-up is blocked (409 `needsLivePreview`) until a healthy dev instance is announced. Browser-screenshot `/api/office/dev-proxy/<slot>/` — not the raw `http://jarvis:<P>` — to prove the operator can actually see it before marking the project complete.
+
 ## Rule 1 — bind to 0.0.0.0
 
 Most dev servers default to binding `127.0.0.1` only. That means they accept connections *inside the jarvis container only*. The headless-shell sibling container gets connection refused. You must bind to `0.0.0.0`.

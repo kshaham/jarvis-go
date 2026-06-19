@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { Server } from 'lucide-react';
 
@@ -17,6 +17,75 @@ const statusBadgeBaseStyle: React.CSSProperties = {
   borderRadius: 'var(--radius-sm)',
   fontSize: 12,
 };
+
+// DevPreview renders the operator-facing live preview for one slot. The raw
+// announced URL (http://jarvis:<port>) is docker-internal and unreachable
+// from the operator's browser, so both the "open" link and the inline iframe
+// point at the reverse-proxy path (/api/office/dev-proxy/<slot>/) that jarvis
+// forwards through. The raw URL is still shown as a small muted dev hint.
+function DevPreview({ slot, url }: { slot: string; url: string }): React.ReactElement {
+  const [showPreview, setShowPreview] = useState(false);
+  const proxyPath = `/api/office/dev-proxy/${slot}/`;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <a
+          href={proxyPath}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: 'var(--accent)',
+            textDecoration: 'none',
+          }}
+        >
+          Open live preview ↗
+        </a>
+        <button
+          type="button"
+          onClick={() => setShowPreview((v) => !v)}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: 'var(--text-secondary)',
+            background: 'var(--bg-pressed)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '2px 10px',
+            cursor: 'pointer',
+          }}
+        >
+          {showPreview ? 'Hide' : 'Preview'}
+        </button>
+      </div>
+      {showPreview ? (
+        <iframe
+          src={proxyPath}
+          title="live preview"
+          style={{
+            width: '100%',
+            height: 320,
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-app)',
+          }}
+        />
+      ) : null}
+      <span
+        style={{
+          fontSize: 11,
+          fontFamily: 'var(--font-mono)',
+          color: 'var(--text-muted)',
+          wordBreak: 'break-all',
+        }}
+      >
+        {url}
+      </span>
+    </div>
+  );
+}
 
 // DevInstancesScreen — list the team's dev servers (frontend / api /
 // custom slots). Each card shows URL + PID + health and credentials
@@ -105,19 +174,7 @@ export function DevInstancesScreen() {
                   ) : null}
                 </header>
                 {d.url ? (
-                  <a
-                    href={d.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      fontSize: 12,
-                      fontFamily: 'var(--font-mono)',
-                      color: 'var(--accent)',
-                      wordBreak: 'break-all',
-                    }}
-                  >
-                    {d.url}
-                  </a>
+                  <DevPreview slot={d.slot} url={d.url} />
                 ) : (
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>(no URL recorded)</span>
                 )}
