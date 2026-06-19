@@ -84,6 +84,26 @@ RUN python3 -m venv /opt/headroom && \
 # (terminal-automation helper invoked by the office).
 RUN npm install -g puppeteer-core@23.0.0 expect-cli@latest 2>&1 | tail -20
 
+# Agent backends the office SPAWNS. Without these the office cannot create ANY
+# agent session (the SDK + PTY paths both exec `claude`; Codex teams exec
+# `codex`). claude installs to /root/.local/bin; copy it onto the system PATH so
+# any runtime uid finds it. Pin >= 2.1.154 via CLAUDE_VERSION for Opus 4.8 +
+# Dynamic Workflows.
+ARG CLAUDE_VERSION=latest
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_VERSION" && \
+    cp /root/.local/bin/claude /usr/local/bin/claude && \
+    /usr/local/bin/claude --version
+ARG CODEX_VERSION=latest
+RUN npm install -g @openai/codex@"$CODEX_VERSION" && codex --version
+
+# The deployed container runs under a compose `user:` override (uid != the image
+# jarvis uid), so make the home writable for the agent CLIs' dotfiles
+# (~/.claude.json, ~/.config) and seed Claude's onboarding bypass so headless
+# `claude -p` never hits the interactive first-run gate.
+RUN chmod 777 /home/jarvis && \
+    python3 -c "import json; json.dump({'hasCompletedOnboarding': True, 'lastOnboardingVersion': '2.1.74', 'installMethod': 'native', 'numStartups': 10, 'projects': {}}, open('/home/jarvis/.claude.json', 'w'), indent=2)" && \
+    chmod 666 /home/jarvis/.claude.json
+
 # --- Stage 3: runtime-scratch (SDK-only, no PTY/node) -------------------------
 # Kept for SDK-only deployments that never spawn PTY sessions / mockups.
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime-scratch
