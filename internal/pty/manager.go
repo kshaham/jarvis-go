@@ -133,21 +133,43 @@ func (m *SessionManager) StopAllSessions(ctx context.Context) error {
 		hook(m)
 	}
 
+	// Stop every session concurrently rather than sequentially. Each SDK Stop
+	// blocks up to sdkStopWaitTimeout (5s) waiting for its event consumer to
+	// exit, so stopping N sessions one-by-one costs ~N*5s and blows past the
+	// shutdown budget (and docker's grace period), which leaves the remaining
+	// agent subprocesses orphaned when PID 1 is SIGKILLed mid-reap. Fanning the
+	// stops out makes the wall-clock cost ~one session's stop time instead of
+	// the sum. Each per-session Stop deletes from its map under its own lock, so
+	// concurrent stops on different ids are safe.
+	var wg sync.WaitGroup
 	for _, id := range ptyIDs {
-		if err := m.StopSession(ctx, id); err != nil {
-			slog.Warn("Failed to stop PTY session during shutdown", "sessionId", id, "error", err)
-		}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			if err := m.StopSession(ctx, id); err != nil {
+				slog.Warn("Failed to stop PTY session during shutdown", "sessionId", id, "error", err)
+			}
+		}(id)
 	}
 	for _, id := range sdkIDs {
-		if err := m.StopSDKSession(id); err != nil {
-			slog.Warn("Failed to stop SDK session during shutdown", "sessionId", id, "error", err)
-		}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			if err := m.StopSDKSession(id); err != nil {
+				slog.Warn("Failed to stop SDK session during shutdown", "sessionId", id, "error", err)
+			}
+		}(id)
 	}
 	for _, id := range codexIDs {
-		if err := m.StopCodexSession(id); err != nil {
-			slog.Warn("Failed to stop Codex session during shutdown", "sessionId", id, "error", err)
-		}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			if err := m.StopCodexSession(id); err != nil {
+				slog.Warn("Failed to stop Codex session during shutdown", "sessionId", id, "error", err)
+			}
+		}(id)
 	}
+	wg.Wait()
 	return nil
 }
 

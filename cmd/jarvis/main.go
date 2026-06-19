@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/kshaham/jarvis/internal/pty"
 	"github.com/kshaham/jarvis/internal/skillsbundle"
@@ -193,12 +194,23 @@ func runWeb() {
 	// abort, and Stop()'s drain could block well past the shutdown budget.
 	cancel()
 
-	// Graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*1e9)
+	// Graceful shutdown. Give server drain and session teardown SEPARATE
+	// budgets: a single shared 10s context lets server.Stop's drain starve
+	// StopAllSessions, and if session teardown overruns docker's grace period
+	// PID 1 is SIGKILLed mid-reap, orphaning the remaining agent subprocesses.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
-
 	_ = server.Stop(shutdownCtx)
-	_ = sessionManager.StopAllSessions(shutdownCtx)
+
+	// Dedicated budget for stopping every agent session (now fanned out
+	// concurrently, so 8s comfortably covers one session's stop time).
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer stopCancel()
+	_ = sessionManager.StopAllSessions(stopCtx)
+
+	// Final backstop: SIGKILL any agent process tree (e.g. claude's MCP-server
+	// children) that survived the graceful Stop above. No-op on non-Linux.
+	pty.ReapAgentSubprocesses()
 
 	slog.Info("Jarvis Go shutdown complete")
 }

@@ -39,6 +39,49 @@ func TestManager_StopAllSessions_NotFoundWarnBranches(t *testing.T) {
 	}
 }
 
+// TestManager_StopAllSessions_RemovesEverything asserts the happy-path: given
+// multiple registered sessions across all three backends, StopAllSessions
+// stops them (now concurrently, via one goroutine per id) and removes every
+// one from its map, so the manager is empty when the call returns. None of
+// these fixtures own a real subprocess, so Stop is deterministic.
+func TestManager_StopAllSessions_RemovesEverything(t *testing.T) {
+	// Arrange.
+	m := NewSessionManager(20)
+	m.mu.Lock()
+	for _, id := range []string{"pty-1", "pty-2", "pty-3"} {
+		m.sessions[id] = NewSession(SessionConfig{ID: id, WorkingDir: "/tmp", Mode: ModeShell})
+	}
+	for _, id := range []string{"sdk-1", "sdk-2", "sdk-3"} {
+		m.sdkSessions[id] = NewSDKSession(SessionConfig{ID: id})
+	}
+	for _, id := range []string{"codex-1", "codex-2"} {
+		m.codexSessions[id] = NewCodexSession(SessionConfig{ID: id})
+	}
+	m.mu.Unlock()
+	if m.GetSessionCount() != 8 {
+		t.Fatalf("setup: session count = %d, want 8", m.GetSessionCount())
+	}
+
+	// Act.
+	if err := m.StopAllSessions(context.Background()); err != nil {
+		t.Fatalf("StopAllSessions returned error: %v", err)
+	}
+
+	// Assert: every map drained.
+	if m.GetSessionCount() != 0 {
+		t.Errorf("session count = %d, want 0 after StopAllSessions", m.GetSessionCount())
+	}
+	if got := len(m.GetAllSessions()); got != 0 {
+		t.Errorf("PTY sessions = %d, want 0", got)
+	}
+	if got := len(m.GetAllSDKSessions()); got != 0 {
+		t.Errorf("SDK sessions = %d, want 0", got)
+	}
+	if got := len(m.GetAllCodexSessions()); got != 0 {
+		t.Errorf("Codex sessions = %d, want 0", got)
+	}
+}
+
 // stuckCodexSession is a CodexSession whose status is pre-advanced so Start()
 // takes its "already started" guard and returns an error -- the only failure
 // mode CreateCodexSession can surface.
