@@ -65,11 +65,25 @@ func (m *Manager) runObjectiveGate() ralph.GateResult {
 // loopHardStopReached reports whether the agent's perpetual loop has exceeded
 // its iteration or wall-clock budget. The returned reason is empty when no cap
 // is hit. Caps of 0 mean "unlimited" (legacy behavior preserved).
+//
+// When the team has a finite perpetual-duration deadline, THAT deadline is the
+// authoritative stop (checkPerpetualDurationDeadline wraps the team up when it
+// passes), so the per-agent iteration / wall-clock caps are skipped. Those caps
+// exist as a runaway guard for UNLIMITED perpetual teams; applying them to a
+// duration-bounded team would retire members after RalphMaxLoopIterations (10)
+// self-replenishment cycles, leaving them idle for the rest of the run instead
+// of improving the project for the full duration the operator asked for.
 func (m *Manager) loopHardStopReached(agent *AgentState) (bool, string) {
 	m.mu.RLock()
 	maxIter := m.config.RalphMaxLoopIterations
 	maxDur := m.config.PerpetualLoopMaxDuration
+	hasDeadline := !m.perpetualDeadline.IsZero()
 	m.mu.RUnlock()
+
+	// A finite duration deadline governs; let agents replenish until it fires.
+	if hasDeadline {
+		return false, ""
+	}
 
 	agent.mu.Lock()
 	iter := agent.LoopIterationCount

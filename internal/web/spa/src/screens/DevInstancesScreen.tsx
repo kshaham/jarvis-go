@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { Server, ChevronRight, ExternalLink } from 'lucide-react';
+import { Server, ChevronRight, ExternalLink, RefreshCw } from 'lucide-react';
 
 import { Metric } from '../components/motion/Metric';
 import { StatusDot } from '../components/motion/StatusDot';
@@ -33,10 +33,24 @@ function dotStatusOf(d: DevInstance): DotStatus {
 // path (/api/office/dev-proxy/<slot>/) that jarvis forwards through.
 function DevInstanceRow({ d }: { d: DevInstance }): React.ReactElement {
   const [open, setOpen] = useState(false);
+  // Bumping nonce remounts the iframe (cache-busted src) so the operator can
+  // pull the team's latest edits -- the dev server is static + no-store, so a
+  // reload always shows current disk state.
+  const [nonce, setNonce] = useState(0);
+  const [autoRefresh, setAutoRefresh] = useState(false);
   const dotStatus = dotStatusOf(d);
   const proxyPath = `/api/office/dev-proxy/${d.slot}/`;
+  const iframeSrc = `${proxyPath}?_=${nonce}`;
   const hasUrl = !!d.url;
   const label = dotStatus === 'stuck' ? 'Unhealthy' : dotStatus === 'working' ? 'Live' : 'Idle';
+
+  // Auto-refresh the preview every 15s while the pane is open + the toggle is
+  // on, so a watching operator sees improvements land without clicking.
+  useEffect(() => {
+    if (!open || !autoRefresh) return;
+    const id = window.setInterval(() => setNonce((n) => n + 1), 15_000);
+    return () => window.clearInterval(id);
+  }, [open, autoRefresh]);
 
   return (
     <GlowCard interactive live={dotStatus === 'working'} className="p-0">
@@ -137,9 +151,45 @@ function DevInstanceRow({ d }: { d: DevInstance }): React.ReactElement {
             gap: 10,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setNonce((n) => n + 1)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--accent)',
+                background: 'var(--bg-pressed)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '3px 10px',
+                cursor: 'pointer',
+              }}
+            >
+              <RefreshCw size={13} /> Refresh
+            </button>
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+              />
+              Auto-refresh (15s)
+            </label>
             <a
-              href={proxyPath}
+              href={iframeSrc}
               target="_blank"
               rel="noreferrer"
               onClick={(e) => e.stopPropagation()}
@@ -165,7 +215,8 @@ function DevInstanceRow({ d }: { d: DevInstance }): React.ReactElement {
             ) : null}
           </div>
           <iframe
-            src={proxyPath}
+            key={nonce}
+            src={iframeSrc}
             title={`live preview - ${d.slot}`}
             style={{
               width: '100%',

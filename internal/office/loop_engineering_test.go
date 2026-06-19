@@ -57,6 +57,31 @@ func TestLoopHardStop_PausesAfterIterationCap(t *testing.T) {
 	}
 }
 
+// TestLoopHardStop_DurationDeadlineBypassesIterationCap verifies that when a
+// finite perpetual-duration deadline is set, the per-agent iteration cap is
+// NOT applied -- the team keeps replenishing (improving the project) until the
+// deadline fires, instead of going idle after RalphMaxLoopIterations cycles.
+func TestLoopHardStop_DurationDeadlineBypassesIterationCap(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := idleTestConfig()
+	cfg.RalphMaxLoopIterations = 2
+	m, store, rec := newCtrlManager(t, cfg)
+	m.SetPerpetualMode(true)
+	m.SetPerpetualDurationHours(6) // finite deadline governs
+	m.RegisterAgent("sess-dl", "dl", &TeamMemberConfig{ID: "dl", Name: "Marathon", Role: "Backend", Tier: "worker"})
+
+	// Run well past the iteration cap (2): every tick should still replenish.
+	for i := 0; i < 6; i++ {
+		m.CheckForIdleAgents()
+	}
+	if len(store.writesFor("sess-dl")) == 0 {
+		t.Error("expected continuous replenishment past the iteration cap when a duration deadline is set")
+	}
+	if rec.has("office:loopMaxReached") {
+		t.Error("loop hard stop must NOT fire while a perpetual-duration deadline governs")
+	}
+}
+
 // TestLoopHardStop_Unlimited verifies the default (cap 0) preserves perpetual
 // behavior -- replenishment keeps firing.
 func TestLoopHardStop_Unlimited(t *testing.T) {
