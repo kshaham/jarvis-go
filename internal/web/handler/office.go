@@ -22,6 +22,7 @@ import (
 	"github.com/kshaham/jarvis/internal/office"
 	"github.com/kshaham/jarvis/internal/office/spawnpayload"
 	"github.com/kshaham/jarvis/internal/projects"
+	"github.com/kshaham/jarvis/internal/pty"
 	"github.com/kshaham/jarvis/internal/safego"
 	"github.com/kshaham/jarvis/internal/strs"
 	"github.com/kshaham/jarvis/internal/teamtemplates"
@@ -1105,6 +1106,15 @@ func (ctx *Context) OfficeShutdownTeam(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx.cleanupSessionResources(sessionID)
 	})
+
+	// Backstop: TeardownTeam only stops sessions still in the team roster. A
+	// session orphaned from the roster -- a reassigned/respawned member, or one
+	// stuck in a provider-error (429) retry loop -- is never visited and keeps
+	// running its agent subprocess. Stop ALL remaining manager sessions, then
+	// reap any straggler agent OS process, mirroring the container shutdown path
+	// so no agent lingers after the team is torn down.
+	_ = ctx.SessionManager.StopAllSessions(context.Background())
+	pty.ReapAgentSubprocesses()
 	ok(w, nil)
 }
 
