@@ -87,6 +87,19 @@ func (ctx *Context) OfficeDevProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dev server unreachable: "+err.Error(), http.StatusBadGateway)
 	}
 
+	// Force no-store on every proxied response (overriding whatever the dev
+	// server / any intermediary set) and strip validators, so the operator's
+	// browser can NEVER cache the live preview -- each load (and the SPA's
+	// auto-refresh) always reflects the team's latest edits.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		resp.Header.Set("Pragma", "no-cache")
+		resp.Header.Del("ETag")
+		resp.Header.Del("Last-Modified")
+		resp.Header.Del("Expires")
+		return nil
+	}
+
 	proxy.ServeHTTP(w, r)
 }
 

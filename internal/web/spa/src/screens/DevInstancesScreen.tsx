@@ -37,18 +37,22 @@ function DevInstanceRow({ d }: { d: DevInstance }): React.ReactElement {
   // pull the team's latest edits -- the dev server is static + no-store, so a
   // reload always shows current disk state.
   const [nonce, setNonce] = useState(0);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  // Auto-refresh defaults ON: an iframe never reloads itself, so without this
+  // the preview freezes on its first snapshot and the operator never sees the
+  // team's edits land. The dev server + proxy send no-store, so each reload
+  // shows current disk state.
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const dotStatus = dotStatusOf(d);
   const proxyPath = `/api/office/dev-proxy/${d.slot}/`;
   const iframeSrc = `${proxyPath}?_=${nonce}`;
   const hasUrl = !!d.url;
   const label = dotStatus === 'stuck' ? 'Unhealthy' : dotStatus === 'working' ? 'Live' : 'Idle';
 
-  // Auto-refresh the preview every 15s while the pane is open + the toggle is
-  // on, so a watching operator sees improvements land without clicking.
+  // Auto-refresh the preview every 8s while the pane is open + the toggle is on
+  // (default on), so the operator sees improvements land without clicking.
   useEffect(() => {
     if (!open || !autoRefresh) return;
-    const id = window.setInterval(() => setNonce((n) => n + 1), 15_000);
+    const id = window.setInterval(() => setNonce((n) => n + 1), 8_000);
     return () => window.clearInterval(id);
   }, [open, autoRefresh]);
 
