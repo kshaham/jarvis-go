@@ -69,7 +69,7 @@ Then start working. Do not narrate what /goal will do -- just begin.
 The evaluator stops your loop after `cm task complete` succeeds. At that point:
 - Run `cm task list` to confirm there is more queued work.
 - If the next task also has multi-step criteria, repeat this skill.
-- If you have nothing queued and you're in perpetual mode, the office will replenish you (do not invent work).
+- If you have nothing queued and you're in perpetual mode, do NOT idle and do NOT conclude the project is finished. Run the improvement cycle from the `office-feature-improvement` skill -- inventory the project's existing features, pick the next most-valuable enhancement or new feature, and `cm task self-add` it. The office will also replenish you, but you should find substantive work proactively rather than wait.
 
 ## Anti-patterns
 

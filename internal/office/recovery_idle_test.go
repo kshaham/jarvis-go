@@ -231,6 +231,15 @@ func TestSendSelfReplenishmentPrompt_IncludesMissionAndRole(t *testing.T) {
 	if !strings.Contains(prompt, "Platform Engineer") {
 		t.Errorf("expected role in prompt, got %q", prompt)
 	}
+	// The reframed prompt must drive systematic feature improvement (deepen an
+	// existing feature OR add a new one) rather than small chores, and must not
+	// let the agent declare the project finished.
+	if !strings.Contains(prompt, "IMPROVEMENT CYCLE") || !strings.Contains(prompt, "office-feature-improvement") {
+		t.Errorf("expected improvement-cycle guidance in prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, `"done" or "mined dry"`) {
+		t.Errorf("expected the prompt to forbid declaring the project finished, got %q", prompt)
+	}
 	if !rec.has("office:agentReplenishment") {
 		t.Error("expected office:agentReplenishment broadcast")
 	}

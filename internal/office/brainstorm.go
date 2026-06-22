@@ -204,9 +204,9 @@ facilitatorPicked:
 
 	// Build brainstorm prompt.
 	brainstormPrompt := strings.Join([]string{
-		fmt.Sprintf("[BRAINSTORM] You and %s are idle and need new tasks.", participantNames),
+		fmt.Sprintf("[BRAINSTORM] You and %s are idle and need new tasks. The project is never \"done\" -- find its next most-valuable improvements.", participantNames),
 		"",
-		"Look at the project, identify improvements matching your roles, and propose 3-5 tasks.",
+		"First, take a quick inventory of what the project already does (pages/screens, key modules, README, the live preview). Then propose 3-5 concrete tasks that each either DEEPEN an existing feature or ADD a valuable new feature matching your roles -- real user-facing improvements, not test/lint/doc busywork. Size each task to finish and pass the verify gate in one loop.",
 		"After brainstorming, assign yourself a task and get started.",
 		"",
 		"Reply with your proposals by running:",

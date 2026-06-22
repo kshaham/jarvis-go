@@ -1451,29 +1451,26 @@ func (m *Manager) sendSelfReplenishmentPrompt(agent *AgentState) {
 		}
 	}
 
-	prompt := fmt.Sprintf(`[URGENT: FIND MORE WORK NOW] Your task queue is empty. You must NOT be idle.
+	prompt := fmt.Sprintf(`[URGENT: FIND MORE WORK NOW] Your task queue is empty -- but the project is NEVER "done" or "mined dry". A real product always has a next most-valuable improvement. To "improve" the project means making it materially better for its users: scan its existing features and either DEEPEN an existing one or ADD a valuable new one. Your job right now is to find that work and ship it.
 %s%s
-As a %s, scan the codebase RIGHT NOW and create tasks for yourself:
+As a %s, run the IMPROVEMENT CYCLE now (full discipline: cm skill read office-feature-improvement):
 
-1. Run 'git log --oneline -20' to see recent changes -- review for bugs or improvements
-2. Search for TODOs/FIXMEs: grep -r "TODO\|FIXME" . --include="*.go" --include="*.js" --include="*.ts"
-3. Run the test suite and fix any failures
-4. Check 'cm roster' to see what teammates are doing -- avoid overlapping work
-5. Look for code relevant to your role that could be improved
+1. INVENTORY -- survey what the project already does: read its pages/screens and the key modules for your role, skim the README, and open the live preview. Read ./IMPROVEMENTS.md if present to see what already shipped and what's queued.
+2. PICK the single highest-value piece of work -- EITHER deepen/polish an existing feature OR build a valuable new feature the project is missing. Check 'cm roster' so you don't overlap a teammate; pick something different.
+3. SCOPE it into ONE concrete, user-facing, verifiable task. Tests/lint/docs only SUPPORT the work -- they are not themselves the improvement, so do not stop at chores.
+4. BUILD it and pass the project's verify gate (its test/build command). A task is DONE only when that gate passes -- not when you say "done".
+5. RECORD what you shipped (append to ./IMPROVEMENTS.md) so the team does not repeat it.
 
-CREATE TASKS NOW using these commands:
-  cm task self-add "Review recent commits for bugs" --priority high
-  cm task self-add "Write tests for untested paths" --priority medium
-  cm task self-add "Refactor and improve code quality" --priority medium
+CREATE THE TASK NOW, e.g.:
+  cm task self-add "Add <new feature> to <existing area>" --priority high
+  cm task self-add "Deepen <existing feature> with <concrete enhancement>" --priority medium
 
-Keep self-found work SMALL and machine-checkable (tests, lint-fix, docs, refactors).
 Do NOT self-add auth/payments/deploy/migration/dependency-upgrade/architecture work --
-those need a human; escalate to your lead instead. A task is only DONE when the
-verify gate (tests/build) passes -- not when you say "done".
+those need a human; escalate to your lead instead.
 
 Then immediately start working: cm task ack <id> && cm task start <id>
 
-DO NOT WAIT. Create at least 2 tasks and start one NOW.`, missionLine, constraintsLine, roleName)
+DO NOT WAIT and do NOT report the project finished. Create at least 1 substantive improvement task and start it NOW.`, missionLine, constraintsLine, roleName)
 
 	m.mu.RLock()
 	sessions := m.sessions

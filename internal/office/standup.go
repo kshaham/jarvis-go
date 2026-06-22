@@ -558,7 +558,8 @@ func (m *Manager) triggerLeaderTaskAssignment(standupID string, participants []s
 			transcriptSummary,
 			"Team roster (use configId in TASKS_FOR):",
 			rosterSummary,
-			"Based on each agent's status, create 2-4 specific, actionable tasks for EACH team member.",
+			"You own the project's improvement backlog. Keep a living feature inventory in ./IMPROVEMENTS.md (what the project already does + what's shipped + what's next). The project is never \"done\": always have a next round of the highest-value work queued.",
+			"Based on each agent's status AND the backlog, create 2-4 specific, actionable tasks for EACH team member. Each task should either DEEPEN an existing feature or ADD a valuable new one -- real user-facing improvements, not test/lint/doc busywork. Spread the work so members don't overlap.",
 			`Respond using: cm leader-tasks respond "TASKS_FOR:agentId\n- [HIGH] title | description\n..."`,
 		}, "\n")
 

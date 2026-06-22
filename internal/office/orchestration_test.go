@@ -355,6 +355,7 @@ func TestBuildKickstartPrompt_ContainsSections(t *testing.T) {
 		"Bolt (Backend Engineer)",
 		"Sage (Senior Architect)",
 		"## Work Mode: RALPH",
+		"office-feature-improvement",
 		"## Your Role",
 		"Build beautiful UIs.",
 	}

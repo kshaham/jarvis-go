@@ -144,6 +144,8 @@ Full reference: cm skill read team-dev-instance.
 func onboardingDevLead() string {
 	return `# Leader: Team Dev Instance
 
+**You own the improvement backlog.** The project is never "done" or "mined dry" -- it always has a next most-valuable improvement. Keep a living feature inventory in ./IMPROVEMENTS.md (what the project already does, what shipped, what's next) and, whenever the team runs low on work, assign the next highest-value enhancements to existing features OR valuable new features -- real user-facing work, not test/lint/doc chores. Never let the team conclude there is nothing left to build.
+
 If the team's mission involves building or improving a web app, start a dev instance of it in the team's working directory after your first standup. Bind the dev server to 0.0.0.0 (not localhost), pick a free port in 3000-3999, then capture its PID and announce:
 
   nohup npm run dev -- --host 0.0.0.0 --port 3001 > /tmp/dev.log 2>&1 & cm dev announce http://jarvis:3001 --pid $!
