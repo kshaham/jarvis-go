@@ -97,14 +97,15 @@ func DefaultConfig() *Config {
 		StuckGracePeriod:       3 * time.Minute,
 		TaskAckTimeout:         2 * time.Minute,
 		TaskAckMaxNudges:       5,
-		// 45s was too aggressive -- a 1200-char replenishment prompt
-		// typically takes 2-3 minutes for an agent to process and emit
-		// `cm task self-add` calls, so the cooldown expired long before
-		// the first prompt produced any effect. 3 minutes gives the
-		// agent space to finish its turn, and the new IsSessionWorking
-		// guard in CheckForIdleAgents prevents piling a second prompt
-		// on top of one being processed even within the window.
-		ReplenishCooldown:        3 * time.Minute,
+		// The IsSessionWorking guard in CheckForIdleAgents is what prevents
+		// piling a second prompt on top of one still being processed -- it
+		// skips any agent whose session is mid-turn. So this cooldown only
+		// gates re-nudging a TRULY idle agent (turn finished, queue empty).
+		// 45s was too aggressive and 3min left idle agents waiting too long
+		// between nudges (a real throughput drag on perpetual teams); 90s
+		// gets a genuinely-idle agent back to work quickly while the
+		// working-session guard still absorbs in-flight turns.
+		ReplenishCooldown:        90 * time.Second,
 		FileLockTTL:              30 * time.Minute,
 		MaxMessages:              50,
 		MaxBugTasks:              100,
