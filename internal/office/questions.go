@@ -152,16 +152,17 @@ func (m *Manager) AskQuestion(fromSession, content, aboutTaskID string, totalWai
 	m.mu.Unlock()
 	defer m.cleanupQuestion(q.ID)
 
-	// Pick the lead first. findStrategicAgent already excludes the asker.
-	// findAvailableAgent does role-affinity + busy-skip, so we use it
-	// for the fallback.
+	// Pick the lead first. findStrategicLeaderForTriage excludes the asker and,
+	// in loop-roles mode, the standing Planner/Verifier (so a quick question
+	// never pulls them off their discipline). findAvailableAgent does
+	// role-affinity + busy-skip, so we use it for the fallback.
 	deadline := time.Now().Add(totalWait)
 	perRecipient := totalWait / 2
 	if perRecipient < askMinWait {
 		perRecipient = askMinWait
 	}
 
-	if lead := m.findStrategicAgent(fromSession); lead != nil {
+	if lead := m.findStrategicLeaderForTriage(fromSession); lead != nil {
 		if answer, ok := m.askOnce(q, lead, perRecipient, deadline); ok {
 			m.markAnswered(q, answer)
 			return q, nil

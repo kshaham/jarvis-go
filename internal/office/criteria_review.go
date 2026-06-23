@@ -39,10 +39,30 @@ type CriteriaVerdict struct {
 // verdict. It NEVER returns a hard error for evaluator/parse failures — those set
 // EvaluatorError so callers can fail-open. A nil error always accompanies a usable verdict.
 func EvaluateAcceptanceCriteria(ctx context.Context, worktreeDir, summary string, criteria []string) (CriteriaVerdict, error) {
+	return evaluateCriteriaWithModel(ctx, worktreeDir, summary, criteria, "")
+}
+
+// verifierEvaluatorModel is the stronger model the loop-roles Verifier path pins
+// the fresh evaluator process to (claude -p --model ...). It honors the
+// operator's "Verifier = stronger model" choice at the point the accept/reject
+// verdict is actually authored -- even though the verdict is produced by a fresh
+// independent process rather than the live Verifier session (the session layer
+// has no synchronous request/reply seam). Empty model on the default path defers
+// to the binary's own default, so non-loop teams are unchanged.
+const verifierEvaluatorModel = "claude-opus-4-8"
+
+// evaluateCriteriaWithModel is EvaluateAcceptanceCriteria with an explicit
+// evaluator model. An empty model defers to the binary default; a non-empty
+// model adds `--model <model>`. Same fail-open contract as the exported wrapper.
+func evaluateCriteriaWithModel(ctx context.Context, worktreeDir, summary string, criteria []string, model string) (CriteriaVerdict, error) {
 	cctx, cancel := context.WithTimeout(ctx, criteriaTimeout)
 	defer cancel()
 	prompt := buildCriteriaPrompt(summary, criteria)
-	cmd := exec.CommandContext(cctx, criteriaBinary, "-p", prompt, "--output-format", "json")
+	args := []string{"-p", prompt, "--output-format", "json"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	cmd := exec.CommandContext(cctx, criteriaBinary, args...)
 	cmd.Dir = worktreeDir
 	out, err := cmd.Output()
 	if err != nil {

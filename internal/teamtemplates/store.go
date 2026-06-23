@@ -37,6 +37,11 @@ type TeamTemplateMember struct {
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 	WorkingDir   string   `json:"workingDir,omitempty"`
+	// LoopRole tags a member's role in the office perpetual loop
+	// ("planner" / "maker" / "verifier"). Empty means the member has
+	// no loop role -- the only behavior before this field existed, so
+	// existing persisted templates still load correctly (omitempty).
+	LoopRole string `json:"loopRole,omitempty"`
 	// Provider + Model let custom templates pin a specific LLM per
 	// member. Empty values mean "inherit from the team-level default
 	// at spawn time" -- previously the only possible behavior, so

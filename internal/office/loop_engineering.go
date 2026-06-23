@@ -384,14 +384,23 @@ func (m *Manager) gatedAutoComplete(agent *AgentState, sid, taskID, taskTitle, a
 		// only after the objective gate passed. Fail-open: an evaluator error
 		// must not wedge the loop.
 		if criteria := taskCriteria(agent, taskID); len(criteria) > 0 {
-			eval := m.criteriaEvaluator
-			if eval == nil {
-				eval = EvaluateAcceptanceCriteria
-			}
+			// The team working dir is the historical, OFF-mode target. In
+			// loop-roles mode (and ONLY then) prefer the MAKER's own worktree
+			// (the directory actually under review) so the Verifier checks the
+			// right checkout; OFF teams keep the team working dir so behavior is
+			// byte-for-byte unchanged. EvaluateCriteria routes to the live
+			// Verifier in loop-roles mode, else shells out to a fresh evaluator
+			// process. This async path has no inline HTTP deadline, so it is the
+			// authoritative semantic check.
 			m.mu.RLock()
 			worktree := m.lastWorkingDir
 			m.mu.RUnlock()
-			verdict, _ := eval(context.Background(), worktree,
+			if m.IsLoopRolesMode() {
+				if wt := agent.GetWorktreePath(); wt != "" {
+					worktree = wt
+				}
+			}
+			verdict, _ := m.EvaluateCriteria(context.Background(), worktree,
 				"Autonomous idle auto-complete of task "+taskID+" ("+taskTitle+")", criteria)
 			if verdict.EvaluatorError == "" && !verdict.AllPass {
 				// Independent checker rejected the work. Do not complete; nudge

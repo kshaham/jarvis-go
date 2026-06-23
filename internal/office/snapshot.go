@@ -60,6 +60,7 @@ type TeamSnapshot struct {
 	WorkingDir    string                `json:"workingDir,omitempty"`
 	PerpetualMode bool                  `json:"perpetualMode"`
 	SevenStepMode bool                  `json:"sevenStepMode,omitempty"`
+	LoopRolesMode bool                  `json:"loopRolesMode,omitempty"`
 	Paused        bool                  `json:"paused,omitempty"`
 	PauseReason   string                `json:"pauseReason,omitempty"`
 	Members       []SnapshotMemberEntry `json:"members"`
@@ -117,6 +118,7 @@ func (m *Manager) CreateSnapshot(name, workingDir string, claudeSessionIDsByConf
 	mission := m.teamMission
 	perpetual := m.perpetualMode
 	sevenStep := m.sevenStepMode
+	loopRoles := m.loopRolesMode
 	paused := m.paused
 	pauseReason := m.pauseReason
 	m.mu.RUnlock()
@@ -155,6 +157,7 @@ func (m *Manager) CreateSnapshot(name, workingDir string, claudeSessionIDsByConf
 		WorkingDir:    workingDir,
 		PerpetualMode: perpetual,
 		SevenStepMode: sevenStep,
+		LoopRolesMode: loopRoles,
 		Paused:        paused,
 		PauseReason:   pauseReason,
 		Members:       members,

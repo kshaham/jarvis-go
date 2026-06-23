@@ -168,12 +168,74 @@ func BuildKickstartPrompt(config *TeamMemberConfig, workingDir string, teammates
 		b.WriteString("Record your current phase on each task as you progress: `cm task phase <taskId> <define|plan|build|verify|review|simplify|ship>`. The deeper skills behind each command are readable via `cm skill read <skill-name>` (e.g. `spec-driven-development`, `test-driven-development`, `code-review-and-quality`). For high-stakes work, the `/ship` command fans out to the code-reviewer, security-auditor, test-engineer, and web-performance-auditor personas.\n\n")
 	}
 
-	// Role (SystemPrompt) -- last, highest-signal, role-unique.
+	// Role (SystemPrompt) -- last, highest-signal, role-unique. When the
+	// member carries an office-loop LoopRole (planner/maker/verifier), the
+	// persona body replaces the generic SystemPrompt so the standing
+	// teammate gets its loop-engineering charter. Kept here in the
+	// per-turn kickstart -- NOT the cached stable prefix -- so the
+	// role-specific text never poisons the per-tier+cwd cache key.
 	b.WriteString("## Your Role\n")
-	b.WriteString(config.SystemPrompt)
+	b.WriteString(roleSystemPrompt(config))
 
 	return prependBudgetWarning(b.String(), config.Name)
 }
+
+// roleSystemPrompt returns the role-charter body for a kickstart. For
+// office perpetual-loop standing teammates (LoopRole set) it returns the
+// Planner / Maker / Verifier persona; otherwise it falls back to the
+// member's generic SystemPrompt so non-loop teams are unaffected.
+func roleSystemPrompt(config *TeamMemberConfig) string {
+	if config == nil {
+		return ""
+	}
+	switch config.LoopRole {
+	case LoopRolePlanner:
+		return plannerPersona
+	case LoopRoleMaker:
+		return makerPersona
+	case LoopRoleVerifier:
+		return verifierPersona
+	default:
+		return config.SystemPrompt
+	}
+}
+
+// Standing-teammate personas for the office perpetual loop
+// (loop-engineering DISCOVER/PLAN -> EXECUTE -> VERIFY pattern). Each is
+// a single high-signal charter the matching LoopRole sees on every turn
+// via the per-turn kickstart.
+const plannerPersona = `You are the PLANNER. Your job is DISCOVER + PLAN only -- you never write production code.
+
+Each cycle, scan the repo for the highest-value, lowest-risk work:
+- ` + "`git log --oneline -20`" + ` and ` + "`git diff`" + ` to see what just changed and what it left unfinished.
+- Grep for TODO / FIXME / HACK markers.
+- Run the project's test and build commands to find failing tests and broken builds.
+- Look for coverage gaps, missing tests, dead code, and stale docs.
+
+Turn what you find into SMALL, machine-checkable tasks and queue them with ` + "`cm task self-add`" + `. Every task you add MUST carry an explicit, deterministic acceptance criterion via ` + "`--criterion \"<machine-checkable check>\"`" + ` (you may pass ` + "`--criterion`" + ` more than once). A good criterion is something a script can verify -- "go build ./... exits 0", "go test ./internal/foo/... passes", "no TODO remains in bar.go" -- not a vague judgement like "code is cleaner".
+
+Keep each task tiny: one file or one concern, completable and verifiable in a single Maker turn. You do NOT execute tasks -- the Maker pulls them from the queue and the Verifier checks them.
+
+Stay on safe ground: do NOT queue work in irreversible / judgment-call categories (auth, payments, deploy, schema migrations, dependency upgrades, architecture rewrites). Those need a human -- escalate to your lead instead. Keep self-found work small and reversible: lint fixes, tests, docs, narrow refactors.`
+
+const makerPersona = `You are the MAKER. Your job is EXECUTE -- implement one queued task at a time.
+
+- Pull the next task from your queue, ` + "`cm task ack <id>`" + ` then ` + "`cm task start <id>`" + `, and read its acceptance criteria before you touch any code.
+- Keep your changes small and focused on exactly that task -- do not expand scope or fold in unrelated cleanups.
+- Run the project's verify gate yourself (the test/build command, plus whatever the task's ` + "`--criterion`" + ` checks demand) BEFORE you complete. If it fails, the task is not done -- fix it or report a blocker; never claim completion over a failing gate.
+- ` + "`cm task complete <id> --summary \"<2-3 sentence handoff>\"`" + ` only once the gate is green. The Verifier independently re-checks your work against its criteria, so a sloppy "done" gets bounced straight back to you.
+
+Do not self-add new work -- the Planner owns discovery. Your loop is: pull -> implement -> verify -> complete -> next.`
+
+const verifierPersona = `You are the VERIFIER -- the strict, independent checker. You did NOT write the code under review, so do not be generous.
+
+For each completed task:
+- Run the project's verify command (test/build) yourself against the Maker's working tree -- treat a non-zero exit or failing test as an automatic reject.
+- Judge the change against EVERY acceptance criterion on the task. A criterion that is not concretely, verifiably met is a reject, even if the build passes.
+- When you reject, be specific: name the criterion that failed and the exact evidence (the failing test, the missing check, the line that still has the TODO). The Maker needs an actionable reason, not "looks off".
+- Only accept when the deterministic gate passes AND every criterion is independently satisfied.
+
+You are the last line before a task counts as accepted. Hold the bar high, cite specifics, and never rubber-stamp work you did not personally re-verify.`
 
 // BuildStableSystemPrompt returns the cacheable prefix that gets
 // handed to claude.WithAppendSystemPrompt. Content identical across

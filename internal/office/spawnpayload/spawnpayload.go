@@ -42,6 +42,10 @@ type MemberOverride struct {
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 	WorkingDir   string   `json:"workingDir,omitempty"`
+	// LoopRole overlays the member's office perpetual-loop role
+	// ("planner" / "maker" / "verifier"). Empty leaves the template's
+	// loop role untouched.
+	LoopRole string `json:"loopRole,omitempty"`
 
 	// Per-member turn cap from the spawn modal. 0 means "use the
 	// team-wide default" (defaultMaxTurnsPerSession). The MaxCostUSD
@@ -176,6 +180,15 @@ type SpawnTeamRequest struct {
 	// section driving each task through the 7 phases, combinable with perpetual
 	// or goal-focused mode.
 	SevenStepMode *bool `json:"sevenStepMode,omitempty"`
+
+	// LoopRoles enables the additive loop-engineering pattern with three
+	// distinct standing teammates per team: Planner (DISCOVER+PLAN), Maker
+	// (EXECUTE), and Verifier (VERIFY). Default (nil) = OFF -- it's opt-in.
+	// When on, members carrying a LoopRole get per-role model/effort defaults
+	// and per-role kickstart personas, and the loop routes self-added tasks
+	// from the Planner to the Maker and through the Verifier's independent
+	// acceptance-criteria check.
+	LoopRoles *bool `json:"loopRoles,omitempty"`
 }
 
 // SessionTuning is the resolved bundle of Claude Code knobs that
@@ -232,15 +245,40 @@ func DefaultEffortFor(tier string) string {
 	return DefaultEffortWorker
 }
 
+// DefaultEffortForRole returns the floor effort tier for an office-loop
+// member, keyed on its LoopRole first and falling back to the tier-based
+// default. The Verifier is the strict independent checker and runs at the
+// highest effort ("max"); the Maker executes one task at a time at the
+// worker default; the Planner discovers and plans at the strategic default.
+// Roles outside the office loop (loopRole == "") fall through to
+// DefaultEffortFor(tier). The loopRole strings mirror the office package's
+// LoopRole* constants ("planner"|"maker"|"verifier"); kept as literals here
+// so spawnpayload doesn't import the office package.
+func DefaultEffortForRole(loopRole, tier string) string {
+	switch loopRole {
+	case "verifier":
+		return "max"
+	case "maker":
+		return DefaultEffortWorker
+	case "planner":
+		return DefaultEffortStrategic
+	default:
+		return DefaultEffortFor(tier)
+	}
+}
+
 // ResolveSessionTuning produces the per-session Claude Code knobs
 // by layering (low precedence → high): jarvis defaults < team-wide
 // (SpawnTeamRequest) < per-member override. Centralised so every
 // spawn call site shares one source of truth. Takes a value-receiver
-// req (call sites have it on the stack) and a member tier string
-// so the helper doesn't need to import the specific member type.
-func ResolveSessionTuning(req SpawnTeamRequest, memberTier string, ov *MemberOverride) SessionTuning {
+// req (call sites have it on the stack), a member loop role, and a
+// member tier string so the helper doesn't need to import the specific
+// member type. The effort floor is keyed on loopRole first (Verifier→max,
+// Maker→worker, Planner→strategic) and falls back to the tier default;
+// team-wide req.DefaultEffort and per-member ov.Effort still override it.
+func ResolveSessionTuning(req SpawnTeamRequest, loopRole, memberTier string, ov *MemberOverride) SessionTuning {
 	t := SessionTuning{
-		Effort:                             DefaultEffortFor(memberTier),
+		Effort:                             DefaultEffortForRole(loopRole, memberTier),
 		FallbackModel:                      "",
 		ExcludeDynamicSystemPromptSections: true,
 		StrictMcpConfig:                    true,

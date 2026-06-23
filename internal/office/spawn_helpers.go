@@ -319,6 +319,31 @@ func ResolveMemberProviderModel(
 			model = override.Model
 		}
 	}
+	// Per-role office-loop defaults take precedence over the tier-based
+	// defaults below (but still yield to an explicit template / spawn-modal
+	// model, resolved above). The Verifier is the strict independent checker
+	// and runs the strongest model; the Maker executes one task at a time on
+	// a cheaper/faster model. The Planner falls through to the strategic
+	// default below. Kept ABOVE the zai guard so a loop-role member on a
+	// Claude/Codex provider isn't pinned to a GLM model.
+	if model == "" {
+		switch member.LoopRole {
+		case LoopRoleVerifier:
+			switch provider {
+			case "claude-subscription", "", "claude-api":
+				model = "claude-opus-4-8"
+			case "openai-codex", "openai-custom":
+				model = "gpt-5.5"
+			}
+		case LoopRoleMaker:
+			switch provider {
+			case "claude-subscription", "", "claude-api":
+				model = "claude-sonnet-4-5"
+			case "openai-codex", "openai-custom":
+				model = "gpt-5.4"
+			}
+		}
+	}
 	// Lead/strategic agents on a first-party Claude provider default to
 	// Opus 4.8 — the model that authors Dynamic Workflows and benefits
 	// most from the higher effort tiers. Workers and non-Claude providers
@@ -445,6 +470,13 @@ func ResolveSevenStepMode(req spawnpayload.SpawnTeamRequest) bool {
 	return req.SevenStepMode != nil && *req.SevenStepMode
 }
 
+// ResolveLoopRolesMode resolves the loop-engineering (Planner/Maker/Verifier)
+// flag. Default is FALSE -- the feature is opt-in, so existing teams behave
+// exactly as today.
+func ResolveLoopRolesMode(req spawnpayload.SpawnTeamRequest) bool {
+	return req.LoopRoles != nil && *req.LoopRoles
+}
+
 // CollectModelRequests gathers the inputs the Z.AI rate-limit
 // allocator needs: an ordered list of every member's ID, plus a
 // map of memberID → operator-requested model (drawn from per-member
@@ -492,6 +524,7 @@ func BuildTeamMemberConfigs(members []teamtemplates.TeamTemplateMember) []*TeamM
 			Personality:  m.Personality,
 			Voice:        m.Voice,
 			SystemPrompt: m.SystemPrompt,
+			LoopRole:     m.LoopRole,
 			Skills:       append([]string(nil), m.Skills...), // copy: don't alias the source slice
 		})
 	}
@@ -547,6 +580,9 @@ func ApplyMemberOverrides(members []teamtemplates.TeamTemplateMember, overrides 
 		}
 		if ov.SystemPrompt != "" {
 			members[i].SystemPrompt = ov.SystemPrompt
+		}
+		if ov.LoopRole != "" {
+			members[i].LoopRole = ov.LoopRole
 		}
 		if len(ov.Skills) > 0 {
 			members[i].Skills = sanitizeSkillNames(ov.Skills)

@@ -1262,12 +1262,14 @@ func (ctx *Context) OfficeRestoreSnapshot(w http.ResponseWriter, r *http.Request
 	overrides, forkAppliedCount := buildRestoreOverrides(snap, forkRequested)
 	perpetual := snap.PerpetualMode
 	sevenStep := snap.SevenStepMode
+	loopRoles := snap.LoopRolesMode
 	req := spawnTeamRequest{
 		WorkingDir:      snap.WorkingDir,
 		Mission:         snap.TeamMission,
 		MemberOverrides: overrides,
 		PerpetualMode:   &perpetual,
 		SevenStepMode:   &sevenStep,
+		LoopRoles:       &loopRoles,
 	}
 
 	// spawnTeamFromRequest writes its own response — we can't read
@@ -2466,8 +2468,16 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 		taskCriteria, taskIsGated, taskRejectCount, _ := agent.TaskGateInfo(req.TaskID)
 
 		// Gated path: run evaluator synchronously before CompleteTask.
+		//
+		// SYNC-PATH LATENCY: this runs inline on the HTTP request (90s evaluator
+		// budget). In loop-roles mode EvaluateCriteria may route to a live
+		// Verifier, whose round-trip can exceed the budget. On timeout (or any
+		// infra failure) the evaluator returns a usable verdict with
+		// EvaluatorError set, so this path FAILS OPEN (completes + logs); the
+		// authoritative live-Verifier check happens on the idle/async path
+		// (gatedAutoComplete), which has no inline HTTP deadline.
 		if len(taskCriteria) > 0 && taskIsGated {
-			v, _ := office.EvaluateAcceptanceCriteria(r.Context(), cwd, req.Result, taskCriteria)
+			v, _ := ctx.OfficeManager.EvaluateCriteria(r.Context(), cwd, req.Result, taskCriteria)
 			if v.EvaluatorError != "" {
 				// Fail-open: broadcast the infra error and continue to completion.
 				ctx.emit("office:taskCriteriaReviewed", map[string]interface{}{
@@ -2650,7 +2660,7 @@ func (ctx *Context) OfficeAgentTaskComplete(w http.ResponseWriter, r *http.Reque
 			tidSnap := req.TaskID
 			emit := ctx.emit // nil-safe (ctx.SSEBroker.Broadcast would panic on a nil broker)
 			safego.Go("office.advisoryCriteria", func() {
-				v, _ := office.EvaluateAcceptanceCriteria(context.Background(), cwdSnap, resultSnap, criteriaSnap)
+				v, _ := ctx.OfficeManager.EvaluateCriteria(context.Background(), cwdSnap, resultSnap, criteriaSnap)
 				emit("office:taskCriteriaReviewed", map[string]interface{}{
 					"sessionId":      sid,
 					"taskId":         tidSnap,
@@ -2851,6 +2861,11 @@ func (ctx *Context) OfficeAgentTaskSelfAdd(w http.ResponseWriter, r *http.Reques
 		AcceptanceCriteria: req.AcceptanceCriteria,
 	}
 	agent.AddTask(task)
+
+	// Loop-roles overlay (opt-in, default OFF): a Planner DISCOVERs+PLANs but
+	// never executes. Auto-route the self-add to the least-loaded Maker off the
+	// request goroutine (no-op for non-Planner roles / non-loop-roles teams).
+	ctx.OfficeManager.AsyncRoutePlannerTask(agent, task.ID)
 
 	ctx.emit("office:taskUpdated", map[string]interface{}{
 		"sessionId": req.SessionID,

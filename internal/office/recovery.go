@@ -1299,8 +1299,14 @@ func (m *Manager) CheckForIdleAgents() {
 			continue
 		}
 		// Count this as one perpetual-loop iteration (starts the clock on the
-		// first one).
-		m.noteLoopIteration(agent)
+		// first one). In loop-roles mode, ONE DISCOVER cycle == ONE iteration,
+		// counted on the PLANNER only: a Maker/Verifier never replenishes, so
+		// counting them would burn the hard-stop cap 3x too fast (one tick can
+		// idle all three). Non-loop-roles teams count every replenishing agent
+		// exactly as before.
+		if !m.IsLoopRolesMode() || loopRoleOf(agent) == LoopRolePlanner {
+			m.noteLoopIteration(agent)
+		}
 
 		// Record this replenishment attempt.
 		agent.mu.Lock()
@@ -1313,6 +1319,26 @@ func (m *Manager) CheckForIdleAgents() {
 		}
 		slog.Info("Agent running low on tasks, finding work", "name", agentName, "remaining", totalWork)
 
+		// Loop-roles overlay (opt-in, default OFF). When on, the three standing
+		// teammates each follow their own replenishment discipline instead of
+		// the generic brainstorm/self-replenish ladder below:
+		//   - Planner: DISCOVER+PLAN only -- self-add SMALL machine-checkable
+		//     tasks WITH --criterion. routePlannerTaskToMaker hands each to a Maker.
+		//   - Maker/Verifier: SKIP self-replenish entirely (they pull from the
+		//     queue / check completions) and suppress the brainstorm/curious/
+		//     water-cooler fallbacks so they never invent their own work.
+		if m.IsLoopRolesMode() {
+			switch loopRoleOf(agent) {
+			case LoopRolePlanner:
+				m.sendDiscoverPlanPrompt(agent)
+				continue
+			case LoopRoleMaker, LoopRoleVerifier:
+				// Worker/checker tiers pull from the queue; do not replenish or
+				// brainstorm. Suppress all fallbacks for this agent.
+				continue
+			}
+		}
+
 		// Strategy 1: Brainstorm with a strategic-tier (captain/leader) agent.
 		// Only pick leaders that aren't busy with their own tasks AND
 		// aren't currently in a turn (a prompt sent to a mid-turn
@@ -1321,6 +1347,11 @@ func (m *Manager) CheckForIdleAgents() {
 		// Stack brainstorm where Stack was working -> Ops ended up
 		// facilitator -> timeout).
 		leader := m.findStrategicAgent(sid)
+		// Loop-roles mode: never pull a standing teammate (Planner/Maker/
+		// Verifier) into a brainstorm -- they follow their own discipline.
+		if m.IsLoopRolesMode() && loopRoleOf(leader) != "" {
+			leader = nil
+		}
 		leaderSid := m.sessionIDOf(leader) // nil-safe; SessionID under m.mu
 		if leader != nil && sessions != nil && leader.ActiveTask() == nil && leader.PendingTaskCount() == 0 &&
 			!sessions.IsSessionWorking(leaderSid) {
@@ -1339,6 +1370,10 @@ func (m *Manager) CheckForIdleAgents() {
 		// Strategy 2: Brainstorm with any available (non-busy) agent.
 		// findAvailableAgent now also filters by IsSessionWorking.
 		partner := m.findAvailableAgent(sid)
+		// Loop-roles mode: a standing teammate is never a brainstorm partner.
+		if m.IsLoopRolesMode() && loopRoleOf(partner) != "" {
+			partner = nil
+		}
 		if partner != nil {
 			partnerSid := m.sessionIDOf(partner)
 			meeting := m.StartBrainstorm([]string{sid, partnerSid})
@@ -1367,6 +1402,32 @@ func (m *Manager) findStrategicAgent(excludeSessionID string) *AgentState {
 		if agent.SessionID() != excludeSessionID && agent.Config != nil && agent.Config.Tier == "strategic" {
 			return agent
 		}
+	}
+	return nil
+}
+
+// findStrategicLeaderForTriage returns a strategic-tier agent eligible to
+// receive triage / ask-for-help routing. In loop-roles mode it SKIPS standing
+// Planner/Verifier teammates (LoopRole set) so they stay on their DISCOVER+PLAN
+// / VERIFY discipline rather than being diverted; it still returns a non-loop
+// strategic lead when the team has one. Returns nil when the only strategic
+// agents are loop-role teammates -- callers treat that as "no leader available"
+// and skip (the blocked-task escalation record still fires). OFF teams behave
+// exactly as findStrategicAgent.
+func (m *Manager) findStrategicLeaderForTriage(excludeSessionID string) *AgentState {
+	// Read the flag BEFORE taking m.mu (IsLoopRolesMode takes its own RLock);
+	// nesting two RLocks risks deadlock against a pending writer.
+	loopMode := m.IsLoopRolesMode()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, agent := range m.agents {
+		if agent.SessionID() == excludeSessionID || agent.Config == nil || agent.Config.Tier != "strategic" {
+			continue
+		}
+		if loopMode && agent.Config.LoopRole != "" {
+			continue
+		}
+		return agent
 	}
 	return nil
 }
@@ -1592,8 +1653,10 @@ func (m *Manager) checkBlockedTasksForLeaderTriage() {
 				continue
 			}
 
-			// Find a strategic-tier agent to triage.
-			leader := m.findStrategicAgent(sid)
+			// Find a strategic-tier agent to triage. In loop-roles mode the
+			// standing Planner/Verifier are excluded so triage never pulls them
+			// off their discipline; a non-loop strategic lead (if any) still gets it.
+			leader := m.findStrategicLeaderForTriage(sid)
 			if leader == nil {
 				continue
 			}
@@ -1652,10 +1715,17 @@ func (m *Manager) checkForCuriousAgents() {
 		return
 	}
 
+	loopRoles := m.IsLoopRolesMode()
 	roster := m.GetRoster()
 	for _, agent := range roster {
 		sid := m.sessionIDOf(agent)
 		if agent.Config == nil {
+			continue
+		}
+		// Loop-roles mode: the standing teammates (Planner/Maker/Verifier) have
+		// their own discipline (DISCOVER+PLAN / queue-pull / verify) and must
+		// not be diverted by curiosity prompts.
+		if loopRoles && loopRoleOf(agent) != "" {
 			continue
 		}
 		// Only target agents with no active task and no pending tasks.
@@ -1778,10 +1848,16 @@ func (m *Manager) maybeTriggerWaterCoolerChat() {
 
 	// Find idle agents (no active task, no pending tasks, NOT mid-turn,
 	// NOT already in a brainstorm or other active meeting).
+	loopRoles := m.IsLoopRolesMode()
 	roster := m.GetRoster()
 	var idle []*AgentState
 	for _, agent := range roster {
 		sid := m.sessionIDOf(agent)
+		// Loop-roles mode: standing teammates never chat at the water cooler --
+		// they follow their DISCOVER+PLAN / queue-pull / verify discipline.
+		if loopRoles && loopRoleOf(agent) != "" {
+			continue
+		}
 		if agent.ActiveTask() != nil || agent.PendingTaskCount() != 0 {
 			continue
 		}

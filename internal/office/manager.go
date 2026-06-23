@@ -112,6 +112,11 @@ type Manager struct {
 	// (agent-skills SDLC). Orthogonal to perpetualMode -- it governs HOW each
 	// task is executed, not whether agents self-replenish.
 	sevenStepMode bool
+	// loopRolesMode is the additive loop-engineering overlay (Planner/Maker/
+	// Verifier standing teammates). Default OFF -- opt-in. When on, the loop
+	// routes Planner self-adds to the Maker and checks completions through the
+	// Verifier's independent acceptance-criteria pass.
+	loopRolesMode bool
 	// eccDisabled mirrors the spawn-time DisableEcc flag so non-spawn paths
 	// (e.g. the onboarding endpoint, which has no request in hand) can filter
 	// ECC-sourced skill recommendations a team opted out of.
@@ -186,6 +191,14 @@ type Manager struct {
 	// sessionID. A verify command (e.g. `go test ./...`) is expensive, so we
 	// never stack two for one agent.
 	autoGateInFlight map[string]bool
+
+	// verifierInFlight guards against launching overlapping live-Verifier
+	// acceptance-criteria checks for the same Verifier session (loop-roles
+	// mode). Keyed by the Verifier's sessionID. Mirrors autoGateInFlight: a
+	// semantic check round-trip is expensive, so two are never stacked on one
+	// Verifier. A busy Verifier fails open (the caller treats it as an
+	// EvaluatorError and allows completion).
+	verifierInFlight map[string]bool
 
 	// lastLowAcceptWarnAt throttles the office:lowAcceptanceRate broadcast so a
 	// persistently low accept rate doesn't spam the dashboard every sweep.
@@ -339,6 +352,7 @@ func NewManager(sessions SessionStore, broadcast BroadcastFunc, config *Config) 
 		lastTriageAt:       make(map[string]time.Time),
 		lastRecoveryAt:     make(map[string]time.Time),
 		autoGateInFlight:   make(map[string]bool),
+		verifierInFlight:   make(map[string]bool),
 		pendingQuestions:   make(map[string]*Question),
 		lastAskAt:          make(map[string]time.Time),
 		events:             make(chan OfficeEvent, 64),
@@ -1420,6 +1434,22 @@ func (m *Manager) IsSevenStepMode() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sevenStepMode
+}
+
+// SetLoopRolesMode toggles the loop-engineering overlay (Planner/Maker/Verifier
+// standing teammates). It is additive and opt-in: default OFF, so existing
+// teams behave exactly as today.
+func (m *Manager) SetLoopRolesMode(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.loopRolesMode = v
+}
+
+// IsLoopRolesMode returns whether the loop-engineering overlay is active.
+func (m *Manager) IsLoopRolesMode() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.loopRolesMode
 }
 
 // SetEccDisabled records whether the current team opted out of the ECC bundle.
@@ -2666,6 +2696,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 	perpetualMode := m.perpetualMode
 	perpetualDeadline := m.perpetualDeadline
 	sevenStepMode := m.sevenStepMode
+	loopRolesMode := m.loopRolesMode
 	// Template the current team was spawned from. Surfaced here (not just in
 	// GetOfficeSettings) so the SPA's office-status hook can tell a one-click
 	// "Demo Jarvis" team apart from a real one and offer a "Stop demo" control.
@@ -2740,6 +2771,7 @@ func (m *Manager) GetOfficeState() map[string]interface{} {
 		"perpetualMode":     perpetualMode,
 		"perpetualDeadline": perpetualDeadlineISO(perpetualDeadline),
 		"sevenStepMode":     sevenStepMode,
+		"loopRolesMode":     loopRolesMode,
 		"paused":            paused,
 		"pause":             pauseBlock,
 		"whiteboardNotes":   whiteboardNotes,

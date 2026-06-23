@@ -151,6 +151,14 @@ func (m *Manager) FinalizeTeamSpawn(req spawnpayload.SpawnTeamRequest, templateU
 	// Additive 7-step engineering overlay (opt-in, default off). Resolved from
 	// the request so it can combine with perpetual or goal-focused mode.
 	m.SetSevenStepMode(ResolveSevenStepMode(req))
+	// Additive loop-engineering overlay (opt-in, default off). Resolved from the
+	// request so Planner/Maker/Verifier routing can combine with perpetual mode.
+	m.SetLoopRolesMode(ResolveLoopRolesMode(req))
+	// Route the SEMANTIC acceptance-criteria check to the live Verifier when
+	// loop-roles mode is on AND a Verifier member is live. No-op otherwise --
+	// the package-level evaluator (a fresh process) stays the default. Called
+	// after the roster is registered so verifierAgent() can find the Verifier.
+	m.MaybeWireVerifierEvaluator()
 	// Persist the ECC opt-out so non-spawn paths (onboarding) filter ECC skills.
 	m.SetEccDisabled(spawnpayload.EccOptOut(req))
 	// Snapshot the spawned roster so a dead member can be rebuilt by the
@@ -679,6 +687,7 @@ func BuildRestartTemplateMember(agent *AgentState) (teamtemplates.TeamTemplateMe
 		Personality:  cfg.Personality,
 		Voice:        agent.GetVoice(), // locked read: Voice is mutated by SetVoice
 		SystemPrompt: cfg.SystemPrompt,
+		LoopRole:     cfg.LoopRole,
 		Skills:       cfg.Skills,
 	}, nil
 }
@@ -911,6 +920,7 @@ func (m *Manager) buildRespawnPlan(rec *spawnedMemberRecord) MemberRespawnPlan {
 			Personality:  cfg.Personality,
 			Voice:        cfg.Voice,
 			SystemPrompt: cfg.SystemPrompt,
+			LoopRole:     cfg.LoopRole,
 			Skills:       cfg.Skills,
 		},
 		WorkingDir: rec.WorkingDir,

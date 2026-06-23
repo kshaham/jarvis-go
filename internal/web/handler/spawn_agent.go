@@ -123,7 +123,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		}
 		agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
 		kickstart := office.BuildKickstartPrompt(
-			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
+			&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color, SystemPrompt: member.SystemPrompt, LoopRole: member.LoopRole},
 			req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
 			ctx.OfficeManager.GetProjectInvariants(), office.ResolveSevenStepMode(req),
 		)
@@ -154,12 +154,18 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		// agents get a raised ceiling (see resolveMaxTurns) so steady-
 		// state work doesn't deterministically retire them.
 		maxTurns := resolveMaxTurns(ov, perpetual)
-		// Per-member model override. Priority: spawn-modal override >
-		// template-pinned member.Model > empty (SDK default). Previously
-		// this value was dropped on the floor for claude-subscription /
-		// claude-api providers — only Z.AI honored it via env vars —
-		// which is why picking "Opus 4.7" for the lead had no effect.
-		memberModel := member.Model
+		// Per-member model. Priority: spawn-modal override >
+		// template-pinned member.Model > per-role / tier default > empty
+		// (SDK default). The caller already ran ResolveMemberProviderModel
+		// to produce `model`, which folds in the office-loop per-role
+		// defaults (Verifier→strong, Maker→cheap) and the strategic/Codex
+		// tier defaults; using it here keeps the SDK session from "showing
+		// strong, running weak" when a Verifier has no explicit model.
+		// Previously this value was dropped on the floor for
+		// claude-subscription / claude-api providers — only Z.AI honored it
+		// via env vars — which is why picking "Opus 4.7" for the lead had
+		// no effect.
+		memberModel := model
 		if ov != nil && ov.Model != "" {
 			memberModel = ov.Model
 		}
@@ -185,7 +191,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 		} else {
 			appendPromptFile = pf
 		}
-		tuning := resolveSessionTuning(req, member.Tier, ov)
+		tuning := resolveSessionTuning(req, member.LoopRole, member.Tier, ov)
 		sdkSession, err := ctx.SessionManager.CreateSDKSession(
 			context.Background(),
 			pty.SessionConfig{
@@ -236,7 +242,7 @@ func spawnAgentSession(ctx *Context, member teamtemplates.TeamTemplateMember, re
 			ptyEnv["JARVIS_AGENT_TOKEN"] = tok
 		}
 	}
-	tuning := resolveSessionTuning(req, member.Tier, ov)
+	tuning := resolveSessionTuning(req, member.LoopRole, member.Tier, ov)
 	if provider == "claude-api" && ptyEnv["ANTHROPIC_API_KEY"] == "" {
 		// No configured key to re-add, so inherited host auth (if any) is left in
 		// place. Surface it: a misconfigured claude-api agent would otherwise
@@ -308,7 +314,7 @@ func spawnAgentSessionWithHooks(ctx *Context, member teamtemplates.TeamTemplateM
 	if cwd == "" {
 		cwd = req.WorkingDir
 	}
-	tuning := resolveSessionTuning(req, member.Tier, spec.Override)
+	tuning := resolveSessionTuning(req, member.LoopRole, member.Tier, spec.Override)
 	session, err := ctx.SessionManager.CreateSession(
 		context.Background(),
 		pty.SessionConfig{
@@ -560,7 +566,7 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	agentMemory := office.LoadAgentMemory(member.ID, req.WorkingDir)
 	invariants := ctx.OfficeManager.GetProjectInvariants()
 	kickstart := office.BuildKickstartPrompt(
-		&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color},
+		&office.TeamMemberConfig{ID: member.ID, Name: member.Name, Role: member.Role, Tier: member.Tier, Color: member.Color, SystemPrompt: member.SystemPrompt, LoopRole: member.LoopRole},
 		req.WorkingDir, teamConfigs, req.Mission, agentMemory, perpetual,
 		invariants, office.ResolveSevenStepMode(req),
 	)
@@ -578,7 +584,7 @@ func (ctx *Context) spawnCodexAgentSession(member teamtemplates.TeamTemplateMemb
 	if model == "" && !subscription {
 		model = "gpt-5.5"
 	}
-	tuning := resolveSessionTuning(req, member.Tier, ov)
+	tuning := resolveSessionTuning(req, member.LoopRole, member.Tier, ov)
 
 	// Provider block. The Phase-0 spike proved that even api.openai.com needs
 	// a custom [model_providers] block with env_key + requires_openai_auth=false

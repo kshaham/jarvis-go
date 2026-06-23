@@ -10,7 +10,7 @@ import "testing"
 
 func TestResolveSessionTuning_Defaults(t *testing.T) {
 	t.Parallel()
-	got := resolveSessionTuning(spawnTeamRequest{}, "worker", nil)
+	got := resolveSessionTuning(spawnTeamRequest{}, "", "worker", nil)
 	if got.Effort != defaultEffortWorker {
 		t.Errorf("worker default Effort=%q, want %q", got.Effort, defaultEffortWorker)
 	}
@@ -27,7 +27,7 @@ func TestResolveSessionTuning_Defaults(t *testing.T) {
 
 func TestResolveSessionTuning_StrategicTierHighEffort(t *testing.T) {
 	t.Parallel()
-	got := resolveSessionTuning(spawnTeamRequest{}, "strategic", nil)
+	got := resolveSessionTuning(spawnTeamRequest{}, "", "strategic", nil)
 	if got.Effort != defaultEffortStrategic {
 		t.Errorf("strategic default Effort=%q, want %q", got.Effort, defaultEffortStrategic)
 	}
@@ -43,7 +43,7 @@ func TestResolveSessionTuning_TeamWideOverridesDefaults(t *testing.T) {
 		ExcludeDynamicSystemPromptSections: &excl,
 		StrictMcpConfig:                    &strict,
 	}
-	got := resolveSessionTuning(req, "worker", nil)
+	got := resolveSessionTuning(req, "", "worker", nil)
 	if got.Effort != "low" || got.FallbackModel != "sonnet" {
 		t.Errorf("team-wide override not applied: %+v", got)
 	}
@@ -62,7 +62,7 @@ func TestResolveSessionTuning_MemberOverrideWinsOverTeam(t *testing.T) {
 		Effort:        "high",
 		FallbackModel: "opus",
 	}
-	got := resolveSessionTuning(req, "worker", ov)
+	got := resolveSessionTuning(req, "", "worker", ov)
 	if got.Effort != "high" {
 		t.Errorf("member Effort should win: got %q", got.Effort)
 	}
@@ -78,7 +78,7 @@ func TestResolveSessionTuning_MemberPartialOverrideKeepsRest(t *testing.T) {
 		DefaultFallbackModel: "sonnet",
 	}
 	ov := &memberOverride{Effort: "high"} // only effort overridden
-	got := resolveSessionTuning(req, "worker", ov)
+	got := resolveSessionTuning(req, "", "worker", ov)
 	if got.Effort != "high" {
 		t.Errorf("Effort=%q, want high", got.Effort)
 	}
@@ -96,7 +96,7 @@ func TestResolveSessionTuning_ResumeForkPlumbing(t *testing.T) {
 		ResumeClaudeSessionID: "claude-sess-42",
 		ForkResumedSession:    true,
 	}
-	got := resolveSessionTuning(spawnTeamRequest{}, "worker", ov)
+	got := resolveSessionTuning(spawnTeamRequest{}, "", "worker", ov)
 	if got.ResumeClaudeSessionID != "claude-sess-42" {
 		t.Errorf("ResumeClaudeSessionID=%q, want claude-sess-42", got.ResumeClaudeSessionID)
 	}
@@ -108,7 +108,7 @@ func TestResolveSessionTuning_ResumeForkPlumbing(t *testing.T) {
 func TestResolveSessionTuning_NoOverrideMeansNoResume(t *testing.T) {
 	t.Parallel()
 	// Routine spawn (no fork) should leave both resume fields at zero.
-	got := resolveSessionTuning(spawnTeamRequest{}, "worker", nil)
+	got := resolveSessionTuning(spawnTeamRequest{}, "", "worker", nil)
 	if got.ResumeClaudeSessionID != "" {
 		t.Errorf("ResumeClaudeSessionID=%q, want empty for non-fork spawn", got.ResumeClaudeSessionID)
 	}
@@ -126,7 +126,7 @@ func TestResolveSessionTuning_EmptyOverrideDoesNotZeroResume(t *testing.T) {
 	// level: the current behaviour is "blank member override leaves
 	// the zero value", which the test below asserts.
 	ov := &memberOverride{Effort: "high"} // no resume fields
-	got := resolveSessionTuning(spawnTeamRequest{}, "worker", ov)
+	got := resolveSessionTuning(spawnTeamRequest{}, "", "worker", ov)
 	if got.ResumeClaudeSessionID != "" {
 		t.Errorf("got non-empty ResumeClaudeSessionID=%q from blank member", got.ResumeClaudeSessionID)
 	}

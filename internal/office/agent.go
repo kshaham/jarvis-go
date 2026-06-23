@@ -18,7 +18,21 @@ type TeamMemberConfig struct {
 	Voice        string   `json:"voice,omitempty"`
 	Skills       []string `json:"skills"`
 	SystemPrompt string   `json:"systemPrompt"`
+	// LoopRole tags a member's role in the office perpetual loop
+	// ("planner" / "maker" / "verifier"). Empty means the member has
+	// no loop role, preserving existing behavior for teams that do not
+	// opt into loop-roles mode.
+	LoopRole string `json:"loopRole,omitempty"`
 }
+
+// Loop roles tag a standing teammate's function in the office
+// perpetual improvement loop. Empty (no role) is the default and
+// preserves pre-existing behavior.
+const (
+	LoopRolePlanner  = "planner"
+	LoopRoleMaker    = "maker"
+	LoopRoleVerifier = "verifier"
+)
 
 // TaskStatus represents the status of a task.
 type TaskStatus string
@@ -687,6 +701,22 @@ func (a *AgentState) SetTaskBlockerDescription(taskID string, desc string) bool 
 	for _, t := range a.taskQueue.Tasks {
 		if t.ID == taskID {
 			t.BlockerDescription = desc
+			return true
+		}
+	}
+	return false
+}
+
+// SetTaskSource sets Task.Source under the agent lock. Returns true if the task
+// was found. Used by loop-roles routing to re-stamp a planner-routed task
+// (TriageTaskBetweenAgents stamps "triage"; the loop overrides it with
+// "planner-route" so the dashboard distinguishes the two).
+func (a *AgentState) SetTaskSource(taskID, source string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.taskQueue.Tasks {
+		if t.ID == taskID {
+			t.Source = source
 			return true
 		}
 	}

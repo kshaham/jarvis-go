@@ -15,6 +15,7 @@ package teamtemplates
 //   - builtin_frontend.go   → frontendStudioMembers
 //   - builtin_research.go   → researchLabMembers, innovationSprintMembers
 //   - builtin_demo.go       → demoJarvisMembers
+//   - builtin_looptriad.go  → loopTriadMembers
 //
 // To add a new builtin: add a new var to the right sibling (or a new
 // sibling file for a new category), then add one row to the slice
@@ -29,5 +30,6 @@ func BuiltInTemplates() []TeamTemplate {
 		{ID: "research-lab-7", Name: "Research Lab", Description: "Deep research team: director, researcher, analyst, POC developer, presentation specialist, brand strategist, and documentation writer. Biweekly sprint reviews.", Category: "research", IsBuiltIn: true, Members: researchLabMembers},
 		{ID: "innovation-sprint-6", Name: "Innovation Sprint", Description: "Lean innovation team: market research, rapid prototyping, visual storytelling, documentation, and validation. Built-in sprint review cadence.", Category: "research", IsBuiltIn: true, Members: innovationSprintMembers},
 		{ID: "core-builders-6", Name: "Core Builders", Description: "Product-led full-stack team: Vince directs + maintains the codebase wiki. Lisa researches and QAs internal changes. Allen scouts external frameworks and QAs. Kyle designs UI/UX with a liquid-glass aesthetic. Kam writes the backend. Henry writes the frontend.", Category: "fullstack", IsBuiltIn: true, Members: coreBuilders6Members},
+		{ID: "loop-triad-3", Name: "Loop Triad (Planner/Maker/Verifier)", Description: "Three standing teammates for the office perpetual-improvement loop: Atlas (Planner) discovers and queues small machine-checkable tasks, Forge (Maker) implements them one at a time, and Sentinel (Verifier) independently re-checks each completion against its acceptance criteria. Designed for loop-roles mode.", Category: "fullstack", IsBuiltIn: true, Members: loopTriadMembers},
 	}
 }
