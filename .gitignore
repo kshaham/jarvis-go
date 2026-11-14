@@ -44,3 +44,6 @@ coverage.out
 # UI mockup exploration artifacts (heavy PNGs + galleries; design scratch,
 # kept on disk but out of git history and the Docker build context)
 /docs/mockups/
+
+# Claude Code session lock (per-machine runtime state, not source)
+.claude/scheduled_tasks.lock
