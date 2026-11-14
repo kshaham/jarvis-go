@@ -73,7 +73,7 @@ const navActivePillStyle: React.CSSProperties = {
   borderRadius: 'var(--radius-md)',
   background: 'var(--lg-fill-accent)',
   border: '1px solid rgb(var(--accent-rgb) / 0.35)',
-  // No --glow-violet-sm bloom — it read as a stray light-green halo behind
+  // No --glow-violet-sm bloom — it read as a stray coloured halo behind
   // the active item. Clean accent pill: fill + inset accent bar + specular.
   boxShadow: 'inset 2px 0 0 var(--accent), var(--lg-specular-convex)',
   zIndex: 0,
@@ -487,9 +487,8 @@ export function AppShell({ children }: { children?: ReactNode }) {
           style={{
             minWidth: 0,
             // The content pane of the floating panel: one cohesive dark "page"
-            // surface (page header + body sit on it, integrated). In blue
-            // --bg-page is dark so the cyan is demoted to the panel's sliver
-            // frame; in the other themes --bg-page == the canvas. Rounds its
+            // surface (page header + body sit on it, integrated). --bg-page ==
+            // the canvas in every theme, so the pane blends with it. Rounds its
             // right corners to match the panel frame.
             background: 'var(--bg-page)',
             borderTopRightRadius: 'var(--radius-card)',

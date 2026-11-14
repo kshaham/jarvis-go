@@ -1,4 +1,4 @@
-import { Contrast, Droplet, Monitor, Moon, Sun } from 'lucide-react';
+import { Circle, Contrast, Monitor, Moon, Sun } from 'lucide-react';
 import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { CSSProperties } from 'react';
 
@@ -23,8 +23,8 @@ const toggleButtonStyle: CSSProperties = {
 
 const NEXT_LABEL: Record<ThemePref, string> = {
   dark: 'Theme: dark — switch to light',
-  light: 'Theme: light — switch to blue',
-  blue: 'Theme: blue — switch to graphite',
+  light: 'Theme: light — switch to mono',
+  mono: 'Theme: mono — switch to graphite',
   graphite: 'Theme: graphite — switch to system',
   system: 'Theme: system — switch to dark',
 };
@@ -32,7 +32,7 @@ const NEXT_LABEL: Record<ThemePref, string> = {
 const ICON: Record<ThemePref, typeof Moon> = {
   dark: Moon,
   light: Sun,
-  blue: Droplet,
+  mono: Circle,
   graphite: Contrast,
   system: Monitor,
 };

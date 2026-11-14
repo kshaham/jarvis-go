@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 // Theme preference: dark-first with opt-in light + dark variants (the
-// [data-theme='light'] / 'blue' / 'graphite' blocks in tokens.css) and a
-// 'system' option. Blue (cyan-on-black) and graphite are dark themes;
+// [data-theme='light'] / 'mono' / 'graphite' blocks in tokens.css) and a
+// 'system' option. Mono (white-on-black) and graphite are dark themes;
 // only light + system-light are light. Persisted to localStorage; 'system'
 // follows the OS color scheme live (it never resolves to an explicit pick).
-export type ThemePref = 'dark' | 'light' | 'blue' | 'graphite' | 'system';
+export type ThemePref = 'dark' | 'light' | 'mono' | 'graphite' | 'system';
 
 const KEY = 'office-theme';
-const ORDER: ThemePref[] = ['dark', 'light', 'blue', 'graphite', 'system'];
+const ORDER: ThemePref[] = ['dark', 'light', 'mono', 'graphite', 'system'];
 
 function getStored(): ThemePref {
   try {
     const v = localStorage.getItem(KEY);
-    if (v === 'dark' || v === 'light' || v === 'blue' || v === 'graphite' || v === 'system') return v;
+    if (v === 'dark' || v === 'light' || v === 'mono' || v === 'graphite' || v === 'system') return v;
   } catch {
     // ignore (private mode / SSR)
   }
@@ -25,10 +25,10 @@ function systemIsLight(): boolean {
 }
 
 // The concrete [data-theme] attribute value for a preference (null = the
-// dark :root default). Blue + graphite are their own attributes; system maps to
+// dark :root default). Mono + graphite are their own attributes; system maps to
 // light/dark.
-function themeAttr(pref: ThemePref): 'light' | 'blue' | 'graphite' | null {
-  if (pref === 'blue') return 'blue';
+function themeAttr(pref: ThemePref): 'light' | 'mono' | 'graphite' | null {
+  if (pref === 'mono') return 'mono';
   if (pref === 'graphite') return 'graphite';
   if (pref === 'light') return 'light';
   if (pref === 'system') return systemIsLight() ? 'light' : null;
@@ -36,9 +36,9 @@ function themeAttr(pref: ThemePref): 'light' | 'blue' | 'graphite' | null {
 }
 
 // resolve — the concrete light|dark a preference reads as, for any consumer
-// that only cares about light-vs-dark. Blue and graphite are dark themes.
+// that only cares about light-vs-dark. Mono and graphite are dark themes.
 function resolve(pref: ThemePref): 'dark' | 'light' {
-  if (pref === 'blue') return 'dark';
+  if (pref === 'mono') return 'dark';
   if (pref === 'graphite') return 'dark';
   return pref === 'system' ? (systemIsLight() ? 'light' : 'dark') : pref;
 }

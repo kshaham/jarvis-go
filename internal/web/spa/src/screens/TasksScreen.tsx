@@ -302,7 +302,7 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
       className="flex flex-col gap-1.5 p-2.5"
       style={{
         borderLeft: '2px solid ' + priorityColor,
-        boxShadow: 'inset 0 1px 0 rgba(78,240,163,0.05)',
+        boxShadow: 'inset 0 1px 0 rgba(171,148,255,0.05)',
       }}
     >
       <span style={taskTitleStyle}>
@@ -317,8 +317,8 @@ function TaskCard({ task, assignee }: { task: Task; assignee: string }) {
             textTransform: 'uppercase',
             padding: '1px 7px',
             borderRadius: 999,
-            background: 'rgba(78,240,163,0.12)',
-            color: 'var(--accent, #4ef0a3)',
+            background: 'rgba(171,148,255,0.12)',
+            color: 'var(--accent, #8b6cff)',
             fontFamily: 'var(--font-mono)',
           }}
           title="7-step engineering phase"

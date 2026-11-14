@@ -355,7 +355,7 @@ function NetworkGraph({
       nodesConnectable={false}
       style={{ width: '100%', height: '100%' }}
     >
-      <Background color="rgba(78,240,163,0.08)" gap={24} />
+      <Background color="rgba(171,148,255,0.08)" gap={24} />
       <Controls showInteractive={false} />
     </ReactFlow>
   );

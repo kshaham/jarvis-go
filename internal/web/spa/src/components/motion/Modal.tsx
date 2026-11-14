@@ -8,7 +8,7 @@ const overlayStyle: CSSProperties = {
   position: 'fixed',
   inset: 0,
   zIndex: 60,
-  background: 'rgba(3,20,14,0.55)',
+  background: 'rgba(6,8,12,0.55)',
   backdropFilter: 'blur(var(--elev-command-blur))',
   WebkitBackdropFilter: 'blur(var(--elev-command-blur))',
 };

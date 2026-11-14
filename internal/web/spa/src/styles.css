@@ -21,25 +21,18 @@
     height: 8px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(78, 240, 163, 0.1);
+    background: rgb(var(--surface-tint-rgb) / 0.14);
     border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(78, 240, 163, 0.2);
+    background: rgb(var(--surface-tint-rgb) / 0.26);
   }
-  /* Light mode: the emerald thumb is invisible on a white track. */
+  /* Light mode: a darker thumb so it stays visible on the white track. */
   [data-theme='light'] ::-webkit-scrollbar-thumb {
     background: rgba(17, 24, 39, 0.18);
   }
   [data-theme='light'] ::-webkit-scrollbar-thumb:hover {
     background: rgba(17, 24, 39, 0.3);
-  }
-  /* Blue mode: a deep-teal thumb on the light cyan track. */
-  [data-theme='blue'] ::-webkit-scrollbar-thumb {
-    background: rgba(10, 58, 48, 0.18);
-  }
-  [data-theme='blue'] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(10, 58, 48, 0.3);
   }
   /* Accent-tinted text selection — a small signature touch. */
   ::selection {
@@ -80,8 +73,7 @@
   /* ── Page header ────────────────────────────────────────────────────────
      The screen-level title + subtitle that sit on the app canvas (not in a
      card). Replaces the repeated inline `fontSize:24` <h1> pattern so every
-     screen header is consistent and recolors per theme via the text tokens
-     (deep teal on the blue cyan canvas; primary elsewhere). */
+     screen header is consistent and recolors per theme via the text tokens. */
   .page-header {
     margin: 0;
     font-size: 24px;
@@ -367,7 +359,7 @@
     background:
       linear-gradient(180deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--accent-rgb) / 0.14));
     border-color: rgb(var(--accent-rgb) / 0.55);
-    color: #eafff5;
+    color: #f3efff;
     box-shadow: var(--lg-shadow-rest), var(--glow-violet-sm);
   }
   .lg-button--primary:hover {
@@ -378,45 +370,45 @@
   }
   /* Light-mode primary CTA — the dark-mode gradient is a translucent
      bright-accent wash that goes pale-on-white with near-white text
-     (invisible). In light mode the accent is DARK green, so the CTA is a
-     SOLID green fill with white text and a soft green-tinted float shadow. */
+     (invisible). In light mode the accent is a DEEP violet, so the CTA is a
+     SOLID violet fill with white text and a soft violet-tinted float shadow. */
   [data-theme='light'] .lg-button--primary {
-    background: linear-gradient(180deg, #0d8f60 0%, #0a7a52 100%);
-    border-color: #0a6e49;
+    background: linear-gradient(180deg, #6f55ec 0%, #5b3fe0 100%);
+    border-color: #5136d3;
     color: #ffffff;
     box-shadow:
-      0 1px 2px rgba(10, 122, 82, 0.25),
-      0 6px 16px -6px rgba(10, 122, 82, 0.45);
+      0 1px 2px rgba(91, 63, 224, 0.25),
+      0 6px 16px -6px rgba(91, 63, 224, 0.45);
   }
   [data-theme='light'] .lg-button--primary:hover {
-    background: linear-gradient(180deg, #0a7a52 0%, #086241 100%);
-    border-color: #075639;
+    background: linear-gradient(180deg, #5b3fe0 0%, #4929c7 100%);
+    border-color: #3f22b0;
     box-shadow:
-      0 2px 4px rgba(10, 122, 82, 0.3),
-      0 10px 24px -8px rgba(10, 122, 82, 0.5);
+      0 2px 4px rgba(91, 63, 224, 0.3),
+      0 10px 24px -8px rgba(91, 63, 224, 0.5);
   }
   /* Light-mode inputs read as recessed grey wells inside white tiles
      (white-on-white would vanish). */
   [data-theme='light'] .field {
     background: var(--bg-app);
   }
-  /* Blue mode — solid cyan CTA with white text. Inputs use the
-     default black --lg-fill (they're content components), so no .field
-     override here: --bg-app is the cyan canvas now, not an input well. */
-  [data-theme='blue'] .lg-button--primary {
-    background: linear-gradient(180deg, #1bb6d4 0%, #06b6d4 100%);
-    border-color: #0790ad;
-    color: #ffffff;
+  /* Mono mode — the accent is near-white, so the translucent accent wash
+     would read as a grey smudge. The CTA is a SOLID white fill with black
+     text instead; hover dims it a step. */
+  [data-theme='mono'] .lg-button--primary {
+    background: linear-gradient(180deg, #ffffff 0%, #e8e8e8 100%);
+    border-color: #ffffff;
+    color: #000000;
     box-shadow:
-      0 1px 2px rgba(6, 182, 212, 0.25),
-      0 6px 16px -6px rgba(6, 182, 212, 0.45);
+      0 1px 2px rgba(0, 0, 0, 0.5),
+      0 6px 18px -8px rgba(255, 255, 255, 0.35);
   }
-  [data-theme='blue'] .lg-button--primary:hover {
-    background: linear-gradient(180deg, #06b6d4 0%, #077f9a 100%);
-    border-color: #066a82;
+  [data-theme='mono'] .lg-button--primary:hover {
+    background: linear-gradient(180deg, #f2f2f2 0%, #d6d6d6 100%);
+    border-color: #f2f2f2;
     box-shadow:
-      0 2px 4px rgba(6, 182, 212, 0.3),
-      0 10px 24px -8px rgba(6, 182, 212, 0.5);
+      0 2px 4px rgba(0, 0, 0, 0.55),
+      0 10px 26px -10px rgba(255, 255, 255, 0.45);
   }
   .lg-button--danger {
     background: var(--lg-fill-danger);
@@ -909,7 +901,7 @@
 
 /* Flatten the single section card that is the panel's (or split's) direct
    child so it blends into the connected surface — keep its .surface-card class
-   (so the blue theme still re-scopes its text white) and its p-4 padding, but
+   (so it keeps its card text tokens) and its p-4 padding, but
    strip the floating-card paint. Direct-child only, so nested tiles (the
    roster's selectable MemberRow cards) keep their distinct look. */
 .spawn-panel-body > .surface-card,
